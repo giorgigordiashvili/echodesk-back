@@ -1,0 +1,39 @@
+name: amanati-crm-api
+services:
+- name: web
+  source_dir: /
+  github:
+    repo: giorgigordiashvili/echodesk-back
+    branch: main
+    deploy_on_push: true
+  run_command: gunicorn --worker-tmp-dir /dev/shm amanati_crm.wsgi:application
+  environment_slug: python
+  instance_count: 1
+  instance_size_slug: basic-xxs
+  routes:
+  - path: /
+  health_check:
+    http_path: /api/
+  envs:
+  - key: DEBUG
+    value: "False"
+  - key: ALLOWED_HOSTS
+    value: "api.echodesk.ge,.ondigitalocean.app"
+  - key: SECRET_KEY
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+  - key: DB_NAME
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+  - key: DB_USER
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+  - key: DB_PASSWORD
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+  - key: DB_HOST
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+  - key: DB_PORT
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
