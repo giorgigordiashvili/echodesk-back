@@ -66,5 +66,10 @@ class EchoDeskTenantMiddleware(TenantMiddleware):
         from django.db import connection
         connection.set_tenant(request.tenant)
         
-        # Set schema search path
-        self.setup_url_routing(request)
+        # Set URL routing based on tenant
+        if tenant.schema_name == get_public_schema_name():
+            # Use public schema URLs
+            request.urlconf = getattr(settings, 'PUBLIC_SCHEMA_URLCONF', None)
+        else:
+            # Use default tenant URLs
+            request.urlconf = getattr(settings, 'ROOT_URLCONF', None)
