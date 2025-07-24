@@ -1,7 +1,7 @@
 from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
-from django.shortcuts import render
+from django.shortcuts import render, redirect
 from django.http import JsonResponse
 from django.db import transaction
 from django.views.decorators.csrf import ensure_csrf_cookie
@@ -16,22 +16,9 @@ User = get_user_model()
 def public_homepage(request):
     """
     Homepage view for the public schema (main domain)
+    Redirects directly to the admin panel
     """
-    tenant_count = Tenant.objects.count()
-    return JsonResponse({
-        'message': 'Welcome to EchoDesk - Multi-tenant CRM System',
-        'domain': request.get_host(),
-        'schema': 'public',
-        'tenant_count': tenant_count,
-        'endpoints': {
-            'admin': '/admin/',
-            'api_docs': '/api/docs/',
-            'api_schema': '/api/schema/',
-            'tenants_api': '/api/tenants/',
-            'register_api': '/api/register/',
-            'register_form': '/register-tenant/'
-        }
-    })
+    return redirect('/admin/')
 
 
 @ensure_csrf_cookie
