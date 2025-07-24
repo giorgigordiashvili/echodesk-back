@@ -12,4 +12,7 @@ python manage.py collectstatic --noinput
 # Run migrations
 python manage.py migrate
 
+# Create admin user if it doesn't exist
+python manage.py create_admin
+
 echo "Build completed successfully!"

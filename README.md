@@ -9,14 +9,20 @@ A clean Django 4.2+ REST API project with JWT authentication and PostgreSQL data
 - User registration, login, and profile endpoints
 - PostgreSQL database with SSL support
 - Django REST Framework
+- **Enhanced Admin Dashboard** with statistics and user management
 - Production-ready configuration for DigitalOcean deployment
 
 ## API Endpoints
 
+### Authentication APIs
 - `POST /api/register/` - Register new user (email, password)
 - `POST /api/login/` - Obtain access/refresh JWT tokens
 - `POST /api/token/refresh/` - Refresh access token
 - `GET /api/profile/` - Get authenticated user's profile data
+
+### Admin Dashboard
+- `/admin/` - Enhanced admin dashboard with user statistics
+- Root URL `/` redirects to admin dashboard
 
 ## Setup Instructions (Local Development)
 
@@ -137,6 +143,10 @@ DB_USER=your_database_user
 DB_PASSWORD=your_database_password
 DB_HOST=your_database_host
 DB_PORT=your_database_port
+
+# Admin user configuration (optional)
+ADMIN_EMAIL=your-admin@email.com
+ADMIN_PASSWORD=your-secure-admin-password
 ```
 
 ### Step 4: Deploy
@@ -221,6 +231,34 @@ Or with your custom domain:
 - `https://api.echodesk.ge/api/login/`
 - `https://api.echodesk.ge/api/token/refresh/`
 - `https://api.echodesk.ge/api/profile/`
+
+## Admin Dashboard Features
+
+### Dashboard Overview
+- **User Statistics**: Total, active, inactive, and staff user counts
+- **Recent Users**: Latest registered users with status indicators
+- **Quick Actions**: Direct links to common admin tasks
+- **Visual Indicators**: Color-coded status badges and progress indicators
+
+### User Management
+- **Enhanced User List**: Comprehensive user information display
+- **Advanced Filtering**: Filter by status, role, registration date
+- **Bulk Actions**: Activate/deactivate multiple users at once
+- **User Details**: Full user profile with permissions management
+- **Search Functionality**: Find users by email, name, or other criteria
+
+### Admin Features
+- **Custom Dashboard**: Beautiful overview with statistics
+- **Responsive Design**: Works on desktop and mobile devices
+- **User Status Badges**: Visual indicators for user states
+- **Quick Navigation**: Easy access to all admin functions
+- **Bulk Operations**: Manage multiple users efficiently
+
+### Default Admin Credentials
+- **Email**: `admin@amanati.com`
+- **Password**: `admin123`
+
+**🔒 Important**: Change the default admin password immediately after first login!
 
 ## Project Structure
 

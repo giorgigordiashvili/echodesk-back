@@ -1,0 +1,125 @@
+{% extends "admin/index.html" %}
+{% load static %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+    .dashboard-overview {
+        background: white;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        padding: 20px;
+        margin-bottom: 20px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 15px;
+        margin: 15px 0;
+    }
+    
+    .stat-item {
+        text-align: center;
+        padding: 15px;
+        background: #f8f9fa;
+        border-radius: 6px;
+        border-left: 4px solid #0066cc;
+    }
+    
+    .stat-number {
+        font-size: 1.8em;
+        font-weight: bold;
+        color: #0066cc;
+        display: block;
+    }
+    
+    .stat-label {
+        font-size: 0.9em;
+        color: #666;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-top: 5px;
+    }
+    
+    .welcome-header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 25px;
+        margin: -20px -20px 20px -20px;
+        border-radius: 8px;
+    }
+    
+    .welcome-header h1 {
+        margin: 0;
+        font-size: 1.8em;
+    }
+    
+    .welcome-header p {
+        margin: 8px 0 0 0;
+        opacity: 0.9;
+    }
+    
+    .quick-actions {
+        display: flex;
+        gap: 10px;
+        margin-top: 15px;
+        flex-wrap: wrap;
+    }
+    
+    .quick-action {
+        background: rgba(255,255,255,0.2);
+        color: white;
+        padding: 8px 16px;
+        border-radius: 4px;
+        text-decoration: none;
+        font-size: 0.9em;
+        transition: background 0.3s;
+    }
+    
+    .quick-action:hover {
+        background: rgba(255,255,255,0.3);
+        color: white;
+        text-decoration: none;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="welcome-header">
+    <h1>Welcome to Amanati CRM</h1>
+    <p>Manage your customer relationships and user accounts efficiently</p>
+    <div class="quick-actions">
+        <a href="{% url 'admin:users_user_changelist' %}" class="quick-action">View Users</a>
+        <a href="{% url 'admin:users_user_add' %}" class="quick-action">Add User</a>
+        <a href="{% url 'admin:auth_group_changelist' %}" class="quick-action">Manage Groups</a>
+    </div>
+</div>
+
+{% if dashboard_stats %}
+<div class="dashboard-overview">
+    <h2>System Overview</h2>
+    <div class="stats-grid">
+        <div class="stat-item">
+            <span class="stat-number">{{ dashboard_stats.total }}</span>
+            <div class="stat-label">Total Users</div>
+        </div>
+        <div class="stat-item">
+            <span class="stat-number">{{ dashboard_stats.active }}</span>
+            <div class="stat-label">Active Users</div>
+        </div>
+        <div class="stat-item">
+            <span class="stat-number">{{ dashboard_stats.inactive }}</span>
+            <div class="stat-label">Inactive Users</div>
+        </div>
+        <div class="stat-item">
+            <span class="stat-number">{{ dashboard_stats.staff }}</span>
+            <div class="stat-label">Staff Members</div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{{ block.super }}
+{% endblock %}
