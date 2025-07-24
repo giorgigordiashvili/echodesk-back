@@ -31,7 +31,23 @@ SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-your-secret-key-change-thi
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
 
-ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1,api.echodesk.ge,.ondigitalocean.app').split(',')
+# Parse ALLOWED_HOSTS from environment variable
+allowed_hosts_env = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1,api.echodesk.ge,.ondigitalocean.app')
+ALLOWED_HOSTS = [host.strip() for host in allowed_hosts_env.split(',') if host.strip()]
+
+# Add wildcard for all DigitalOcean apps if not in production
+if DEBUG:
+    ALLOWED_HOSTS.extend(['*'])
+else:
+    # Ensure these are always included in production
+    production_hosts = [
+        'api.echodesk.ge',
+        'echodesk-api-qe8h8.ondigitalocean.app',
+        '.ondigitalocean.app'
+    ]
+    for host in production_hosts:
+        if host not in ALLOWED_HOSTS:
+            ALLOWED_HOSTS.append(host)
 
 
 # Application definition
