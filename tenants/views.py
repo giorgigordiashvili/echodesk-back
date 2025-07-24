@@ -1,12 +1,33 @@
 from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from django.shortcuts import render
+from django.http import JsonResponse
 from tenant_schemas.utils import get_public_schema_name, schema_context
 from django.contrib.auth import get_user_model
 from .models import Tenant
 from .serializers import TenantSerializer, TenantCreateSerializer
 
 User = get_user_model()
+
+
+def public_homepage(request):
+    """
+    Homepage view for the public schema (main domain)
+    """
+    tenant_count = Tenant.objects.count()
+    return JsonResponse({
+        'message': 'Welcome to EchoDesk - Multi-tenant CRM System',
+        'domain': request.get_host(),
+        'schema': 'public',
+        'tenant_count': tenant_count,
+        'endpoints': {
+            'admin': '/admin/',
+            'api_docs': '/api/docs/',
+            'api_schema': '/api/schema/',
+            'tenants_api': '/api/tenants/'
+        }
+    })
 
 
 class TenantViewSet(viewsets.ModelViewSet):
