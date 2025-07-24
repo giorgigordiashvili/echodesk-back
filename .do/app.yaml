@@ -18,7 +18,7 @@ services:
   - key: DEBUG
     value: "False"
   - key: ALLOWED_HOSTS
-    value: "api.echodesk.ge,.ondigitalocean.app"
+    value: "api.echodesk.ge,echodesk-api-qe8h8.ondigitalocean.app,.ondigitalocean.app"
   - key: SECRET_KEY
     scope: RUN_AND_BUILD_TIME
     type: SECRET
