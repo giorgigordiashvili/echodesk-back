@@ -2,7 +2,7 @@ from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.contrib.auth import authenticate
-from django.http import JsonResponse
+from django.shortcuts import redirect
 from rest_framework.authtoken.models import Token
 from .models import User
 from .serializers import UserSerializer, UserCreateSerializer
@@ -11,25 +11,9 @@ from .serializers import UserSerializer, UserCreateSerializer
 def tenant_homepage(request):
     """
     Homepage view for tenant schemas (subdomains)
+    Redirects directly to the admin panel
     """
-    tenant = getattr(request, 'tenant', None)
-    user_count = User.objects.count()
-    
-    return JsonResponse({
-        'message': f'Welcome to {tenant.name if tenant else "Your Tenant"}',
-        'domain': request.get_host(),
-        'schema': tenant.schema_name if tenant else 'unknown',
-        'tenant_name': tenant.name if tenant else 'Unknown',
-        'user_count': user_count,
-        'endpoints': {
-            'admin': '/admin/',
-            'api_docs': '/api/docs/',
-            'api_schema': '/api/schema/',
-            'users_api': '/api/users/',
-            'login': '/api/users/login/',
-            'current_user': '/api/users/me/'
-        }
-    })
+    return redirect('/admin/')
 
 
 class UserViewSet(viewsets.ModelViewSet):
