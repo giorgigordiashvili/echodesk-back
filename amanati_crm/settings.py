@@ -67,6 +67,7 @@ TENANT_MODEL = "tenants.Tenant"
 MIDDLEWARE = [
     'amanati_crm.middleware.EchoDeskTenantMiddleware',  # Custom tenant middleware
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',  # Static file serving
     'django.contrib.sessions.middleware.SessionMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -144,6 +145,9 @@ USE_TZ = True
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
+# WhiteNoise configuration for static files
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+
 # Media files
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
@@ -187,9 +191,11 @@ CORS_ALLOWED_ORIGINS = [
 # Allow CORS for all subdomains in production
 if not DEBUG:
     CORS_ALLOW_ALL_ORIGINS = False
+    # Escape dots for regex pattern
+    escaped_domain = MAIN_DOMAIN.replace('.', r'\.')
     CORS_ALLOWED_ORIGIN_REGEXES = [
-        rf"https://.*\.{MAIN_DOMAIN.replace('.', r'\.')}",
-        rf"http://.*\.{MAIN_DOMAIN.replace('.', r'\.')}",
+        rf"https://.*\.{escaped_domain}",
+        rf"http://.*\.{escaped_domain}",
     ]
 else:
     # For local development
