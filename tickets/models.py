@@ -69,4 +69,4 @@ class TicketComment(models.Model):
         ordering = ['created_at']
 
     def __str__(self):
-        return f'Comment on {self.ticket.title} by {self.user.username}'
+        return f'Comment on {self.ticket.title} by {self.user.email}'

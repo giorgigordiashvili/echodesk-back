@@ -49,9 +49,9 @@ class TicketAdmin(admin.ModelAdmin):
         'assigned_to', 'tags'
     )
     search_fields = (
-        'title', 'description', 'created_by__username', 
+        'title', 'description', 'created_by__email', 
         'created_by__first_name', 'created_by__last_name',
-        'assigned_to__username', 'assigned_to__first_name', 
+        'assigned_to__email', 'assigned_to__first_name', 
         'assigned_to__last_name'
     )
     raw_id_fields = ('created_by', 'assigned_to')
@@ -135,7 +135,7 @@ class TicketCommentAdmin(admin.ModelAdmin):
     list_display = ('ticket_title', 'user', 'comment_preview', 'created_at')
     list_filter = ('created_at', 'ticket__status', 'ticket__priority')
     search_fields = (
-        'comment', 'ticket__title', 'user__username',
+        'comment', 'ticket__title', 'user__email',
         'user__first_name', 'user__last_name'
     )
     raw_id_fields = ('ticket', 'user')
