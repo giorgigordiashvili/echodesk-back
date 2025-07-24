@@ -15,7 +15,16 @@ SECRET_KEY = config('SECRET_KEY', default='your-secret-key-here')
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config('DEBUG', default=True, cast=bool)
 
-ALLOWED_HOSTS = ['*']  # Configure properly for production
+# Main domain configuration
+MAIN_DOMAIN = config('MAIN_DOMAIN', default='echodesk.ge')
+
+ALLOWED_HOSTS = [
+    MAIN_DOMAIN,  # Main domain for public schema
+    f'.{MAIN_DOMAIN}',  # Wildcard for tenant subdomains
+    '.ondigitalocean.app',  # DigitalOcean app platform
+    'localhost',
+    '127.0.0.1',
+]
 
 # Shared applications - available to all tenants
 SHARED_APPS = [
@@ -56,7 +65,7 @@ INSTALLED_APPS = list(SHARED_APPS) + [app for app in TENANT_APPS if app not in S
 TENANT_MODEL = "tenants.Tenant"
 
 MIDDLEWARE = [
-    'tenant_schemas.middleware.TenantMiddleware',
+    'amanati_crm.middleware.EchoDeskTenantMiddleware',  # Custom tenant middleware
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'corsheaders.middleware.CorsMiddleware',
@@ -171,7 +180,24 @@ SPECTACULAR_SETTINGS = {
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    f"https://{MAIN_DOMAIN}",
+    f"http://{MAIN_DOMAIN}",
 ]
+
+# Allow CORS for all subdomains in production
+if not DEBUG:
+    CORS_ALLOW_ALL_ORIGINS = False
+    CORS_ALLOWED_ORIGIN_REGEXES = [
+        rf"https://.*\.{MAIN_DOMAIN.replace('.', r'\.')}",
+        rf"http://.*\.{MAIN_DOMAIN.replace('.', r'\.')}",
+    ]
+else:
+    # For local development
+    CORS_ALLOWED_ORIGINS.extend([
+        "http://demo.localhost:8000",
+        "http://acme.localhost:8000",
+        "http://localhost:8000",
+    ])
 
 CORS_ALLOW_CREDENTIALS = True
 

@@ -1,4 +1,4 @@
-name: amanati-crm-api
+name: echodesk-multitenant-api
 services:
 - name: web
   source_dir: /
@@ -6,19 +6,22 @@ services:
     repo: giorgigordiashvili/echodesk-back
     branch: main
     deploy_on_push: true
-  run_command: gunicorn --worker-tmp-dir /dev/shm amanati_crm.wsgi:application
+  build_command: ./build_production.sh
+  run_command: gunicorn --worker-tmp-dir /dev/shm --bind 0.0.0.0:8080 amanati_crm.wsgi:application
   environment_slug: python
   instance_count: 1
   instance_size_slug: basic-xxs
   routes:
   - path: /
   health_check:
-    http_path: /api/
+    http_path: /api/docs/
   envs:
   - key: DEBUG
     value: "False"
   - key: ALLOWED_HOSTS
-    value: "api.echodesk.ge,echodesk-api-qe8h8.ondigitalocean.app,.ondigitalocean.app"
+    value: "echodesk.ge,.echodesk.ge,.ondigitalocean.app"
+  - key: MAIN_DOMAIN
+    value: "echodesk.ge"
   - key: SECRET_KEY
     scope: RUN_AND_BUILD_TIME
     type: SECRET
