@@ -30,8 +30,15 @@ class EchoDeskTenantMiddleware(TenantMiddleware):
             public_tenant.domain_url = main_domain
             return public_tenant
         
-        # For subdomains, use the standard tenant lookup
-        return super().get_tenant(domain_url, path)
+        # For subdomains, extract the subdomain and look up the tenant
+        try:
+            from tenants.models import Tenant
+            # Look up tenant by domain_url
+            tenant = Tenant.objects.get(domain_url=domain_url)
+            return tenant
+        except Tenant.DoesNotExist:
+            # If tenant not found, raise exception to trigger fallback
+            raise Exception(f"No tenant found for domain: {domain_url}")
     
     def process_request(self, request):
         """
@@ -44,13 +51,14 @@ class EchoDeskTenantMiddleware(TenantMiddleware):
         if settings.DEBUG:
             print(f"[DEBUG] Hostname: {hostname}")
         
-        # Use the parent class method to process the request
-        # but override the tenant lookup logic
+        # Use our custom tenant lookup logic
         domain_url = hostname
         path = request.get_full_path()
         
         try:
             tenant = self.get_tenant(domain_url, path)
+            if settings.DEBUG:
+                print(f"[DEBUG] Found tenant: {tenant.schema_name} for domain: {domain_url}")
         except Exception as e:
             if settings.DEBUG:
                 print(f"[DEBUG] Tenant lookup failed: {e}")
@@ -70,6 +78,10 @@ class EchoDeskTenantMiddleware(TenantMiddleware):
         if tenant.schema_name == get_public_schema_name():
             # Use public schema URLs
             request.urlconf = getattr(settings, 'PUBLIC_SCHEMA_URLCONF', None)
+            if settings.DEBUG:
+                print(f"[DEBUG] Using public schema URLs: {request.urlconf}")
         else:
             # Use default tenant URLs
             request.urlconf = getattr(settings, 'ROOT_URLCONF', None)
+            if settings.DEBUG:
+                print(f"[DEBUG] Using tenant URLs: {request.urlconf}")
