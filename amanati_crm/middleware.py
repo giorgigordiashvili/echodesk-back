@@ -44,7 +44,8 @@ class EchoDeskTenantMiddleware(TenantMiddleware):
         if settings.DEBUG:
             print(f"[DEBUG] Hostname: {hostname}")
         
-        connection = self.get_connection(request)
+        # Use the parent class method to process the request
+        # but override the tenant lookup logic
         domain_url = hostname
         path = request.get_full_path()
         
@@ -60,6 +61,9 @@ class EchoDeskTenantMiddleware(TenantMiddleware):
             tenant.domain_url = hostname
         
         request.tenant = tenant
+        
+        # Use parent class method to set up the connection
+        from django.db import connection
         connection.set_tenant(request.tenant)
         
         # Set schema search path
