@@ -1,6 +1,6 @@
 """
-URL configuration for amanati_crm project.
-This is the main URL configuration for tenant-specific routes.
+Public schema URL configuration.
+This handles routes for the public schema (tenant management).
 """
 from django.contrib import admin
 from django.urls import path, include
@@ -13,7 +13,6 @@ urlpatterns = [
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
     path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
     
-    # Tenant-specific apps
-    path('', include('users.urls')),
-    path('', include('crm.urls')),
+    # Public/tenant management endpoints
+    path('', include('tenants.urls')),
 ]

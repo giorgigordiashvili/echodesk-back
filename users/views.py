@@ -1,160 +1,109 @@
-from rest_framework import status
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework import viewsets, permissions, status
+from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework_simplejwt.views import TokenRefreshView
-from drf_spectacular.utils import extend_schema, OpenApiResponse
-from drf_spectacular.openapi import OpenApiExample
-from .serializers import UserRegistrationSerializer, UserLoginSerializer, UserProfileSerializer
+from django.contrib.auth import authenticate
+from rest_framework.authtoken.models import Token
+from .models import User
+from .serializers import UserSerializer, UserCreateSerializer
 
 
-class CustomTokenRefreshView(TokenRefreshView):
-    @extend_schema(
-        operation_id='refresh_token',
-        summary='Refresh JWT token',
-        description='Refresh the access token using a valid refresh token.',
-        responses={
-            200: OpenApiResponse(
-                description='Token refreshed successfully',
-                examples=[
-                    OpenApiExample(
-                        'Success Response',
-                        value={
-                            'access': 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...',
-                            'refresh': 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...'
-                        }
-                    )
-                ]
-            ),
-            401: OpenApiResponse(description='Invalid refresh token')
-        },
-        tags=['Authentication']
-    )
-    def post(self, request, *args, **kwargs):
-        return super().post(request, *args, **kwargs)
-
-
-@extend_schema(
-    operation_id='register_user',
-    summary='Register a new user',
-    description='Create a new user account with email and password. Returns user data and JWT tokens.',
-    request=UserRegistrationSerializer,
-    responses={
-        201: OpenApiResponse(
-            response=UserProfileSerializer,
-            description='User successfully created',
-            examples=[
-                OpenApiExample(
-                    'Success Response',
-                    value={
-                        'user': {
-                            'id': 1,
-                            'email': 'user@example.com',
-                            'first_name': 'John',
-                            'last_name': 'Doe',
-                            'is_active': True,
-                            'date_joined': '2025-01-01T12:00:00Z'
-                        },
-                        'refresh': 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...',
-                        'access': 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...'
-                    }
-                )
-            ]
-        ),
-        400: OpenApiResponse(description='Validation errors')
-    },
-    tags=['Authentication']
-)
-@api_view(['POST'])
-@permission_classes([AllowAny])
-def register(request):
-    serializer = UserRegistrationSerializer(data=request.data)
-    if serializer.is_valid():
-        user = serializer.save()
-        refresh = RefreshToken.for_user(user)
-        return Response({
-            'user': UserProfileSerializer(user).data,
-            'refresh': str(refresh),
-            'access': str(refresh.access_token),
-        }, status=status.HTTP_201_CREATED)
-    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
-@extend_schema(
-    operation_id='login_user',
-    summary='User login',
-    description='Authenticate user with email and password. Returns user data and JWT tokens.',
-    request=UserLoginSerializer,
-    responses={
-        200: OpenApiResponse(
-            response=UserProfileSerializer,
-            description='Login successful',
-            examples=[
-                OpenApiExample(
-                    'Success Response',
-                    value={
-                        'user': {
-                            'id': 1,
-                            'email': 'user@example.com',
-                            'first_name': 'John',
-                            'last_name': 'Doe',
-                            'is_active': True,
-                            'date_joined': '2025-01-01T12:00:00Z'
-                        },
-                        'refresh': 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...',
-                        'access': 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...'
-                    }
-                )
-            ]
-        ),
-        400: OpenApiResponse(description='Invalid credentials')
-    },
-    tags=['Authentication']
-)
-@api_view(['POST'])
-@permission_classes([AllowAny])
-def login(request):
-    serializer = UserLoginSerializer(data=request.data)
-    if serializer.is_valid():
-        user = serializer.validated_data['user']
-        refresh = RefreshToken.for_user(user)
-        return Response({
-            'user': UserProfileSerializer(user).data,
-            'refresh': str(refresh),
-            'access': str(refresh.access_token),
-        })
-    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
-@extend_schema(
-    operation_id='get_user_profile',
-    summary='Get user profile',
-    description='Get the current authenticated user\'s profile information.',
-    responses={
-        200: OpenApiResponse(
-            response=UserProfileSerializer,
-            description='User profile data',
-            examples=[
-                OpenApiExample(
-                    'Profile Response',
-                    value={
-                        'id': 1,
-                        'email': 'user@example.com',
-                        'first_name': 'John',
-                        'last_name': 'Doe',
-                        'is_active': True,
-                        'date_joined': '2025-01-01T12:00:00Z'
-                    }
-                )
-            ]
-        ),
-        401: OpenApiResponse(description='Authentication required')
-    },
-    tags=['User Profile']
-)
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def profile(request):
-    serializer = UserProfileSerializer(request.user)
-    return Response(serializer.data)
+class UserViewSet(viewsets.ModelViewSet):
+    """ViewSet for User model with tenant-specific user management"""
+    queryset = User.objects.all()
+    serializer_class = UserSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return UserCreateSerializer
+        return UserSerializer
+    
+    def get_permissions(self):
+        """
+        Different permissions for different actions
+        """
+        if self.action == 'create':
+            # Only staff can create users
+            permission_classes = [permissions.IsAuthenticated, permissions.IsAdminUser]
+        elif self.action in ['update', 'partial_update', 'destroy']:
+            # Only staff can modify other users, users can modify themselves
+            permission_classes = [permissions.IsAuthenticated]
+        else:
+            permission_classes = [permissions.IsAuthenticated]
+        
+        return [permission() for permission in permission_classes]
+    
+    def get_queryset(self):
+        """Filter users based on permissions"""
+        user = self.request.user
+        if user.is_staff:
+            return User.objects.all()
+        else:
+            # Regular users can only see themselves
+            return User.objects.filter(id=user.id)
+    
+    @action(detail=False, methods=['get'])
+    def me(self, request):
+        """Get current user info"""
+        serializer = self.get_serializer(request.user)
+        return Response(serializer.data)
+    
+    @action(detail=False, methods=['post'], permission_classes=[])
+    def login(self, request):
+        """Login endpoint that returns a token"""
+        email = request.data.get('email')
+        password = request.data.get('password')
+        
+        if not email or not password:
+            return Response(
+                {'error': 'Email and password required'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        user = authenticate(request, username=email, password=password)
+        if user:
+            token, created = Token.objects.get_or_create(user=user)
+            return Response({
+                'token': token.key,
+                'user': UserSerializer(user).data
+            })
+        else:
+            return Response(
+                {'error': 'Invalid credentials'}, 
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+    
+    @action(detail=False, methods=['post'])
+    def logout(self, request):
+        """Logout endpoint that deletes the token"""
+        try:
+            request.user.auth_token.delete()
+            return Response({'message': 'Successfully logged out'})
+        except:
+            return Response(
+                {'error': 'Error logging out'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+    
+    @action(detail=False, methods=['post'])
+    def change_password(self, request):
+        """Change password for current user"""
+        old_password = request.data.get('old_password')
+        new_password = request.data.get('new_password')
+        
+        if not old_password or not new_password:
+            return Response(
+                {'error': 'Both old and new passwords required'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if not request.user.check_password(old_password):
+            return Response(
+                {'error': 'Invalid old password'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        request.user.set_password(new_password)
+        request.user.save()
+        
+        return Response({'message': 'Password changed successfully'})
