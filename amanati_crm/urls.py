@@ -16,4 +16,5 @@ urlpatterns = [
     # Tenant-specific apps
     path('', include('users.urls')),
     path('', include('crm.urls')),
+    path('', include('tickets.urls')),
 ]

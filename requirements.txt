@@ -4,6 +4,7 @@ django-tenant-schemas>=1.10.0
 psycopg2-binary>=2.9.0
 django-cors-headers>=4.0.0
 drf-spectacular>=0.26.0
+django-filter>=23.0
 python-decouple>=3.8
 gunicorn>=21.2.0
 whitenoise>=6.5.0
