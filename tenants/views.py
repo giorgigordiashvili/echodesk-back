@@ -1,12 +1,14 @@
 from rest_framework import viewsets, status, permissions
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from django.shortcuts import render
 from django.http import JsonResponse
+from django.db import transaction
+from django.views.decorators.csrf import ensure_csrf_cookie
 from tenant_schemas.utils import get_public_schema_name, schema_context
 from django.contrib.auth import get_user_model
 from .models import Tenant
-from .serializers import TenantSerializer, TenantCreateSerializer
+from .serializers import TenantSerializer, TenantCreateSerializer, TenantRegistrationSerializer
 
 User = get_user_model()
 
@@ -25,9 +27,101 @@ def public_homepage(request):
             'admin': '/admin/',
             'api_docs': '/api/docs/',
             'api_schema': '/api/schema/',
-            'tenants_api': '/api/tenants/'
+            'tenants_api': '/api/tenants/',
+            'register_api': '/api/register/',
+            'register_form': '/register-tenant/'
         }
     })
+
+
+@ensure_csrf_cookie
+def register_tenant_form(request):
+    """
+    Serve the tenant registration form
+    """
+    # Only allow access from public schema
+    if hasattr(request, 'tenant') and request.tenant.schema_name != get_public_schema_name():
+        return JsonResponse(
+            {'error': 'Registration is only available from the main domain'}, 
+            status=403
+        )
+    
+    return render(request, 'tenants/register.html')
+
+
+@api_view(['POST'])
+@permission_classes([])  # No authentication required
+def register_tenant(request):
+    """
+    Public endpoint for tenant registration with admin user creation
+    """
+    # Only allow access from public schema
+    if hasattr(request, 'tenant') and request.tenant.schema_name != get_public_schema_name():
+        return Response(
+            {'error': 'This endpoint is only available from the main domain'}, 
+            status=status.HTTP_403_FORBIDDEN
+        )
+    
+    serializer = TenantRegistrationSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    validated_data = serializer.validated_data
+    
+    try:
+        with transaction.atomic():
+            # Create tenant
+            domain_name = validated_data['domain']
+            schema_name = domain_name.lower().replace('-', '_')
+            
+            tenant = Tenant.objects.create(
+                schema_name=schema_name,
+                domain_url=f"{domain_name}.echodesk.ge",
+                name=validated_data['company_name'],
+                description=validated_data.get('description', ''),
+                admin_email=validated_data['admin_email'],
+                admin_name=f"{validated_data['admin_first_name']} {validated_data['admin_last_name']}",
+                plan='basic',  # Default plan
+                max_users=10,  # Default limits
+                max_storage=1024  # 1GB default
+            )
+            
+            # Create admin user in tenant schema
+            with schema_context(tenant.schema_name):
+                admin_user = User.objects.create_user(
+                    email=validated_data['admin_email'],
+                    password=validated_data['admin_password'],
+                    first_name=validated_data['admin_first_name'],
+                    last_name=validated_data['admin_last_name'],
+                    is_staff=True,
+                    is_superuser=True,
+                    is_active=True
+                )
+            
+            return Response({
+                'message': 'Tenant created successfully!',
+                'tenant': {
+                    'id': tenant.id,
+                    'name': tenant.name,
+                    'domain_url': tenant.domain_url,  # This is what the form expects
+                    'schema': tenant.schema_name,
+                    'admin_email': tenant.admin_email
+                },
+                'domain_url': tenant.domain_url,  # Also at root level for easy access
+                'admin_email': validated_data['admin_email'],
+                'login_url': f"https://{tenant.domain_url}/admin/",
+                'api_url': f"https://{tenant.domain_url}/api/",
+                'credentials': {
+                    'email': validated_data['admin_email'],
+                    'note': 'Use the password you provided to login'
+                }
+            }, status=status.HTTP_201_CREATED)
+            
+    except Exception as e:
+        return Response(
+            {'error': f'Failed to create tenant: {str(e)}'}, 
+            status=status.HTTP_400_BAD_REQUEST
+        )
 
 
 class TenantViewSet(viewsets.ModelViewSet):
