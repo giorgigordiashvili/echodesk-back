@@ -9,6 +9,8 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 from django.contrib.auth import authenticate
 from tenant_schemas.utils import get_public_schema_name, schema_context
 from django.contrib.auth import get_user_model
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse
+from drf_spectacular.openapi import OpenApiTypes
 from .models import Tenant
 from .serializers import (
     TenantSerializer, TenantCreateSerializer, TenantRegistrationSerializer,
@@ -21,6 +23,28 @@ logger = logging.getLogger(__name__)
 User = get_user_model()
 
 
+@extend_schema(
+    operation_id='tenant_login',
+    summary='Tenant Login',
+    description='Authenticate a user within a specific tenant and get dashboard data. This endpoint only works from tenant subdomains (*.api.echodesk.ge).',
+    request=TenantLoginSerializer,
+    responses={
+        200: OpenApiResponse(
+            description='Login successful',
+            response={
+                'type': 'object',
+                'properties': {
+                    'message': {'type': 'string'},
+                    'token': {'type': 'string'},
+                    'dashboard_data': {'type': 'object'}
+                }
+            }
+        ),
+        400: OpenApiResponse(description='Invalid credentials or validation errors'),
+        403: OpenApiResponse(description='Not available from main domain')
+    },
+    tags=['Authentication']
+)
 @api_view(['POST'])
 @permission_classes([])  # No authentication required for login
 def tenant_login(request):
@@ -52,6 +76,25 @@ def tenant_login(request):
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
+@extend_schema(
+    operation_id='tenant_logout',
+    summary='Tenant Logout',
+    description='Logout the current user and invalidate their authentication token. This endpoint only works from tenant subdomains.',
+    responses={
+        200: OpenApiResponse(
+            description='Logout successful',
+            response={
+                'type': 'object',
+                'properties': {
+                    'message': {'type': 'string'}
+                }
+            }
+        ),
+        400: OpenApiResponse(description='Error during logout'),
+        403: OpenApiResponse(description='Not available from main domain')
+    },
+    tags=['Authentication']
+)
 @api_view(['POST'])
 @permission_classes([permissions.IsAuthenticated])
 def tenant_logout(request):
@@ -77,6 +120,16 @@ def tenant_logout(request):
         )
 
 
+@extend_schema(
+    operation_id='tenant_dashboard',
+    summary='Get Tenant Dashboard Data',
+    description='Get comprehensive dashboard data including tenant information, user details, and statistics. Requires authentication.',
+    responses={
+        200: TenantDashboardDataSerializer,
+        403: OpenApiResponse(description='Not available from main domain')
+    },
+    tags=['Dashboard']
+)
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated])
 def tenant_dashboard(request):
@@ -93,6 +146,32 @@ def tenant_dashboard(request):
     return Response(serializer.data, status=status.HTTP_200_OK)
 
 
+@extend_schema(
+    operation_id='tenant_profile',
+    summary='Get User Profile',
+    description='Get current user profile information within the tenant context.',
+    responses={
+        200: OpenApiResponse(
+            description='User profile data',
+            response={
+                'type': 'object',
+                'properties': {
+                    'id': {'type': 'integer'},
+                    'email': {'type': 'string'},
+                    'first_name': {'type': 'string'},
+                    'last_name': {'type': 'string'},
+                    'is_staff': {'type': 'boolean'},
+                    'is_superuser': {'type': 'boolean'},
+                    'date_joined': {'type': 'string', 'format': 'date-time'},
+                    'last_login': {'type': 'string', 'format': 'date-time'},
+                    'is_active': {'type': 'boolean'}
+                }
+            }
+        ),
+        403: OpenApiResponse(description='Not available from main domain')
+    },
+    tags=['User Profile']
+)
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated])
 def tenant_profile(request):
@@ -119,6 +198,32 @@ def tenant_profile(request):
     }, status=status.HTTP_200_OK)
 
 
+@extend_schema(
+    operation_id='update_tenant_profile',
+    summary='Update User Profile',
+    description='Update current user profile information (first_name and last_name only).',
+    request={
+        'type': 'object',
+        'properties': {
+            'first_name': {'type': 'string'},
+            'last_name': {'type': 'string'}
+        }
+    },
+    responses={
+        200: OpenApiResponse(
+            description='Profile updated successfully',
+            response={
+                'type': 'object',
+                'properties': {
+                    'message': {'type': 'string'},
+                    'user': {'type': 'object'}
+                }
+            }
+        ),
+        403: OpenApiResponse(description='Not available from main domain')
+    },
+    tags=['User Profile']
+)
 @api_view(['PUT', 'PATCH'])
 @permission_classes([permissions.IsAuthenticated])
 def update_tenant_profile(request):
@@ -155,6 +260,33 @@ def update_tenant_profile(request):
     }, status=status.HTTP_200_OK)
 
 
+@extend_schema(
+    operation_id='change_tenant_password',
+    summary='Change User Password',
+    description='Change password for the current user. Requires old password for verification. All existing tokens will be invalidated.',
+    request={
+        'type': 'object',
+        'properties': {
+            'old_password': {'type': 'string'},
+            'new_password': {'type': 'string', 'minLength': 8}
+        },
+        'required': ['old_password', 'new_password']
+    },
+    responses={
+        200: OpenApiResponse(
+            description='Password changed successfully',
+            response={
+                'type': 'object',
+                'properties': {
+                    'message': {'type': 'string'}
+                }
+            }
+        ),
+        400: OpenApiResponse(description='Invalid old password or validation errors'),
+        403: OpenApiResponse(description='Not available from main domain')
+    },
+    tags=['User Profile']
+)
 @api_view(['POST'])
 @permission_classes([permissions.IsAuthenticated])
 def change_tenant_password(request):
@@ -204,6 +336,26 @@ def change_tenant_password(request):
     }, status=status.HTTP_200_OK)
 
 
+@extend_schema(
+    operation_id='get_tenant_language',
+    summary='Get Tenant Language',
+    description='Get the preferred language setting for the current tenant.',
+    responses={
+        200: OpenApiResponse(
+            description='Tenant language information',
+            response={
+                'type': 'object',
+                'properties': {
+                    'preferred_language': {'type': 'string'},
+                    'tenant_name': {'type': 'string'},
+                    'schema_name': {'type': 'string'}
+                }
+            }
+        ),
+        403: OpenApiResponse(description='Not available from main domain')
+    },
+    tags=['Tenant Configuration']
+)
 @api_view(['GET'])
 @permission_classes([])  # No authentication required
 def get_tenant_language(request):
@@ -280,6 +432,29 @@ def register_tenant_form(request):
     return render(request, 'tenants/register.html')
 
 
+@extend_schema(
+    operation_id='register_tenant',
+    summary='Register New Tenant',
+    description='Register a new tenant with admin user creation. Only available from the main domain.',
+    request=TenantRegistrationSerializer,
+    responses={
+        201: OpenApiResponse(
+            description='Tenant created successfully',
+            response={
+                'type': 'object',
+                'properties': {
+                    'message': {'type': 'string'},
+                    'tenant': {'type': 'object'},
+                    'frontend_url': {'type': 'string'},
+                    'api_url': {'type': 'string'}
+                }
+            }
+        ),
+        400: OpenApiResponse(description='Validation errors'),
+        403: OpenApiResponse(description='Only available from main domain')
+    },
+    tags=['Tenant Management']
+)
 @api_view(['POST'])
 @permission_classes([])  # No authentication required
 def register_tenant(request):
