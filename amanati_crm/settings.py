@@ -40,6 +40,7 @@ SHARED_APPS = [
     'django.contrib.staticfiles',
     'django.contrib.admin',
     'rest_framework',
+    'rest_framework.authtoken',
     'drf_spectacular',
     'corsheaders',
     
@@ -56,6 +57,7 @@ TENANT_APPS = [
     'django.contrib.staticfiles',
     'django.contrib.admin',
     'rest_framework',
+    'rest_framework.authtoken',
     'drf_spectacular',
     'django_filters',
     

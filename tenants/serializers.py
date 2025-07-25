@@ -1,5 +1,6 @@
 from rest_framework import serializers
-from django.contrib.auth import get_user_model
+from django.contrib.auth import get_user_model, authenticate
+from rest_framework.authtoken.models import Token
 from .models import Tenant
 
 User = get_user_model()
@@ -139,3 +140,123 @@ class TenantRegistrationSerializer(serializers.Serializer):
             raise serializers.ValidationError("Password must contain at least one number.")
         
         return value
+
+
+class TenantLoginSerializer(serializers.Serializer):
+    """
+    Serializer for tenant-specific login
+    """
+    email = serializers.EmailField()
+    password = serializers.CharField(write_only=True)
+    
+    def validate(self, attrs):
+        email = attrs.get('email')
+        password = attrs.get('password')
+        
+        if email and password:
+            # Get the current tenant from the request context
+            request = self.context.get('request')
+            if not hasattr(request, 'tenant'):
+                raise serializers.ValidationError('This endpoint is only available from tenant subdomains')
+            
+            user = authenticate(request=request, username=email, password=password)
+            
+            if not user:
+                raise serializers.ValidationError('Invalid email or password')
+            
+            if not user.is_active:
+                raise serializers.ValidationError('User account is disabled')
+            
+            attrs['user'] = user
+        else:
+            raise serializers.ValidationError('Must include email and password')
+        
+        return attrs
+
+
+class TenantDashboardDataSerializer(serializers.Serializer):
+    """
+    Serializer for tenant dashboard data
+    """
+    tenant_info = serializers.SerializerMethodField()
+    user_info = serializers.SerializerMethodField()
+    statistics = serializers.SerializerMethodField()
+    
+    def get_tenant_info(self, obj):
+        """Get tenant information"""
+        request = self.context.get('request')
+        tenant = request.tenant
+        
+        return {
+            'id': tenant.id,
+            'name': tenant.name,
+            'description': tenant.description,
+            'domain_url': tenant.domain_url,
+            'preferred_language': tenant.preferred_language,
+            'plan': tenant.plan,
+            'frontend_url': tenant.frontend_url,
+            'deployment_status': tenant.deployment_status,
+            'created_on': tenant.created_on,
+            'is_active': tenant.is_active
+        }
+    
+    def get_user_info(self, obj):
+        """Get current user information"""
+        user = obj
+        return {
+            'id': user.id,
+            'email': user.email,
+            'first_name': user.first_name,
+            'last_name': user.last_name,
+            'is_staff': user.is_staff,
+            'is_superuser': user.is_superuser,
+            'date_joined': user.date_joined
+        }
+    
+    def get_statistics(self, obj):
+        """Get tenant statistics"""
+        from django.contrib.auth import get_user_model
+        from tickets.models import Ticket
+        from crm.models import Customer
+        
+        User = get_user_model()
+        
+        try:
+            # Count users in current tenant
+            total_users = User.objects.count()
+            active_users = User.objects.filter(is_active=True).count()
+            
+            # Count tickets if tickets app exists
+            try:
+                total_tickets = Ticket.objects.count()
+                open_tickets = Ticket.objects.filter(status__in=['open', 'in_progress']).count()
+            except:
+                total_tickets = 0
+                open_tickets = 0
+            
+            # Count customers if CRM app exists
+            try:
+                total_customers = Customer.objects.count()
+                active_customers = Customer.objects.filter(is_active=True).count()
+            except:
+                total_customers = 0
+                active_customers = 0
+            
+            return {
+                'users': {
+                    'total': total_users,
+                    'active': active_users
+                },
+                'tickets': {
+                    'total': total_tickets,
+                    'open': open_tickets
+                },
+                'customers': {
+                    'total': total_customers,
+                    'active': active_customers
+                }
+            }
+        except Exception as e:
+            return {
+                'error': f'Could not fetch statistics: {str(e)}'
+            }

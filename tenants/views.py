@@ -1,19 +1,207 @@
 from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
+from rest_framework.authtoken.models import Token
 from django.shortcuts import render, redirect
 from django.http import JsonResponse
 from django.db import transaction
 from django.views.decorators.csrf import ensure_csrf_cookie
+from django.contrib.auth import authenticate
 from tenant_schemas.utils import get_public_schema_name, schema_context
 from django.contrib.auth import get_user_model
 from .models import Tenant
-from .serializers import TenantSerializer, TenantCreateSerializer, TenantRegistrationSerializer
+from .serializers import (
+    TenantSerializer, TenantCreateSerializer, TenantRegistrationSerializer,
+    TenantLoginSerializer, TenantDashboardDataSerializer
+)
 from .services import SingleFrontendDeploymentService, TenantConfigAPI
 import logging
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
+
+
+@api_view(['POST'])
+@permission_classes([])  # No authentication required for login
+def tenant_login(request):
+    """
+    Tenant-specific login endpoint for dashboard access
+    """
+    if not hasattr(request, 'tenant') or request.tenant.schema_name == get_public_schema_name():
+        return Response(
+            {'error': 'This endpoint is only available from tenant subdomains'}, 
+            status=status.HTTP_403_FORBIDDEN
+        )
+    
+    serializer = TenantLoginSerializer(data=request.data, context={'request': request})
+    if serializer.is_valid():
+        user = serializer.validated_data['user']
+        
+        # Get or create token for the user
+        token, created = Token.objects.get_or_create(user=user)
+        
+        # Get dashboard data
+        dashboard_serializer = TenantDashboardDataSerializer(user, context={'request': request})
+        
+        return Response({
+            'message': 'Login successful',
+            'token': token.key,
+            'dashboard_data': dashboard_serializer.data
+        }, status=status.HTTP_200_OK)
+    
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def tenant_logout(request):
+    """
+    Tenant-specific logout endpoint
+    """
+    if not hasattr(request, 'tenant') or request.tenant.schema_name == get_public_schema_name():
+        return Response(
+            {'error': 'This endpoint is only available from tenant subdomains'}, 
+            status=status.HTTP_403_FORBIDDEN
+        )
+    
+    try:
+        # Delete the user's token
+        request.user.auth_token.delete()
+        return Response({
+            'message': 'Successfully logged out'
+        }, status=status.HTTP_200_OK)
+    except:
+        return Response(
+            {'error': 'Error during logout'}, 
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def tenant_dashboard(request):
+    """
+    Get tenant dashboard data for authenticated users
+    """
+    if not hasattr(request, 'tenant') or request.tenant.schema_name == get_public_schema_name():
+        return Response(
+            {'error': 'This endpoint is only available from tenant subdomains'}, 
+            status=status.HTTP_403_FORBIDDEN
+        )
+    
+    serializer = TenantDashboardDataSerializer(request.user, context={'request': request})
+    return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def tenant_profile(request):
+    """
+    Get current user profile information
+    """
+    if not hasattr(request, 'tenant') or request.tenant.schema_name == get_public_schema_name():
+        return Response(
+            {'error': 'This endpoint is only available from tenant subdomains'}, 
+            status=status.HTTP_403_FORBIDDEN
+        )
+    
+    user = request.user
+    return Response({
+        'id': user.id,
+        'email': user.email,
+        'first_name': user.first_name,
+        'last_name': user.last_name,
+        'is_staff': user.is_staff,
+        'is_superuser': user.is_superuser,
+        'date_joined': user.date_joined,
+        'last_login': user.last_login,
+        'is_active': user.is_active
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['PUT', 'PATCH'])
+@permission_classes([permissions.IsAuthenticated])
+def update_tenant_profile(request):
+    """
+    Update current user profile information
+    """
+    if not hasattr(request, 'tenant') or request.tenant.schema_name == get_public_schema_name():
+        return Response(
+            {'error': 'This endpoint is only available from tenant subdomains'}, 
+            status=status.HTTP_403_FORBIDDEN
+        )
+    
+    user = request.user
+    data = request.data
+    
+    # Update allowed fields
+    if 'first_name' in data:
+        user.first_name = data['first_name']
+    if 'last_name' in data:
+        user.last_name = data['last_name']
+    
+    user.save()
+    
+    return Response({
+        'message': 'Profile updated successfully',
+        'user': {
+            'id': user.id,
+            'email': user.email,
+            'first_name': user.first_name,
+            'last_name': user.last_name,
+            'is_staff': user.is_staff,
+            'is_superuser': user.is_superuser
+        }
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def change_tenant_password(request):
+    """
+    Change password for current user in tenant
+    """
+    if not hasattr(request, 'tenant') or request.tenant.schema_name == get_public_schema_name():
+        return Response(
+            {'error': 'This endpoint is only available from tenant subdomains'}, 
+            status=status.HTTP_403_FORBIDDEN
+        )
+    
+    old_password = request.data.get('old_password')
+    new_password = request.data.get('new_password')
+    
+    if not old_password or not new_password:
+        return Response(
+            {'error': 'Both old_password and new_password are required'}, 
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    user = request.user
+    
+    # Check old password
+    if not user.check_password(old_password):
+        return Response(
+            {'error': 'Invalid old password'}, 
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    # Validate new password (basic validation)
+    if len(new_password) < 8:
+        return Response(
+            {'error': 'New password must be at least 8 characters long'}, 
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    # Set new password
+    user.set_password(new_password)
+    user.save()
+    
+    # Delete all existing tokens to force re-login
+    Token.objects.filter(user=user).delete()
+    
+    return Response({
+        'message': 'Password changed successfully. Please login again.'
+    }, status=status.HTTP_200_OK)
 
 
 @api_view(['GET'])
