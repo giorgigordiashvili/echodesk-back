@@ -17,11 +17,15 @@ DEBUG = config('DEBUG', default=True, cast=bool)
 
 # Main domain configuration
 MAIN_DOMAIN = config('MAIN_DOMAIN', default='echodesk.ge')
+API_DOMAIN = config('API_DOMAIN', default='api.echodesk.ge')
 
 ALLOWED_HOSTS = [
     MAIN_DOMAIN,  # Main domain for public schema
-    f'.{MAIN_DOMAIN}',  # Wildcard for tenant subdomains
+    f'.{MAIN_DOMAIN}',  # Wildcard for tenant frontend subdomains
+    API_DOMAIN,  # API domain
+    f'.{API_DOMAIN}',  # Wildcard for tenant API subdomains
     '.ondigitalocean.app',  # DigitalOcean app platform
+    '.vercel.app',  # Vercel hosting
     'localhost',
     '127.0.0.1',
 ]
@@ -193,16 +197,21 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:3000",
     f"https://{MAIN_DOMAIN}",
     f"http://{MAIN_DOMAIN}",
+    f"https://{API_DOMAIN}",
+    f"http://{API_DOMAIN}",
 ]
 
 # Allow CORS for all subdomains in production
 if not DEBUG:
     CORS_ALLOW_ALL_ORIGINS = False
     # Escape dots for regex pattern
-    escaped_domain = MAIN_DOMAIN.replace('.', r'\.')
+    escaped_main_domain = MAIN_DOMAIN.replace('.', r'\.')
+    escaped_api_domain = API_DOMAIN.replace('.', r'\.')
     CORS_ALLOWED_ORIGIN_REGEXES = [
-        rf"https://.*\.{escaped_domain}",
-        rf"http://.*\.{escaped_domain}",
+        rf"https://.*\.{escaped_main_domain}",  # Frontend subdomains
+        rf"http://.*\.{escaped_main_domain}",   # Frontend subdomains (dev)
+        rf"https://.*\.{escaped_api_domain}",   # API subdomains
+        rf"http://.*\.{escaped_api_domain}",    # API subdomains (dev)
     ]
 else:
     # For local development
@@ -210,6 +219,7 @@ else:
         "http://demo.localhost:8000",
         "http://acme.localhost:8000",
         "http://localhost:8000",
+        "http://localhost:3000",
     ])
 
 CORS_ALLOW_CREDENTIALS = True
@@ -236,3 +246,11 @@ LOGGING = {
         },
     },
 }
+
+# Frontend Configuration
+FRONTEND_BASE_URL = config('FRONTEND_BASE_URL', default='echodesk.ge')
+REVALIDATION_SECRET = config('REVALIDATION_SECRET', default='your-secret-key-here')
+
+# Optional: For advanced deployments
+VERCEL_TOKEN = config('VERCEL_TOKEN', default='')
+VERCEL_PROJECT_ID = config('VERCEL_PROJECT_ID', default='')

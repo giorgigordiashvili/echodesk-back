@@ -129,3 +129,6 @@ media/
 
 # Static files (collected)
 staticfiles/
+
+# Frontend Next.js project
+echodesk-frontend/

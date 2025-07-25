@@ -43,6 +43,20 @@ class Tenant(TenantMixin):
         help_text='Preferred language for the frontend dashboard'
     )
     
+    # Frontend deployment fields
+    frontend_url = models.URLField(blank=True, null=True, help_text="URL of the deployed frontend")
+    deployment_status = models.CharField(
+        max_length=20,
+        choices=[
+            ('pending', 'Pending'),
+            ('deploying', 'Deploying'),
+            ('deployed', 'Deployed'),
+            ('failed', 'Failed'),
+        ],
+        default='pending',
+        help_text="Status of the frontend deployment"
+    )
+    
     # Auto-created schema name is available as self.schema_name
     # domain_url inherited from TenantMixin
     

@@ -9,7 +9,10 @@ from tenant_schemas.utils import get_public_schema_name, schema_context
 from django.contrib.auth import get_user_model
 from .models import Tenant
 from .serializers import TenantSerializer, TenantCreateSerializer, TenantRegistrationSerializer
+from .services import SingleFrontendDeploymentService, TenantConfigAPI
+import logging
 
+logger = logging.getLogger(__name__)
 User = get_user_model()
 
 
@@ -116,7 +119,7 @@ def register_tenant(request):
             
             tenant = Tenant.objects.create(
                 schema_name=schema_name,
-                domain_url=f"{domain_name}.echodesk.ge",
+                domain_url=f"{domain_name}.api.echodesk.ge",  # Backend API domain
                 name=validated_data['company_name'],
                 description=validated_data.get('description', ''),
                 admin_email=validated_data['admin_email'],
@@ -124,7 +127,8 @@ def register_tenant(request):
                 preferred_language=validated_data.get('preferred_language', 'en'),
                 plan='basic',  # Default plan
                 max_users=10,  # Default limits
-                max_storage=1024  # 1GB default
+                max_storage=1024,  # 1GB default
+                deployment_status='deploying'  # Set initial status
             )
             
             # Create admin user in tenant schema
@@ -139,32 +143,97 @@ def register_tenant(request):
                     is_active=True
                 )
             
-            return Response({
-                'message': 'Tenant created successfully!',
-                'tenant': {
-                    'id': tenant.id,
-                    'name': tenant.name,
-                    'domain_url': tenant.domain_url,  # This is what the form expects
-                    'schema': tenant.schema_name,
-                    'admin_email': tenant.admin_email,
-                    'preferred_language': tenant.preferred_language
-                },
-                'domain_url': tenant.domain_url,  # Also at root level for easy access
-                'admin_email': validated_data['admin_email'],
-                'preferred_language': tenant.preferred_language,
-                'login_url': f"https://{tenant.domain_url}/admin/",
-                'api_url': f"https://{tenant.domain_url}/api/",
-                'credentials': {
-                    'email': validated_data['admin_email'],
-                    'note': 'Use the password you provided to login'
-                }
-            }, status=status.HTTP_201_CREATED)
+            # Setup frontend access (immediate, no deployment needed)
+            deployment_service = SingleFrontendDeploymentService()
+            deployment_result = deployment_service.setup_tenant_frontend(tenant)
+            
+            if deployment_result:
+                return Response({
+                    'message': 'Tenant created successfully! Your frontend is ready.',
+                    'tenant': {
+                        'id': tenant.id,
+                        'name': tenant.name,
+                        'domain_url': tenant.domain_url,
+                        'schema': tenant.schema_name,
+                        'admin_email': tenant.admin_email,
+                        'preferred_language': tenant.preferred_language,
+                        'deployment_status': 'deployed',
+                        'frontend_url': tenant.frontend_url
+                    },
+                    'domain_url': tenant.domain_url,
+                    'admin_email': validated_data['admin_email'],
+                    'preferred_language': tenant.preferred_language,
+                    'login_url': f"https://{tenant.domain_url}/admin/",  # API domain admin
+                    'api_url': f"https://{tenant.domain_url}/api/",      # API domain
+                    'frontend_url': tenant.frontend_url,                 # Frontend domain
+                    'deployment_status': 'deployed',
+                    'credentials': {
+                        'email': validated_data['admin_email'],
+                        'note': 'Use the password you provided to login'
+                    }
+                }, status=status.HTTP_201_CREATED)
+            else:
+                return Response({
+                    'error': 'Tenant created but frontend setup failed'
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
     except Exception as e:
         return Response(
             {'error': f'Failed to create tenant: {str(e)}'}, 
             status=status.HTTP_400_BAD_REQUEST
         )
+
+
+# Add API endpoint for frontend to get tenant configuration
+@api_view(['GET'])
+@permission_classes([])
+def get_tenant_config(request):
+    """
+    Get tenant configuration for frontend
+    Can be called by subdomain or domain parameter
+    """
+    subdomain = request.GET.get('subdomain')
+    domain = request.GET.get('domain')
+    
+    if subdomain:
+        config = TenantConfigAPI.get_tenant_by_subdomain(subdomain)
+    elif domain:
+        config = TenantConfigAPI.get_tenant_by_domain(domain)
+    else:
+        return Response({'error': 'subdomain or domain parameter required'}, status=400)
+    
+    if config:
+        return Response(config)
+    else:
+        return Response({'error': 'Tenant not found'}, status=404)
+
+
+@api_view(['GET'])
+@permission_classes([])
+def get_all_tenants(request):
+    """
+    Get list of all active tenants for frontend routing
+    """
+    tenants = TenantConfigAPI.get_all_tenants()
+    return Response({
+        'tenants': tenants,
+        'count': len(tenants)
+    })
+
+
+@api_view(['GET'])
+@permission_classes([])
+def check_deployment_status(request, tenant_id):
+    """Check the deployment status of a tenant's frontend"""
+    try:
+        tenant = Tenant.objects.get(id=tenant_id)
+        return Response({
+            'deployment_status': tenant.deployment_status,
+            'frontend_url': tenant.frontend_url,
+            'message': f'Deployment status: {tenant.get_deployment_status_display()}'
+        })
+    except Tenant.DoesNotExist:
+        return Response({'error': 'Tenant not found'}, status=404)
 
 
 class TenantViewSet(viewsets.ModelViewSet):

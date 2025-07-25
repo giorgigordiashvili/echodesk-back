@@ -13,7 +13,7 @@ class TenantSerializer(serializers.ModelSerializer):
         fields = (
             'id', 'schema_name', 'domain_url', 'name', 'description', 'admin_email', 
             'admin_name', 'plan', 'max_users', 'max_storage', 'preferred_language',
-            'is_active', 'created_on'
+            'frontend_url', 'deployment_status', 'is_active', 'created_on'
         )
         read_only_fields = ('id', 'schema_name', 'created_on')
 
