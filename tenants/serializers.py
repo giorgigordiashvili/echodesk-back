@@ -12,7 +12,7 @@ class TenantSerializer(serializers.ModelSerializer):
         model = Tenant
         fields = (
             'id', 'schema_name', 'domain_url', 'name', 'description', 'admin_email', 
-            'admin_name', 'plan', 'max_users', 'max_storage', 
+            'admin_name', 'plan', 'max_users', 'max_storage', 'preferred_language',
             'is_active', 'created_on'
         )
         read_only_fields = ('id', 'schema_name', 'created_on')
@@ -27,7 +27,7 @@ class TenantCreateSerializer(serializers.ModelSerializer):
         model = Tenant
         fields = (
             'name', 'description', 'admin_email', 'admin_name', 
-            'plan', 'max_users', 'max_storage', 'domain'
+            'plan', 'max_users', 'max_storage', 'preferred_language', 'domain'
         )
     
     def create(self, validated_data):
@@ -84,6 +84,17 @@ class TenantRegistrationSerializer(serializers.Serializer):
     admin_password = serializers.CharField(min_length=8, write_only=True, help_text="Password for the admin user")
     admin_first_name = serializers.CharField(max_length=30, help_text="Admin's first name")
     admin_last_name = serializers.CharField(max_length=30, help_text="Admin's last name")
+    
+    # Language preference
+    preferred_language = serializers.ChoiceField(
+        choices=[
+            ('en', 'English'),
+            ('ru', 'Russian'), 
+            ('ka', 'Georgian'),
+        ],
+        default='en',
+        help_text="Preferred language for the frontend dashboard"
+    )
     
     def validate_domain(self, value):
         """Validate that the domain is unique and follows naming conventions"""

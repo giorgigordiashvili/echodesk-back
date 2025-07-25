@@ -31,6 +31,18 @@ class Tenant(TenantMixin):
     max_users = models.IntegerField(default=10)
     max_storage = models.BigIntegerField(default=1073741824)  # 1GB in bytes
     
+    # Language preference for tenant dashboard
+    preferred_language = models.CharField(
+        max_length=10,
+        default='en',
+        choices=[
+            ('en', 'English'),
+            ('ru', 'Russian'),
+            ('ka', 'Georgian'),
+        ],
+        help_text='Preferred language for the frontend dashboard'
+    )
+    
     # Auto-created schema name is available as self.schema_name
     # domain_url inherited from TenantMixin
     

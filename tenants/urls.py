@@ -1,6 +1,6 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import TenantViewSet, public_homepage, register_tenant, register_tenant_form
+from .views import TenantViewSet, public_homepage, register_tenant, register_tenant_form, get_tenant_language, update_tenant_language
 
 router = DefaultRouter()
 router.register(r'tenants', TenantViewSet)
@@ -9,5 +9,7 @@ urlpatterns = [
     path('', public_homepage, name='public_homepage'),
     path('register-tenant/', register_tenant_form, name='register_tenant_form'),
     path('api/register/', register_tenant, name='register_tenant'),
+    path('api/tenant/language/', get_tenant_language, name='get_tenant_language'),
+    path('api/tenant/language/update/', update_tenant_language, name='update_tenant_language'),
     path('api/', include(router.urls)),
 ]

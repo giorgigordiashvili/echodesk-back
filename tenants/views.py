@@ -13,6 +13,59 @@ from .serializers import TenantSerializer, TenantCreateSerializer, TenantRegistr
 User = get_user_model()
 
 
+@api_view(['GET'])
+@permission_classes([])  # No authentication required
+def get_tenant_language(request):
+    """
+    Get the preferred language for the current tenant
+    """
+    if not hasattr(request, 'tenant') or request.tenant.schema_name == get_public_schema_name():
+        return Response(
+            {'error': 'This endpoint is only available from tenant subdomains'}, 
+            status=status.HTTP_403_FORBIDDEN
+        )
+    
+    return Response({
+        'preferred_language': request.tenant.preferred_language,
+        'tenant_name': request.tenant.name,
+        'schema_name': request.tenant.schema_name
+    })
+
+
+@api_view(['PUT', 'PATCH'])
+@permission_classes([permissions.IsAuthenticated])
+def update_tenant_language(request):
+    """
+    Update the preferred language for the current tenant
+    Only authenticated users can change the language
+    """
+    if not hasattr(request, 'tenant') or request.tenant.schema_name == get_public_schema_name():
+        return Response(
+            {'error': 'This endpoint is only available from tenant subdomains'}, 
+            status=status.HTTP_403_FORBIDDEN
+        )
+    
+    language = request.data.get('preferred_language')
+    
+    # Validate language choice
+    valid_languages = ['en', 'ru', 'ka']
+    if language not in valid_languages:
+        return Response(
+            {'error': f'Invalid language. Must be one of: {", ".join(valid_languages)}'}, 
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    # Update tenant language
+    request.tenant.preferred_language = language
+    request.tenant.save()
+    
+    return Response({
+        'message': 'Language preference updated successfully',
+        'preferred_language': request.tenant.preferred_language,
+        'tenant_name': request.tenant.name
+    })
+
+
 def public_homepage(request):
     """
     Homepage view for the public schema (main domain)
@@ -68,6 +121,7 @@ def register_tenant(request):
                 description=validated_data.get('description', ''),
                 admin_email=validated_data['admin_email'],
                 admin_name=f"{validated_data['admin_first_name']} {validated_data['admin_last_name']}",
+                preferred_language=validated_data.get('preferred_language', 'en'),
                 plan='basic',  # Default plan
                 max_users=10,  # Default limits
                 max_storage=1024  # 1GB default
@@ -92,10 +146,12 @@ def register_tenant(request):
                     'name': tenant.name,
                     'domain_url': tenant.domain_url,  # This is what the form expects
                     'schema': tenant.schema_name,
-                    'admin_email': tenant.admin_email
+                    'admin_email': tenant.admin_email,
+                    'preferred_language': tenant.preferred_language
                 },
                 'domain_url': tenant.domain_url,  # Also at root level for easy access
                 'admin_email': validated_data['admin_email'],
+                'preferred_language': tenant.preferred_language,
                 'login_url': f"https://{tenant.domain_url}/admin/",
                 'api_url': f"https://{tenant.domain_url}/api/",
                 'credentials': {

@@ -60,6 +60,7 @@
         input[type="text"],
         input[type="email"],
         input[type="password"],
+        select,
         textarea {
             width: 100%;
             padding: 12px;
@@ -70,6 +71,7 @@
         }
         
         input:focus,
+        select:focus,
         textarea:focus {
             outline: none;
             border-color: #667eea;
@@ -212,6 +214,16 @@
             </div>
             
             <div class="form-group">
+                <label for="preferred_language">Dashboard Language *</label>
+                <select id="preferred_language" name="preferred_language" required>
+                    <option value="en">🇺🇸 English</option>
+                    <option value="ru">🇷🇺 Russian</option>
+                    <option value="ka">🇬🇪 Georgian</option>
+                </select>
+                <small style="color: #666; font-size: 12px;">Language to use in your frontend dashboard</small>
+            </div>
+            
+            <div class="form-group">
                 <label>Your Subdomain</label>
                 <div class="domain-preview" id="domain-preview">
                     <span id="generated-domain">your-company.echodesk.ge</span>
@@ -293,6 +305,7 @@
                         Your tenant has been created successfully!<br>
                         <strong>Your URL:</strong> <a href="https://${data.domain_url}" target="_blank">${data.domain_url}</a><br>
                         <strong>Admin Login:</strong> ${data.admin_email}<br>
+                        <strong>Dashboard Language:</strong> ${data.preferred_language.toUpperCase()}<br>
                         You can now access your tenant at the link above.
                     `;
                     successMessage.style.display = 'block';
