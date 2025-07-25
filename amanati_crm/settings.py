@@ -207,13 +207,16 @@ CORS_ALLOWED_ORIGINS = [
 ]
 
 # Allow all subdomains with regex patterns
+escaped_main_domain = MAIN_DOMAIN.replace('.', r'\.')
+escaped_api_domain = API_DOMAIN.replace('.', r'\.')
+
 CORS_ALLOWED_ORIGIN_REGEXES = [
-    rf"https://.*\.{MAIN_DOMAIN.replace('.', r'\.')}",  # *.echodesk.ge
-    rf"http://.*\.{MAIN_DOMAIN.replace('.', r'\.')}",   # *.echodesk.ge (dev)
-    rf"https://.*\.{API_DOMAIN.replace('.', r'\.')}",   # *.api.echodesk.ge
-    rf"http://.*\.{API_DOMAIN.replace('.', r'\.')}",    # *.api.echodesk.ge (dev)
-    r"https://.*\.ondigitalocean\.app",                  # DigitalOcean app domains
-    r"http://.*\.localhost:3000",                        # Local development subdomains
+    f"https://.*\\.{escaped_main_domain}",  # *.echodesk.ge
+    f"http://.*\\.{escaped_main_domain}",   # *.echodesk.ge (dev)
+    f"https://.*\\.{escaped_api_domain}",   # *.api.echodesk.ge
+    f"http://.*\\.{escaped_api_domain}",    # *.api.echodesk.ge (dev)
+    r"https://.*\.ondigitalocean\.app",      # DigitalOcean app domains
+    r"http://.*\.localhost:3000",            # Local development subdomains
 ]
 
 # CORS configuration for multi-tenant setup
