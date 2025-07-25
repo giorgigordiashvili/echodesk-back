@@ -51,6 +51,7 @@ class SingleFrontendDeploymentService:
         """
         Notify the frontend about the new tenant (optional)
         This can trigger cache invalidation or webhook calls
+        Frontend deployed on DigitalOcean App Platform with wildcard subdomain support
         """
         try:
             # Call a webhook on your frontend to clear cache
@@ -60,18 +61,20 @@ class SingleFrontendDeploymentService:
                 'tenant_id': tenant.id,
                 'schema_name': tenant.schema_name,
                 'domain_url': tenant.domain_url,
+                'frontend_url': tenant.frontend_url,
+                'platform': 'digitalocean',
                 'secret': self.revalidation_secret
             }
             
             response = requests.post(webhook_url, json=payload, timeout=10)
             
             if response.status_code == 200:
-                logger.info(f"Successfully notified frontend about new tenant: {tenant.name}")
+                logger.info(f"Successfully notified DigitalOcean frontend about new tenant: {tenant.name}")
             else:
-                logger.warning(f"Frontend notification failed: {response.status_code}")
+                logger.warning(f"DigitalOcean frontend notification failed: {response.status_code}")
                 
         except Exception as e:
-            logger.warning(f"Could not notify frontend: {str(e)}")
+            logger.warning(f"Could not notify DigitalOcean frontend: {str(e)}")
             # This is not critical, so we don't fail the deployment
     
     def get_tenant_frontend_config(self, tenant):
