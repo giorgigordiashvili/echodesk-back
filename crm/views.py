@@ -24,7 +24,7 @@ class SipConfigurationViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     
     def get_queryset(self):
-        # Return configurations for current tenant - use request.tenant instead of user.tenant
+        # Return configurations for current tenant - tenant schema isolation handles filtering
         if hasattr(self.request, 'tenant'):
             # In tenant schema, all records are for the current tenant
             return SipConfiguration.objects.all()
