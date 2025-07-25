@@ -1,22 +1,67 @@
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
-from .models import CallLog, Client
+from .models import CallLog, Client, SipConfiguration
+
+
+class SipConfigurationSerializer(serializers.ModelSerializer):
+    """Serializer for SIP configuration management"""
+    
+    class Meta:
+        model = SipConfiguration
+        fields = [
+            'id', 'name', 'sip_server', 'sip_port', 'username', 
+            'realm', 'proxy', 'stun_server', 'turn_server', 
+            'turn_username', 'is_active', 'is_default', 
+            'max_concurrent_calls', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+    
+    def create(self, validated_data):
+        validated_data['created_by'] = self.context['request'].user
+        return super().create(validated_data)
+
+
+class SipConfigurationListSerializer(serializers.ModelSerializer):
+    """Simplified serializer for listing SIP configurations"""
+    
+    class Meta:
+        model = SipConfiguration
+        fields = ['id', 'name', 'sip_server', 'is_active', 'is_default']
+
+
+class SipConfigurationDetailSerializer(serializers.ModelSerializer):
+    """Detailed serializer including sensitive fields for configuration"""
+    
+    class Meta:
+        model = SipConfiguration
+        fields = [
+            'id', 'name', 'sip_server', 'sip_port', 'username', 'password',
+            'realm', 'proxy', 'stun_server', 'turn_server', 
+            'turn_username', 'turn_password', 'is_active', 'is_default',
+            'max_concurrent_calls'
+        ]
 
 
 class CallLogSerializer(serializers.ModelSerializer):
-    """Serializer for CallLog model"""
+    """Enhanced serializer for CallLog model with SIP support"""
     
     handled_by_name = serializers.SerializerMethodField()
     duration_display = serializers.SerializerMethodField()
+    client_name = serializers.CharField(source='client.name', read_only=True)
+    sip_config_name = serializers.CharField(source='sip_configuration.name', read_only=True)
     
     class Meta:
         model = CallLog
-        fields = (
-            'id', 'caller_number', 'recipient_number', 'duration', 
-            'duration_display', 'status', 'created_at', 'notes', 
-            'handled_by', 'handled_by_name'
-        )
-        read_only_fields = ('id', 'created_at', 'handled_by_name', 'duration_display')
+        fields = [
+            'id', 'call_id', 'caller_number', 'recipient_number', 
+            'direction', 'call_type', 'started_at', 'answered_at', 
+            'ended_at', 'duration', 'duration_display', 'status', 
+            'notes', 'sip_call_id', 'client', 'client_name', 
+            'handled_by', 'handled_by_name', 'sip_configuration', 
+            'sip_config_name', 'recording_url', 'call_quality_score',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'call_id', 'created_at', 'updated_at', 'client']
 
     @extend_schema_field(serializers.CharField)
     def get_handled_by_name(self, obj):
@@ -30,10 +75,51 @@ class CallLogSerializer(serializers.ModelSerializer):
         """Display duration in human-readable format"""
         if obj.duration:
             total_seconds = int(obj.duration.total_seconds())
-            minutes = total_seconds // 60
+            hours = total_seconds // 3600
+            minutes = (total_seconds % 3600) // 60
             seconds = total_seconds % 60
-            return f"{minutes}:{seconds:02d}"
+            if hours > 0:
+                return f"{hours}:{minutes:02d}:{seconds:02d}"
+            else:
+                return f"{minutes}:{seconds:02d}"
         return None
+
+
+class CallLogCreateSerializer(serializers.ModelSerializer):
+    """Serializer for creating new call logs"""
+    
+    class Meta:
+        model = CallLog
+        fields = [
+            'caller_number', 'recipient_number', 'direction', 
+            'call_type', 'sip_call_id', 'sip_configuration', 'notes'
+        ]
+
+
+class CallInitiateSerializer(serializers.Serializer):
+    """Serializer for initiating outbound calls"""
+    recipient_number = serializers.CharField(max_length=20)
+    call_type = serializers.ChoiceField(
+        choices=CallLog.CALL_TYPE_CHOICES, 
+        default='voice'
+    )
+    sip_configuration = serializers.IntegerField(required=False)
+    
+    def validate_recipient_number(self, value):
+        """Validate phone number format"""
+        # Remove common formatting characters
+        clean_number = value.replace('+', '').replace('-', '').replace(' ', '').replace('(', '').replace(')', '')
+        if not clean_number.isdigit() or len(clean_number) < 7:
+            raise serializers.ValidationError("Please enter a valid phone number")
+        return value
+
+
+class CallStatusUpdateSerializer(serializers.Serializer):
+    """Serializer for updating call status"""
+    status = serializers.ChoiceField(choices=CallLog.STATUS_CHOICES)
+    notes = serializers.CharField(required=False, allow_blank=True)
+    call_quality_score = serializers.FloatField(min_value=0, max_value=5, required=False)
+    recording_url = serializers.URLField(required=False, allow_blank=True)
 
 
 class ClientSerializer(serializers.ModelSerializer):

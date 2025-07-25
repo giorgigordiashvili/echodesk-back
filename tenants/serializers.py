@@ -214,10 +214,11 @@ class TenantDashboardDataSerializer(serializers.Serializer):
         }
     
     def get_statistics(self, obj):
-        """Get tenant statistics"""
+        """Get tenant statistics including SIP functionality"""
         from django.contrib.auth import get_user_model
         from tickets.models import Ticket
-        from crm.models import Client
+        from crm.models import Client, CallLog, SipConfiguration
+        from django.utils import timezone
         
         User = get_user_model()
         
@@ -242,6 +243,53 @@ class TenantDashboardDataSerializer(serializers.Serializer):
                 total_clients = 0
                 active_clients = 0
             
+            # SIP and call statistics
+            try:
+                # SIP configurations
+                sip_configs = SipConfiguration.objects.filter(created_by__tenant=self.context['request'].tenant)
+                active_sip_configs = sip_configs.filter(is_active=True)
+                default_sip_config = sip_configs.filter(is_default=True, is_active=True).first()
+                
+                # Call statistics (today)
+                today = timezone.now().date()
+                calls_today = CallLog.objects.filter(started_at__date=today)
+                
+                # Call statistics (this week)
+                week_start = timezone.now().date() - timezone.timedelta(days=7)
+                calls_week = CallLog.objects.filter(started_at__date__gte=week_start)
+                
+                sip_stats = {
+                    'configurations': {
+                        'total': sip_configs.count(),
+                        'active': active_sip_configs.count(),
+                        'has_default': default_sip_config is not None
+                    },
+                    'calls_today': {
+                        'total': calls_today.count(),
+                        'answered': calls_today.filter(status='answered').count(),
+                        'missed': calls_today.filter(status='missed').count(),
+                        'inbound': calls_today.filter(direction='inbound').count(),
+                        'outbound': calls_today.filter(direction='outbound').count()
+                    },
+                    'calls_week': {
+                        'total': calls_week.count(),
+                        'answered': calls_week.filter(status='answered').count(),
+                        'missed': calls_week.filter(status='missed').count()
+                    },
+                    'default_config': {
+                        'id': default_sip_config.id if default_sip_config else None,
+                        'name': default_sip_config.name if default_sip_config else None,
+                        'server': default_sip_config.sip_server if default_sip_config else None
+                    } if default_sip_config else None
+                }
+            except:
+                sip_stats = {
+                    'configurations': {'total': 0, 'active': 0, 'has_default': False},
+                    'calls_today': {'total': 0, 'answered': 0, 'missed': 0, 'inbound': 0, 'outbound': 0},
+                    'calls_week': {'total': 0, 'answered': 0, 'missed': 0},
+                    'default_config': None
+                }
+            
             return {
                 'users': {
                     'total': total_users,
@@ -254,7 +302,8 @@ class TenantDashboardDataSerializer(serializers.Serializer):
                 'clients': {
                     'total': total_clients,
                     'active': active_clients
-                }
+                },
+                'sip': sip_stats
             }
         except Exception as e:
             return {
