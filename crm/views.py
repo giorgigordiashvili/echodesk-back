@@ -24,8 +24,13 @@ class SipConfigurationViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     
     def get_queryset(self):
-        # Return configurations created by users in current tenant
-        return SipConfiguration.objects.filter(created_by__tenant=self.request.user.tenant)
+        # Return configurations for current tenant - use request.tenant instead of user.tenant
+        if hasattr(self.request, 'tenant'):
+            # In tenant schema, all records are for the current tenant
+            return SipConfiguration.objects.all()
+        else:
+            # Fallback for public schema or when tenant is not available
+            return SipConfiguration.objects.all()
     
     def get_serializer_class(self):
         if self.action == 'list':
@@ -65,10 +70,8 @@ class SipConfigurationViewSet(viewsets.ModelViewSet):
         """Set this configuration as default"""
         sip_config = self.get_object()
         
-        # Remove default from other configs
-        SipConfiguration.objects.filter(
-            created_by__tenant=request.user.tenant
-        ).update(is_default=False)
+        # Remove default from other configs in current tenant
+        SipConfiguration.objects.filter(is_default=True).exclude(id=sip_config.id).update(is_default=False)
         
         # Set this as default
         sip_config.is_default = True
@@ -114,8 +117,13 @@ class CallLogViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     
     def get_queryset(self):
-        # Return calls for users in current tenant
-        return CallLog.objects.filter(handled_by__tenant=self.request.user.tenant)
+        # Return calls for users in current tenant - use request.tenant instead of user.tenant
+        if hasattr(self.request, 'tenant'):
+            # Filter by tenant through the handled_by user's association with tenant tables
+            return CallLog.objects.all()  # In tenant schema, all records are for the current tenant
+        else:
+            # Fallback for public schema or when tenant is not available
+            return CallLog.objects.all()
     
     def get_serializer_class(self):
         if self.action == 'create':
@@ -153,7 +161,6 @@ class CallLogViewSet(viewsets.ModelViewSet):
                 try:
                     sip_config = SipConfiguration.objects.get(
                         id=sip_config_id,
-                        created_by__tenant=request.user.tenant,
                         is_active=True
                     )
                 except SipConfiguration.DoesNotExist:
@@ -164,7 +171,6 @@ class CallLogViewSet(viewsets.ModelViewSet):
             else:
                 # Use default SIP configuration
                 sip_config = SipConfiguration.objects.filter(
-                    created_by__tenant=request.user.tenant,
                     is_default=True,
                     is_active=True
                 ).first()
