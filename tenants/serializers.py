@@ -217,7 +217,7 @@ class TenantDashboardDataSerializer(serializers.Serializer):
         """Get tenant statistics"""
         from django.contrib.auth import get_user_model
         from tickets.models import Ticket
-        from crm.models import Customer
+        from crm.models import Client
         
         User = get_user_model()
         
@@ -234,13 +234,13 @@ class TenantDashboardDataSerializer(serializers.Serializer):
                 total_tickets = 0
                 open_tickets = 0
             
-            # Count customers if CRM app exists
+            # Count clients if CRM app exists
             try:
-                total_customers = Customer.objects.count()
-                active_customers = Customer.objects.filter(is_active=True).count()
+                total_clients = Client.objects.count()
+                active_clients = Client.objects.filter(is_active=True).count()
             except:
-                total_customers = 0
-                active_customers = 0
+                total_clients = 0
+                active_clients = 0
             
             return {
                 'users': {
@@ -251,9 +251,9 @@ class TenantDashboardDataSerializer(serializers.Serializer):
                     'total': total_tickets,
                     'open': open_tickets
                 },
-                'customers': {
-                    'total': total_customers,
-                    'active': active_customers
+                'clients': {
+                    'total': total_clients,
+                    'active': active_clients
                 }
             }
         except Exception as e:
