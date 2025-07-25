@@ -2,12 +2,108 @@ from rest_framework import viewsets, permissions, filters, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
-from django.db.models import Q
-from .models import Ticket, Tag, TicketComment
+from django.db.models import Q, F, Max
+from django.db import transaction
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse
+from drf_spectacular.openapi import OpenApiTypes
+from .models import Ticket, Tag, TicketComment, TicketColumn
 from .serializers import (
     TicketSerializer, TicketListSerializer, TagSerializer, 
-    TicketCommentSerializer
+    TicketCommentSerializer, TicketColumnSerializer, 
+    TicketColumnCreateSerializer, TicketColumnUpdateSerializer,
+    KanbanBoardSerializer
 )
+
+
+class TicketColumnViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing ticket columns (Kanban board columns).
+    """
+    queryset = TicketColumn.objects.all()
+    serializer_class = TicketColumnSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [filters.OrderingFilter]
+    ordering = ['position', 'created_at']
+
+    def get_serializer_class(self):
+        """Use different serializers for different actions."""
+        if self.action == 'create':
+            return TicketColumnCreateSerializer
+        elif self.action in ['update', 'partial_update']:
+            return TicketColumnUpdateSerializer
+        return TicketColumnSerializer
+
+    def get_permissions(self):
+        """
+        Only staff can create, update, or delete columns.
+        Anyone authenticated can view columns.
+        """
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            permission_classes = [permissions.IsAdminUser]
+        else:
+            permission_classes = [permissions.IsAuthenticated]
+        
+        return [permission() for permission in permission_classes]
+
+    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAdminUser])
+    def reorder(self, request, pk=None):
+        """Reorder columns."""
+        column = self.get_object()
+        new_position = request.data.get('position')
+        
+        if new_position is None:
+            return Response(
+                {'error': 'Position is required'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            new_position = int(new_position)
+        except ValueError:
+            return Response(
+                {'error': 'Position must be a number'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        with transaction.atomic():
+            # Update positions of other columns
+            if new_position > column.position:
+                # Moving right - decrease position of columns in between
+                TicketColumn.objects.filter(
+                    position__gt=column.position,
+                    position__lte=new_position
+                ).update(position=F('position') - 1)
+            else:
+                # Moving left - increase position of columns in between
+                TicketColumn.objects.filter(
+                    position__gte=new_position,
+                    position__lt=column.position
+                ).update(position=F('position') + 1)
+            
+            # Update the column's position
+            column.position = new_position
+            column.save()
+        
+        return Response({'message': 'Column reordered successfully'})
+
+    @extend_schema(
+        operation_id='kanban_board',
+        summary='Get Kanban Board',
+        description='Get all columns with their tickets organized for Kanban board display.',
+        responses={
+            200: KanbanBoardSerializer,
+        },
+        tags=['Kanban Board']
+    )
+    @action(detail=False, methods=['get'])
+    def kanban_board(self, request):
+        """Get all columns with their tickets for Kanban board view."""
+        columns = self.get_queryset()
+        board_data = {
+            'columns': columns
+        }
+        serializer = KanbanBoardSerializer(board_data, context={'request': request})
+        return Response(serializer.data)
 
 
 class TicketPermission(permissions.BasePermission):
@@ -56,7 +152,7 @@ class TicketViewSet(viewsets.ModelViewSet):
     serializer_class = TicketSerializer
     permission_classes = [TicketPermission]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['status', 'priority', 'assigned_to', 'created_by', 'tags']
+    filterset_fields = ['status', 'priority', 'assigned_to', 'created_by', 'tags', 'column']
     search_fields = ['title', 'description']
     ordering_fields = ['created_at', 'updated_at', 'priority', 'status']
     ordering = ['-created_at']
@@ -175,6 +271,126 @@ class TicketViewSet(viewsets.ModelViewSet):
             ticket.save()
             serializer = self.get_serializer(ticket)
             return Response(serializer.data)
+
+    @extend_schema(
+        operation_id='move_ticket_to_column',
+        summary='Move Ticket to Column',
+        description='Move a ticket to a different column in the Kanban board and optionally set its position.',
+        request={
+            'type': 'object',
+            'properties': {
+                'column_id': {'type': 'integer'},
+                'position_in_column': {'type': 'integer', 'nullable': True}
+            },
+            'required': ['column_id']
+        },
+        responses={
+            200: TicketSerializer,
+            400: OpenApiResponse(description='Invalid column or missing column_id'),
+        },
+        tags=['Kanban Board']
+    )
+    @action(detail=True, methods=['patch'], permission_classes=[permissions.IsAuthenticated])
+    def move_to_column(self, request, pk=None):
+        """Move a ticket to a different column."""
+        ticket = self.get_object()
+        column_id = request.data.get('column_id')
+        new_position = request.data.get('position_in_column')
+        
+        if not column_id:
+            return Response(
+                {'error': 'column_id is required'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            new_column = TicketColumn.objects.get(id=column_id)
+        except TicketColumn.DoesNotExist:
+            return Response(
+                {'error': 'Column not found'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        with transaction.atomic():
+            old_column = ticket.column
+            
+            # Remove ticket from old column and adjust positions
+            if old_column:
+                Ticket.objects.filter(
+                    column=old_column,
+                    position_in_column__gt=ticket.position_in_column
+                ).update(position_in_column=F('position_in_column') - 1)
+            
+            # Add ticket to new column
+            if new_position is not None:
+                # Insert at specific position
+                Ticket.objects.filter(
+                    column=new_column,
+                    position_in_column__gte=new_position
+                ).update(position_in_column=F('position_in_column') + 1)
+                ticket.position_in_column = new_position
+            else:
+                # Add to end of column
+                max_position = Ticket.objects.filter(column=new_column).aggregate(
+                    max_pos=Max('position_in_column')
+                )['max_pos'] or 0
+                ticket.position_in_column = max_position + 1
+            
+            ticket.column = new_column
+            ticket.save()
+        
+        serializer = self.get_serializer(ticket)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['patch'], permission_classes=[permissions.IsAuthenticated])
+    def reorder_in_column(self, request, pk=None):
+        """Reorder a ticket within its current column."""
+        ticket = self.get_object()
+        new_position = request.data.get('position_in_column')
+        
+        if new_position is None:
+            return Response(
+                {'error': 'position_in_column is required'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            new_position = int(new_position)
+        except ValueError:
+            return Response(
+                {'error': 'position_in_column must be a number'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if not ticket.column:
+            return Response(
+                {'error': 'Ticket is not assigned to any column'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        with transaction.atomic():
+            # Update positions of other tickets in the same column
+            if new_position > ticket.position_in_column:
+                # Moving down - decrease position of tickets in between
+                Ticket.objects.filter(
+                    column=ticket.column,
+                    position_in_column__gt=ticket.position_in_column,
+                    position_in_column__lte=new_position
+                ).update(position_in_column=F('position_in_column') - 1)
+            else:
+                # Moving up - increase position of tickets in between
+                Ticket.objects.filter(
+                    column=ticket.column,
+                    position_in_column__gte=new_position,
+                    position_in_column__lt=ticket.position_in_column
+                ).update(position_in_column=F('position_in_column') + 1)
+            
+            # Update the ticket's position
+            ticket.position_in_column = new_position
+            ticket.save()
+        
+        serializer = self.get_serializer(ticket)
+        return Response(serializer.data)
 
 
 class TagViewSet(viewsets.ModelViewSet):
