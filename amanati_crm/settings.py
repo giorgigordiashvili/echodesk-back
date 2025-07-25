@@ -191,7 +191,12 @@ SPECTACULAR_SETTINGS = {
     'SERVE_INCLUDE_SCHEMA': False,
 }
 
-# CORS settings
+# CORS settings - Allow wildcard subdomains for multi-tenant frontend
+CORS_ALLOW_ALL_ORIGINS = True  # Temporarily allow all origins for development and testing
+
+# If you want to be more restrictive in production, use this instead:
+# CORS_ALLOW_ALL_ORIGINS = DEBUG  # Allow all in development, restrict in production
+
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
@@ -201,28 +206,46 @@ CORS_ALLOWED_ORIGINS = [
     f"http://{API_DOMAIN}",
 ]
 
-# Allow CORS for all subdomains in production
-if not DEBUG:
-    CORS_ALLOW_ALL_ORIGINS = False
-    # Escape dots for regex pattern
-    escaped_main_domain = MAIN_DOMAIN.replace('.', r'\.')
-    escaped_api_domain = API_DOMAIN.replace('.', r'\.')
-    CORS_ALLOWED_ORIGIN_REGEXES = [
-        rf"https://.*\.{escaped_main_domain}",  # Frontend subdomains
-        rf"http://.*\.{escaped_main_domain}",   # Frontend subdomains (dev)
-        rf"https://.*\.{escaped_api_domain}",   # API subdomains
-        rf"http://.*\.{escaped_api_domain}",    # API subdomains (dev)
-    ]
-else:
-    # For local development
-    CORS_ALLOWED_ORIGINS.extend([
-        "http://demo.localhost:8000",
-        "http://acme.localhost:8000",
-        "http://localhost:8000",
-        "http://localhost:3000",
-    ])
+# Allow all subdomains with regex patterns
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    rf"https://.*\.{MAIN_DOMAIN.replace('.', r'\.')}",  # *.echodesk.ge
+    rf"http://.*\.{MAIN_DOMAIN.replace('.', r'\.')}",   # *.echodesk.ge (dev)
+    rf"https://.*\.{API_DOMAIN.replace('.', r'\.')}",   # *.api.echodesk.ge
+    rf"http://.*\.{API_DOMAIN.replace('.', r'\.')}",    # *.api.echodesk.ge (dev)
+    r"https://.*\.ondigitalocean\.app",                  # DigitalOcean app domains
+    r"http://.*\.localhost:3000",                        # Local development subdomains
+]
 
+# CORS configuration for multi-tenant setup
 CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_ALL_HEADERS = True
+CORS_ALLOWED_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+    'x-tenant-subdomain',
+    'x-tenant-domain',
+    'cache-control',
+]
+
+# Allow all HTTP methods
+CORS_ALLOWED_METHODS = [
+    'DELETE',
+    'GET',
+    'OPTIONS',
+    'PATCH',
+    'POST',
+    'PUT',
+]
+
+# Preflight cache time
+CORS_PREFLIGHT_MAX_AGE = 86400
 
 # Tenant settings
 PUBLIC_SCHEMA_URLCONF = 'amanati_crm.urls_public'
