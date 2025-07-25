@@ -364,8 +364,7 @@ class ClientViewSet(viewsets.ModelViewSet):
         """Get call history for a specific client"""
         client = self.get_object()
         calls = CallLog.objects.filter(
-            client=client,
-            handled_by__tenant=request.user.tenant
+            client=client
         ).order_by('-started_at')
         
         serializer = CallLogSerializer(calls, many=True)
