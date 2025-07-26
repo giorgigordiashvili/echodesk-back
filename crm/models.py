@@ -72,6 +72,7 @@ class CallLog(models.Model):
     """Enhanced call log model for tracking phone calls with SIP integration"""
     
     STATUS_CHOICES = [
+        ('initiated', 'Initiated'),
         ('ringing', 'Ringing'),
         ('answered', 'Answered'),
         ('missed', 'Missed'), 
@@ -81,6 +82,8 @@ class CallLog(models.Model):
         ('cancelled', 'Cancelled'),
         ('transferred', 'Transferred'),
         ('ended', 'Ended'),
+        ('recording', 'Recording'),
+        ('on_hold', 'On Hold'),
     ]
     
     DIRECTION_CHOICES = [
@@ -172,3 +175,85 @@ class CallLog(models.Model):
             except:
                 pass
         super().save(*args, **kwargs)
+
+
+class CallEvent(models.Model):
+    """Track detailed events during a call"""
+    
+    EVENT_TYPES = [
+        ('initiated', 'Call Initiated'),
+        ('ringing', 'Ringing Started'),
+        ('answered', 'Call Answered'),
+        ('hold', 'Call On Hold'),
+        ('unhold', 'Call Resumed'),
+        ('transfer_initiated', 'Transfer Initiated'),
+        ('transfer_completed', 'Transfer Completed'),
+        ('recording_started', 'Recording Started'),
+        ('recording_stopped', 'Recording Stopped'),
+        ('muted', 'Call Muted'),
+        ('unmuted', 'Call Unmuted'),
+        ('dtmf', 'DTMF Pressed'),
+        ('quality_change', 'Call Quality Changed'),
+        ('ended', 'Call Ended'),
+        ('failed', 'Call Failed'),
+        ('error', 'Error Occurred'),
+    ]
+    
+    call_log = models.ForeignKey(CallLog, on_delete=models.CASCADE, related_name='events')
+    event_type = models.CharField(max_length=20, choices=EVENT_TYPES)
+    timestamp = models.DateTimeField(auto_now_add=True)
+    metadata = models.JSONField(blank=True, default=dict, help_text="Additional event data")
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True,
+        help_text="User who triggered this event"
+    )
+    
+    class Meta:
+        ordering = ['timestamp']
+        indexes = [
+            models.Index(fields=['call_log', 'event_type']),
+            models.Index(fields=['timestamp']),
+        ]
+    
+    def __str__(self):
+        return f"{self.call_log.call_id} - {self.event_type} at {self.timestamp}"
+
+
+class CallRecording(models.Model):
+    """Track call recordings separately for better management"""
+    
+    RECORDING_STATUS = [
+        ('pending', 'Pending'),
+        ('recording', 'Recording'),
+        ('processing', 'Processing'),
+        ('completed', 'Completed'),
+        ('failed', 'Failed'),
+        ('deleted', 'Deleted'),
+    ]
+    
+    call_log = models.OneToOneField(CallLog, on_delete=models.CASCADE, related_name='recording')
+    recording_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    file_path = models.CharField(max_length=500, blank=True, help_text="Local file path")
+    file_url = models.URLField(blank=True, help_text="External URL for recording")
+    file_size = models.BigIntegerField(null=True, blank=True, help_text="File size in bytes")
+    duration = models.DurationField(null=True, blank=True, help_text="Recording duration")
+    format = models.CharField(max_length=10, default='wav', help_text="Audio format")
+    status = models.CharField(max_length=15, choices=RECORDING_STATUS, default='pending')
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    
+    # Transcription
+    transcript = models.TextField(blank=True, help_text="Call transcript")
+    transcript_confidence = models.FloatField(null=True, blank=True, help_text="Transcript confidence (0-1)")
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"Recording for {self.call_log.call_id} ({self.status})"
