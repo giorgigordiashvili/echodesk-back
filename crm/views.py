@@ -202,6 +202,51 @@ class CallLogViewSet(viewsets.ModelViewSet):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
     @extend_schema(
+        summary="Log an incoming call",
+        description="Log an incoming call when it starts ringing",
+        request=CallLogCreateSerializer,
+        responses={
+            201: CallLogSerializer,
+            400: "Invalid call data"
+        }
+    )
+    @action(detail=False, methods=['post'])
+    def log_incoming_call(self, request):
+        """Log an incoming call"""
+        # Extract data from request
+        caller_number = request.data.get('caller_number', '')
+        recipient_number = request.data.get('recipient_number', '')
+        sip_call_id = request.data.get('sip_call_id', '')
+        
+        # Get default SIP configuration
+        sip_config = SipConfiguration.objects.filter(
+            is_default=True,
+            is_active=True
+        ).first()
+        
+        if not sip_config:
+            return Response(
+                {'error': 'No default SIP configuration found'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Create call log for incoming call
+        call_log = CallLog.objects.create(
+            caller_number=caller_number,
+            recipient_number=recipient_number,
+            direction='inbound',
+            call_type='voice',
+            status='ringing',
+            handled_by=request.user,
+            sip_configuration=sip_config,
+            sip_call_id=sip_call_id,
+            started_at=timezone.now()
+        )
+        
+        response_serializer = CallLogSerializer(call_log)
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+    
+    @extend_schema(
         summary="Update call status",
         description="Update the status of an ongoing call",
         request=CallStatusUpdateSerializer,
