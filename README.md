@@ -1,6 +1,8 @@
-# EchoDesk Multi-Tenant CRM Backend
+# EchoDesk Backend
 
-A Django-based multi-tenant CRM system where each tenant operates on its own subdomain with isolated data using PostgreSQL schemas.
+Django-based backend for the EchoDesk CRM system with multi-tenant architecture.
+
+Updated: July 31, 2025 - Enhanced user management system with comprehensive role-based permissions.
 
 ## 🏗️ Architecture
 
