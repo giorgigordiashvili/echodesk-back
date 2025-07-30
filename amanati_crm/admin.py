@@ -4,7 +4,14 @@ from django.urls import path
 from django.shortcuts import render
 from django.db.models import Count
 from django.utils.html import format_html
-from users.models import User
+
+try:
+    from users.models import User
+    HAS_USERS_APP = True
+except ImportError:
+    # Users app not available in public schema
+    HAS_USERS_APP = False
+    User = None
 
 
 class AmanatiCRMAdminSite(AdminSite):
@@ -27,24 +34,54 @@ class AmanatiCRMAdminSite(AdminSite):
         context = {
             'title': 'Dashboard',
             'user_stats': self.get_user_statistics(),
-            'recent_users': User.objects.order_by('-date_joined')[:10],
+            'recent_users': self.get_recent_users(),
         }
         return render(request, 'admin/dashboard.html', context)
     
     def get_user_statistics(self):
         """Get user statistics for dashboard"""
-        total_users = User.objects.count()
-        active_users = User.objects.filter(is_active=True).count()
-        staff_users = User.objects.filter(is_staff=True).count()
-        inactive_users = total_users - active_users
+        if not HAS_USERS_APP or not User:
+            return {
+                'total': 0,
+                'active': 0,
+                'inactive': 0,
+                'staff': 0,
+                'active_percentage': 0,
+            }
         
-        return {
-            'total': total_users,
-            'active': active_users,
-            'inactive': inactive_users,
-            'staff': staff_users,
-            'active_percentage': round((active_users / total_users * 100) if total_users > 0 else 0, 1),
-        }
+        try:
+            total_users = User.objects.count()
+            active_users = User.objects.filter(is_active=True).count()
+            staff_users = User.objects.filter(is_staff=True).count()
+            inactive_users = total_users - active_users
+            
+            return {
+                'total': total_users,
+                'active': active_users,
+                'inactive': inactive_users,
+                'staff': staff_users,
+                'active_percentage': round((active_users / total_users * 100) if total_users > 0 else 0, 1),
+            }
+        except Exception:
+            # Handle case where users table doesn't exist in current schema
+            return {
+                'total': 0,
+                'active': 0,
+                'inactive': 0,
+                'staff': 0,
+                'active_percentage': 0,
+            }
+    
+    def get_recent_users(self):
+        """Get recent users for dashboard"""
+        if not HAS_USERS_APP or not User:
+            return []
+        
+        try:
+            return User.objects.order_by('-date_joined')[:10]
+        except Exception:
+            # Handle case where users table doesn't exist in current schema
+            return []
     
     def index(self, request, extra_context=None):
         """Override admin index to show custom dashboard"""
