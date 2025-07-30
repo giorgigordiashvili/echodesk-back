@@ -46,7 +46,8 @@ SHARED_APPS = [
     
     # Shared apps
     'tenants',  # This must be in SHARED_APPS
-    'crm',     # Move CRM to shared apps so it's available in public schema too
+    'users',    # Add users to shared apps so public schema gets the table
+    'crm',      # Move CRM to shared apps so it's available in public schema too
 ]
 
 # Tenant-specific applications
@@ -63,8 +64,8 @@ TENANT_APPS = [
     'django_filters',
     
     # Tenant-specific apps
-    'users',
-    'crm',     # Keep in tenant apps too for backwards compatibility
+    'users',    # Only available in tenant schemas
+    'crm',      # Keep in tenant apps too for backwards compatibility
     'tickets',
 ]
 
@@ -126,6 +127,7 @@ DATABASE_ROUTERS = (
 )
 
 # Custom user model
+# User model
 AUTH_USER_MODEL = 'users.User'
 
 # Password validation
