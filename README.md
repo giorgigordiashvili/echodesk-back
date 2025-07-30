@@ -2,7 +2,7 @@
 
 Django-based backend for the EchoDesk CRM system with multi-tenant architecture.
 
-Updated: July 31, 2025 - Enhanced user management system with comprehensive role-based permissions.
+Updated: July 31, 2025 - Enhanced user management system with comprehensive role-based permissions and team management functionality.
 
 ## 🏗️ Architecture
 
