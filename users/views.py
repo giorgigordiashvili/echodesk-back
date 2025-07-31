@@ -31,16 +31,9 @@ class DepartmentViewSet(viewsets.ModelViewSet):
 
 class PermissionViewSet(viewsets.ReadOnlyModelViewSet):
     """ViewSet for viewing Django permissions"""
-    queryset = Permission.objects.all()
+    queryset = Permission.objects.all().order_by('content_type__app_label', 'content_type__model', 'codename')
     serializer_class = PermissionSerializer
     permission_classes = [permissions.IsAuthenticated]
-    
-    def get_queryset(self):
-        # Only show permissions related to the users app and some common ones
-        content_types = ContentType.objects.filter(
-            app_label__in=['users', 'auth', 'tickets', 'crm']
-        )
-        return Permission.objects.filter(content_type__in=content_types).order_by('name')
 
 
 class GroupViewSet(viewsets.ModelViewSet):
