@@ -1,9 +1,10 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import UserViewSet, tenant_homepage
+from .views import UserViewSet, GroupViewSet, tenant_homepage
 
 router = DefaultRouter()
 router.register(r'users', UserViewSet)
+router.register(r'groups', GroupViewSet)
 
 urlpatterns = [
     path('', tenant_homepage, name='tenant_homepage'),

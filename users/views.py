@@ -2,6 +2,7 @@ from rest_framework import viewsets, permissions, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.contrib.auth import authenticate, get_user_model
+from django.contrib.auth.models import Group
 from django.shortcuts import redirect
 from django.db import transaction
 from django.utils import timezone
@@ -14,7 +15,8 @@ import secrets
 from .models import User
 from .serializers import (
     UserSerializer, UserCreateSerializer, UserUpdateSerializer,
-    BulkUserActionSerializer, PasswordChangeSerializer
+    BulkUserActionSerializer, PasswordChangeSerializer,
+    GroupSerializer, GroupCreateSerializer, GroupUpdateSerializer
 )
 
 User = get_user_model()
@@ -364,3 +366,114 @@ class UserViewSet(viewsets.ModelViewSet):
             return Response({'message': 'Password changed successfully'})
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class GroupViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing Django Groups"""
+    queryset = Group.objects.all()
+    serializer_class = GroupSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['name']
+    ordering_fields = ['name', 'id']
+    ordering = ['name']
+
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return GroupCreateSerializer
+        elif self.action in ['update', 'partial_update']:
+            return GroupUpdateSerializer
+        return GroupSerializer
+
+    def get_permissions(self):
+        """Only admins can manage groups"""
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            return [permissions.IsAuthenticated(), AdminPermission()]
+        return [permissions.IsAuthenticated()]
+
+    @extend_schema(
+        operation_id='groups_add_users',
+        summary='Add Users to Group',
+        description='Add multiple users to a group',
+    )
+    @action(detail=True, methods=['post'])
+    def add_users(self, request, pk=None):
+        """Add users to group"""
+        if not request.user.is_admin:
+            return Response(
+                {'error': 'Only administrators can manage group membership'}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        group = self.get_object()
+        user_ids = request.data.get('user_ids', [])
+        
+        if not user_ids:
+            return Response({'error': 'user_ids is required'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        users = User.objects.filter(id__in=user_ids)
+        group.user_set.add(*users)
+        
+        return Response({
+            'message': f'Added {users.count()} users to group {group.name}',
+            'group': GroupSerializer(group).data
+        })
+
+    @extend_schema(
+        operation_id='groups_remove_users',
+        summary='Remove Users from Group',
+        description='Remove multiple users from a group',
+    )
+    @action(detail=True, methods=['post'])
+    def remove_users(self, request, pk=None):
+        """Remove users from group"""
+        if not request.user.is_admin:
+            return Response(
+                {'error': 'Only administrators can manage group membership'}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        group = self.get_object()
+        user_ids = request.data.get('user_ids', [])
+        
+        if not user_ids:
+            return Response({'error': 'user_ids is required'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        users = User.objects.filter(id__in=user_ids)
+        group.user_set.remove(*users)
+        
+        return Response({
+            'message': f'Removed {users.count()} users from group {group.name}',
+            'group': GroupSerializer(group).data
+        })
+
+    @extend_schema(
+        operation_id='groups_statistics',
+        summary='Get Group Statistics',
+        description='Get statistics about groups',
+    )
+    @action(detail=False, methods=['get'])
+    def statistics(self, request):
+        """Get group statistics"""
+        if not request.user.is_manager:
+            return Response(
+                {'error': 'You do not have permission to view statistics'}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        queryset = self.get_queryset()
+        
+        stats = {
+            'total_groups': queryset.count(),
+            'groups_with_users': queryset.filter(user__isnull=False).distinct().count(),
+            'empty_groups': queryset.filter(user__isnull=True).count(),
+            'total_group_memberships': User.objects.filter(groups__isnull=False).count(),
+        }
+        
+        return Response(stats)
+
+
+class AdminPermission(permissions.BasePermission):
+    """Permission that allows only admin users"""
+    def has_permission(self, request, view):
+        return request.user and request.user.is_authenticated and request.user.is_admin

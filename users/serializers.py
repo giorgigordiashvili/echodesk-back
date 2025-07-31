@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth import authenticate, get_user_model
+from django.contrib.auth.models import Group
 from django.contrib.auth.password_validation import validate_password
 from django.utils import timezone
 
@@ -134,4 +135,44 @@ class PasswordChangeSerializer(serializers.Serializer):
         user = self.context['request'].user
         if not user.check_password(value):
             raise serializers.ValidationError("Invalid old password")
+        return value
+
+
+class GroupSerializer(serializers.ModelSerializer):
+    """Serializer for Django Group model"""
+    user_count = serializers.SerializerMethodField()
+    users = serializers.StringRelatedField(source='user_set', many=True, read_only=True)
+    
+    class Meta:
+        model = Group
+        fields = ['id', 'name', 'user_count', 'users']
+    
+    def get_user_count(self, obj):
+        return obj.user_set.count()
+
+
+class GroupCreateSerializer(serializers.ModelSerializer):
+    """Serializer for creating groups"""
+    class Meta:
+        model = Group
+        fields = ['name']
+    
+    def validate_name(self, value):
+        if Group.objects.filter(name=value).exists():
+            raise serializers.ValidationError("A group with this name already exists.")
+        return value
+
+
+class GroupUpdateSerializer(serializers.ModelSerializer):
+    """Serializer for updating groups"""
+    class Meta:
+        model = Group
+        fields = ['name']
+    
+    def validate_name(self, value):
+        # Allow the same name if it's the current object
+        if self.instance and self.instance.name == value:
+            return value
+        if Group.objects.filter(name=value).exists():
+            raise serializers.ValidationError("A group with this name already exists.")
         return value
