@@ -244,3 +244,44 @@ class User(AbstractBaseUser, PermissionsMixin):
             group_permissions.update(group.get_permissions_list())
         
         return list(group_permissions)
+
+    def get_user_permissions_list(self):
+        """Get user's direct individual permissions (not from groups)"""
+        permissions = []
+        permission_fields = [
+            ('can_view_all_tickets', 'view_all_tickets'),
+            ('can_manage_users', 'manage_users'),
+            ('can_make_calls', 'make_calls'),
+            ('can_manage_groups', 'manage_groups'),
+            ('can_manage_settings', 'manage_settings'),
+            ('can_create_tickets', 'create_tickets'),
+            ('can_edit_own_tickets', 'edit_own_tickets'),
+            ('can_edit_all_tickets', 'edit_all_tickets'),
+            ('can_delete_tickets', 'delete_tickets'),
+            ('can_assign_tickets', 'assign_tickets'),
+            ('can_view_reports', 'view_reports'),
+            ('can_export_data', 'export_data'),
+            ('can_manage_tags', 'manage_tags'),
+            ('can_manage_columns', 'manage_columns'),
+        ]
+        
+        for field_name, permission_name in permission_fields:
+            if getattr(self, field_name, False):
+                permissions.append(permission_name)
+        
+        return permissions
+
+    def get_group_permissions_list(self):
+        """Alias for get_group_permissions for consistency"""
+        return self.get_group_permissions()
+
+    def get_all_permissions_dict(self):
+        """Get all permissions as a dictionary with categories"""
+        individual_permissions = self.get_user_permissions_list()
+        group_permissions = self.get_group_permissions()
+        
+        return {
+            'individual': individual_permissions,
+            'group': group_permissions,
+            'all': list(set(individual_permissions + group_permissions))
+        }
