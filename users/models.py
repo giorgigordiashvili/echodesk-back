@@ -4,6 +4,21 @@ from django.utils import timezone
 from django.contrib.contenttypes.models import ContentType
 
 
+class Department(models.Model):
+    """Department model for organizing users"""
+    name = models.CharField(max_length=100, unique=True)
+    description = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['name']
+    
+    def __str__(self):
+        return self.name
+
+
 class TenantGroup(models.Model):
     """Custom group model with permissions for tenant-specific access control"""
     name = models.CharField(max_length=150, unique=True)
@@ -106,6 +121,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     primary_group = models.ForeignKey('TenantGroup', on_delete=models.SET_NULL, null=True, blank=True, related_name='primary_members', help_text='Primary group for this user')
     phone_number = models.CharField(max_length=20, blank=True)
     job_title = models.CharField(max_length=100, blank=True)
+    department = models.ForeignKey('Department', on_delete=models.SET_NULL, null=True, blank=True, related_name='employees', help_text='Department this user belongs to')
     
     # Permission flags
     is_active = models.BooleanField(default=True)

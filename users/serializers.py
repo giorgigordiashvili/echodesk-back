@@ -4,6 +4,7 @@ from django.contrib.auth.models import Group, Permission
 from django.contrib.auth.password_validation import validate_password
 from django.contrib.contenttypes.models import ContentType
 from django.utils import timezone
+from .models import Department, TenantGroup
 
 User = get_user_model()
 
@@ -13,6 +14,19 @@ class PermissionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Permission
         fields = ['id', 'name', 'codename', 'content_type']
+
+
+class DepartmentSerializer(serializers.ModelSerializer):
+    """Serializer for Department"""
+    employee_count = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Department
+        fields = ['id', 'name', 'description', 'is_active', 'employee_count', 'created_at', 'updated_at']
+        read_only_fields = ['created_at', 'updated_at']
+    
+    def get_employee_count(self, obj):
+        return obj.employees.count()
 
 
 class GroupSerializer(serializers.ModelSerializer):
@@ -87,6 +101,8 @@ class UserSerializer(serializers.ModelSerializer):
     group_permissions = serializers.SerializerMethodField()
     all_permissions = serializers.SerializerMethodField()
     groups = GroupSerializer(many=True, read_only=True)
+    department = DepartmentSerializer(read_only=True)
+    department_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
     group_ids = serializers.ListField(
         child=serializers.IntegerField(),
         write_only=True,
@@ -104,7 +120,7 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = [
             'id', 'email', 'first_name', 'last_name', 'full_name',
-            'role', 'status', 'phone_number', 'job_title',
+            'role', 'status', 'phone_number', 'job_title', 'department', 'department_id',
             'is_active', 'is_staff', 'date_joined', 'last_login',
             'permissions', 'group_permissions', 'all_permissions',
             'groups', 'group_ids', 'user_permission_ids'
@@ -126,9 +142,22 @@ class UserSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         group_ids = validated_data.pop('group_ids', None)
         user_permission_ids = validated_data.pop('user_permission_ids', None)
+        department_id = validated_data.pop('department_id', None)
         
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
+        
+        # Handle department assignment
+        if department_id is not None:
+            if department_id:
+                try:
+                    department = Department.objects.get(id=department_id)
+                    instance.department = department
+                except Department.DoesNotExist:
+                    raise serializers.ValidationError({'department_id': 'Department not found'})
+            else:
+                instance.department = None
+        
         instance.save()
         
         if group_ids is not None:
@@ -146,6 +175,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
     """Serializer for creating users"""
     password = serializers.CharField(write_only=True, validators=[validate_password])
     password_confirm = serializers.CharField(write_only=True)
+    department_id = serializers.IntegerField(required=False, allow_null=True)
     group_ids = serializers.ListField(
         child=serializers.IntegerField(),
         required=False,
@@ -161,7 +191,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
         model = User
         fields = [
             'email', 'first_name', 'last_name', 'password', 'password_confirm',
-            'role', 'status', 'phone_number', 'job_title',
+            'role', 'status', 'phone_number', 'job_title', 'department_id',
             'group_ids', 'user_permission_ids'
         ]
     

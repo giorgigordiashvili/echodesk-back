@@ -6,13 +6,27 @@ from django.contrib.auth.models import Group, Permission
 from django.contrib.contenttypes.models import ContentType
 from django.db import transaction
 from django.utils import timezone
+from .models import Department, TenantGroup
 from .serializers import (
     UserSerializer, UserCreateSerializer, UserUpdateSerializer,
     GroupSerializer, GroupCreateSerializer, PermissionSerializer,
-    BulkUserActionSerializer, PasswordChangeSerializer
+    BulkUserActionSerializer, PasswordChangeSerializer, DepartmentSerializer
 )
 
 User = get_user_model()
+
+
+class DepartmentViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing departments"""
+    queryset = Department.objects.all()
+    serializer_class = DepartmentSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_queryset(self):
+        # Only show active departments by default, unless explicitly requested
+        if self.request.query_params.get('include_inactive') == 'true':
+            return Department.objects.all()
+        return Department.objects.filter(is_active=True)
 
 
 class PermissionViewSet(viewsets.ReadOnlyModelViewSet):
