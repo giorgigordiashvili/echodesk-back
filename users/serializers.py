@@ -1,144 +1,168 @@
 from rest_framework import serializers
 from django.contrib.auth import authenticate, get_user_model
-from django.contrib.auth.models import Group
+from django.contrib.auth.models import Group, Permission
 from django.contrib.auth.password_validation import validate_password
+from django.contrib.contenttypes.models import ContentType
 from django.utils import timezone
-from .models import TenantGroup
 
 User = get_user_model()
 
 
-class TenantGroupSerializer(serializers.ModelSerializer):
-    """Serializer for TenantGroup with all permissions"""
-    members_count = serializers.SerializerMethodField()
-    permissions_list = serializers.ReadOnlyField(source='get_permissions_list')
+class PermissionSerializer(serializers.ModelSerializer):
+    """Serializer for Django permissions"""
+    class Meta:
+        model = Permission
+        fields = ['id', 'name', 'codename', 'content_type']
+
+
+class GroupSerializer(serializers.ModelSerializer):
+    """Serializer for Django Groups with permissions"""
+    permissions = PermissionSerializer(many=True, read_only=True)
+    permission_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        write_only=True,
+        required=False,
+        help_text="List of permission IDs to assign to this group"
+    )
+    user_count = serializers.SerializerMethodField()
     
     class Meta:
-        model = TenantGroup
-        fields = [
-            'id', 'name', 'description', 'is_active', 'created_at', 'updated_at',
-            'members_count', 'permissions_list',
-            # Core permissions
-            'can_view_all_tickets', 'can_manage_users', 'can_make_calls', 
-            'can_manage_groups', 'can_manage_settings',
-            # Ticket permissions
-            'can_create_tickets', 'can_edit_own_tickets', 'can_edit_all_tickets',
-            'can_delete_tickets', 'can_assign_tickets',
-            # Additional permissions
-            'can_view_reports', 'can_export_data', 'can_manage_tags', 'can_manage_columns'
-        ]
-        read_only_fields = ['id', 'created_at', 'updated_at', 'members_count', 'permissions_list']
+        model = Group
+        fields = ['id', 'name', 'permissions', 'permission_ids', 'user_count']
     
-    def get_members_count(self, obj):
-        return obj.members.count()
-
-
-class TenantGroupCreateSerializer(serializers.ModelSerializer):
-    """Serializer for creating new TenantGroups"""
+    def get_user_count(self, obj):
+        return obj.user_set.count()
     
-    class Meta:
-        model = TenantGroup
-        fields = [
-            'name', 'description',
-            # Core permissions
-            'can_view_all_tickets', 'can_manage_users', 'can_make_calls', 
-            'can_manage_groups', 'can_manage_settings',
-            # Ticket permissions
-            'can_create_tickets', 'can_edit_own_tickets', 'can_edit_all_tickets',
-            'can_delete_tickets', 'can_assign_tickets',
-            # Additional permissions
-            'can_view_reports', 'can_export_data', 'can_manage_tags', 'can_manage_columns'
-        ]
+    def create(self, validated_data):
+        permission_ids = validated_data.pop('permission_ids', [])
+        group = Group.objects.create(**validated_data)
+        
+        if permission_ids:
+            permissions = Permission.objects.filter(id__in=permission_ids)
+            group.permissions.set(permissions)
+        
+        return group
+    
+    def update(self, instance, validated_data):
+        permission_ids = validated_data.pop('permission_ids', None)
+        
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        
+        if permission_ids is not None:
+            permissions = Permission.objects.filter(id__in=permission_ids)
+            instance.permissions.set(permissions)
+        
+        return instance
 
 
-class TenantGroupUpdateSerializer(serializers.ModelSerializer):
-    """Serializer for updating TenantGroups"""
+class GroupCreateSerializer(serializers.ModelSerializer):
+    """Simplified serializer for creating groups"""
+    permission_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        required=False,
+        help_text="List of permission IDs to assign to this group"
+    )
     
     class Meta:
-        model = TenantGroup
-        fields = [
-            'name', 'description', 'is_active',
-            # Core permissions
-            'can_view_all_tickets', 'can_manage_users', 'can_make_calls', 
-            'can_manage_groups', 'can_manage_settings',
-            # Ticket permissions
-            'can_create_tickets', 'can_edit_own_tickets', 'can_edit_all_tickets',
-            'can_delete_tickets', 'can_assign_tickets',
-            # Additional permissions
-            'can_view_reports', 'can_export_data', 'can_manage_tags', 'can_manage_columns'
-        ]
+        model = Group
+        fields = ['name', 'permission_ids']
+    
+    def create(self, validated_data):
+        permission_ids = validated_data.pop('permission_ids', [])
+        group = Group.objects.create(**validated_data)
+        
+        if permission_ids:
+            permissions = Permission.objects.filter(id__in=permission_ids)
+            group.permissions.set(permissions)
+        
+        return group
 
 
 class UserSerializer(serializers.ModelSerializer):
-    """Enhanced serializer for User model with full profile information"""
-    full_name = serializers.ReadOnlyField(source='get_full_name')
+    """Serializer for User model with permissions and groups"""
+    full_name = serializers.ReadOnlyField()
     permissions = serializers.SerializerMethodField()
-    group_permissions = serializers.ReadOnlyField(source='get_group_permissions')
-    all_permissions = serializers.ReadOnlyField(source='get_all_permissions')
-    tenant_groups = TenantGroupSerializer(many=True, read_only=True)
+    group_permissions = serializers.SerializerMethodField()
+    all_permissions = serializers.SerializerMethodField()
+    groups = GroupSerializer(many=True, read_only=True)
+    group_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        write_only=True,
+        required=False,
+        help_text="List of group IDs to assign to this user"
+    )
+    user_permission_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        write_only=True,
+        required=False,
+        help_text="List of permission IDs to assign directly to this user"
+    )
     
     class Meta:
         model = User
         fields = [
             'id', 'email', 'first_name', 'last_name', 'full_name',
-            'role', 'status', 'department', 'phone_number', 'job_title',
-            # Core permissions
-            'can_view_all_tickets', 'can_manage_users', 'can_make_calls', 'can_manage_groups', 'can_manage_settings',
-            # Additional permissions
-            'can_create_tickets', 'can_edit_own_tickets', 'can_edit_all_tickets',
-            'can_delete_tickets', 'can_assign_tickets', 'can_view_reports',
-            'can_export_data', 'can_manage_tags', 'can_manage_columns',
-            # System fields
+            'role', 'status', 'phone_number', 'job_title',
             'is_active', 'is_staff', 'date_joined', 'last_login',
-            'invited_by', 'invitation_sent_at', 
-            # Permission summaries
-            'permissions', 'group_permissions', 'all_permissions', 'tenant_groups'
+            'permissions', 'group_permissions', 'all_permissions',
+            'groups', 'group_ids', 'user_permission_ids'
         ]
-        read_only_fields = ['id', 'date_joined', 'invited_by', 'invitation_sent_at', 'last_login', 
-                           'permissions', 'group_permissions', 'all_permissions']
+        read_only_fields = ['id', 'date_joined', 'last_login']
     
     def get_permissions(self, obj):
-        return {
-            'is_admin': obj.is_admin,
-            'is_manager': obj.is_manager,
-            # Core permissions
-            'can_view_all_tickets': obj.has_permission('view_all_tickets'),
-            'can_manage_users': obj.has_permission('manage_users'),
-            'can_make_calls': obj.has_permission('make_calls'),
-            'can_manage_groups': obj.has_permission('manage_groups'),
-            'can_manage_settings': obj.has_permission('manage_settings'),
-            # Additional permissions
-            'can_create_tickets': obj.has_permission('create_tickets'),
-            'can_edit_own_tickets': obj.has_permission('edit_own_tickets'),
-            'can_edit_all_tickets': obj.has_permission('edit_all_tickets'),
-            'can_delete_tickets': obj.has_permission('delete_tickets'),
-            'can_assign_tickets': obj.has_permission('assign_tickets'),
-            'can_view_reports': obj.has_permission('view_reports'),
-            'can_export_data': obj.has_permission('export_data'),
-            'can_manage_tags': obj.has_permission('manage_tags'),
-            'can_manage_columns': obj.has_permission('manage_columns'),
-        }
+        """Get user's direct permissions"""
+        return obj.get_user_permissions_list()
+    
+    def get_group_permissions(self, obj):
+        """Get permissions from groups"""
+        return obj.get_group_permissions_list()
+    
+    def get_all_permissions(self, obj):
+        """Get all permissions (user + group) as a dictionary"""
+        return obj.get_all_permissions_dict()
+    
+    def update(self, instance, validated_data):
+        group_ids = validated_data.pop('group_ids', None)
+        user_permission_ids = validated_data.pop('user_permission_ids', None)
+        
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        
+        if group_ids is not None:
+            groups = Group.objects.filter(id__in=group_ids)
+            instance.groups.set(groups)
+        
+        if user_permission_ids is not None:
+            permissions = Permission.objects.filter(id__in=user_permission_ids)
+            instance.user_permissions.set(permissions)
+        
+        return instance
 
 
 class UserCreateSerializer(serializers.ModelSerializer):
-    """Enhanced serializer for creating new users"""
+    """Serializer for creating users"""
     password = serializers.CharField(write_only=True, validators=[validate_password])
     password_confirm = serializers.CharField(write_only=True)
-    tenant_groups = serializers.PrimaryKeyRelatedField(many=True, queryset=TenantGroup.objects.all(), required=False)
+    group_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        required=False,
+        help_text="List of group IDs to assign to this user"
+    )
+    user_permission_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        required=False,
+        help_text="List of permission IDs to assign directly to this user"
+    )
     
     class Meta:
         model = User
         fields = [
             'email', 'first_name', 'last_name', 'password', 'password_confirm',
-            'role', 'department', 'phone_number', 'job_title',
-            # Core permissions
-            'can_view_all_tickets', 'can_manage_users', 'can_make_calls', 'can_manage_groups', 'can_manage_settings',
-            # Additional permissions
-            'can_create_tickets', 'can_edit_own_tickets', 'can_edit_all_tickets',
-            'can_delete_tickets', 'can_assign_tickets', 'can_view_reports',
-            'can_export_data', 'can_manage_tags', 'can_manage_columns',
-            # Groups
-            'tenant_groups'
+            'role', 'status', 'phone_number', 'job_title',
+            'group_ids', 'user_permission_ids'
         ]
     
     def validate(self, attrs):
@@ -146,102 +170,78 @@ class UserCreateSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Passwords don't match")
         return attrs
     
-    def validate_role(self, value):
-        # Only admins can create other admins
-        request = self.context.get('request')
-        if request and value == 'admin' and not request.user.is_admin:
-            raise serializers.ValidationError("Only administrators can create admin users.")
-        return value
-    
     def create(self, validated_data):
         validated_data.pop('password_confirm')
+        group_ids = validated_data.pop('group_ids', [])
+        user_permission_ids = validated_data.pop('user_permission_ids', [])
         password = validated_data.pop('password')
-        tenant_groups = validated_data.pop('tenant_groups', [])
         
         user = User.objects.create_user(password=password, **validated_data)
         
-        # Set groups
-        if tenant_groups:
-            user.tenant_groups.set(tenant_groups)
+        if group_ids:
+            groups = Group.objects.filter(id__in=group_ids)
+            user.groups.set(groups)
         
-        # Set invitation details
-        request = self.context.get('request')
-        if request:
-            user.invited_by = request.user
-            user.invitation_sent_at = timezone.now()
-            user.save()
+        if user_permission_ids:
+            permissions = Permission.objects.filter(id__in=user_permission_ids)
+            user.user_permissions.set(permissions)
         
         return user
 
 
 class UserUpdateSerializer(serializers.ModelSerializer):
-    """Serializer for updating user information"""
-    tenant_groups = serializers.PrimaryKeyRelatedField(many=True, queryset=TenantGroup.objects.all(), required=False)
+    """Serializer for updating users"""
+    group_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        required=False,
+        help_text="List of group IDs to assign to this user"
+    )
+    user_permission_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        required=False,
+        help_text="List of permission IDs to assign directly to this user"
+    )
     
     class Meta:
         model = User
         fields = [
-            'first_name', 'last_name', 'role', 'status', 'department', 
-            'phone_number', 'job_title',
-            # Core permissions
-            'can_view_all_tickets', 'can_manage_users', 'can_make_calls', 'can_manage_groups', 'can_manage_settings',
-            # Additional permissions
-            'can_create_tickets', 'can_edit_own_tickets', 'can_edit_all_tickets',
-            'can_delete_tickets', 'can_assign_tickets', 'can_view_reports',
-            'can_export_data', 'can_manage_tags', 'can_manage_columns',
-            # System fields
-            'is_active',
-            # Groups
-            # Groups
-            'tenant_groups'
+            'first_name', 'last_name', 'role', 'status', 
+            'phone_number', 'job_title', 'is_active',
+            'group_ids', 'user_permission_ids'
         ]
     
-    def validate_role(self, value):
-        request = self.context.get('request')
-        if request and value == 'admin' and not request.user.is_admin:
-            raise serializers.ValidationError("Only administrators can assign admin role.")
-        return value
-    
     def update(self, instance, validated_data):
-        tenant_groups = validated_data.pop('tenant_groups', None)
+        group_ids = validated_data.pop('group_ids', None)
+        user_permission_ids = validated_data.pop('user_permission_ids', None)
         
-        # Update other fields
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
         
-        # Update groups if provided
-        if tenant_groups is not None:
-            instance.tenant_groups.set(tenant_groups)
+        if group_ids is not None:
+            groups = Group.objects.filter(id__in=group_ids)
+            instance.groups.set(groups)
+        
+        if user_permission_ids is not None:
+            permissions = Permission.objects.filter(id__in=user_permission_ids)
+            instance.user_permissions.set(permissions)
         
         return instance
 
 
 class BulkUserActionSerializer(serializers.Serializer):
     """Serializer for bulk user actions"""
-    ACTION_CHOICES = [
-        ('activate', 'Activate Users'),
-        ('deactivate', 'Deactivate Users'),
-        ('delete', 'Delete Users'),
+    user_ids = serializers.ListField(child=serializers.IntegerField())
+    action = serializers.ChoiceField(choices=[
+        ('activate', 'Activate'),
+        ('deactivate', 'Deactivate'),
+        ('delete', 'Delete'),
         ('change_role', 'Change Role'),
-        ('change_status', 'Change Status'),
-    ]
-    
-    user_ids = serializers.ListField(child=serializers.IntegerField(), min_length=1)
-    action = serializers.ChoiceField(choices=ACTION_CHOICES)
+        ('add_to_group', 'Add to Group'),
+        ('remove_from_group', 'Remove from Group'),
+    ])
     role = serializers.ChoiceField(choices=User.ROLE_CHOICES, required=False)
-    status = serializers.ChoiceField(choices=User.STATUS_CHOICES, required=False)
-    
-    def validate(self, data):
-        action = data['action']
-        
-        if action == 'change_role' and not data.get('role'):
-            raise serializers.ValidationError("role is required for change_role action")
-        
-        if action == 'change_status' and not data.get('status'):
-            raise serializers.ValidationError("status is required for change_status action")
-        
-        return data
+    group_id = serializers.IntegerField(required=False)
 
 
 class PasswordChangeSerializer(serializers.Serializer):
@@ -258,45 +258,26 @@ class PasswordChangeSerializer(serializers.Serializer):
     def validate_old_password(self, value):
         user = self.context['request'].user
         if not user.check_password(value):
-            raise serializers.ValidationError("Invalid old password")
+            raise serializers.ValidationError("Old password is incorrect")
         return value
 
 
-class GroupSerializer(serializers.ModelSerializer):
-    """Serializer for Django Group model"""
-    user_count = serializers.SerializerMethodField()
-    users = serializers.StringRelatedField(source='user_set', many=True, read_only=True)
+class UserLoginSerializer(serializers.Serializer):
+    """Serializer for user login"""
+    email = serializers.EmailField()
+    password = serializers.CharField()
     
-    class Meta:
-        model = Group
-        fields = ['id', 'name', 'user_count', 'users']
-    
-    def get_user_count(self, obj):
-        return obj.user_set.count()
-
-
-class GroupCreateSerializer(serializers.ModelSerializer):
-    """Serializer for creating groups"""
-    class Meta:
-        model = Group
-        fields = ['name']
-    
-    def validate_name(self, value):
-        if Group.objects.filter(name=value).exists():
-            raise serializers.ValidationError("A group with this name already exists.")
-        return value
-
-
-class GroupUpdateSerializer(serializers.ModelSerializer):
-    """Serializer for updating groups"""
-    class Meta:
-        model = Group
-        fields = ['name']
-    
-    def validate_name(self, value):
-        # Allow the same name if it's the current object
-        if self.instance and self.instance.name == value:
-            return value
-        if Group.objects.filter(name=value).exists():
-            raise serializers.ValidationError("A group with this name already exists.")
-        return value
+    def validate(self, attrs):
+        email = attrs.get('email')
+        password = attrs.get('password')
+        
+        if email and password:
+            user = authenticate(email=email, password=password)
+            if not user:
+                raise serializers.ValidationError('Invalid email or password.')
+            if not user.is_active:
+                raise serializers.ValidationError('User account is disabled.')
+            attrs['user'] = user
+            return attrs
+        else:
+            raise serializers.ValidationError('Must include email and password.')

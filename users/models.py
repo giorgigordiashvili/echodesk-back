@@ -1,6 +1,7 @@
-from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
+from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin, Group, Permission
 from django.db import models
 from django.utils import timezone
+from django.contrib.contenttypes.models import ContentType
 
 
 class TenantGroup(models.Model):
@@ -102,7 +103,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     # Enhanced user management fields
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='agent')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
-    department = models.CharField(max_length=100, blank=True)
+    primary_group = models.ForeignKey('TenantGroup', on_delete=models.SET_NULL, null=True, blank=True, related_name='primary_members', help_text='Primary group for this user')
     phone_number = models.CharField(max_length=20, blank=True)
     job_title = models.CharField(max_length=100, blank=True)
     

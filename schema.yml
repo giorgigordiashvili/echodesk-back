@@ -1453,7 +1453,7 @@ paths:
   /api/groups/:
     get:
       operationId: groups_list
-      description: ViewSet for managing TenantGroups with comprehensive permissions
+      description: ViewSet for managing Django Groups with permissions
       parameters:
       - name: ordering
         required: false
@@ -1483,24 +1483,24 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PaginatedTenantGroupList'
+                $ref: '#/components/schemas/PaginatedGroupList'
           description: ''
     post:
       operationId: groups_create
-      description: ViewSet for managing TenantGroups with comprehensive permissions
+      description: ViewSet for managing Django Groups with permissions
       tags:
       - groups
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/TenantGroupCreate'
+              $ref: '#/components/schemas/GroupCreate'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/TenantGroupCreate'
+              $ref: '#/components/schemas/GroupCreate'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/TenantGroupCreate'
+              $ref: '#/components/schemas/GroupCreate'
         required: true
       security:
       - cookieAuth: []
@@ -1510,18 +1510,18 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TenantGroupCreate'
+                $ref: '#/components/schemas/GroupCreate'
           description: ''
   /api/groups/{id}/:
     get:
       operationId: groups_retrieve
-      description: ViewSet for managing TenantGroups with comprehensive permissions
+      description: ViewSet for managing Django Groups with permissions
       parameters:
       - in: path
         name: id
         schema:
           type: integer
-        description: A unique integer value identifying this Group.
+        description: A unique integer value identifying this group.
         required: true
       tags:
       - groups
@@ -1533,17 +1533,17 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TenantGroup'
+                $ref: '#/components/schemas/Group'
           description: ''
     put:
       operationId: groups_update
-      description: ViewSet for managing TenantGroups with comprehensive permissions
+      description: ViewSet for managing Django Groups with permissions
       parameters:
       - in: path
         name: id
         schema:
           type: integer
-        description: A unique integer value identifying this Group.
+        description: A unique integer value identifying this group.
         required: true
       tags:
       - groups
@@ -1551,13 +1551,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/TenantGroupUpdate'
+              $ref: '#/components/schemas/Group'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/TenantGroupUpdate'
+              $ref: '#/components/schemas/Group'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/TenantGroupUpdate'
+              $ref: '#/components/schemas/Group'
         required: true
       security:
       - cookieAuth: []
@@ -1567,17 +1567,17 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TenantGroupUpdate'
+                $ref: '#/components/schemas/Group'
           description: ''
     patch:
       operationId: groups_partial_update
-      description: ViewSet for managing TenantGroups with comprehensive permissions
+      description: ViewSet for managing Django Groups with permissions
       parameters:
       - in: path
         name: id
         schema:
           type: integer
-        description: A unique integer value identifying this Group.
+        description: A unique integer value identifying this group.
         required: true
       tags:
       - groups
@@ -1585,13 +1585,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PatchedTenantGroupUpdate'
+              $ref: '#/components/schemas/PatchedGroup'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/PatchedTenantGroupUpdate'
+              $ref: '#/components/schemas/PatchedGroup'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/PatchedTenantGroupUpdate'
+              $ref: '#/components/schemas/PatchedGroup'
       security:
       - cookieAuth: []
       - tokenAuth: []
@@ -1600,17 +1600,17 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TenantGroupUpdate'
+                $ref: '#/components/schemas/Group'
           description: ''
     delete:
       operationId: groups_destroy
-      description: ViewSet for managing TenantGroups with comprehensive permissions
+      description: ViewSet for managing Django Groups with permissions
       parameters:
       - in: path
         name: id
         schema:
           type: integer
-        description: A unique integer value identifying this Group.
+        description: A unique integer value identifying this group.
         required: true
       tags:
       - groups
@@ -1622,15 +1622,14 @@ paths:
           description: No response body
   /api/groups/{id}/add_users/:
     post:
-      operationId: tenant_groups_add_users
-      description: Add multiple users to a tenant group
-      summary: Add Users to TenantGroup
+      operationId: groups_add_users_create
+      description: Add users to this group
       parameters:
       - in: path
         name: id
         schema:
           type: integer
-        description: A unique integer value identifying this Group.
+        description: A unique integer value identifying this group.
         required: true
       tags:
       - groups
@@ -1638,13 +1637,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/TenantGroup'
+              $ref: '#/components/schemas/Group'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/TenantGroup'
+              $ref: '#/components/schemas/Group'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/TenantGroup'
+              $ref: '#/components/schemas/Group'
         required: true
       security:
       - cookieAuth: []
@@ -1654,55 +1653,18 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TenantGroup'
-          description: ''
-  /api/groups/{id}/copy_permissions/:
-    post:
-      operationId: tenant_groups_copy_permissions
-      description: Copy all permissions from another tenant group
-      summary: Copy Permissions from Another Group
-      parameters:
-      - in: path
-        name: id
-        schema:
-          type: integer
-        description: A unique integer value identifying this Group.
-        required: true
-      tags:
-      - groups
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/TenantGroup'
-          application/x-www-form-urlencoded:
-            schema:
-              $ref: '#/components/schemas/TenantGroup'
-          multipart/form-data:
-            schema:
-              $ref: '#/components/schemas/TenantGroup'
-        required: true
-      security:
-      - cookieAuth: []
-      - tokenAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/TenantGroup'
+                $ref: '#/components/schemas/Group'
           description: ''
   /api/groups/{id}/remove_users/:
     post:
-      operationId: tenant_groups_remove_users
-      description: Remove multiple users from a tenant group
-      summary: Remove Users from TenantGroup
+      operationId: groups_remove_users_create
+      description: Remove users from this group
       parameters:
       - in: path
         name: id
         schema:
           type: integer
-        description: A unique integer value identifying this Group.
+        description: A unique integer value identifying this group.
         required: true
       tags:
       - groups
@@ -1710,13 +1672,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/TenantGroup'
+              $ref: '#/components/schemas/Group'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/TenantGroup'
+              $ref: '#/components/schemas/Group'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/TenantGroup'
+              $ref: '#/components/schemas/Group'
         required: true
       security:
       - cookieAuth: []
@@ -1726,13 +1688,12 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TenantGroup'
+                $ref: '#/components/schemas/Group'
           description: ''
-  /api/groups/statistics/:
+  /api/groups/available_permissions/:
     get:
-      operationId: groups_statistics
-      description: Get statistics about groups
-      summary: Get Group Statistics
+      operationId: groups_available_permissions_retrieve
+      description: Get available permissions for groups
       tags:
       - groups
       security:
@@ -1743,7 +1704,65 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TenantGroup'
+                $ref: '#/components/schemas/Group'
+          description: ''
+  /api/permissions/:
+    get:
+      operationId: permissions_list
+      description: ViewSet for viewing Django permissions
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - permissions
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedPermissionList'
+          description: ''
+  /api/permissions/{id}/:
+    get:
+      operationId: permissions_retrieve
+      description: ViewSet for viewing Django permissions
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this permission.
+        required: true
+      tags:
+      - permissions
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Permission'
           description: ''
   /api/preflight-test/:
     get:
@@ -3020,20 +3039,8 @@ paths:
   /api/users/:
     get:
       operationId: users_list
-      description: Enhanced ViewSet for comprehensive tenant user management
+      description: ViewSet for managing users
       parameters:
-      - in: query
-        name: department
-        schema:
-          type: string
-      - in: query
-        name: is_active
-        schema:
-          type: boolean
-      - in: query
-        name: is_staff
-        schema:
-          type: boolean
       - name: ordering
         required: false
         in: query
@@ -3046,40 +3053,12 @@ paths:
         description: A page number within the paginated result set.
         schema:
           type: integer
-      - in: query
-        name: role
-        schema:
-          type: string
-          enum:
-          - admin
-          - agent
-          - manager
-          - viewer
-        description: |-
-          * `admin` - Administrator
-          * `manager` - Manager
-          * `agent` - Agent
-          * `viewer` - Viewer
       - name: search
         required: false
         in: query
         description: A search term.
         schema:
           type: string
-      - in: query
-        name: status
-        schema:
-          type: string
-          enum:
-          - active
-          - inactive
-          - pending
-          - suspended
-        description: |-
-          * `active` - Active
-          * `inactive` - Inactive
-          * `suspended` - Suspended
-          * `pending` - Pending Activation
       tags:
       - users
       security:
@@ -3094,7 +3073,7 @@ paths:
           description: ''
     post:
       operationId: users_create
-      description: Enhanced ViewSet for comprehensive tenant user management
+      description: ViewSet for managing users
       tags:
       - users
       requestBody:
@@ -3122,7 +3101,7 @@ paths:
   /api/users/{id}/:
     get:
       operationId: users_retrieve
-      description: Enhanced ViewSet for comprehensive tenant user management
+      description: ViewSet for managing users
       parameters:
       - in: path
         name: id
@@ -3144,7 +3123,7 @@ paths:
           description: ''
     put:
       operationId: users_update
-      description: Enhanced ViewSet for comprehensive tenant user management
+      description: ViewSet for managing users
       parameters:
       - in: path
         name: id
@@ -3177,7 +3156,7 @@ paths:
           description: ''
     patch:
       operationId: users_partial_update
-      description: Enhanced ViewSet for comprehensive tenant user management
+      description: ViewSet for managing users
       parameters:
       - in: path
         name: id
@@ -3210,7 +3189,7 @@ paths:
           description: ''
     delete:
       operationId: users_destroy
-      description: Enhanced ViewSet for comprehensive tenant user management
+      description: ViewSet for managing users
       parameters:
       - in: path
         name: id
@@ -3226,46 +3205,10 @@ paths:
       responses:
         '204':
           description: No response body
-  /api/users/{id}/change_status/:
-    patch:
-      operationId: users_change_status
-      description: Change user status (active, inactive, suspended, pending)
-      summary: Change User Status
-      parameters:
-      - in: path
-        name: id
-        schema:
-          type: integer
-        description: A unique integer value identifying this User.
-        required: true
-      tags:
-      - users
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/PatchedUser'
-          application/x-www-form-urlencoded:
-            schema:
-              $ref: '#/components/schemas/PatchedUser'
-          multipart/form-data:
-            schema:
-              $ref: '#/components/schemas/PatchedUser'
-      security:
-      - cookieAuth: []
-      - tokenAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/User'
-          description: ''
-  /api/users/{id}/reset_password/:
+  /api/users/{id}/change_password/:
     post:
-      operationId: users_reset_password
-      description: Reset password for a user (admin only) and generate temporary password
-      summary: Reset User Password
+      operationId: users_change_password_create
+      description: Change user password
       parameters:
       - in: path
         name: id
@@ -3299,67 +3242,8 @@ paths:
           description: ''
   /api/users/bulk_action/:
     post:
-      operationId: users_bulk_action
-      description: Perform bulk actions on multiple users (activate, deactivate, delete,
-        change role, etc.)
-      summary: Bulk User Actions
-      tags:
-      - users
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/BulkUserAction'
-          application/x-www-form-urlencoded:
-            schema:
-              $ref: '#/components/schemas/BulkUserAction'
-          multipart/form-data:
-            schema:
-              $ref: '#/components/schemas/BulkUserAction'
-        required: true
-      security:
-      - cookieAuth: []
-      - tokenAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BulkUserAction'
-          description: ''
-  /api/users/change_password/:
-    post:
-      operationId: users_change_password
-      description: Change password for current user with old password verification
-      summary: Change Password
-      tags:
-      - users
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/PasswordChange'
-          application/x-www-form-urlencoded:
-            schema:
-              $ref: '#/components/schemas/PasswordChange'
-          multipart/form-data:
-            schema:
-              $ref: '#/components/schemas/PasswordChange'
-        required: true
-      security:
-      - cookieAuth: []
-      - tokenAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PasswordChange'
-          description: ''
-  /api/users/login/:
-    post:
-      operationId: users_login_create
-      description: Enhanced login endpoint
+      operationId: users_bulk_action_create
+      description: Perform bulk actions on users
       tags:
       - users
       requestBody:
@@ -3374,68 +3258,6 @@ paths:
             schema:
               $ref: '#/components/schemas/User'
         required: true
-      security:
-      - cookieAuth: []
-      - tokenAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/User'
-          description: ''
-  /api/users/logout/:
-    post:
-      operationId: users_logout_create
-      description: Enhanced logout endpoint
-      tags:
-      - users
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/User'
-          application/x-www-form-urlencoded:
-            schema:
-              $ref: '#/components/schemas/User'
-          multipart/form-data:
-            schema:
-              $ref: '#/components/schemas/User'
-        required: true
-      security:
-      - cookieAuth: []
-      - tokenAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/User'
-          description: ''
-  /api/users/me/:
-    get:
-      operationId: users_me
-      description: Get current user profile information with permissions
-      summary: Get Current User Profile
-      tags:
-      - users
-      security:
-      - cookieAuth: []
-      - tokenAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/User'
-          description: ''
-  /api/users/statistics/:
-    get:
-      operationId: users_statistics
-      description: Get statistics about users in the tenant
-      summary: Get User Statistics
-      tags:
-      - users
       security:
       - cookieAuth: []
       - tokenAuth: []
@@ -3544,38 +3366,6 @@ paths:
           description: ''
 components:
   schemas:
-    ActionEnum:
-      enum:
-      - activate
-      - deactivate
-      - delete
-      - change_role
-      - change_status
-      type: string
-      description: |-
-        * `activate` - Activate Users
-        * `deactivate` - Deactivate Users
-        * `delete` - Delete Users
-        * `change_role` - Change Role
-        * `change_status` - Change Status
-    BulkUserAction:
-      type: object
-      description: Serializer for bulk user actions
-      properties:
-        user_ids:
-          type: array
-          items:
-            type: integer
-          minItems: 1
-        action:
-          $ref: '#/components/schemas/ActionEnum'
-        role:
-          $ref: '#/components/schemas/RoleEnum'
-        status:
-          $ref: '#/components/schemas/Status336Enum'
-      required:
-      - action
-      - user_ids
     CallEvent:
       type: object
       description: Serializer for call events
@@ -4064,6 +3854,49 @@ components:
         * `ended` - Call Ended
         * `failed` - Call Failed
         * `error` - Error Occurred
+    Group:
+      type: object
+      description: Serializer for Django Groups with permissions
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 150
+        permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Permission'
+          readOnly: true
+        permission_ids:
+          type: array
+          items:
+            type: integer
+          writeOnly: true
+          description: List of permission IDs to assign to this group
+        user_count:
+          type: string
+          readOnly: true
+      required:
+      - id
+      - name
+      - permissions
+      - user_count
+    GroupCreate:
+      type: object
+      description: Simplified serializer for creating groups
+      properties:
+        name:
+          type: string
+          maxLength: 150
+        permission_ids:
+          type: array
+          items:
+            type: integer
+          description: List of permission IDs to assign to this group
+      required:
+      - name
     KanbanBoard:
       type: object
       description: Serializer for Kanban board data with columns and tickets.
@@ -4125,6 +3958,52 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Client'
+    PaginatedGroupList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Group'
+    PaginatedPermissionList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Permission'
     PaginatedSipConfigurationListList:
       type: object
       required:
@@ -4171,29 +4050,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Tag'
-    PaginatedTenantGroupList:
-      type: object
-      required:
-      - count
-      - results
-      properties:
-        count:
-          type: integer
-          example: 123
-        next:
-          type: string
-          nullable: true
-          format: uri
-          example: http://api.example.org/accounts/?page=4
-        previous:
-          type: string
-          nullable: true
-          format: uri
-          example: http://api.example.org/accounts/?page=2
-        results:
-          type: array
-          items:
-            $ref: '#/components/schemas/TenantGroup'
     PaginatedTenantList:
       type: object
       required:
@@ -4309,20 +4165,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/User'
-    PasswordChange:
-      type: object
-      description: Serializer for password change
-      properties:
-        old_password:
-          type: string
-        new_password:
-          type: string
-        new_password_confirm:
-          type: string
-      required:
-      - new_password
-      - new_password_confirm
-      - old_password
     PatchedCallLog:
       type: object
       description: Enhanced serializer for CallLog model with SIP support
@@ -4455,6 +4297,30 @@ components:
           readOnly: true
         is_active:
           type: boolean
+    PatchedGroup:
+      type: object
+      description: Serializer for Django Groups with permissions
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 150
+        permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Permission'
+          readOnly: true
+        permission_ids:
+          type: array
+          items:
+            type: integer
+          writeOnly: true
+          description: List of permission IDs to assign to this group
+        user_count:
+          type: string
+          readOnly: true
     PatchedSipConfiguration:
       type: object
       description: Serializer for SIP configuration management
@@ -4595,59 +4461,6 @@ components:
           type: string
           format: date-time
           readOnly: true
-    PatchedTenantGroupUpdate:
-      type: object
-      description: Serializer for updating TenantGroups
-      properties:
-        name:
-          type: string
-          maxLength: 150
-        description:
-          type: string
-        is_active:
-          type: boolean
-        can_view_all_tickets:
-          type: boolean
-          description: Members can view all tickets in the tenant
-        can_manage_users:
-          type: boolean
-          description: Members can manage user accounts
-        can_make_calls:
-          type: boolean
-          description: Members can make phone calls
-        can_manage_groups:
-          type: boolean
-          description: Members can manage groups
-        can_manage_settings:
-          type: boolean
-          description: Members can manage tenant settings
-        can_create_tickets:
-          type: boolean
-          description: Members can create new tickets
-        can_edit_own_tickets:
-          type: boolean
-          description: Members can edit their own tickets
-        can_edit_all_tickets:
-          type: boolean
-          description: Members can edit any ticket
-        can_delete_tickets:
-          type: boolean
-          description: Members can delete tickets
-        can_assign_tickets:
-          type: boolean
-          description: Members can assign tickets to others
-        can_view_reports:
-          type: boolean
-          description: Members can view analytics and reports
-        can_export_data:
-          type: boolean
-          description: Members can export data
-        can_manage_tags:
-          type: boolean
-          description: Members can manage ticket tags
-        can_manage_columns:
-          type: boolean
-          description: Members can manage kanban board columns
     PatchedTicket:
       type: object
       description: Serializer for Ticket model.
@@ -4765,160 +4578,58 @@ components:
           type: string
           format: date-time
           readOnly: true
-    PatchedUser:
+    PatchedUserUpdate:
       type: object
-      description: Enhanced serializer for User model with full profile information
+      description: Serializer for updating users
+      properties:
+        first_name:
+          type: string
+          maxLength: 30
+        last_name:
+          type: string
+          maxLength: 30
+        role:
+          $ref: '#/components/schemas/RoleEnum'
+        status:
+          $ref: '#/components/schemas/Status336Enum'
+        phone_number:
+          type: string
+          maxLength: 20
+        job_title:
+          type: string
+          maxLength: 100
+        is_active:
+          type: boolean
+        group_ids:
+          type: array
+          items:
+            type: integer
+          description: List of group IDs to assign to this user
+        user_permission_ids:
+          type: array
+          items:
+            type: integer
+          description: List of permission IDs to assign directly to this user
+    Permission:
+      type: object
+      description: Serializer for Django permissions
       properties:
         id:
           type: integer
           readOnly: true
-        email:
+        name:
           type: string
-          format: email
-          maxLength: 254
-        first_name:
-          type: string
-          maxLength: 30
-        last_name:
-          type: string
-          maxLength: 30
-        full_name:
-          type: string
-          readOnly: true
-        role:
-          $ref: '#/components/schemas/RoleEnum'
-        status:
-          $ref: '#/components/schemas/Status336Enum'
-        department:
+          maxLength: 255
+        codename:
           type: string
           maxLength: 100
-        phone_number:
-          type: string
-          maxLength: 20
-        job_title:
-          type: string
-          maxLength: 100
-        can_view_all_tickets:
-          type: boolean
-        can_manage_users:
-          type: boolean
-        can_make_calls:
-          type: boolean
-        can_manage_groups:
-          type: boolean
-        can_manage_settings:
-          type: boolean
-        can_create_tickets:
-          type: boolean
-        can_edit_own_tickets:
-          type: boolean
-        can_edit_all_tickets:
-          type: boolean
-        can_delete_tickets:
-          type: boolean
-        can_assign_tickets:
-          type: boolean
-        can_view_reports:
-          type: boolean
-        can_export_data:
-          type: boolean
-        can_manage_tags:
-          type: boolean
-        can_manage_columns:
-          type: boolean
-        is_active:
-          type: boolean
-        is_staff:
-          type: boolean
-        date_joined:
-          type: string
-          format: date-time
-          readOnly: true
-        last_login:
-          type: string
-          format: date-time
-          readOnly: true
-          nullable: true
-        invited_by:
+        content_type:
           type: integer
-          readOnly: true
-          nullable: true
-        invitation_sent_at:
-          type: string
-          format: date-time
-          readOnly: true
-          nullable: true
-        permissions:
-          type: string
-          readOnly: true
-        group_permissions:
-          type: string
-          readOnly: true
-        all_permissions:
-          type: string
-          readOnly: true
-        tenant_groups:
-          type: array
-          items:
-            $ref: '#/components/schemas/TenantGroup'
-          readOnly: true
-    PatchedUserUpdate:
-      type: object
-      description: Serializer for updating user information
-      properties:
-        first_name:
-          type: string
-          maxLength: 30
-        last_name:
-          type: string
-          maxLength: 30
-        role:
-          $ref: '#/components/schemas/RoleEnum'
-        status:
-          $ref: '#/components/schemas/Status336Enum'
-        department:
-          type: string
-          maxLength: 100
-        phone_number:
-          type: string
-          maxLength: 20
-        job_title:
-          type: string
-          maxLength: 100
-        can_view_all_tickets:
-          type: boolean
-        can_manage_users:
-          type: boolean
-        can_make_calls:
-          type: boolean
-        can_manage_groups:
-          type: boolean
-        can_manage_settings:
-          type: boolean
-        can_create_tickets:
-          type: boolean
-        can_edit_own_tickets:
-          type: boolean
-        can_edit_all_tickets:
-          type: boolean
-        can_delete_tickets:
-          type: boolean
-        can_assign_tickets:
-          type: boolean
-        can_view_reports:
-          type: boolean
-        can_export_data:
-          type: boolean
-        can_manage_tags:
-          type: boolean
-        can_manage_columns:
-          type: boolean
-        is_active:
-          type: boolean
-        tenant_groups:
-          type: array
-          items:
-            type: integer
+      required:
+      - codename
+      - content_type
+      - id
+      - name
     PlanEnum:
       enum:
       - basic
@@ -5323,191 +5034,6 @@ components:
       - statistics
       - tenant_info
       - user_info
-    TenantGroup:
-      type: object
-      description: Serializer for TenantGroup with all permissions
-      properties:
-        id:
-          type: integer
-          readOnly: true
-        name:
-          type: string
-          maxLength: 150
-        description:
-          type: string
-        is_active:
-          type: boolean
-        created_at:
-          type: string
-          format: date-time
-          readOnly: true
-        updated_at:
-          type: string
-          format: date-time
-          readOnly: true
-        members_count:
-          type: string
-          readOnly: true
-        permissions_list:
-          type: string
-          readOnly: true
-        can_view_all_tickets:
-          type: boolean
-          description: Members can view all tickets in the tenant
-        can_manage_users:
-          type: boolean
-          description: Members can manage user accounts
-        can_make_calls:
-          type: boolean
-          description: Members can make phone calls
-        can_manage_groups:
-          type: boolean
-          description: Members can manage groups
-        can_manage_settings:
-          type: boolean
-          description: Members can manage tenant settings
-        can_create_tickets:
-          type: boolean
-          description: Members can create new tickets
-        can_edit_own_tickets:
-          type: boolean
-          description: Members can edit their own tickets
-        can_edit_all_tickets:
-          type: boolean
-          description: Members can edit any ticket
-        can_delete_tickets:
-          type: boolean
-          description: Members can delete tickets
-        can_assign_tickets:
-          type: boolean
-          description: Members can assign tickets to others
-        can_view_reports:
-          type: boolean
-          description: Members can view analytics and reports
-        can_export_data:
-          type: boolean
-          description: Members can export data
-        can_manage_tags:
-          type: boolean
-          description: Members can manage ticket tags
-        can_manage_columns:
-          type: boolean
-          description: Members can manage kanban board columns
-      required:
-      - created_at
-      - id
-      - members_count
-      - name
-      - permissions_list
-      - updated_at
-    TenantGroupCreate:
-      type: object
-      description: Serializer for creating new TenantGroups
-      properties:
-        name:
-          type: string
-          maxLength: 150
-        description:
-          type: string
-        can_view_all_tickets:
-          type: boolean
-          description: Members can view all tickets in the tenant
-        can_manage_users:
-          type: boolean
-          description: Members can manage user accounts
-        can_make_calls:
-          type: boolean
-          description: Members can make phone calls
-        can_manage_groups:
-          type: boolean
-          description: Members can manage groups
-        can_manage_settings:
-          type: boolean
-          description: Members can manage tenant settings
-        can_create_tickets:
-          type: boolean
-          description: Members can create new tickets
-        can_edit_own_tickets:
-          type: boolean
-          description: Members can edit their own tickets
-        can_edit_all_tickets:
-          type: boolean
-          description: Members can edit any ticket
-        can_delete_tickets:
-          type: boolean
-          description: Members can delete tickets
-        can_assign_tickets:
-          type: boolean
-          description: Members can assign tickets to others
-        can_view_reports:
-          type: boolean
-          description: Members can view analytics and reports
-        can_export_data:
-          type: boolean
-          description: Members can export data
-        can_manage_tags:
-          type: boolean
-          description: Members can manage ticket tags
-        can_manage_columns:
-          type: boolean
-          description: Members can manage kanban board columns
-      required:
-      - name
-    TenantGroupUpdate:
-      type: object
-      description: Serializer for updating TenantGroups
-      properties:
-        name:
-          type: string
-          maxLength: 150
-        description:
-          type: string
-        is_active:
-          type: boolean
-        can_view_all_tickets:
-          type: boolean
-          description: Members can view all tickets in the tenant
-        can_manage_users:
-          type: boolean
-          description: Members can manage user accounts
-        can_make_calls:
-          type: boolean
-          description: Members can make phone calls
-        can_manage_groups:
-          type: boolean
-          description: Members can manage groups
-        can_manage_settings:
-          type: boolean
-          description: Members can manage tenant settings
-        can_create_tickets:
-          type: boolean
-          description: Members can create new tickets
-        can_edit_own_tickets:
-          type: boolean
-          description: Members can edit their own tickets
-        can_edit_all_tickets:
-          type: boolean
-          description: Members can edit any ticket
-        can_delete_tickets:
-          type: boolean
-          description: Members can delete tickets
-        can_assign_tickets:
-          type: boolean
-          description: Members can assign tickets to others
-        can_view_reports:
-          type: boolean
-          description: Members can view analytics and reports
-        can_export_data:
-          type: boolean
-          description: Members can export data
-        can_manage_tags:
-          type: boolean
-          description: Members can manage ticket tags
-        can_manage_columns:
-          type: boolean
-          description: Members can manage kanban board columns
-      required:
-      - name
     TenantLogin:
       type: object
       description: Serializer for tenant-specific login
@@ -5848,7 +5374,7 @@ components:
       - updated_at
     User:
       type: object
-      description: Enhanced serializer for User model with full profile information
+      description: Serializer for User model with permissions and groups
       properties:
         id:
           type: integer
@@ -5870,43 +5396,12 @@ components:
           $ref: '#/components/schemas/RoleEnum'
         status:
           $ref: '#/components/schemas/Status336Enum'
-        department:
-          type: string
-          maxLength: 100
         phone_number:
           type: string
           maxLength: 20
         job_title:
           type: string
           maxLength: 100
-        can_view_all_tickets:
-          type: boolean
-        can_manage_users:
-          type: boolean
-        can_make_calls:
-          type: boolean
-        can_manage_groups:
-          type: boolean
-        can_manage_settings:
-          type: boolean
-        can_create_tickets:
-          type: boolean
-        can_edit_own_tickets:
-          type: boolean
-        can_edit_all_tickets:
-          type: boolean
-        can_delete_tickets:
-          type: boolean
-        can_assign_tickets:
-          type: boolean
-        can_view_reports:
-          type: boolean
-        can_export_data:
-          type: boolean
-        can_manage_tags:
-          type: boolean
-        can_manage_columns:
-          type: boolean
         is_active:
           type: boolean
         is_staff:
@@ -5920,15 +5415,6 @@ components:
           format: date-time
           readOnly: true
           nullable: true
-        invited_by:
-          type: integer
-          readOnly: true
-          nullable: true
-        invitation_sent_at:
-          type: string
-          format: date-time
-          readOnly: true
-          nullable: true
         permissions:
           type: string
           readOnly: true
@@ -5938,26 +5424,36 @@ components:
         all_permissions:
           type: string
           readOnly: true
-        tenant_groups:
+        groups:
           type: array
           items:
-            $ref: '#/components/schemas/TenantGroup'
+            $ref: '#/components/schemas/Group'
           readOnly: true
+        group_ids:
+          type: array
+          items:
+            type: integer
+          writeOnly: true
+          description: List of group IDs to assign to this user
+        user_permission_ids:
+          type: array
+          items:
+            type: integer
+          writeOnly: true
+          description: List of permission IDs to assign directly to this user
       required:
       - all_permissions
       - date_joined
       - email
       - full_name
       - group_permissions
+      - groups
       - id
-      - invitation_sent_at
-      - invited_by
       - last_login
       - permissions
-      - tenant_groups
     UserCreate:
       type: object
-      description: Enhanced serializer for creating new users
+      description: Serializer for creating users
       properties:
         email:
           type: string
@@ -5977,47 +5473,24 @@ components:
           writeOnly: true
         role:
           $ref: '#/components/schemas/RoleEnum'
-        department:
-          type: string
-          maxLength: 100
+        status:
+          $ref: '#/components/schemas/Status336Enum'
         phone_number:
           type: string
           maxLength: 20
         job_title:
           type: string
           maxLength: 100
-        can_view_all_tickets:
-          type: boolean
-        can_manage_users:
-          type: boolean
-        can_make_calls:
-          type: boolean
-        can_manage_groups:
-          type: boolean
-        can_manage_settings:
-          type: boolean
-        can_create_tickets:
-          type: boolean
-        can_edit_own_tickets:
-          type: boolean
-        can_edit_all_tickets:
-          type: boolean
-        can_delete_tickets:
-          type: boolean
-        can_assign_tickets:
-          type: boolean
-        can_view_reports:
-          type: boolean
-        can_export_data:
-          type: boolean
-        can_manage_tags:
-          type: boolean
-        can_manage_columns:
-          type: boolean
-        tenant_groups:
+        group_ids:
           type: array
           items:
             type: integer
+          description: List of group IDs to assign to this user
+        user_permission_ids:
+          type: array
+          items:
+            type: integer
+          description: List of permission IDs to assign directly to this user
       required:
       - email
       - password
@@ -6046,7 +5519,7 @@ components:
       - last_name
     UserUpdate:
       type: object
-      description: Serializer for updating user information
+      description: Serializer for updating users
       properties:
         first_name:
           type: string
@@ -6058,49 +5531,24 @@ components:
           $ref: '#/components/schemas/RoleEnum'
         status:
           $ref: '#/components/schemas/Status336Enum'
-        department:
-          type: string
-          maxLength: 100
         phone_number:
           type: string
           maxLength: 20
         job_title:
           type: string
           maxLength: 100
-        can_view_all_tickets:
-          type: boolean
-        can_manage_users:
-          type: boolean
-        can_make_calls:
-          type: boolean
-        can_manage_groups:
-          type: boolean
-        can_manage_settings:
-          type: boolean
-        can_create_tickets:
-          type: boolean
-        can_edit_own_tickets:
-          type: boolean
-        can_edit_all_tickets:
-          type: boolean
-        can_delete_tickets:
-          type: boolean
-        can_assign_tickets:
-          type: boolean
-        can_view_reports:
-          type: boolean
-        can_export_data:
-          type: boolean
-        can_manage_tags:
-          type: boolean
-        can_manage_columns:
-          type: boolean
         is_active:
           type: boolean
-        tenant_groups:
+        group_ids:
           type: array
           items:
             type: integer
+          description: List of group IDs to assign to this user
+        user_permission_ids:
+          type: array
+          items:
+            type: integer
+          description: List of permission IDs to assign directly to this user
   securitySchemes:
     cookieAuth:
       type: apiKey
