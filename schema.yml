@@ -1,0 +1,6113 @@
+openapi: 3.0.3
+info:
+  title: EchoDesk API
+  version: 1.0.0
+  description: Multi-tenant CRM system for EchoDesk
+paths:
+  /api/auth/change-password/:
+    post:
+      operationId: change_tenant_password
+      description: Change password for the current user. Requires old password for
+        verification. All existing tokens will be invalidated.
+      summary: Change User Password
+      tags:
+      - User Profile
+      requestBody:
+        content:
+          type:
+            schema:
+              type: object
+              additionalProperties: {}
+              description: Unspecified request body
+          properties:
+            schema:
+              old_password:
+                type: string
+              new_password:
+                type: string
+                minLength: 8
+          required:
+            schema:
+              type: object
+              additionalProperties: {}
+              description: Unspecified request body
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+          description: Password changed successfully
+        '400':
+          description: Invalid old password or validation errors
+        '403':
+          description: Not available from main domain
+  /api/auth/dashboard/:
+    get:
+      operationId: tenant_dashboard
+      description: Get comprehensive dashboard data including tenant information,
+        user details, and statistics. Requires authentication.
+      summary: Get Tenant Dashboard Data
+      tags:
+      - Dashboard
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantDashboardData'
+          description: ''
+        '403':
+          description: Not available from main domain
+  /api/auth/login/:
+    post:
+      operationId: tenant_login
+      description: Authenticate a user within a specific tenant and get dashboard
+        data. This endpoint only works from tenant subdomains (*.api.echodesk.ge).
+      summary: Tenant Login
+      tags:
+      - Authentication
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TenantLogin'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TenantLogin'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TenantLogin'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  token:
+                    type: string
+                  dashboard_data:
+                    type: object
+          description: Login successful
+        '400':
+          description: Invalid credentials or validation errors
+        '403':
+          description: Not available from main domain
+  /api/auth/logout/:
+    post:
+      operationId: tenant_logout
+      description: Logout the current user and invalidate their authentication token.
+        This endpoint only works from tenant subdomains.
+      summary: Tenant Logout
+      tags:
+      - Authentication
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+          description: Logout successful
+        '400':
+          description: Error during logout
+        '403':
+          description: Not available from main domain
+  /api/auth/profile/:
+    get:
+      operationId: tenant_profile
+      description: Get current user profile information within the tenant context.
+      summary: Get User Profile
+      tags:
+      - User Profile
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  email:
+                    type: string
+                  first_name:
+                    type: string
+                  last_name:
+                    type: string
+                  is_staff:
+                    type: boolean
+                  is_superuser:
+                    type: boolean
+                  date_joined:
+                    type: string
+                    format: date-time
+                  last_login:
+                    type: string
+                    format: date-time
+                  is_active:
+                    type: boolean
+          description: User profile data
+        '403':
+          description: Not available from main domain
+  /api/auth/profile/update/:
+    put:
+      operationId: update_tenant_profile_2
+      description: Update current user profile information (first_name and last_name
+        only).
+      summary: Update User Profile
+      tags:
+      - User Profile
+      requestBody:
+        content:
+          type:
+            schema:
+              type: object
+              additionalProperties: {}
+              description: Unspecified request body
+          properties:
+            schema:
+              first_name:
+                type: string
+              last_name:
+                type: string
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  user:
+                    type: object
+          description: Profile updated successfully
+        '403':
+          description: Not available from main domain
+    patch:
+      operationId: update_tenant_profile
+      description: Update current user profile information (first_name and last_name
+        only).
+      summary: Update User Profile
+      tags:
+      - User Profile
+      requestBody:
+        content:
+          type:
+            schema:
+              type: object
+              additionalProperties: {}
+              description: Unspecified request body
+          properties:
+            schema:
+              first_name:
+                type: string
+              last_name:
+                type: string
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  user:
+                    type: object
+          description: Profile updated successfully
+        '403':
+          description: Not available from main domain
+  /api/call-logs/:
+    get:
+      operationId: call_logs_list
+      description: |-
+        ViewSet for managing call logs with SIP integration.
+
+        Handles both inbound and outbound calls, call status updates, and call history.
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - call-logs
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedCallLogList'
+          description: ''
+    post:
+      operationId: call_logs_create
+      description: |-
+        ViewSet for managing call logs with SIP integration.
+
+        Handles both inbound and outbound calls, call status updates, and call history.
+      tags:
+      - call-logs
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CallLogCreate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/CallLogCreate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CallLogCreate'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallLogCreate'
+          description: ''
+  /api/call-logs/{id}/:
+    get:
+      operationId: call_logs_retrieve
+      description: |-
+        ViewSet for managing call logs with SIP integration.
+
+        Handles both inbound and outbound calls, call status updates, and call history.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this call log.
+        required: true
+      tags:
+      - call-logs
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallLogDetail'
+          description: ''
+    put:
+      operationId: call_logs_update
+      description: |-
+        ViewSet for managing call logs with SIP integration.
+
+        Handles both inbound and outbound calls, call status updates, and call history.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this call log.
+        required: true
+      tags:
+      - call-logs
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CallLog'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/CallLog'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CallLog'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallLog'
+          description: ''
+    patch:
+      operationId: call_logs_partial_update
+      description: |-
+        ViewSet for managing call logs with SIP integration.
+
+        Handles both inbound and outbound calls, call status updates, and call history.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this call log.
+        required: true
+      tags:
+      - call-logs
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedCallLog'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedCallLog'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedCallLog'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallLog'
+          description: ''
+    delete:
+      operationId: call_logs_destroy
+      description: |-
+        ViewSet for managing call logs with SIP integration.
+
+        Handles both inbound and outbound calls, call status updates, and call history.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this call log.
+        required: true
+      tags:
+      - call-logs
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/call-logs/{id}/add_event/:
+    post:
+      operationId: call_logs_add_event_create
+      description: Add a specific event to a call (hold, mute, etc.)
+      summary: Add call event
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this call log.
+        required: true
+      tags:
+      - call-logs
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CallEvent'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/CallEvent'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CallEvent'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallEvent'
+          description: ''
+  /api/call-logs/{id}/end_call/:
+    post:
+      operationId: call_logs_end_call_create
+      description: End an ongoing call and update duration
+      summary: End a call
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this call log.
+        required: true
+      tags:
+      - call-logs
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CallStatusUpdate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/CallStatusUpdate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CallStatusUpdate'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallLog'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+                description: Unspecified response body
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+                description: Unspecified response body
+          description: ''
+  /api/call-logs/{id}/start_recording/:
+    post:
+      operationId: call_logs_start_recording_create
+      description: Start recording for an active call
+      summary: Start call recording
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this call log.
+        required: true
+      tags:
+      - call-logs
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CallLog'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/CallLog'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CallLog'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallRecording'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+                description: Unspecified response body
+          description: ''
+  /api/call-logs/{id}/stop_recording/:
+    post:
+      operationId: call_logs_stop_recording_create
+      description: Stop recording for an active call
+      summary: Stop call recording
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this call log.
+        required: true
+      tags:
+      - call-logs
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CallLog'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/CallLog'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CallLog'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallRecording'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+                description: Unspecified response body
+          description: ''
+  /api/call-logs/{id}/toggle_hold/:
+    post:
+      operationId: call_logs_toggle_hold_create
+      description: Put call on hold or resume from hold
+      summary: Hold/Unhold call
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this call log.
+        required: true
+      tags:
+      - call-logs
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CallLog'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/CallLog'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CallLog'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallLog'
+          description: ''
+  /api/call-logs/{id}/transfer_call/:
+    post:
+      operationId: call_logs_transfer_call_create
+      description: Transfer an active call to another number
+      summary: Transfer call
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this call log.
+        required: true
+      tags:
+      - call-logs
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CallLog'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/CallLog'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CallLog'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallLog'
+          description: ''
+  /api/call-logs/{id}/update_status/:
+    patch:
+      operationId: call_logs_update_status_partial_update
+      description: Update the status of an ongoing call
+      summary: Update call status
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this call log.
+        required: true
+      tags:
+      - call-logs
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedCallStatusUpdate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedCallStatusUpdate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedCallStatusUpdate'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallLog'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+                description: Unspecified response body
+          description: ''
+  /api/call-logs/initiate_call/:
+    post:
+      operationId: call_logs_initiate_call_create
+      description: Start a new outbound call using SIP configuration
+      summary: Initiate an outbound call
+      tags:
+      - call-logs
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CallInitiate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/CallInitiate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CallInitiate'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallLog'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+                description: Unspecified response body
+          description: ''
+  /api/call-logs/log_incoming_call/:
+    post:
+      operationId: call_logs_log_incoming_call_create
+      description: Log an incoming call when it starts ringing
+      summary: Log an incoming call
+      tags:
+      - call-logs
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CallLogCreate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/CallLogCreate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CallLogCreate'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallLog'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+                description: Unspecified response body
+          description: ''
+  /api/call-logs/statistics/:
+    get:
+      operationId: call_logs_statistics_retrieve
+      description: Get call statistics for the current tenant
+      summary: Get call statistics
+      parameters:
+      - in: query
+        name: period
+        schema:
+          type: string
+          enum:
+          - month
+          - today
+          - week
+        description: Time period (today, week, month)
+      tags:
+      - call-logs
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+                description: Unspecified response body
+          description: ''
+  /api/clients/:
+    get:
+      operationId: clients_list
+      description: ViewSet for managing clients/customers.
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - clients
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedClientList'
+          description: ''
+    post:
+      operationId: clients_create
+      description: ViewSet for managing clients/customers.
+      tags:
+      - clients
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Client'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Client'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Client'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Client'
+          description: ''
+  /api/clients/{id}/:
+    get:
+      operationId: clients_retrieve
+      description: ViewSet for managing clients/customers.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this client.
+        required: true
+      tags:
+      - clients
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Client'
+          description: ''
+    put:
+      operationId: clients_update
+      description: ViewSet for managing clients/customers.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this client.
+        required: true
+      tags:
+      - clients
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Client'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Client'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Client'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Client'
+          description: ''
+    patch:
+      operationId: clients_partial_update
+      description: ViewSet for managing clients/customers.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this client.
+        required: true
+      tags:
+      - clients
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedClient'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedClient'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedClient'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Client'
+          description: ''
+    delete:
+      operationId: clients_destroy
+      description: ViewSet for managing clients/customers.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this client.
+        required: true
+      tags:
+      - clients
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/clients/{id}/call_history/:
+    get:
+      operationId: clients_call_history_list
+      description: Get all calls associated with this client
+      summary: Get client call history
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this client.
+        required: true
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - clients
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedCallLogList'
+          description: ''
+  /api/columns/:
+    get:
+      operationId: columns_list
+      description: ViewSet for managing ticket columns (Kanban board columns).
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      tags:
+      - columns
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTicketColumnList'
+          description: ''
+    post:
+      operationId: columns_create
+      description: ViewSet for managing ticket columns (Kanban board columns).
+      tags:
+      - columns
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TicketColumnCreate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TicketColumnCreate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TicketColumnCreate'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketColumnCreate'
+          description: ''
+  /api/columns/{id}/:
+    get:
+      operationId: columns_retrieve
+      description: ViewSet for managing ticket columns (Kanban board columns).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this ticket column.
+        required: true
+      tags:
+      - columns
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketColumn'
+          description: ''
+    put:
+      operationId: columns_update
+      description: ViewSet for managing ticket columns (Kanban board columns).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this ticket column.
+        required: true
+      tags:
+      - columns
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TicketColumnUpdate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TicketColumnUpdate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TicketColumnUpdate'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketColumnUpdate'
+          description: ''
+    patch:
+      operationId: columns_partial_update
+      description: ViewSet for managing ticket columns (Kanban board columns).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this ticket column.
+        required: true
+      tags:
+      - columns
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedTicketColumnUpdate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedTicketColumnUpdate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedTicketColumnUpdate'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketColumnUpdate'
+          description: ''
+    delete:
+      operationId: columns_destroy
+      description: ViewSet for managing ticket columns (Kanban board columns).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this ticket column.
+        required: true
+      tags:
+      - columns
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/columns/{id}/reorder/:
+    post:
+      operationId: columns_reorder_create
+      description: Reorder columns.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this ticket column.
+        required: true
+      tags:
+      - columns
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TicketColumn'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TicketColumn'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TicketColumn'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketColumn'
+          description: ''
+  /api/columns/kanban_board/:
+    get:
+      operationId: kanban_board
+      description: Get all columns with their tickets organized for Kanban board display.
+      summary: Get Kanban Board
+      tags:
+      - Kanban Board
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KanbanBoard'
+          description: ''
+  /api/comments/:
+    get:
+      operationId: comments_list
+      description: ViewSet for managing ticket comments.
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      tags:
+      - comments
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTicketCommentList'
+          description: ''
+    post:
+      operationId: comments_create
+      description: ViewSet for managing ticket comments.
+      tags:
+      - comments
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TicketComment'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TicketComment'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TicketComment'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketComment'
+          description: ''
+  /api/comments/{id}/:
+    get:
+      operationId: comments_retrieve
+      description: ViewSet for managing ticket comments.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        required: true
+      tags:
+      - comments
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketComment'
+          description: ''
+    put:
+      operationId: comments_update
+      description: ViewSet for managing ticket comments.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        required: true
+      tags:
+      - comments
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TicketComment'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TicketComment'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TicketComment'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketComment'
+          description: ''
+    patch:
+      operationId: comments_partial_update
+      description: ViewSet for managing ticket comments.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        required: true
+      tags:
+      - comments
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedTicketComment'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedTicketComment'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedTicketComment'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketComment'
+          description: ''
+    delete:
+      operationId: comments_destroy
+      description: ViewSet for managing ticket comments.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        required: true
+      tags:
+      - comments
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/cors-test/:
+    get:
+      operationId: cors_test_retrieve
+      description: Test endpoint to verify CORS configuration
+      tags:
+      - cors-test
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/deployment-status/{tenant_id}/:
+    get:
+      operationId: deployment_status_retrieve
+      description: Check the deployment status of a tenant's frontend
+      parameters:
+      - in: path
+        name: tenant_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - deployment-status
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/groups/:
+    get:
+      operationId: groups_list
+      description: ViewSet for managing TenantGroups with comprehensive permissions
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - groups
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTenantGroupList'
+          description: ''
+    post:
+      operationId: groups_create
+      description: ViewSet for managing TenantGroups with comprehensive permissions
+      tags:
+      - groups
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TenantGroupCreate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TenantGroupCreate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TenantGroupCreate'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantGroupCreate'
+          description: ''
+  /api/groups/{id}/:
+    get:
+      operationId: groups_retrieve
+      description: ViewSet for managing TenantGroups with comprehensive permissions
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this Group.
+        required: true
+      tags:
+      - groups
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantGroup'
+          description: ''
+    put:
+      operationId: groups_update
+      description: ViewSet for managing TenantGroups with comprehensive permissions
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this Group.
+        required: true
+      tags:
+      - groups
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TenantGroupUpdate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TenantGroupUpdate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TenantGroupUpdate'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantGroupUpdate'
+          description: ''
+    patch:
+      operationId: groups_partial_update
+      description: ViewSet for managing TenantGroups with comprehensive permissions
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this Group.
+        required: true
+      tags:
+      - groups
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedTenantGroupUpdate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedTenantGroupUpdate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedTenantGroupUpdate'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantGroupUpdate'
+          description: ''
+    delete:
+      operationId: groups_destroy
+      description: ViewSet for managing TenantGroups with comprehensive permissions
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this Group.
+        required: true
+      tags:
+      - groups
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/groups/{id}/add_users/:
+    post:
+      operationId: tenant_groups_add_users
+      description: Add multiple users to a tenant group
+      summary: Add Users to TenantGroup
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this Group.
+        required: true
+      tags:
+      - groups
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TenantGroup'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TenantGroup'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TenantGroup'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantGroup'
+          description: ''
+  /api/groups/{id}/copy_permissions/:
+    post:
+      operationId: tenant_groups_copy_permissions
+      description: Copy all permissions from another tenant group
+      summary: Copy Permissions from Another Group
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this Group.
+        required: true
+      tags:
+      - groups
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TenantGroup'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TenantGroup'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TenantGroup'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantGroup'
+          description: ''
+  /api/groups/{id}/remove_users/:
+    post:
+      operationId: tenant_groups_remove_users
+      description: Remove multiple users from a tenant group
+      summary: Remove Users from TenantGroup
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this Group.
+        required: true
+      tags:
+      - groups
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TenantGroup'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TenantGroup'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TenantGroup'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantGroup'
+          description: ''
+  /api/groups/statistics/:
+    get:
+      operationId: groups_statistics
+      description: Get statistics about groups
+      summary: Get Group Statistics
+      tags:
+      - groups
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantGroup'
+          description: ''
+  /api/preflight-test/:
+    get:
+      operationId: preflight_test_retrieve
+      description: Specific test for preflight OPTIONS requests
+      tags:
+      - preflight-test
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/register/:
+    post:
+      operationId: register_tenant
+      description: Register a new tenant with admin user creation. Only available
+        from the main domain.
+      summary: Register New Tenant
+      tags:
+      - Tenant Management
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TenantRegistration'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TenantRegistration'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TenantRegistration'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  tenant:
+                    type: object
+                  frontend_url:
+                    type: string
+                  api_url:
+                    type: string
+          description: Tenant created successfully
+        '400':
+          description: Validation errors
+        '403':
+          description: Only available from main domain
+  /api/sip-configurations/:
+    get:
+      operationId: sip_configurations_list
+      description: |-
+        ViewSet for managing SIP configurations.
+
+        Allows tenants to configure their SIP settings for making and receiving calls.
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - sip-configurations
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedSipConfigurationListList'
+          description: ''
+    post:
+      operationId: sip_configurations_create
+      description: |-
+        ViewSet for managing SIP configurations.
+
+        Allows tenants to configure their SIP settings for making and receiving calls.
+      tags:
+      - sip-configurations
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SipConfiguration'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SipConfiguration'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SipConfiguration'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SipConfiguration'
+          description: ''
+  /api/sip-configurations/{id}/:
+    get:
+      operationId: sip_configurations_retrieve
+      description: |-
+        ViewSet for managing SIP configurations.
+
+        Allows tenants to configure their SIP settings for making and receiving calls.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this sip configuration.
+        required: true
+      tags:
+      - sip-configurations
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SipConfigurationDetail'
+          description: ''
+    put:
+      operationId: sip_configurations_update
+      description: |-
+        ViewSet for managing SIP configurations.
+
+        Allows tenants to configure their SIP settings for making and receiving calls.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this sip configuration.
+        required: true
+      tags:
+      - sip-configurations
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SipConfiguration'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SipConfiguration'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SipConfiguration'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SipConfiguration'
+          description: ''
+    patch:
+      operationId: sip_configurations_partial_update
+      description: |-
+        ViewSet for managing SIP configurations.
+
+        Allows tenants to configure their SIP settings for making and receiving calls.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this sip configuration.
+        required: true
+      tags:
+      - sip-configurations
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedSipConfiguration'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedSipConfiguration'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedSipConfiguration'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SipConfiguration'
+          description: ''
+    delete:
+      operationId: sip_configurations_destroy
+      description: |-
+        ViewSet for managing SIP configurations.
+
+        Allows tenants to configure their SIP settings for making and receiving calls.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this sip configuration.
+        required: true
+      tags:
+      - sip-configurations
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/sip-configurations/{id}/set_default/:
+    post:
+      operationId: sip_configurations_set_default_create
+      description: Set this SIP configuration as the default for outbound calls
+      summary: Set as default SIP configuration
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this sip configuration.
+        required: true
+      tags:
+      - sip-configurations
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SipConfiguration'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SipConfiguration'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SipConfiguration'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+                description: Unspecified response body
+          description: ''
+  /api/sip-configurations/{id}/test_connection/:
+    post:
+      operationId: sip_configurations_test_connection_create
+      description: Test the SIP configuration connectivity
+      summary: Test SIP configuration
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this sip configuration.
+        required: true
+      tags:
+      - sip-configurations
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SipConfiguration'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SipConfiguration'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SipConfiguration'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+                description: Unspecified response body
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+                description: Unspecified response body
+          description: ''
+  /api/sip-configurations/{id}/webrtc_config/:
+    get:
+      operationId: sip_configurations_webrtc_config_retrieve
+      description: Retrieve SIP configuration details needed for WebRTC calling in
+        the frontend
+      summary: Get WebRTC configuration for calling
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this sip configuration.
+        required: true
+      tags:
+      - sip-configurations
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SipConfigurationDetail'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+                description: Unspecified response body
+          description: ''
+  /api/tags/:
+    get:
+      operationId: tags_list
+      description: ViewSet for managing tags.
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - tags
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTagList'
+          description: ''
+    post:
+      operationId: tags_create
+      description: ViewSet for managing tags.
+      tags:
+      - tags
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Tag'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Tag'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Tag'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tag'
+          description: ''
+  /api/tags/{id}/:
+    get:
+      operationId: tags_retrieve
+      description: ViewSet for managing tags.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this tag.
+        required: true
+      tags:
+      - tags
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tag'
+          description: ''
+    put:
+      operationId: tags_update
+      description: ViewSet for managing tags.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this tag.
+        required: true
+      tags:
+      - tags
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Tag'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Tag'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Tag'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tag'
+          description: ''
+    patch:
+      operationId: tags_partial_update
+      description: ViewSet for managing tags.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this tag.
+        required: true
+      tags:
+      - tags
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedTag'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedTag'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedTag'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tag'
+          description: ''
+    delete:
+      operationId: tags_destroy
+      description: ViewSet for managing tags.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this tag.
+        required: true
+      tags:
+      - tags
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/tenant/config/:
+    get:
+      operationId: tenant_config_retrieve
+      description: |-
+        Get tenant configuration for frontend
+        Can be called by subdomain or domain parameter
+      tags:
+      - tenant
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/tenant/language/:
+    get:
+      operationId: get_tenant_language
+      description: Get the preferred language setting for the current tenant.
+      summary: Get Tenant Language
+      tags:
+      - Tenant Configuration
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  preferred_language:
+                    type: string
+                  tenant_name:
+                    type: string
+                  schema_name:
+                    type: string
+          description: Tenant language information
+        '403':
+          description: Not available from main domain
+  /api/tenant/language/update/:
+    put:
+      operationId: tenant_language_update_update
+      description: |-
+        Update the preferred language for the current tenant
+        Only authenticated users can change the language
+      tags:
+      - tenant
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: tenant_language_update_partial_update
+      description: |-
+        Update the preferred language for the current tenant
+        Only authenticated users can change the language
+      tags:
+      - tenant
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/tenants/:
+    get:
+      operationId: tenants_list
+      description: |-
+        ViewSet for managing tenants.
+        Only accessible from the public schema.
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - tenants
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTenantList'
+          description: ''
+    post:
+      operationId: tenants_create
+      description: |-
+        ViewSet for managing tenants.
+        Only accessible from the public schema.
+      tags:
+      - tenants
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TenantCreate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TenantCreate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TenantCreate'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantCreate'
+          description: ''
+  /api/tenants/{id}/:
+    get:
+      operationId: tenants_retrieve
+      description: |-
+        ViewSet for managing tenants.
+        Only accessible from the public schema.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this tenant.
+        required: true
+      tags:
+      - tenants
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenant'
+          description: ''
+    put:
+      operationId: tenants_update
+      description: |-
+        ViewSet for managing tenants.
+        Only accessible from the public schema.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this tenant.
+        required: true
+      tags:
+      - tenants
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Tenant'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Tenant'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Tenant'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenant'
+          description: ''
+    patch:
+      operationId: tenants_partial_update
+      description: |-
+        ViewSet for managing tenants.
+        Only accessible from the public schema.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this tenant.
+        required: true
+      tags:
+      - tenants
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedTenant'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedTenant'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedTenant'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenant'
+          description: ''
+    delete:
+      operationId: tenants_destroy
+      description: |-
+        ViewSet for managing tenants.
+        Only accessible from the public schema.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this tenant.
+        required: true
+      tags:
+      - tenants
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/tenants/{id}/create_admin_user/:
+    post:
+      operationId: tenants_create_admin_user_create
+      description: Create an admin user for a specific tenant
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this tenant.
+        required: true
+      tags:
+      - tenants
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Tenant'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Tenant'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Tenant'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenant'
+          description: ''
+  /api/tenants/{id}/users/:
+    get:
+      operationId: tenants_users_retrieve
+      description: Get all users for a specific tenant
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this tenant.
+        required: true
+      tags:
+      - tenants
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenant'
+          description: ''
+  /api/tenants/list/:
+    get:
+      operationId: tenants_list_retrieve
+      description: Get list of all active tenants for frontend routing
+      tags:
+      - tenants
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/tickets/:
+    get:
+      operationId: tickets_list
+      description: ViewSet for managing tickets with filtering and permissions.
+      parameters:
+      - in: query
+        name: assigned_to
+        schema:
+          type: integer
+      - in: query
+        name: column
+        schema:
+          type: integer
+      - in: query
+        name: created_by
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - in: query
+        name: priority
+        schema:
+          type: string
+          enum:
+          - critical
+          - high
+          - low
+          - medium
+        description: |-
+          * `low` - Low
+          * `medium` - Medium
+          * `high` - High
+          * `critical` - Critical
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: query
+        name: status
+        schema:
+          type: string
+          enum:
+          - closed
+          - in_progress
+          - open
+          - resolved
+        description: |-
+          * `open` - Open
+          * `in_progress` - In Progress
+          * `resolved` - Resolved
+          * `closed` - Closed
+      - in: query
+        name: tags
+        schema:
+          type: array
+          items:
+            type: integer
+        explode: true
+        style: form
+      tags:
+      - tickets
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTicketListList'
+          description: ''
+    post:
+      operationId: tickets_create
+      description: ViewSet for managing tickets with filtering and permissions.
+      tags:
+      - tickets
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Ticket'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Ticket'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Ticket'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ticket'
+          description: ''
+  /api/tickets/{id}/:
+    get:
+      operationId: tickets_retrieve
+      description: ViewSet for managing tickets with filtering and permissions.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this ticket.
+        required: true
+      tags:
+      - tickets
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ticket'
+          description: ''
+    put:
+      operationId: tickets_update
+      description: ViewSet for managing tickets with filtering and permissions.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this ticket.
+        required: true
+      tags:
+      - tickets
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Ticket'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Ticket'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Ticket'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ticket'
+          description: ''
+    patch:
+      operationId: tickets_partial_update
+      description: ViewSet for managing tickets with filtering and permissions.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this ticket.
+        required: true
+      tags:
+      - tickets
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedTicket'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedTicket'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedTicket'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ticket'
+          description: ''
+    delete:
+      operationId: tickets_destroy
+      description: ViewSet for managing tickets with filtering and permissions.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this ticket.
+        required: true
+      tags:
+      - tickets
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/tickets/{id}/add_comment/:
+    post:
+      operationId: tickets_add_comment_create
+      description: Add a comment to a ticket.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this ticket.
+        required: true
+      tags:
+      - tickets
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Ticket'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Ticket'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Ticket'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ticket'
+          description: ''
+  /api/tickets/{id}/assign/:
+    patch:
+      operationId: tickets_assign_partial_update
+      description: Assign a ticket to a user (staff only).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this ticket.
+        required: true
+      tags:
+      - tickets
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedTicket'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedTicket'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedTicket'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ticket'
+          description: ''
+  /api/tickets/{id}/comments/:
+    get:
+      operationId: tickets_comments_retrieve
+      description: Get all comments for a ticket.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this ticket.
+        required: true
+      tags:
+      - tickets
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ticket'
+          description: ''
+  /api/tickets/{id}/move_to_column/:
+    patch:
+      operationId: move_ticket_to_column
+      description: Move a ticket to a different column in the Kanban board and optionally
+        set its position.
+      summary: Move Ticket to Column
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this ticket.
+        required: true
+      tags:
+      - Kanban Board
+      requestBody:
+        content:
+          type:
+            schema:
+              type: object
+              additionalProperties: {}
+              description: Unspecified request body
+          properties:
+            schema:
+              column_id:
+                type: integer
+              position_in_column:
+                type: integer
+                nullable: true
+          required:
+            schema:
+              type: object
+              additionalProperties: {}
+              description: Unspecified request body
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ticket'
+          description: ''
+        '400':
+          description: Invalid column or missing column_id
+  /api/tickets/{id}/reorder_in_column/:
+    patch:
+      operationId: tickets_reorder_in_column_partial_update
+      description: Reorder a ticket within its current column.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this ticket.
+        required: true
+      tags:
+      - tickets
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedTicket'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedTicket'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedTicket'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ticket'
+          description: ''
+  /api/tickets/assigned_to_me/:
+    get:
+      operationId: tickets_assigned_to_me_retrieve
+      description: Get tickets assigned to the current user.
+      tags:
+      - tickets
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ticket'
+          description: ''
+  /api/tickets/my_tickets/:
+    get:
+      operationId: tickets_my_tickets_retrieve
+      description: Get tickets created by the current user.
+      tags:
+      - tickets
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ticket'
+          description: ''
+  /api/users/:
+    get:
+      operationId: users_list
+      description: Enhanced ViewSet for comprehensive tenant user management
+      parameters:
+      - in: query
+        name: department
+        schema:
+          type: string
+      - in: query
+        name: is_active
+        schema:
+          type: boolean
+      - in: query
+        name: is_staff
+        schema:
+          type: boolean
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - in: query
+        name: role
+        schema:
+          type: string
+          enum:
+          - admin
+          - agent
+          - manager
+          - viewer
+        description: |-
+          * `admin` - Administrator
+          * `manager` - Manager
+          * `agent` - Agent
+          * `viewer` - Viewer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: query
+        name: status
+        schema:
+          type: string
+          enum:
+          - active
+          - inactive
+          - pending
+          - suspended
+        description: |-
+          * `active` - Active
+          * `inactive` - Inactive
+          * `suspended` - Suspended
+          * `pending` - Pending Activation
+      tags:
+      - users
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedUserList'
+          description: ''
+    post:
+      operationId: users_create
+      description: Enhanced ViewSet for comprehensive tenant user management
+      tags:
+      - users
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserCreate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/UserCreate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/UserCreate'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserCreate'
+          description: ''
+  /api/users/{id}/:
+    get:
+      operationId: users_retrieve
+      description: Enhanced ViewSet for comprehensive tenant user management
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this User.
+        required: true
+      tags:
+      - users
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+          description: ''
+    put:
+      operationId: users_update
+      description: Enhanced ViewSet for comprehensive tenant user management
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this User.
+        required: true
+      tags:
+      - users
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserUpdate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/UserUpdate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/UserUpdate'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserUpdate'
+          description: ''
+    patch:
+      operationId: users_partial_update
+      description: Enhanced ViewSet for comprehensive tenant user management
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this User.
+        required: true
+      tags:
+      - users
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedUserUpdate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedUserUpdate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedUserUpdate'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserUpdate'
+          description: ''
+    delete:
+      operationId: users_destroy
+      description: Enhanced ViewSet for comprehensive tenant user management
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this User.
+        required: true
+      tags:
+      - users
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/users/{id}/change_status/:
+    patch:
+      operationId: users_change_status
+      description: Change user status (active, inactive, suspended, pending)
+      summary: Change User Status
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this User.
+        required: true
+      tags:
+      - users
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedUser'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedUser'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedUser'
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+          description: ''
+  /api/users/{id}/reset_password/:
+    post:
+      operationId: users_reset_password
+      description: Reset password for a user (admin only) and generate temporary password
+      summary: Reset User Password
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this User.
+        required: true
+      tags:
+      - users
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/User'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/User'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/User'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+          description: ''
+  /api/users/bulk_action/:
+    post:
+      operationId: users_bulk_action
+      description: Perform bulk actions on multiple users (activate, deactivate, delete,
+        change role, etc.)
+      summary: Bulk User Actions
+      tags:
+      - users
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkUserAction'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/BulkUserAction'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/BulkUserAction'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkUserAction'
+          description: ''
+  /api/users/change_password/:
+    post:
+      operationId: users_change_password
+      description: Change password for current user with old password verification
+      summary: Change Password
+      tags:
+      - users
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordChange'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PasswordChange'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PasswordChange'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PasswordChange'
+          description: ''
+  /api/users/login/:
+    post:
+      operationId: users_login_create
+      description: Enhanced login endpoint
+      tags:
+      - users
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/User'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/User'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/User'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+          description: ''
+  /api/users/logout/:
+    post:
+      operationId: users_logout_create
+      description: Enhanced logout endpoint
+      tags:
+      - users
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/User'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/User'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/User'
+        required: true
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+          description: ''
+  /api/users/me/:
+    get:
+      operationId: users_me
+      description: Get current user profile information with permissions
+      summary: Get Current User Profile
+      tags:
+      - users
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+          description: ''
+  /api/users/statistics/:
+    get:
+      operationId: users_statistics
+      description: Get statistics about users in the tenant
+      summary: Get User Statistics
+      tags:
+      - users
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+          description: ''
+  /api/webhooks/recording/:
+    post:
+      operationId: webhooks_recording_create
+      description: Webhook endpoint for receiving call recording updates
+      summary: Call Recording Webhook
+      tags:
+      - webhooks
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                call_id:
+                  type: string
+                recording_id:
+                  type: string
+                status:
+                  type: string
+                  enum:
+                  - started
+                  - completed
+                  - failed
+                file_url:
+                  type: string
+                file_size:
+                  type: integer
+                duration:
+                  type: integer
+                  description: Duration in seconds
+                format:
+                  type: string
+              required:
+              - call_id
+              - status
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+                description: Unspecified response body
+          description: ''
+  /api/webhooks/sip/:
+    post:
+      operationId: webhooks_sip_create
+      description: Webhook endpoint for receiving call events from SIP server
+      summary: SIP Call Event Webhook
+      tags:
+      - webhooks
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                event_type:
+                  type: string
+                  enum:
+                  - call_initiated
+                  - call_ringing
+                  - call_answered
+                  - call_ended
+                  - call_failed
+                call_id:
+                  type: string
+                sip_call_id:
+                  type: string
+                caller_number:
+                  type: string
+                recipient_number:
+                  type: string
+                timestamp:
+                  type: string
+                  format: date-time
+                metadata:
+                  type: object
+              required:
+              - event_type
+              - sip_call_id
+      security:
+      - cookieAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+                description: Unspecified response body
+          description: ''
+components:
+  schemas:
+    ActionEnum:
+      enum:
+      - activate
+      - deactivate
+      - delete
+      - change_role
+      - change_status
+      type: string
+      description: |-
+        * `activate` - Activate Users
+        * `deactivate` - Deactivate Users
+        * `delete` - Delete Users
+        * `change_role` - Change Role
+        * `change_status` - Change Status
+    BulkUserAction:
+      type: object
+      description: Serializer for bulk user actions
+      properties:
+        user_ids:
+          type: array
+          items:
+            type: integer
+          minItems: 1
+        action:
+          $ref: '#/components/schemas/ActionEnum'
+        role:
+          $ref: '#/components/schemas/RoleEnum'
+        status:
+          $ref: '#/components/schemas/Status336Enum'
+      required:
+      - action
+      - user_ids
+    CallEvent:
+      type: object
+      description: Serializer for call events
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        event_type:
+          $ref: '#/components/schemas/EventTypeEnum'
+        timestamp:
+          type: string
+          format: date-time
+          readOnly: true
+        metadata:
+          description: Additional event data
+        user:
+          type: integer
+          nullable: true
+          description: User who triggered this event
+        user_name:
+          type: string
+          readOnly: true
+      required:
+      - event_type
+      - id
+      - timestamp
+      - user_name
+    CallInitiate:
+      type: object
+      description: Serializer for initiating outbound calls
+      properties:
+        recipient_number:
+          type: string
+          maxLength: 20
+        call_type:
+          allOf:
+          - $ref: '#/components/schemas/CallTypeEnum'
+          default: voice
+        sip_configuration:
+          type: integer
+      required:
+      - recipient_number
+    CallLog:
+      type: object
+      description: Enhanced serializer for CallLog model with SIP support
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        call_id:
+          type: string
+          format: uuid
+          readOnly: true
+        caller_number:
+          type: string
+          maxLength: 20
+        recipient_number:
+          type: string
+          maxLength: 20
+        direction:
+          $ref: '#/components/schemas/DirectionEnum'
+        call_type:
+          $ref: '#/components/schemas/CallTypeEnum'
+        started_at:
+          type: string
+          format: date-time
+          readOnly: true
+        answered_at:
+          type: string
+          format: date-time
+          nullable: true
+        ended_at:
+          type: string
+          format: date-time
+          nullable: true
+        duration:
+          type: string
+          nullable: true
+        duration_display:
+          type: string
+          readOnly: true
+        status:
+          $ref: '#/components/schemas/StatusB9eEnum'
+        notes:
+          type: string
+        sip_call_id:
+          type: string
+          description: SIP Call-ID header
+          maxLength: 255
+        client:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: Associated client (auto-detected by phone number)
+        client_name:
+          type: string
+          readOnly: true
+        handled_by:
+          type: integer
+          nullable: true
+        handled_by_name:
+          type: string
+          readOnly: true
+        sip_configuration:
+          type: integer
+          nullable: true
+          description: SIP configuration used for this call
+        sip_config_name:
+          type: string
+          readOnly: true
+        recording_url:
+          type: string
+          format: uri
+          description: Call recording file URL
+          maxLength: 200
+        call_quality_score:
+          type: number
+          format: double
+          nullable: true
+          description: Call quality (0-5)
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - call_id
+      - caller_number
+      - client
+      - client_name
+      - created_at
+      - duration_display
+      - handled_by_name
+      - id
+      - recipient_number
+      - sip_config_name
+      - started_at
+      - updated_at
+    CallLogCreate:
+      type: object
+      description: Serializer for creating new call logs
+      properties:
+        caller_number:
+          type: string
+          maxLength: 20
+        recipient_number:
+          type: string
+          maxLength: 20
+        direction:
+          $ref: '#/components/schemas/DirectionEnum'
+        call_type:
+          $ref: '#/components/schemas/CallTypeEnum'
+        sip_call_id:
+          type: string
+          description: SIP Call-ID header
+          maxLength: 255
+        sip_configuration:
+          type: integer
+          nullable: true
+          description: SIP configuration used for this call
+        notes:
+          type: string
+      required:
+      - caller_number
+      - recipient_number
+    CallLogDetail:
+      type: object
+      description: Detailed serializer for CallLog with events and recording
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        call_id:
+          type: string
+          format: uuid
+          readOnly: true
+        caller_number:
+          type: string
+          maxLength: 20
+        recipient_number:
+          type: string
+          maxLength: 20
+        direction:
+          $ref: '#/components/schemas/DirectionEnum'
+        call_type:
+          $ref: '#/components/schemas/CallTypeEnum'
+        started_at:
+          type: string
+          format: date-time
+          readOnly: true
+        answered_at:
+          type: string
+          format: date-time
+          nullable: true
+        ended_at:
+          type: string
+          format: date-time
+          nullable: true
+        duration:
+          type: string
+          nullable: true
+        duration_display:
+          type: string
+          readOnly: true
+        status:
+          $ref: '#/components/schemas/StatusB9eEnum'
+        notes:
+          type: string
+        sip_call_id:
+          type: string
+          description: SIP Call-ID header
+          maxLength: 255
+        client:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: Associated client (auto-detected by phone number)
+        client_name:
+          type: string
+          readOnly: true
+        handled_by:
+          type: integer
+          nullable: true
+        handled_by_name:
+          type: string
+          readOnly: true
+        sip_configuration:
+          type: integer
+          nullable: true
+          description: SIP configuration used for this call
+        sip_config_name:
+          type: string
+          readOnly: true
+        recording_url:
+          type: string
+          format: uri
+          description: Call recording file URL
+          maxLength: 200
+        call_quality_score:
+          type: number
+          format: double
+          nullable: true
+          description: Call quality (0-5)
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/CallEvent'
+          readOnly: true
+        recording:
+          allOf:
+          - $ref: '#/components/schemas/CallRecording'
+          readOnly: true
+      required:
+      - call_id
+      - caller_number
+      - client
+      - client_name
+      - created_at
+      - duration_display
+      - events
+      - handled_by_name
+      - id
+      - recipient_number
+      - recording
+      - sip_config_name
+      - started_at
+      - updated_at
+    CallRecording:
+      type: object
+      description: Serializer for call recordings
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        recording_id:
+          type: string
+          format: uuid
+          readOnly: true
+        file_path:
+          type: string
+          description: Local file path
+          maxLength: 500
+        file_url:
+          type: string
+          format: uri
+          description: External URL for recording
+          maxLength: 200
+        file_size:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          nullable: true
+          description: File size in bytes
+        file_size_display:
+          type: string
+          readOnly: true
+        duration:
+          type: string
+          nullable: true
+          description: Recording duration
+        duration_display:
+          type: string
+          readOnly: true
+        format:
+          type: string
+          description: Audio format
+          maxLength: 10
+        status:
+          $ref: '#/components/schemas/CallRecordingStatusEnum'
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        transcript:
+          type: string
+          description: Call transcript
+        transcript_confidence:
+          type: number
+          format: double
+          nullable: true
+          description: Transcript confidence (0-1)
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - duration_display
+      - file_size_display
+      - id
+      - recording_id
+      - updated_at
+    CallRecordingStatusEnum:
+      enum:
+      - pending
+      - recording
+      - processing
+      - completed
+      - failed
+      - deleted
+      type: string
+      description: |-
+        * `pending` - Pending
+        * `recording` - Recording
+        * `processing` - Processing
+        * `completed` - Completed
+        * `failed` - Failed
+        * `deleted` - Deleted
+    CallStatusUpdate:
+      type: object
+      description: Serializer for updating call status
+      properties:
+        status:
+          $ref: '#/components/schemas/StatusB9eEnum'
+        notes:
+          type: string
+        call_quality_score:
+          type: number
+          format: double
+          maximum: 5
+          minimum: 0
+        recording_url:
+          type: string
+          format: uri
+      required:
+      - status
+    CallTypeEnum:
+      enum:
+      - voice
+      - video
+      - conference
+      type: string
+      description: |-
+        * `voice` - Voice Call
+        * `video` - Video Call
+        * `conference` - Conference Call
+    Client:
+      type: object
+      description: Serializer for Client model
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 100
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        phone:
+          type: string
+          maxLength: 20
+        company:
+          type: string
+          maxLength: 100
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        is_active:
+          type: boolean
+      required:
+      - created_at
+      - email
+      - id
+      - name
+      - updated_at
+    DeploymentStatusEnum:
+      enum:
+      - pending
+      - deploying
+      - deployed
+      - failed
+      type: string
+      description: |-
+        * `pending` - Pending
+        * `deploying` - Deploying
+        * `deployed` - Deployed
+        * `failed` - Failed
+    DirectionEnum:
+      enum:
+      - inbound
+      - outbound
+      type: string
+      description: |-
+        * `inbound` - Inbound
+        * `outbound` - Outbound
+    EventTypeEnum:
+      enum:
+      - initiated
+      - ringing
+      - answered
+      - hold
+      - unhold
+      - transfer_initiated
+      - transfer_completed
+      - recording_started
+      - recording_stopped
+      - muted
+      - unmuted
+      - dtmf
+      - quality_change
+      - ended
+      - failed
+      - error
+      type: string
+      description: |-
+        * `initiated` - Call Initiated
+        * `ringing` - Ringing Started
+        * `answered` - Call Answered
+        * `hold` - Call On Hold
+        * `unhold` - Call Resumed
+        * `transfer_initiated` - Transfer Initiated
+        * `transfer_completed` - Transfer Completed
+        * `recording_started` - Recording Started
+        * `recording_stopped` - Recording Stopped
+        * `muted` - Call Muted
+        * `unmuted` - Call Unmuted
+        * `dtmf` - DTMF Pressed
+        * `quality_change` - Call Quality Changed
+        * `ended` - Call Ended
+        * `failed` - Call Failed
+        * `error` - Error Occurred
+    KanbanBoard:
+      type: object
+      description: Serializer for Kanban board data with columns and tickets.
+      properties:
+        columns:
+          type: array
+          items:
+            $ref: '#/components/schemas/TicketColumn'
+          readOnly: true
+        tickets_by_column:
+          type: string
+          readOnly: true
+      required:
+      - columns
+      - tickets_by_column
+    PaginatedCallLogList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/CallLog'
+    PaginatedClientList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Client'
+    PaginatedSipConfigurationListList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/SipConfigurationList'
+    PaginatedTagList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Tag'
+    PaginatedTenantGroupList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/TenantGroup'
+    PaginatedTenantList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Tenant'
+    PaginatedTicketColumnList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/TicketColumn'
+    PaginatedTicketCommentList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/TicketComment'
+    PaginatedTicketListList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/TicketList'
+    PaginatedUserList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/User'
+    PasswordChange:
+      type: object
+      description: Serializer for password change
+      properties:
+        old_password:
+          type: string
+        new_password:
+          type: string
+        new_password_confirm:
+          type: string
+      required:
+      - new_password
+      - new_password_confirm
+      - old_password
+    PatchedCallLog:
+      type: object
+      description: Enhanced serializer for CallLog model with SIP support
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        call_id:
+          type: string
+          format: uuid
+          readOnly: true
+        caller_number:
+          type: string
+          maxLength: 20
+        recipient_number:
+          type: string
+          maxLength: 20
+        direction:
+          $ref: '#/components/schemas/DirectionEnum'
+        call_type:
+          $ref: '#/components/schemas/CallTypeEnum'
+        started_at:
+          type: string
+          format: date-time
+          readOnly: true
+        answered_at:
+          type: string
+          format: date-time
+          nullable: true
+        ended_at:
+          type: string
+          format: date-time
+          nullable: true
+        duration:
+          type: string
+          nullable: true
+        duration_display:
+          type: string
+          readOnly: true
+        status:
+          $ref: '#/components/schemas/StatusB9eEnum'
+        notes:
+          type: string
+        sip_call_id:
+          type: string
+          description: SIP Call-ID header
+          maxLength: 255
+        client:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: Associated client (auto-detected by phone number)
+        client_name:
+          type: string
+          readOnly: true
+        handled_by:
+          type: integer
+          nullable: true
+        handled_by_name:
+          type: string
+          readOnly: true
+        sip_configuration:
+          type: integer
+          nullable: true
+          description: SIP configuration used for this call
+        sip_config_name:
+          type: string
+          readOnly: true
+        recording_url:
+          type: string
+          format: uri
+          description: Call recording file URL
+          maxLength: 200
+        call_quality_score:
+          type: number
+          format: double
+          nullable: true
+          description: Call quality (0-5)
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+    PatchedCallStatusUpdate:
+      type: object
+      description: Serializer for updating call status
+      properties:
+        status:
+          $ref: '#/components/schemas/StatusB9eEnum'
+        notes:
+          type: string
+        call_quality_score:
+          type: number
+          format: double
+          maximum: 5
+          minimum: 0
+        recording_url:
+          type: string
+          format: uri
+    PatchedClient:
+      type: object
+      description: Serializer for Client model
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 100
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        phone:
+          type: string
+          maxLength: 20
+        company:
+          type: string
+          maxLength: 100
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        is_active:
+          type: boolean
+    PatchedSipConfiguration:
+      type: object
+      description: Serializer for SIP configuration management
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          description: Configuration name
+          maxLength: 100
+        sip_server:
+          type: string
+          description: SIP server hostname/IP
+          maxLength: 255
+        sip_port:
+          type: integer
+          maximum: 2147483647
+          minimum: -2147483648
+          description: SIP server port
+        username:
+          type: string
+          description: SIP username
+          maxLength: 100
+        realm:
+          type: string
+          description: SIP realm/domain
+          maxLength: 255
+        proxy:
+          type: string
+          description: Outbound proxy
+          maxLength: 255
+        stun_server:
+          type: string
+          description: STUN server for NAT traversal
+          maxLength: 255
+        turn_server:
+          type: string
+          description: TURN server
+          maxLength: 255
+        turn_username:
+          type: string
+          maxLength: 100
+        is_active:
+          type: boolean
+        is_default:
+          type: boolean
+        max_concurrent_calls:
+          type: integer
+          maximum: 2147483647
+          minimum: -2147483648
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+    PatchedTag:
+      type: object
+      description: Serializer for Tag model.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 50
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+    PatchedTenant:
+      type: object
+      description: Serializer for Tenant model
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        schema_name:
+          type: string
+          readOnly: true
+        domain_url:
+          type: string
+          maxLength: 128
+        name:
+          type: string
+          maxLength: 100
+        description:
+          type: string
+        admin_email:
+          type: string
+          format: email
+          maxLength: 254
+        admin_name:
+          type: string
+          maxLength: 100
+        plan:
+          $ref: '#/components/schemas/PlanEnum'
+        max_users:
+          type: integer
+          maximum: 2147483647
+          minimum: -2147483648
+        max_storage:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+        preferred_language:
+          allOf:
+          - $ref: '#/components/schemas/PreferredLanguageEnum'
+          description: |-
+            Preferred language for the frontend dashboard
+
+            * `en` - English
+            * `ru` - Russian
+            * `ka` - Georgian
+        frontend_url:
+          type: string
+          format: uri
+          nullable: true
+          description: URL of the deployed frontend
+          maxLength: 200
+        deployment_status:
+          allOf:
+          - $ref: '#/components/schemas/DeploymentStatusEnum'
+          description: |-
+            Status of the frontend deployment
+
+            * `pending` - Pending
+            * `deploying` - Deploying
+            * `deployed` - Deployed
+            * `failed` - Failed
+        is_active:
+          type: boolean
+        created_on:
+          type: string
+          format: date-time
+          readOnly: true
+    PatchedTenantGroupUpdate:
+      type: object
+      description: Serializer for updating TenantGroups
+      properties:
+        name:
+          type: string
+          maxLength: 150
+        description:
+          type: string
+        is_active:
+          type: boolean
+        can_view_all_tickets:
+          type: boolean
+          description: Members can view all tickets in the tenant
+        can_manage_users:
+          type: boolean
+          description: Members can manage user accounts
+        can_make_calls:
+          type: boolean
+          description: Members can make phone calls
+        can_manage_groups:
+          type: boolean
+          description: Members can manage groups
+        can_manage_settings:
+          type: boolean
+          description: Members can manage tenant settings
+        can_create_tickets:
+          type: boolean
+          description: Members can create new tickets
+        can_edit_own_tickets:
+          type: boolean
+          description: Members can edit their own tickets
+        can_edit_all_tickets:
+          type: boolean
+          description: Members can edit any ticket
+        can_delete_tickets:
+          type: boolean
+          description: Members can delete tickets
+        can_assign_tickets:
+          type: boolean
+          description: Members can assign tickets to others
+        can_view_reports:
+          type: boolean
+          description: Members can view analytics and reports
+        can_export_data:
+          type: boolean
+          description: Members can export data
+        can_manage_tags:
+          type: boolean
+          description: Members can manage ticket tags
+        can_manage_columns:
+          type: boolean
+          description: Members can manage kanban board columns
+    PatchedTicket:
+      type: object
+      description: Serializer for Ticket model.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        title:
+          type: string
+          maxLength: 255
+        description:
+          type: string
+        status:
+          $ref: '#/components/schemas/Status14bEnum'
+        priority:
+          $ref: '#/components/schemas/PriorityEnum'
+        column:
+          allOf:
+          - $ref: '#/components/schemas/TicketColumn'
+          readOnly: true
+        column_id:
+          type: integer
+          writeOnly: true
+          nullable: true
+        position_in_column:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          description: Position of the ticket within its column
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        created_by:
+          allOf:
+          - $ref: '#/components/schemas/UserMinimal'
+          readOnly: true
+        assigned_to:
+          allOf:
+          - $ref: '#/components/schemas/UserMinimal'
+          readOnly: true
+        assigned_to_id:
+          type: integer
+          writeOnly: true
+          nullable: true
+        tags:
+          type: array
+          items:
+            $ref: '#/components/schemas/Tag'
+          readOnly: true
+        tag_ids:
+          type: array
+          items:
+            type: integer
+          writeOnly: true
+        comments:
+          type: array
+          items:
+            $ref: '#/components/schemas/TicketComment'
+          readOnly: true
+        comments_count:
+          type: string
+          readOnly: true
+    PatchedTicketColumnUpdate:
+      type: object
+      description: Serializer for updating ticket columns.
+      properties:
+        name:
+          type: string
+          maxLength: 100
+        description:
+          type: string
+        color:
+          type: string
+          description: 'Hex color code for the column (e.g., #3B82F6)'
+          maxLength: 7
+        position:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          description: Position of the column in the board (lower numbers appear first)
+        is_default:
+          type: boolean
+          description: Whether this is the default column for new tickets
+        is_closed_status:
+          type: boolean
+          description: Whether tickets in this column are considered closed/completed
+    PatchedTicketComment:
+      type: object
+      description: Serializer for TicketComment model.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        ticket:
+          type: integer
+        user:
+          allOf:
+          - $ref: '#/components/schemas/UserMinimal'
+          readOnly: true
+        user_id:
+          type: integer
+          writeOnly: true
+        comment:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+    PatchedUser:
+      type: object
+      description: Enhanced serializer for User model with full profile information
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        first_name:
+          type: string
+          maxLength: 30
+        last_name:
+          type: string
+          maxLength: 30
+        full_name:
+          type: string
+          readOnly: true
+        role:
+          $ref: '#/components/schemas/RoleEnum'
+        status:
+          $ref: '#/components/schemas/Status336Enum'
+        department:
+          type: string
+          maxLength: 100
+        phone_number:
+          type: string
+          maxLength: 20
+        job_title:
+          type: string
+          maxLength: 100
+        can_view_all_tickets:
+          type: boolean
+        can_manage_users:
+          type: boolean
+        can_make_calls:
+          type: boolean
+        can_manage_groups:
+          type: boolean
+        can_manage_settings:
+          type: boolean
+        can_create_tickets:
+          type: boolean
+        can_edit_own_tickets:
+          type: boolean
+        can_edit_all_tickets:
+          type: boolean
+        can_delete_tickets:
+          type: boolean
+        can_assign_tickets:
+          type: boolean
+        can_view_reports:
+          type: boolean
+        can_export_data:
+          type: boolean
+        can_manage_tags:
+          type: boolean
+        can_manage_columns:
+          type: boolean
+        is_active:
+          type: boolean
+        is_staff:
+          type: boolean
+        date_joined:
+          type: string
+          format: date-time
+          readOnly: true
+        last_login:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        invited_by:
+          type: integer
+          readOnly: true
+          nullable: true
+        invitation_sent_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        permissions:
+          type: string
+          readOnly: true
+        group_permissions:
+          type: string
+          readOnly: true
+        all_permissions:
+          type: string
+          readOnly: true
+        tenant_groups:
+          type: array
+          items:
+            $ref: '#/components/schemas/TenantGroup'
+          readOnly: true
+    PatchedUserUpdate:
+      type: object
+      description: Serializer for updating user information
+      properties:
+        first_name:
+          type: string
+          maxLength: 30
+        last_name:
+          type: string
+          maxLength: 30
+        role:
+          $ref: '#/components/schemas/RoleEnum'
+        status:
+          $ref: '#/components/schemas/Status336Enum'
+        department:
+          type: string
+          maxLength: 100
+        phone_number:
+          type: string
+          maxLength: 20
+        job_title:
+          type: string
+          maxLength: 100
+        can_view_all_tickets:
+          type: boolean
+        can_manage_users:
+          type: boolean
+        can_make_calls:
+          type: boolean
+        can_manage_groups:
+          type: boolean
+        can_manage_settings:
+          type: boolean
+        can_create_tickets:
+          type: boolean
+        can_edit_own_tickets:
+          type: boolean
+        can_edit_all_tickets:
+          type: boolean
+        can_delete_tickets:
+          type: boolean
+        can_assign_tickets:
+          type: boolean
+        can_view_reports:
+          type: boolean
+        can_export_data:
+          type: boolean
+        can_manage_tags:
+          type: boolean
+        can_manage_columns:
+          type: boolean
+        is_active:
+          type: boolean
+        tenant_groups:
+          type: array
+          items:
+            type: integer
+    PlanEnum:
+      enum:
+      - basic
+      - premium
+      - enterprise
+      type: string
+      description: |-
+        * `basic` - Basic
+        * `premium` - Premium
+        * `enterprise` - Enterprise
+    PreferredLanguageEnum:
+      enum:
+      - en
+      - ru
+      - ka
+      type: string
+      description: |-
+        * `en` - English
+        * `ru` - Russian
+        * `ka` - Georgian
+    PriorityEnum:
+      enum:
+      - low
+      - medium
+      - high
+      - critical
+      type: string
+      description: |-
+        * `low` - Low
+        * `medium` - Medium
+        * `high` - High
+        * `critical` - Critical
+    RoleEnum:
+      enum:
+      - admin
+      - manager
+      - agent
+      - viewer
+      type: string
+      description: |-
+        * `admin` - Administrator
+        * `manager` - Manager
+        * `agent` - Agent
+        * `viewer` - Viewer
+    SipConfiguration:
+      type: object
+      description: Serializer for SIP configuration management
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          description: Configuration name
+          maxLength: 100
+        sip_server:
+          type: string
+          description: SIP server hostname/IP
+          maxLength: 255
+        sip_port:
+          type: integer
+          maximum: 2147483647
+          minimum: -2147483648
+          description: SIP server port
+        username:
+          type: string
+          description: SIP username
+          maxLength: 100
+        realm:
+          type: string
+          description: SIP realm/domain
+          maxLength: 255
+        proxy:
+          type: string
+          description: Outbound proxy
+          maxLength: 255
+        stun_server:
+          type: string
+          description: STUN server for NAT traversal
+          maxLength: 255
+        turn_server:
+          type: string
+          description: TURN server
+          maxLength: 255
+        turn_username:
+          type: string
+          maxLength: 100
+        is_active:
+          type: boolean
+        is_default:
+          type: boolean
+        max_concurrent_calls:
+          type: integer
+          maximum: 2147483647
+          minimum: -2147483648
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - id
+      - name
+      - sip_server
+      - updated_at
+      - username
+    SipConfigurationDetail:
+      type: object
+      description: Detailed serializer including sensitive fields for configuration
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          description: Configuration name
+          maxLength: 100
+        sip_server:
+          type: string
+          description: SIP server hostname/IP
+          maxLength: 255
+        sip_port:
+          type: integer
+          maximum: 2147483647
+          minimum: -2147483648
+          description: SIP server port
+        username:
+          type: string
+          description: SIP username
+          maxLength: 100
+        password:
+          type: string
+          description: SIP password
+          maxLength: 255
+        realm:
+          type: string
+          description: SIP realm/domain
+          maxLength: 255
+        proxy:
+          type: string
+          description: Outbound proxy
+          maxLength: 255
+        stun_server:
+          type: string
+          description: STUN server for NAT traversal
+          maxLength: 255
+        turn_server:
+          type: string
+          description: TURN server
+          maxLength: 255
+        turn_username:
+          type: string
+          maxLength: 100
+        turn_password:
+          type: string
+          maxLength: 255
+        is_active:
+          type: boolean
+        is_default:
+          type: boolean
+        max_concurrent_calls:
+          type: integer
+          maximum: 2147483647
+          minimum: -2147483648
+      required:
+      - id
+      - name
+      - password
+      - sip_server
+      - username
+    SipConfigurationList:
+      type: object
+      description: Simplified serializer for listing SIP configurations
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          description: Configuration name
+          maxLength: 100
+        sip_server:
+          type: string
+          description: SIP server hostname/IP
+          maxLength: 255
+        is_active:
+          type: boolean
+        is_default:
+          type: boolean
+      required:
+      - id
+      - name
+      - sip_server
+    Status14bEnum:
+      enum:
+      - open
+      - in_progress
+      - resolved
+      - closed
+      type: string
+      description: |-
+        * `open` - Open
+        * `in_progress` - In Progress
+        * `resolved` - Resolved
+        * `closed` - Closed
+    Status336Enum:
+      enum:
+      - active
+      - inactive
+      - suspended
+      - pending
+      type: string
+      description: |-
+        * `active` - Active
+        * `inactive` - Inactive
+        * `suspended` - Suspended
+        * `pending` - Pending Activation
+    StatusB9eEnum:
+      enum:
+      - initiated
+      - ringing
+      - answered
+      - missed
+      - busy
+      - no_answer
+      - failed
+      - cancelled
+      - transferred
+      - ended
+      - recording
+      - on_hold
+      type: string
+      description: |-
+        * `initiated` - Initiated
+        * `ringing` - Ringing
+        * `answered` - Answered
+        * `missed` - Missed
+        * `busy` - Busy
+        * `no_answer` - No Answer
+        * `failed` - Failed
+        * `cancelled` - Cancelled
+        * `transferred` - Transferred
+        * `ended` - Ended
+        * `recording` - Recording
+        * `on_hold` - On Hold
+    Tag:
+      type: object
+      description: Serializer for Tag model.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 50
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - id
+      - name
+    Tenant:
+      type: object
+      description: Serializer for Tenant model
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        schema_name:
+          type: string
+          readOnly: true
+        domain_url:
+          type: string
+          maxLength: 128
+        name:
+          type: string
+          maxLength: 100
+        description:
+          type: string
+        admin_email:
+          type: string
+          format: email
+          maxLength: 254
+        admin_name:
+          type: string
+          maxLength: 100
+        plan:
+          $ref: '#/components/schemas/PlanEnum'
+        max_users:
+          type: integer
+          maximum: 2147483647
+          minimum: -2147483648
+        max_storage:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+        preferred_language:
+          allOf:
+          - $ref: '#/components/schemas/PreferredLanguageEnum'
+          description: |-
+            Preferred language for the frontend dashboard
+
+            * `en` - English
+            * `ru` - Russian
+            * `ka` - Georgian
+        frontend_url:
+          type: string
+          format: uri
+          nullable: true
+          description: URL of the deployed frontend
+          maxLength: 200
+        deployment_status:
+          allOf:
+          - $ref: '#/components/schemas/DeploymentStatusEnum'
+          description: |-
+            Status of the frontend deployment
+
+            * `pending` - Pending
+            * `deploying` - Deploying
+            * `deployed` - Deployed
+            * `failed` - Failed
+        is_active:
+          type: boolean
+        created_on:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - admin_email
+      - admin_name
+      - created_on
+      - domain_url
+      - id
+      - name
+      - schema_name
+    TenantCreate:
+      type: object
+      description: Serializer for creating new tenants
+      properties:
+        name:
+          type: string
+          maxLength: 100
+        description:
+          type: string
+        admin_email:
+          type: string
+          format: email
+          maxLength: 254
+        admin_name:
+          type: string
+          maxLength: 100
+        plan:
+          $ref: '#/components/schemas/PlanEnum'
+        max_users:
+          type: integer
+          maximum: 2147483647
+          minimum: -2147483648
+        max_storage:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+        preferred_language:
+          allOf:
+          - $ref: '#/components/schemas/PreferredLanguageEnum'
+          description: |-
+            Preferred language for the frontend dashboard
+
+            * `en` - English
+            * `ru` - Russian
+            * `ka` - Georgian
+        domain:
+          type: string
+          writeOnly: true
+          description: Subdomain for the tenant (e.g., 'acme' for acme.echodesk.ge)
+      required:
+      - admin_email
+      - admin_name
+      - domain
+      - name
+    TenantDashboardData:
+      type: object
+      description: Serializer for tenant dashboard data
+      properties:
+        tenant_info:
+          type: string
+          readOnly: true
+        user_info:
+          type: string
+          readOnly: true
+        statistics:
+          type: string
+          readOnly: true
+      required:
+      - statistics
+      - tenant_info
+      - user_info
+    TenantGroup:
+      type: object
+      description: Serializer for TenantGroup with all permissions
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 150
+        description:
+          type: string
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        members_count:
+          type: string
+          readOnly: true
+        permissions_list:
+          type: string
+          readOnly: true
+        can_view_all_tickets:
+          type: boolean
+          description: Members can view all tickets in the tenant
+        can_manage_users:
+          type: boolean
+          description: Members can manage user accounts
+        can_make_calls:
+          type: boolean
+          description: Members can make phone calls
+        can_manage_groups:
+          type: boolean
+          description: Members can manage groups
+        can_manage_settings:
+          type: boolean
+          description: Members can manage tenant settings
+        can_create_tickets:
+          type: boolean
+          description: Members can create new tickets
+        can_edit_own_tickets:
+          type: boolean
+          description: Members can edit their own tickets
+        can_edit_all_tickets:
+          type: boolean
+          description: Members can edit any ticket
+        can_delete_tickets:
+          type: boolean
+          description: Members can delete tickets
+        can_assign_tickets:
+          type: boolean
+          description: Members can assign tickets to others
+        can_view_reports:
+          type: boolean
+          description: Members can view analytics and reports
+        can_export_data:
+          type: boolean
+          description: Members can export data
+        can_manage_tags:
+          type: boolean
+          description: Members can manage ticket tags
+        can_manage_columns:
+          type: boolean
+          description: Members can manage kanban board columns
+      required:
+      - created_at
+      - id
+      - members_count
+      - name
+      - permissions_list
+      - updated_at
+    TenantGroupCreate:
+      type: object
+      description: Serializer for creating new TenantGroups
+      properties:
+        name:
+          type: string
+          maxLength: 150
+        description:
+          type: string
+        can_view_all_tickets:
+          type: boolean
+          description: Members can view all tickets in the tenant
+        can_manage_users:
+          type: boolean
+          description: Members can manage user accounts
+        can_make_calls:
+          type: boolean
+          description: Members can make phone calls
+        can_manage_groups:
+          type: boolean
+          description: Members can manage groups
+        can_manage_settings:
+          type: boolean
+          description: Members can manage tenant settings
+        can_create_tickets:
+          type: boolean
+          description: Members can create new tickets
+        can_edit_own_tickets:
+          type: boolean
+          description: Members can edit their own tickets
+        can_edit_all_tickets:
+          type: boolean
+          description: Members can edit any ticket
+        can_delete_tickets:
+          type: boolean
+          description: Members can delete tickets
+        can_assign_tickets:
+          type: boolean
+          description: Members can assign tickets to others
+        can_view_reports:
+          type: boolean
+          description: Members can view analytics and reports
+        can_export_data:
+          type: boolean
+          description: Members can export data
+        can_manage_tags:
+          type: boolean
+          description: Members can manage ticket tags
+        can_manage_columns:
+          type: boolean
+          description: Members can manage kanban board columns
+      required:
+      - name
+    TenantGroupUpdate:
+      type: object
+      description: Serializer for updating TenantGroups
+      properties:
+        name:
+          type: string
+          maxLength: 150
+        description:
+          type: string
+        is_active:
+          type: boolean
+        can_view_all_tickets:
+          type: boolean
+          description: Members can view all tickets in the tenant
+        can_manage_users:
+          type: boolean
+          description: Members can manage user accounts
+        can_make_calls:
+          type: boolean
+          description: Members can make phone calls
+        can_manage_groups:
+          type: boolean
+          description: Members can manage groups
+        can_manage_settings:
+          type: boolean
+          description: Members can manage tenant settings
+        can_create_tickets:
+          type: boolean
+          description: Members can create new tickets
+        can_edit_own_tickets:
+          type: boolean
+          description: Members can edit their own tickets
+        can_edit_all_tickets:
+          type: boolean
+          description: Members can edit any ticket
+        can_delete_tickets:
+          type: boolean
+          description: Members can delete tickets
+        can_assign_tickets:
+          type: boolean
+          description: Members can assign tickets to others
+        can_view_reports:
+          type: boolean
+          description: Members can view analytics and reports
+        can_export_data:
+          type: boolean
+          description: Members can export data
+        can_manage_tags:
+          type: boolean
+          description: Members can manage ticket tags
+        can_manage_columns:
+          type: boolean
+          description: Members can manage kanban board columns
+      required:
+      - name
+    TenantLogin:
+      type: object
+      description: Serializer for tenant-specific login
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          writeOnly: true
+      required:
+      - email
+      - password
+    TenantRegistration:
+      type: object
+      description: Public serializer for tenant registration with admin user creation
+      properties:
+        company_name:
+          type: string
+          description: Your company or organization name
+          maxLength: 100
+        domain:
+          type: string
+          description: Subdomain for your tenant (e.g., 'acme' for acme.echodesk.ge)
+          maxLength: 63
+        description:
+          type: string
+          description: Brief description of your organization
+          maxLength: 500
+        admin_email:
+          type: string
+          format: email
+          description: Email address for the admin user
+        admin_password:
+          type: string
+          writeOnly: true
+          description: Password for the admin user
+          minLength: 8
+        admin_first_name:
+          type: string
+          description: Admin's first name
+          maxLength: 30
+        admin_last_name:
+          type: string
+          description: Admin's last name
+          maxLength: 30
+        preferred_language:
+          allOf:
+          - $ref: '#/components/schemas/PreferredLanguageEnum'
+          default: en
+          description: |-
+            Preferred language for the frontend dashboard
+
+            * `en` - English
+            * `ru` - Russian
+            * `ka` - Georgian
+      required:
+      - admin_email
+      - admin_first_name
+      - admin_last_name
+      - admin_password
+      - company_name
+      - domain
+    Ticket:
+      type: object
+      description: Serializer for Ticket model.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        title:
+          type: string
+          maxLength: 255
+        description:
+          type: string
+        status:
+          $ref: '#/components/schemas/Status14bEnum'
+        priority:
+          $ref: '#/components/schemas/PriorityEnum'
+        column:
+          allOf:
+          - $ref: '#/components/schemas/TicketColumn'
+          readOnly: true
+        column_id:
+          type: integer
+          writeOnly: true
+          nullable: true
+        position_in_column:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          description: Position of the ticket within its column
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        created_by:
+          allOf:
+          - $ref: '#/components/schemas/UserMinimal'
+          readOnly: true
+        assigned_to:
+          allOf:
+          - $ref: '#/components/schemas/UserMinimal'
+          readOnly: true
+        assigned_to_id:
+          type: integer
+          writeOnly: true
+          nullable: true
+        tags:
+          type: array
+          items:
+            $ref: '#/components/schemas/Tag'
+          readOnly: true
+        tag_ids:
+          type: array
+          items:
+            type: integer
+          writeOnly: true
+        comments:
+          type: array
+          items:
+            $ref: '#/components/schemas/TicketComment'
+          readOnly: true
+        comments_count:
+          type: string
+          readOnly: true
+      required:
+      - assigned_to
+      - column
+      - comments
+      - comments_count
+      - created_at
+      - created_by
+      - description
+      - id
+      - tags
+      - title
+      - updated_at
+    TicketColumn:
+      type: object
+      description: Serializer for TicketColumn model.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 100
+        description:
+          type: string
+        color:
+          type: string
+          description: 'Hex color code for the column (e.g., #3B82F6)'
+          maxLength: 7
+        position:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          description: Position of the column in the board (lower numbers appear first)
+        is_default:
+          type: boolean
+          description: Whether this is the default column for new tickets
+        is_closed_status:
+          type: boolean
+          description: Whether tickets in this column are considered closed/completed
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        created_by:
+          type: string
+          readOnly: true
+        tickets_count:
+          type: string
+          readOnly: true
+      required:
+      - created_at
+      - created_by
+      - id
+      - name
+      - tickets_count
+      - updated_at
+    TicketColumnCreate:
+      type: object
+      description: Serializer for creating ticket columns.
+      properties:
+        name:
+          type: string
+          maxLength: 100
+        description:
+          type: string
+        color:
+          type: string
+          description: 'Hex color code for the column (e.g., #3B82F6)'
+          maxLength: 7
+        position:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          description: Position of the column in the board (lower numbers appear first)
+        is_default:
+          type: boolean
+          description: Whether this is the default column for new tickets
+        is_closed_status:
+          type: boolean
+          description: Whether tickets in this column are considered closed/completed
+      required:
+      - name
+    TicketColumnUpdate:
+      type: object
+      description: Serializer for updating ticket columns.
+      properties:
+        name:
+          type: string
+          maxLength: 100
+        description:
+          type: string
+        color:
+          type: string
+          description: 'Hex color code for the column (e.g., #3B82F6)'
+          maxLength: 7
+        position:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          description: Position of the column in the board (lower numbers appear first)
+        is_default:
+          type: boolean
+          description: Whether this is the default column for new tickets
+        is_closed_status:
+          type: boolean
+          description: Whether tickets in this column are considered closed/completed
+      required:
+      - name
+    TicketComment:
+      type: object
+      description: Serializer for TicketComment model.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        ticket:
+          type: integer
+        user:
+          allOf:
+          - $ref: '#/components/schemas/UserMinimal'
+          readOnly: true
+        user_id:
+          type: integer
+          writeOnly: true
+        comment:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - comment
+      - created_at
+      - id
+      - ticket
+      - updated_at
+      - user
+    TicketList:
+      type: object
+      description: Lightweight serializer for ticket lists.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        title:
+          type: string
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/Status14bEnum'
+          readOnly: true
+        priority:
+          allOf:
+          - $ref: '#/components/schemas/PriorityEnum'
+          readOnly: true
+        column:
+          allOf:
+          - $ref: '#/components/schemas/TicketColumn'
+          readOnly: true
+        position_in_column:
+          type: integer
+          readOnly: true
+          description: Position of the ticket within its column
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        created_by:
+          allOf:
+          - $ref: '#/components/schemas/UserMinimal'
+          readOnly: true
+        assigned_to:
+          allOf:
+          - $ref: '#/components/schemas/UserMinimal'
+          readOnly: true
+        tags:
+          type: array
+          items:
+            $ref: '#/components/schemas/Tag'
+          readOnly: true
+        comments_count:
+          type: string
+          readOnly: true
+      required:
+      - assigned_to
+      - column
+      - comments_count
+      - created_at
+      - created_by
+      - id
+      - position_in_column
+      - priority
+      - status
+      - tags
+      - title
+      - updated_at
+    User:
+      type: object
+      description: Enhanced serializer for User model with full profile information
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        first_name:
+          type: string
+          maxLength: 30
+        last_name:
+          type: string
+          maxLength: 30
+        full_name:
+          type: string
+          readOnly: true
+        role:
+          $ref: '#/components/schemas/RoleEnum'
+        status:
+          $ref: '#/components/schemas/Status336Enum'
+        department:
+          type: string
+          maxLength: 100
+        phone_number:
+          type: string
+          maxLength: 20
+        job_title:
+          type: string
+          maxLength: 100
+        can_view_all_tickets:
+          type: boolean
+        can_manage_users:
+          type: boolean
+        can_make_calls:
+          type: boolean
+        can_manage_groups:
+          type: boolean
+        can_manage_settings:
+          type: boolean
+        can_create_tickets:
+          type: boolean
+        can_edit_own_tickets:
+          type: boolean
+        can_edit_all_tickets:
+          type: boolean
+        can_delete_tickets:
+          type: boolean
+        can_assign_tickets:
+          type: boolean
+        can_view_reports:
+          type: boolean
+        can_export_data:
+          type: boolean
+        can_manage_tags:
+          type: boolean
+        can_manage_columns:
+          type: boolean
+        is_active:
+          type: boolean
+        is_staff:
+          type: boolean
+        date_joined:
+          type: string
+          format: date-time
+          readOnly: true
+        last_login:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        invited_by:
+          type: integer
+          readOnly: true
+          nullable: true
+        invitation_sent_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        permissions:
+          type: string
+          readOnly: true
+        group_permissions:
+          type: string
+          readOnly: true
+        all_permissions:
+          type: string
+          readOnly: true
+        tenant_groups:
+          type: array
+          items:
+            $ref: '#/components/schemas/TenantGroup'
+          readOnly: true
+      required:
+      - all_permissions
+      - date_joined
+      - email
+      - full_name
+      - group_permissions
+      - id
+      - invitation_sent_at
+      - invited_by
+      - last_login
+      - permissions
+      - tenant_groups
+    UserCreate:
+      type: object
+      description: Enhanced serializer for creating new users
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        first_name:
+          type: string
+          maxLength: 30
+        last_name:
+          type: string
+          maxLength: 30
+        password:
+          type: string
+          writeOnly: true
+        password_confirm:
+          type: string
+          writeOnly: true
+        role:
+          $ref: '#/components/schemas/RoleEnum'
+        department:
+          type: string
+          maxLength: 100
+        phone_number:
+          type: string
+          maxLength: 20
+        job_title:
+          type: string
+          maxLength: 100
+        can_view_all_tickets:
+          type: boolean
+        can_manage_users:
+          type: boolean
+        can_make_calls:
+          type: boolean
+        can_manage_groups:
+          type: boolean
+        can_manage_settings:
+          type: boolean
+        can_create_tickets:
+          type: boolean
+        can_edit_own_tickets:
+          type: boolean
+        can_edit_all_tickets:
+          type: boolean
+        can_delete_tickets:
+          type: boolean
+        can_assign_tickets:
+          type: boolean
+        can_view_reports:
+          type: boolean
+        can_export_data:
+          type: boolean
+        can_manage_tags:
+          type: boolean
+        can_manage_columns:
+          type: boolean
+        tenant_groups:
+          type: array
+          items:
+            type: integer
+      required:
+      - email
+      - password
+      - password_confirm
+    UserMinimal:
+      type: object
+      description: Minimal user serializer for ticket relationships.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        email:
+          type: string
+          format: email
+          readOnly: true
+        first_name:
+          type: string
+          readOnly: true
+        last_name:
+          type: string
+          readOnly: true
+      required:
+      - email
+      - first_name
+      - id
+      - last_name
+    UserUpdate:
+      type: object
+      description: Serializer for updating user information
+      properties:
+        first_name:
+          type: string
+          maxLength: 30
+        last_name:
+          type: string
+          maxLength: 30
+        role:
+          $ref: '#/components/schemas/RoleEnum'
+        status:
+          $ref: '#/components/schemas/Status336Enum'
+        department:
+          type: string
+          maxLength: 100
+        phone_number:
+          type: string
+          maxLength: 20
+        job_title:
+          type: string
+          maxLength: 100
+        can_view_all_tickets:
+          type: boolean
+        can_manage_users:
+          type: boolean
+        can_make_calls:
+          type: boolean
+        can_manage_groups:
+          type: boolean
+        can_manage_settings:
+          type: boolean
+        can_create_tickets:
+          type: boolean
+        can_edit_own_tickets:
+          type: boolean
+        can_edit_all_tickets:
+          type: boolean
+        can_delete_tickets:
+          type: boolean
+        can_assign_tickets:
+          type: boolean
+        can_view_reports:
+          type: boolean
+        can_export_data:
+          type: boolean
+        can_manage_tags:
+          type: boolean
+        can_manage_columns:
+          type: boolean
+        is_active:
+          type: boolean
+        tenant_groups:
+          type: array
+          items:
+            type: integer
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: sessionid
+    tokenAuth:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: Token-based authentication with required prefix "Token"

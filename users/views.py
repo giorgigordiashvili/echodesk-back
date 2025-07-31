@@ -17,8 +17,9 @@ from .models import User
 from .serializers import (
     UserSerializer, UserCreateSerializer, UserUpdateSerializer,
     BulkUserActionSerializer, PasswordChangeSerializer,
-    GroupSerializer, GroupCreateSerializer, GroupUpdateSerializer
+    TenantGroupSerializer, TenantGroupCreateSerializer, TenantGroupUpdateSerializer
 )
+from .models import TenantGroup
 
 User = get_user_model()
 
@@ -369,22 +370,22 @@ class UserViewSet(viewsets.ModelViewSet):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-class GroupViewSet(viewsets.ModelViewSet):
-    """ViewSet for managing Django Groups"""
-    queryset = Group.objects.all()
-    serializer_class = GroupSerializer
+class TenantGroupViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing TenantGroups with comprehensive permissions"""
+    queryset = TenantGroup.objects.all()
+    serializer_class = TenantGroupSerializer
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
-    search_fields = ['name']
-    ordering_fields = ['name', 'id']
+    search_fields = ['name', 'description']
+    ordering_fields = ['name', 'created_at', 'updated_at']
     ordering = ['name']
 
     def get_serializer_class(self):
         if self.action == 'create':
-            return GroupCreateSerializer
+            return TenantGroupCreateSerializer
         elif self.action in ['update', 'partial_update']:
-            return GroupUpdateSerializer
-        return GroupSerializer
+            return TenantGroupUpdateSerializer
+        return TenantGroupSerializer
 
     def get_permissions(self):
         """Only users with manage_groups permission can manage groups"""
@@ -414,13 +415,13 @@ class GroupViewSet(viewsets.ModelViewSet):
         return super().destroy(request, *args, **kwargs)
 
     @extend_schema(
-        operation_id='groups_add_users',
-        summary='Add Users to Group',
-        description='Add multiple users to a group',
+        operation_id='tenant_groups_add_users',
+        summary='Add Users to TenantGroup',
+        description='Add multiple users to a tenant group',
     )
     @action(detail=True, methods=['post'])
     def add_users(self, request, pk=None):
-        """Add users to group"""
+        """Add users to tenant group"""
         self.check_group_permission(request)
         
         group = self.get_object()
@@ -430,21 +431,21 @@ class GroupViewSet(viewsets.ModelViewSet):
             return Response({'error': 'user_ids is required'}, status=status.HTTP_400_BAD_REQUEST)
         
         users = User.objects.filter(id__in=user_ids)
-        group.user_set.add(*users)
+        group.members.add(*users)
         
         return Response({
             'message': f'Added {users.count()} users to group {group.name}',
-            'group': GroupSerializer(group).data
+            'group': TenantGroupSerializer(group).data
         })
 
     @extend_schema(
-        operation_id='groups_remove_users',
-        summary='Remove Users from Group',
-        description='Remove multiple users from a group',
+        operation_id='tenant_groups_remove_users',
+        summary='Remove Users from TenantGroup',
+        description='Remove multiple users from a tenant group',
     )
     @action(detail=True, methods=['post'])
     def remove_users(self, request, pk=None):
-        """Remove users from group"""
+        """Remove users from tenant group"""
         self.check_group_permission(request)
         
         group = self.get_object()
@@ -454,11 +455,51 @@ class GroupViewSet(viewsets.ModelViewSet):
             return Response({'error': 'user_ids is required'}, status=status.HTTP_400_BAD_REQUEST)
         
         users = User.objects.filter(id__in=user_ids)
-        group.user_set.remove(*users)
+        group.members.remove(*users)
         
         return Response({
             'message': f'Removed {users.count()} users from group {group.name}',
-            'group': GroupSerializer(group).data
+            'group': TenantGroupSerializer(group).data
+        })
+
+    @extend_schema(
+        operation_id='tenant_groups_copy_permissions',
+        summary='Copy Permissions from Another Group',
+        description='Copy all permissions from another tenant group',
+    )
+    @action(detail=True, methods=['post'])
+    def copy_permissions(self, request, pk=None):
+        """Copy permissions from another group"""
+        self.check_group_permission(request)
+        
+        target_group = self.get_object()
+        source_group_id = request.data.get('source_group_id')
+        
+        if not source_group_id:
+            return Response({'error': 'source_group_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            source_group = TenantGroup.objects.get(id=source_group_id)
+        except TenantGroup.DoesNotExist:
+            return Response({'error': 'Source group not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Copy all permission fields
+        permission_fields = [
+            'can_view_all_tickets', 'can_manage_users', 'can_make_calls', 
+            'can_manage_groups', 'can_manage_settings', 'can_create_tickets',
+            'can_edit_own_tickets', 'can_edit_all_tickets', 'can_delete_tickets',
+            'can_assign_tickets', 'can_view_reports', 'can_export_data',
+            'can_manage_tags', 'can_manage_columns'
+        ]
+        
+        for field in permission_fields:
+            setattr(target_group, field, getattr(source_group, field))
+        
+        target_group.save()
+        
+        return Response({
+            'message': f'Copied permissions from {source_group.name} to {target_group.name}',
+            'group': TenantGroupSerializer(target_group).data
         })
 
     @extend_schema(

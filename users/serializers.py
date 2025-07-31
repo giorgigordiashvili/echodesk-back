@@ -3,35 +3,120 @@ from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.models import Group
 from django.contrib.auth.password_validation import validate_password
 from django.utils import timezone
+from .models import TenantGroup
 
 User = get_user_model()
+
+
+class TenantGroupSerializer(serializers.ModelSerializer):
+    """Serializer for TenantGroup with all permissions"""
+    members_count = serializers.SerializerMethodField()
+    permissions_list = serializers.ReadOnlyField(source='get_permissions_list')
+    
+    class Meta:
+        model = TenantGroup
+        fields = [
+            'id', 'name', 'description', 'is_active', 'created_at', 'updated_at',
+            'members_count', 'permissions_list',
+            # Core permissions
+            'can_view_all_tickets', 'can_manage_users', 'can_make_calls', 
+            'can_manage_groups', 'can_manage_settings',
+            # Ticket permissions
+            'can_create_tickets', 'can_edit_own_tickets', 'can_edit_all_tickets',
+            'can_delete_tickets', 'can_assign_tickets',
+            # Additional permissions
+            'can_view_reports', 'can_export_data', 'can_manage_tags', 'can_manage_columns'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at', 'members_count', 'permissions_list']
+    
+    def get_members_count(self, obj):
+        return obj.members.count()
+
+
+class TenantGroupCreateSerializer(serializers.ModelSerializer):
+    """Serializer for creating new TenantGroups"""
+    
+    class Meta:
+        model = TenantGroup
+        fields = [
+            'name', 'description',
+            # Core permissions
+            'can_view_all_tickets', 'can_manage_users', 'can_make_calls', 
+            'can_manage_groups', 'can_manage_settings',
+            # Ticket permissions
+            'can_create_tickets', 'can_edit_own_tickets', 'can_edit_all_tickets',
+            'can_delete_tickets', 'can_assign_tickets',
+            # Additional permissions
+            'can_view_reports', 'can_export_data', 'can_manage_tags', 'can_manage_columns'
+        ]
+
+
+class TenantGroupUpdateSerializer(serializers.ModelSerializer):
+    """Serializer for updating TenantGroups"""
+    
+    class Meta:
+        model = TenantGroup
+        fields = [
+            'name', 'description', 'is_active',
+            # Core permissions
+            'can_view_all_tickets', 'can_manage_users', 'can_make_calls', 
+            'can_manage_groups', 'can_manage_settings',
+            # Ticket permissions
+            'can_create_tickets', 'can_edit_own_tickets', 'can_edit_all_tickets',
+            'can_delete_tickets', 'can_assign_tickets',
+            # Additional permissions
+            'can_view_reports', 'can_export_data', 'can_manage_tags', 'can_manage_columns'
+        ]
 
 
 class UserSerializer(serializers.ModelSerializer):
     """Enhanced serializer for User model with full profile information"""
     full_name = serializers.ReadOnlyField(source='get_full_name')
     permissions = serializers.SerializerMethodField()
+    group_permissions = serializers.ReadOnlyField(source='get_group_permissions')
+    all_permissions = serializers.ReadOnlyField(source='get_all_permissions')
+    tenant_groups = TenantGroupSerializer(many=True, read_only=True)
     
     class Meta:
         model = User
         fields = [
             'id', 'email', 'first_name', 'last_name', 'full_name',
             'role', 'status', 'department', 'phone_number', 'job_title',
+            # Core permissions
             'can_view_all_tickets', 'can_manage_users', 'can_make_calls', 'can_manage_groups', 'can_manage_settings',
+            # Additional permissions
+            'can_create_tickets', 'can_edit_own_tickets', 'can_edit_all_tickets',
+            'can_delete_tickets', 'can_assign_tickets', 'can_view_reports',
+            'can_export_data', 'can_manage_tags', 'can_manage_columns',
+            # System fields
             'is_active', 'is_staff', 'date_joined', 'last_login',
-            'invited_by', 'invitation_sent_at', 'permissions'
+            'invited_by', 'invitation_sent_at', 
+            # Permission summaries
+            'permissions', 'group_permissions', 'all_permissions', 'tenant_groups'
         ]
-        read_only_fields = ['id', 'date_joined', 'invited_by', 'invitation_sent_at', 'last_login']
+        read_only_fields = ['id', 'date_joined', 'invited_by', 'invitation_sent_at', 'last_login', 
+                           'permissions', 'group_permissions', 'all_permissions']
     
     def get_permissions(self, obj):
         return {
             'is_admin': obj.is_admin,
             'is_manager': obj.is_manager,
+            # Core permissions
             'can_view_all_tickets': obj.has_permission('view_all_tickets'),
             'can_manage_users': obj.has_permission('manage_users'),
             'can_make_calls': obj.has_permission('make_calls'),
             'can_manage_groups': obj.has_permission('manage_groups'),
             'can_manage_settings': obj.has_permission('manage_settings'),
+            # Additional permissions
+            'can_create_tickets': obj.has_permission('create_tickets'),
+            'can_edit_own_tickets': obj.has_permission('edit_own_tickets'),
+            'can_edit_all_tickets': obj.has_permission('edit_all_tickets'),
+            'can_delete_tickets': obj.has_permission('delete_tickets'),
+            'can_assign_tickets': obj.has_permission('assign_tickets'),
+            'can_view_reports': obj.has_permission('view_reports'),
+            'can_export_data': obj.has_permission('export_data'),
+            'can_manage_tags': obj.has_permission('manage_tags'),
+            'can_manage_columns': obj.has_permission('manage_columns'),
         }
 
 
@@ -39,13 +124,21 @@ class UserCreateSerializer(serializers.ModelSerializer):
     """Enhanced serializer for creating new users"""
     password = serializers.CharField(write_only=True, validators=[validate_password])
     password_confirm = serializers.CharField(write_only=True)
+    tenant_groups = serializers.PrimaryKeyRelatedField(many=True, queryset=TenantGroup.objects.all(), required=False)
     
     class Meta:
         model = User
         fields = [
             'email', 'first_name', 'last_name', 'password', 'password_confirm',
             'role', 'department', 'phone_number', 'job_title',
-            'can_view_all_tickets', 'can_manage_users', 'can_make_calls', 'can_manage_groups', 'can_manage_settings'
+            # Core permissions
+            'can_view_all_tickets', 'can_manage_users', 'can_make_calls', 'can_manage_groups', 'can_manage_settings',
+            # Additional permissions
+            'can_create_tickets', 'can_edit_own_tickets', 'can_edit_all_tickets',
+            'can_delete_tickets', 'can_assign_tickets', 'can_view_reports',
+            'can_export_data', 'can_manage_tags', 'can_manage_columns',
+            # Groups
+            'tenant_groups'
         ]
     
     def validate(self, attrs):
@@ -63,8 +156,13 @@ class UserCreateSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         validated_data.pop('password_confirm')
         password = validated_data.pop('password')
+        tenant_groups = validated_data.pop('tenant_groups', [])
         
         user = User.objects.create_user(password=password, **validated_data)
+        
+        # Set groups
+        if tenant_groups:
+            user.tenant_groups.set(tenant_groups)
         
         # Set invitation details
         request = self.context.get('request')
@@ -78,13 +176,24 @@ class UserCreateSerializer(serializers.ModelSerializer):
 
 class UserUpdateSerializer(serializers.ModelSerializer):
     """Serializer for updating user information"""
+    tenant_groups = serializers.PrimaryKeyRelatedField(many=True, queryset=TenantGroup.objects.all(), required=False)
+    
     class Meta:
         model = User
         fields = [
             'first_name', 'last_name', 'role', 'status', 'department', 
             'phone_number', 'job_title',
+            # Core permissions
             'can_view_all_tickets', 'can_manage_users', 'can_make_calls', 'can_manage_groups', 'can_manage_settings',
-            'is_active'
+            # Additional permissions
+            'can_create_tickets', 'can_edit_own_tickets', 'can_edit_all_tickets',
+            'can_delete_tickets', 'can_assign_tickets', 'can_view_reports',
+            'can_export_data', 'can_manage_tags', 'can_manage_columns',
+            # System fields
+            'is_active',
+            # Groups
+            # Groups
+            'tenant_groups'
         ]
     
     def validate_role(self, value):
@@ -92,6 +201,20 @@ class UserUpdateSerializer(serializers.ModelSerializer):
         if request and value == 'admin' and not request.user.is_admin:
             raise serializers.ValidationError("Only administrators can assign admin role.")
         return value
+    
+    def update(self, instance, validated_data):
+        tenant_groups = validated_data.pop('tenant_groups', None)
+        
+        # Update other fields
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        
+        # Update groups if provided
+        if tenant_groups is not None:
+            instance.tenant_groups.set(tenant_groups)
+        
+        return instance
 
 
 class BulkUserActionSerializer(serializers.Serializer):

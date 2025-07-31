@@ -3,6 +3,60 @@ from django.db import models
 from django.utils import timezone
 
 
+class TenantGroup(models.Model):
+    """Custom group model with permissions for tenant-specific access control"""
+    name = models.CharField(max_length=150, unique=True)
+    description = models.TextField(blank=True)
+    
+    # Group-level permissions
+    can_view_all_tickets = models.BooleanField(default=False, help_text="Members can view all tickets in the tenant")
+    can_manage_users = models.BooleanField(default=False, help_text="Members can manage user accounts")
+    can_make_calls = models.BooleanField(default=False, help_text="Members can make phone calls")
+    can_manage_groups = models.BooleanField(default=False, help_text="Members can manage groups")
+    can_manage_settings = models.BooleanField(default=False, help_text="Members can manage tenant settings")
+    
+    # Additional group permissions
+    can_create_tickets = models.BooleanField(default=True, help_text="Members can create new tickets")
+    can_edit_own_tickets = models.BooleanField(default=True, help_text="Members can edit their own tickets")
+    can_edit_all_tickets = models.BooleanField(default=False, help_text="Members can edit any ticket")
+    can_delete_tickets = models.BooleanField(default=False, help_text="Members can delete tickets")
+    can_assign_tickets = models.BooleanField(default=False, help_text="Members can assign tickets to others")
+    can_view_reports = models.BooleanField(default=False, help_text="Members can view analytics and reports")
+    can_export_data = models.BooleanField(default=False, help_text="Members can export data")
+    can_manage_tags = models.BooleanField(default=False, help_text="Members can manage ticket tags")
+    can_manage_columns = models.BooleanField(default=False, help_text="Members can manage kanban board columns")
+    
+    # Meta permissions
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        verbose_name = 'Group'
+        verbose_name_plural = 'Groups'
+        ordering = ['name']
+    
+    def __str__(self):
+        return self.name
+    
+    def get_permissions_list(self):
+        """Return a list of permissions this group has"""
+        permissions = []
+        permission_fields = [
+            'can_view_all_tickets', 'can_manage_users', 'can_make_calls', 
+            'can_manage_groups', 'can_manage_settings', 'can_create_tickets',
+            'can_edit_own_tickets', 'can_edit_all_tickets', 'can_delete_tickets',
+            'can_assign_tickets', 'can_view_reports', 'can_export_data',
+            'can_manage_tags', 'can_manage_columns'
+        ]
+        
+        for field in permission_fields:
+            if getattr(self, field, False):
+                permissions.append(field)
+        
+        return permissions
+
+
 class UserManager(BaseUserManager):
     def create_user(self, email, password=None, **extra_fields):
         if not email:
@@ -56,12 +110,26 @@ class User(AbstractBaseUser, PermissionsMixin):
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
     
-    # Tenant-specific permissions
+    # Tenant-specific permissions (individual user permissions)
     can_view_all_tickets = models.BooleanField(default=False)
     can_manage_users = models.BooleanField(default=False)
     can_make_calls = models.BooleanField(default=False)
     can_manage_groups = models.BooleanField(default=False)
     can_manage_settings = models.BooleanField(default=False)
+    
+    # Additional individual permissions
+    can_create_tickets = models.BooleanField(default=True)
+    can_edit_own_tickets = models.BooleanField(default=True)
+    can_edit_all_tickets = models.BooleanField(default=False)
+    can_delete_tickets = models.BooleanField(default=False)
+    can_assign_tickets = models.BooleanField(default=False)
+    can_view_reports = models.BooleanField(default=False)
+    can_export_data = models.BooleanField(default=False)
+    can_manage_tags = models.BooleanField(default=False)
+    can_manage_columns = models.BooleanField(default=False)
+    
+    # Group membership
+    tenant_groups = models.ManyToManyField(TenantGroup, blank=True, related_name='members')
     
     # Timestamps
     date_joined = models.DateTimeField(default=timezone.now)
@@ -96,16 +164,82 @@ class User(AbstractBaseUser, PermissionsMixin):
         return self.role in ['admin', 'manager'] or self.is_superuser
     
     def has_permission(self, permission):
-        """Check if user has specific tenant permission"""
+        """Check if user has specific tenant permission (individual or through group membership)"""
         if self.is_superuser:
             return True
         
-        permission_map = {
-            'view_all_tickets': self.can_view_all_tickets or self.is_manager,
-            'manage_users': self.can_manage_users or self.is_admin,
-            'make_calls': self.can_make_calls or self.is_manager,
-            'manage_groups': self.can_manage_groups or self.is_admin,
-            'manage_settings': self.can_manage_settings or self.is_admin,
+        # Check individual permissions first
+        individual_permissions = {
+            'view_all_tickets': self.can_view_all_tickets,
+            'manage_users': self.can_manage_users,
+            'make_calls': self.can_make_calls,
+            'manage_groups': self.can_manage_groups,
+            'manage_settings': self.can_manage_settings,
+            'create_tickets': self.can_create_tickets,
+            'edit_own_tickets': self.can_edit_own_tickets,
+            'edit_all_tickets': self.can_edit_all_tickets,
+            'delete_tickets': self.can_delete_tickets,
+            'assign_tickets': self.can_assign_tickets,
+            'view_reports': self.can_view_reports,
+            'export_data': self.can_export_data,
+            'manage_tags': self.can_manage_tags,
+            'manage_columns': self.can_manage_columns,
         }
         
-        return permission_map.get(permission, False)
+        # Check if user has individual permission
+        if individual_permissions.get(permission, False):
+            return True
+        
+        # Check role-based permissions (legacy support)
+        role_permissions = {
+            'view_all_tickets': self.is_manager,
+            'manage_users': self.is_admin,
+            'make_calls': self.is_manager,
+            'manage_groups': self.is_admin,
+            'manage_settings': self.is_admin,
+            'edit_all_tickets': self.is_manager,
+            'delete_tickets': self.is_manager,
+            'assign_tickets': self.is_manager,
+            'view_reports': self.is_manager,
+            'export_data': self.is_manager,
+            'manage_tags': self.is_manager,
+            'manage_columns': self.is_manager,
+        }
+        
+        if role_permissions.get(permission, False):
+            return True
+        
+        # Check group permissions
+        for group in self.tenant_groups.filter(is_active=True):
+            group_permission_field = f'can_{permission}'
+            if hasattr(group, group_permission_field) and getattr(group, group_permission_field, False):
+                return True
+        
+        return False
+    
+    def get_all_permissions(self):
+        """Get all permissions this user has (individual + group + role-based)"""
+        permissions = set()
+        
+        # Individual permissions
+        permission_fields = [
+            'view_all_tickets', 'manage_users', 'make_calls', 'manage_groups', 
+            'manage_settings', 'create_tickets', 'edit_own_tickets', 
+            'edit_all_tickets', 'delete_tickets', 'assign_tickets', 
+            'view_reports', 'export_data', 'manage_tags', 'manage_columns'
+        ]
+        
+        for field in permission_fields:
+            if self.has_permission(field):
+                permissions.add(field)
+        
+        return list(permissions)
+    
+    def get_group_permissions(self):
+        """Get permissions inherited from groups"""
+        group_permissions = set()
+        
+        for group in self.tenant_groups.filter(is_active=True):
+            group_permissions.update(group.get_permissions_list())
+        
+        return list(group_permissions)
