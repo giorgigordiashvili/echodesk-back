@@ -17,7 +17,7 @@ class UserSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'email', 'first_name', 'last_name', 'full_name',
             'role', 'status', 'department', 'phone_number', 'job_title',
-            'can_view_all_tickets', 'can_manage_users', 'can_make_calls', 'can_manage_settings',
+            'can_view_all_tickets', 'can_manage_users', 'can_make_calls', 'can_manage_groups', 'can_manage_settings',
             'is_active', 'is_staff', 'date_joined', 'last_login',
             'invited_by', 'invitation_sent_at', 'permissions'
         ]
@@ -30,6 +30,7 @@ class UserSerializer(serializers.ModelSerializer):
             'can_view_all_tickets': obj.has_permission('view_all_tickets'),
             'can_manage_users': obj.has_permission('manage_users'),
             'can_make_calls': obj.has_permission('make_calls'),
+            'can_manage_groups': obj.has_permission('manage_groups'),
             'can_manage_settings': obj.has_permission('manage_settings'),
         }
 
@@ -44,7 +45,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
         fields = [
             'email', 'first_name', 'last_name', 'password', 'password_confirm',
             'role', 'department', 'phone_number', 'job_title',
-            'can_view_all_tickets', 'can_manage_users', 'can_make_calls', 'can_manage_settings'
+            'can_view_all_tickets', 'can_manage_users', 'can_make_calls', 'can_manage_groups', 'can_manage_settings'
         ]
     
     def validate(self, attrs):
@@ -82,7 +83,7 @@ class UserUpdateSerializer(serializers.ModelSerializer):
         fields = [
             'first_name', 'last_name', 'role', 'status', 'department', 
             'phone_number', 'job_title',
-            'can_view_all_tickets', 'can_manage_users', 'can_make_calls', 'can_manage_settings',
+            'can_view_all_tickets', 'can_manage_users', 'can_make_calls', 'can_manage_groups', 'can_manage_settings',
             'is_active'
         ]
     

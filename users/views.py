@@ -1,6 +1,7 @@
 from rest_framework import viewsets, permissions, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework.exceptions import PermissionDenied
 from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.models import Group
 from django.shortcuts import redirect
@@ -386,10 +387,31 @@ class GroupViewSet(viewsets.ModelViewSet):
         return GroupSerializer
 
     def get_permissions(self):
-        """Only admins can manage groups"""
-        if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [permissions.IsAuthenticated(), AdminPermission()]
+        """Only users with manage_groups permission can manage groups"""
+        if self.action in ['create', 'update', 'partial_update', 'destroy', 'add_users', 'remove_users']:
+            return [permissions.IsAuthenticated()]
         return [permissions.IsAuthenticated()]
+    
+    def check_group_permission(self, request):
+        """Check if user can manage groups"""
+        if not (request.user.is_admin or request.user.has_permission('manage_groups')):
+            raise PermissionDenied("You do not have permission to manage groups")
+
+    def create(self, request, *args, **kwargs):
+        self.check_group_permission(request)
+        return super().create(request, *args, **kwargs)
+    
+    def update(self, request, *args, **kwargs):
+        self.check_group_permission(request)
+        return super().update(request, *args, **kwargs)
+    
+    def partial_update(self, request, *args, **kwargs):
+        self.check_group_permission(request)
+        return super().partial_update(request, *args, **kwargs)
+    
+    def destroy(self, request, *args, **kwargs):
+        self.check_group_permission(request)
+        return super().destroy(request, *args, **kwargs)
 
     @extend_schema(
         operation_id='groups_add_users',
@@ -399,11 +421,7 @@ class GroupViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def add_users(self, request, pk=None):
         """Add users to group"""
-        if not request.user.is_admin:
-            return Response(
-                {'error': 'Only administrators can manage group membership'}, 
-                status=status.HTTP_403_FORBIDDEN
-            )
+        self.check_group_permission(request)
         
         group = self.get_object()
         user_ids = request.data.get('user_ids', [])
@@ -427,11 +445,7 @@ class GroupViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def remove_users(self, request, pk=None):
         """Remove users from group"""
-        if not request.user.is_admin:
-            return Response(
-                {'error': 'Only administrators can manage group membership'}, 
-                status=status.HTTP_403_FORBIDDEN
-            )
+        self.check_group_permission(request)
         
         group = self.get_object()
         user_ids = request.data.get('user_ids', [])

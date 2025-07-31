@@ -60,6 +60,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     can_view_all_tickets = models.BooleanField(default=False)
     can_manage_users = models.BooleanField(default=False)
     can_make_calls = models.BooleanField(default=False)
+    can_manage_groups = models.BooleanField(default=False)
     can_manage_settings = models.BooleanField(default=False)
     
     # Timestamps
@@ -103,6 +104,7 @@ class User(AbstractBaseUser, PermissionsMixin):
             'view_all_tickets': self.can_view_all_tickets or self.is_manager,
             'manage_users': self.can_manage_users or self.is_admin,
             'make_calls': self.can_make_calls or self.is_manager,
+            'manage_groups': self.can_manage_groups or self.is_admin,
             'manage_settings': self.can_manage_settings or self.is_admin,
         }
         
