@@ -59,7 +59,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     # Tenant-specific permissions
     can_view_all_tickets = models.BooleanField(default=False)
     can_manage_users = models.BooleanField(default=False)
-    can_view_reports = models.BooleanField(default=False)
+    can_make_calls = models.BooleanField(default=False)
     can_manage_settings = models.BooleanField(default=False)
     
     # Timestamps
@@ -102,7 +102,7 @@ class User(AbstractBaseUser, PermissionsMixin):
         permission_map = {
             'view_all_tickets': self.can_view_all_tickets or self.is_manager,
             'manage_users': self.can_manage_users or self.is_admin,
-            'view_reports': self.can_view_reports or self.is_manager,
+            'make_calls': self.can_make_calls or self.is_manager,
             'manage_settings': self.can_manage_settings or self.is_admin,
         }
         

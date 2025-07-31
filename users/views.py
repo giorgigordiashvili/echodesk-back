@@ -272,7 +272,7 @@ class UserViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def statistics(self, request):
         """Get user statistics"""
-        if not (request.user.is_manager or request.user.has_permission('view_reports')):
+        if not request.user.is_manager:
             return Response(
                 {'error': 'You do not have permission to view statistics'}, 
                 status=status.HTTP_403_FORBIDDEN
