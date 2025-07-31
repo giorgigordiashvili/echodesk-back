@@ -149,10 +149,10 @@ def tenant_dashboard(request):
 @extend_schema(
     operation_id='tenant_profile',
     summary='Get User Profile',
-    description='Get current user profile information within the tenant context.',
+    description='Get current user profile information including groups and permissions within the tenant context.',
     responses={
         200: OpenApiResponse(
-            description='User profile data',
+            description='User profile data with groups and permissions',
             response={
                 'type': 'object',
                 'properties': {
@@ -164,7 +164,35 @@ def tenant_dashboard(request):
                     'is_superuser': {'type': 'boolean'},
                     'date_joined': {'type': 'string', 'format': 'date-time'},
                     'last_login': {'type': 'string', 'format': 'date-time'},
-                    'is_active': {'type': 'boolean'}
+                    'is_active': {'type': 'boolean'},
+                    'groups': {
+                        'type': 'array',
+                        'items': {
+                            'type': 'object',
+                            'properties': {
+                                'id': {'type': 'integer'},
+                                'name': {'type': 'string'},
+                                'permissions': {
+                                    'type': 'array',
+                                    'items': {
+                                        'type': 'object',
+                                        'properties': {
+                                            'id': {'type': 'integer'},
+                                            'codename': {'type': 'string'},
+                                            'name': {'type': 'string'},
+                                            'app_label': {'type': 'string'},
+                                            'model': {'type': 'string'}
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    'all_permissions': {
+                        'type': 'array',
+                        'items': {'type': 'string'},
+                        'description': 'List of all permission codenames user has'
+                    }
                 }
             }
         ),
@@ -176,7 +204,7 @@ def tenant_dashboard(request):
 @permission_classes([permissions.IsAuthenticated])
 def tenant_profile(request):
     """
-    Get current user profile information
+    Get current user profile information including groups and permissions
     """
     if not hasattr(request, 'tenant') or request.tenant.schema_name == get_public_schema_name():
         return Response(
@@ -185,6 +213,29 @@ def tenant_profile(request):
         )
     
     user = request.user
+    
+    # Get user's groups with permissions
+    groups_data = []
+    for group in user.groups.all():
+        permissions_data = []
+        for permission in group.permissions.all():
+            permissions_data.append({
+                'id': permission.id,
+                'codename': permission.codename,
+                'name': permission.name,
+                'app_label': permission.content_type.app_label,
+                'model': permission.content_type.model
+            })
+        
+        groups_data.append({
+            'id': group.id,
+            'name': group.name,
+            'permissions': permissions_data
+        })
+    
+    # Get all user permissions (both from groups and direct permissions)
+    all_permissions = user.get_all_permissions()
+    
     return Response({
         'id': user.id,
         'email': user.email,
@@ -194,7 +245,9 @@ def tenant_profile(request):
         'is_superuser': user.is_superuser,
         'date_joined': user.date_joined,
         'last_login': user.last_login,
-        'is_active': user.is_active
+        'is_active': user.is_active,
+        'groups': groups_data,
+        'all_permissions': list(all_permissions)
     }, status=status.HTTP_200_OK)
 
 
