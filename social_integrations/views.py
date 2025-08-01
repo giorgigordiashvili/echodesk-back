@@ -46,7 +46,11 @@ def facebook_oauth_start(request):
                 'error': 'Facebook App ID not configured'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
-        redirect_uri = request.build_absolute_uri(reverse('facebook-oauth-callback'))
+        # Use public callback URL since Facebook needs a consistent redirect URI
+        redirect_uri = 'https://api.echodesk.ge/api/social/facebook/oauth/callback/'
+        
+        # Include tenant info in state parameter for multi-tenant support
+        state = f'tenant={getattr(request, "tenant", "amanati")}&user={request.user.id}'
         
         # Facebook OAuth URL for business pages with pages_messaging scope
         oauth_url = (
@@ -54,12 +58,14 @@ def facebook_oauth_start(request):
             f"client_id={fb_app_id}&"
             f"redirect_uri={redirect_uri}&"
             f"scope=pages_manage_metadata,pages_messaging,pages_read_engagement&"
+            f"state={state}&"
             f"response_type=code"
         )
         
         return Response({
             'oauth_url': oauth_url,
-            'redirect_uri': redirect_uri
+            'redirect_uri': redirect_uri,
+            'instructions': 'Visit the OAuth URL to connect your Facebook pages'
         })
     except Exception as e:
         return Response({
@@ -68,77 +74,26 @@ def facebook_oauth_start(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
 def facebook_oauth_callback(request):
     """Handle Facebook OAuth callback and exchange code for access token"""
     try:
         code = request.GET.get('code')
+        state = request.GET.get('state')  # Can be used to pass tenant info
+        
         if not code:
             return Response({
                 'error': 'Authorization code not provided'
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        fb_config = getattr(settings, 'SOCIAL_INTEGRATIONS', {})
-        app_id = fb_config.get('FACEBOOK_APP_ID')
-        app_secret = fb_config.get('FACEBOOK_APP_SECRET')
+        # For multi-tenant setup, we need to handle this differently
+        # Since this comes from public URL, we need to redirect to tenant context
         
-        if not app_id or not app_secret:
-            return Response({
-                'error': 'Facebook app credentials not configured'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-        redirect_uri = request.build_absolute_uri(reverse('facebook-oauth-callback'))
-        
-        # Exchange code for access token
-        token_url = "https://graph.facebook.com/v18.0/oauth/access_token"
-        token_params = {
-            'client_id': app_id,
-            'client_secret': app_secret,
-            'redirect_uri': redirect_uri,
-            'code': code
-        }
-        
-        token_response = requests.get(token_url, params=token_params)
-        token_data = token_response.json()
-        
-        if 'access_token' not in token_data:
-            return Response({
-                'error': 'Failed to obtain access token',
-                'details': token_data
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        access_token = token_data['access_token']
-        
-        # Get user's pages
-        pages_url = f"https://graph.facebook.com/v18.0/me/accounts?access_token={access_token}"
-        pages_response = requests.get(pages_url)
-        pages_data = pages_response.json()
-        
-        if 'data' not in pages_data:
-            return Response({
-                'error': 'Failed to fetch pages',
-                'details': pages_data
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Save page connections
-        pages_saved = 0
-        for page in pages_data['data']:
-            page_connection, created = FacebookPageConnection.objects.get_or_create(
-                user=request.user,
-                page_id=page['id'],
-                defaults={
-                    'page_name': page['name'],
-                    'page_access_token': page['access_token'],
-                    'is_active': True
-                }
-            )
-            if created:
-                pages_saved += 1
-        
+        # For now, return a simple success page that can redirect to frontend
         return Response({
-            'status': 'success',
-            'pages_connected': pages_saved,
-            'message': f'Successfully connected {pages_saved} Facebook pages'
+            'status': 'callback_received',
+            'code': code,
+            'message': 'Facebook OAuth callback received. Please complete setup in your tenant dashboard.',
+            'redirect_to': f'https://api.echodesk.ge/admin/'  # Or your frontend URL
         })
         
     except Exception as e:
