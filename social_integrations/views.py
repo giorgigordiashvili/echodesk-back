@@ -2,7 +2,7 @@ import os
 import requests
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
-from django.http import JsonResponse
+from django.http import JsonResponse, HttpResponse
 from django.shortcuts import redirect
 from django.urls import reverse
 from django.views.decorators.csrf import csrf_exempt
@@ -180,13 +180,35 @@ def facebook_disconnect(request):
 def facebook_webhook(request):
     """Handle Facebook webhook events for page messages"""
     if request.method == 'GET':
-        # Webhook verification
-        verify_token = getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_VERIFY_TOKEN', 'verify_token')
+        # Webhook verification - Facebook sends these parameters
+        mode = request.GET.get('hub.mode')
+        token = request.GET.get('hub.verify_token')
+        challenge = request.GET.get('hub.challenge')
         
-        if request.GET.get('hub.verify_token') == verify_token:
-            return JsonResponse({'challenge': request.GET.get('hub.challenge')})
+        # Verify token from settings
+        verify_token = getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_VERIFY_TOKEN', 'echodesk_webhook_token_2024')
+        
+        # Log the verification attempt for debugging
+        print(f"[WEBHOOK] Verification attempt:")
+        print(f"  Mode: {mode}")
+        print(f"  Token received: {token}")
+        print(f"  Token expected: {verify_token}")
+        print(f"  Challenge: {challenge}")
+        
+        # Verify the mode and token
+        if mode == 'subscribe' and token == verify_token:
+            print(f"[WEBHOOK] Verification successful, returning challenge")
+            # Return the challenge as plain text (not JSON)
+            from django.http import HttpResponse
+            return HttpResponse(challenge, content_type='text/plain')
         else:
-            return JsonResponse({'error': 'Invalid verify token'}, status=403)
+            print(f"[WEBHOOK] Verification failed")
+            return JsonResponse({
+                'error': 'Invalid verify token or mode',
+                'expected_token': verify_token,
+                'received_token': token,
+                'mode': mode
+            }, status=403)
     
     elif request.method == 'POST':
         # Handle webhook events
