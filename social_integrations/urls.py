@@ -15,6 +15,7 @@ urlpatterns = [
     # Facebook OAuth endpoints
     path('facebook/oauth/start/', views.facebook_oauth_start, name='facebook-oauth-start'),
     path('facebook/oauth/callback/', views.facebook_oauth_callback, name='facebook-oauth-callback'),
+    path('facebook/oauth/debug/', views.facebook_debug_callback, name='facebook-debug-callback'),
     path('facebook/status/', views.facebook_connection_status, name='facebook-status'),
     path('facebook/disconnect/', views.facebook_disconnect, name='facebook-disconnect'),
     path('facebook/webhook/', views.facebook_webhook, name='facebook-webhook'),

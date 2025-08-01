@@ -74,31 +74,56 @@ def facebook_oauth_start(request):
 
 
 @api_view(['GET'])
+@permission_classes([])  # No authentication required for Facebook callbacks
 def facebook_oauth_callback(request):
     """Handle Facebook OAuth callback and exchange code for access token"""
     try:
+        # Get all parameters from Facebook callback
         code = request.GET.get('code')
-        state = request.GET.get('state')  # Can be used to pass tenant info
+        error = request.GET.get('error')
+        error_description = request.GET.get('error_description')
+        error_reason = request.GET.get('error_reason')
+        state = request.GET.get('state')
         
-        if not code:
+        # Debug: Log all received parameters
+        all_params = dict(request.GET.items())
+        
+        # Handle Facebook errors (user denied, etc.)
+        if error:
             return Response({
-                'error': 'Authorization code not provided'
+                'status': 'error',
+                'error': error,
+                'error_description': error_description,
+                'error_reason': error_reason,
+                'message': 'Facebook OAuth was denied or failed',
+                'received_params': all_params
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        # For multi-tenant setup, we need to handle this differently
-        # Since this comes from public URL, we need to redirect to tenant context
+        # Handle missing code
+        if not code:
+            return Response({
+                'status': 'error',
+                'error': 'Authorization code not provided',
+                'message': 'Facebook did not return an authorization code',
+                'received_params': all_params,
+                'help': 'This usually means the OAuth flow was not completed or user denied permission'
+            }, status=status.HTTP_400_BAD_REQUEST)
         
-        # For now, return a simple success page that can redirect to frontend
+        # Success case - we have the code
         return Response({
-            'status': 'callback_received',
-            'code': code,
-            'message': 'Facebook OAuth callback received. Please complete setup in your tenant dashboard.',
-            'redirect_to': f'https://api.echodesk.ge/admin/'  # Or your frontend URL
+            'status': 'success',
+            'message': 'Facebook OAuth callback received successfully',
+            'code': code[:10] + '...' if len(code) > 10 else code,  # Truncate for security
+            'state': state,
+            'received_params': {k: v for k, v in all_params.items() if k != 'code'},  # Don't expose full code
+            'next_steps': 'Code received successfully. Integration can be completed in tenant dashboard.'
         })
         
     except Exception as e:
         return Response({
-            'error': f'OAuth callback failed: {str(e)}'
+            'status': 'error',
+            'error': f'OAuth callback processing failed: {str(e)}',
+            'received_params': dict(request.GET.items())
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -209,3 +234,18 @@ def facebook_webhook(request):
             }, status=500)
     
     return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+
+@api_view(['GET'])
+@permission_classes([])  # No authentication required for debugging
+def facebook_debug_callback(request):
+    """Debug endpoint to see what Facebook is actually sending"""
+    return Response({
+        'method': request.method,
+        'path': request.path,
+        'full_url': request.build_absolute_uri(),
+        'get_params': dict(request.GET.items()),
+        'post_params': dict(request.POST.items()) if hasattr(request, 'POST') else {},
+        'headers': {k: v for k, v in request.META.items() if k.startswith('HTTP_')},
+        'message': 'This endpoint shows exactly what Facebook sends to the callback'
+    })
