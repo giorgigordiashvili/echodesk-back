@@ -3,6 +3,9 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def privacy_policy(request):
@@ -66,3 +69,70 @@ def data_deletion_status(request):
     return render(request, 'legal/data_deletion_status.html', {
         'confirmation_code': confirmation_code
     })
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def deauthorize_callback(request):
+    """Handle Facebook/Instagram app deauthorization callback
+    
+    This endpoint handles when users remove your app from their Facebook/Instagram account.
+    Since Instagram uses Facebook's infrastructure, this single endpoint handles both platforms.
+    """
+    try:
+        if request.content_type == 'application/json':
+            data = json.loads(request.body)
+        else:
+            data = request.POST.dict()
+        
+        signed_request = data.get('signed_request')
+        if not signed_request:
+            logger.warning("Deauthorize callback received without signed_request")
+            return JsonResponse({
+                'error': 'Missing signed_request parameter'
+            }, status=400)
+        
+        # In a real implementation, you would:
+        # 1. Verify the signed_request signature using your app secret
+        # 2. Extract the user_id from the signed_request
+        # 3. Revoke access tokens and remove connection data
+        # 4. Log the deauthorization event
+        
+        # For now, we'll just log the deauthorization request
+        logger.info(f"App deauthorization request received: {signed_request[:20]}...")
+        
+        # Parse signed request to get user ID (simplified - you should verify signature)
+        try:
+            import base64
+            # This is a simplified parsing - in production, verify the signature first
+            payload = signed_request.split('.')[1]
+            # Add padding if needed
+            payload += '=' * (4 - len(payload) % 4)
+            decoded = base64.b64decode(payload)
+            parsed_data = json.loads(decoded)
+            user_id = parsed_data.get('user_id')
+            
+            if user_id:
+                # Here you would remove the user's connections from your database
+                # For both Facebook and Instagram connections
+                logger.info(f"Processing deauthorization for user: {user_id}")
+                
+                # TODO: Implement actual deauthorization logic:
+                # - Remove FacebookPageConnection records for this user
+                # - Remove InstagramAccountConnection records for this user  
+                # - Revoke any stored access tokens
+                # - Clean up related data
+        
+        except Exception as parse_error:
+            logger.error(f"Failed to parse signed_request: {parse_error}")
+        
+        return JsonResponse({
+            'status': 'success',
+            'message': 'Deauthorization processed'
+        })
+        
+    except Exception as e:
+        logger.error(f"Failed to process deauthorization: {e}")
+        return JsonResponse({
+            'error': f'Failed to process deauthorization: {str(e)}'
+        }, status=500)

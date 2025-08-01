@@ -19,6 +19,7 @@ urlpatterns = [
     path('legal/terms-of-service/', legal_views.terms_of_service, name='terms-of-service'),
     path('legal/data-deletion/', legal_views.user_data_deletion, name='data-deletion'),
     path('legal/data-deletion-status/', legal_views.data_deletion_status, name='data-deletion-status'),
+    path('legal/deauthorize/', legal_views.deauthorize_callback, name='deauthorize-callback'),
     
     # Social integrations (needed for OAuth callbacks)
     path('api/social/', include('social_integrations.urls')),
