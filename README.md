@@ -1,4 +1,4 @@
-# EchoDesk Backend
+# EchoDesk BackendA
 
 Django-based backend for the EchoDesk CRM system with multi-tenant architecture.
 
@@ -116,12 +116,14 @@ python manage.py runserver
 ## 🌐 Access URLs
 
 ### Production (DigitalOcean)
+
 - **Main Dashboard**: https://echodesk.ge/admin/
 - **API Docs**: https://echodesk.ge/api/docs/
 - **Demo Tenant**: https://demo.echodesk.ge/admin/
 - **Acme Tenant**: https://acme.echodesk.ge/admin/
 
 ### Local Development
+
 - **Main Dashboard**: http://localhost:8000/admin/
 - **API Docs**: http://localhost:8000/api/docs/
 - **Demo Tenant**: http://demo.localhost:8000/admin/
@@ -146,6 +148,7 @@ python manage.py create_tenant <schema_name> <name> <domain> <admin_email> <admi
 ```
 
 Example:
+
 ```bash
 python manage.py create_tenant startup "Startup Inc" startup.echodesk.ge admin@startup.com "Jane Smith" --admin-password "startup123"
 ```
@@ -163,12 +166,14 @@ for tenant in Tenant.objects.all():
 ## 📡 API Endpoints
 
 ### Public Schema (Main Domain)
+
 - `GET /api/tenants/` - List all tenants
 - `POST /api/tenants/` - Create new tenant
 - `GET /api/tenants/{id}/users/` - List tenant users
 - `POST /api/tenants/{id}/create_admin_user/` - Create admin user for tenant
 
 ### Tenant Schema (Per Subdomain)
+
 - `GET /api/users/` - List users in current tenant
 - `GET /api/call-logs/` - List call logs
 - `POST /api/call-logs/` - Create call log
