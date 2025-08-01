@@ -67,6 +67,7 @@ TENANT_APPS = [
     'users',    # Only available in tenant schemas
     'crm',      # Keep in tenant apps too for backwards compatibility
     'tickets',
+    'social_integrations',
 ]
 
 INSTALLED_APPS = list(SHARED_APPS) + [app for app in TENANT_APPS if app not in SHARED_APPS]
@@ -285,3 +286,22 @@ REVALIDATION_SECRET = config('REVALIDATION_SECRET', default='your-secret-key-her
 # Optional: For advanced deployments
 VERCEL_TOKEN = config('VERCEL_TOKEN', default='')
 VERCEL_PROJECT_ID = config('VERCEL_PROJECT_ID', default='')
+
+# Facebook Integration Settings
+FACEBOOK_APP_ID = config('FACEBOOK_APP_ID', default='')
+FACEBOOK_APP_SECRET = config('FACEBOOK_APP_SECRET', default='')
+FACEBOOK_APP_VERSION = config('FACEBOOK_APP_VERSION', default='v18.0')
+
+# Social Integration Configuration
+SOCIAL_INTEGRATIONS = {
+    'FACEBOOK_APP_ID': FACEBOOK_APP_ID,
+    'FACEBOOK_APP_SECRET': FACEBOOK_APP_SECRET,
+    'FACEBOOK_API_VERSION': FACEBOOK_APP_VERSION,
+    'FACEBOOK_VERIFY_TOKEN': config('FACEBOOK_WEBHOOK_VERIFY_TOKEN', default='echodesk_webhook_token_2024'),
+    'FACEBOOK_SCOPES': [
+        'pages_messaging',  # Read and send messages on behalf of pages
+        'pages_show_list',  # Access list of pages
+        'pages_read_engagement',  # Read page posts and comments
+        'pages_manage_metadata',  # Access page metadata
+    ],
+}
