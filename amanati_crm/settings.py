@@ -304,4 +304,11 @@ SOCIAL_INTEGRATIONS = {
         'pages_read_engagement',  # Read page posts and comments
         'pages_manage_metadata',  # Access page metadata
     ],
+    # Instagram configuration (uses Facebook app credentials)
+    'INSTAGRAM_VERIFY_TOKEN': config('INSTAGRAM_WEBHOOK_VERIFY_TOKEN', default='echodesk_instagram_webhook_token_2024'),
+    'INSTAGRAM_SCOPES': [
+        'instagram_basic',  # Access to Instagram account info
+        'instagram_manage_messages',  # Read and send Instagram direct messages
+        'pages_show_list',  # Access list of connected pages (for business accounts)
+    ],
 }
