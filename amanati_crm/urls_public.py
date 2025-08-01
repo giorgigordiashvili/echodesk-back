@@ -13,6 +13,9 @@ urlpatterns = [
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
     path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
     
+    # Social integrations (needed for OAuth callbacks)
+    path('api/social/', include('social_integrations.urls')),
+    
     # Public/tenant management endpoints
     path('', include('tenants.urls')),
 ]
