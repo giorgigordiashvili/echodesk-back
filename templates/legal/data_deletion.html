@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Data Deletion Request - EchoDesk</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; line-height: 1.6; }
+        h1, h2 { color: #333; }
+        .form-group { margin-bottom: 20px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input, textarea { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; }
+        button { background-color: #d32f2f; color: white; padding: 12px 24px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
+        button:hover { background-color: #b71c1c; }
+        .warning { background-color: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; border-radius: 4px; margin-bottom: 20px; }
+        .info { background-color: #e3f2fd; border: 1px solid #bbdefb; padding: 15px; border-radius: 4px; margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+    <h1>Data Deletion Request</h1>
+    
+    <div class="warning">
+        <strong>⚠️ Warning:</strong> This action will permanently delete all your data from EchoDesk, including your account, messages, and settings. This action cannot be undone.
+    </div>
+    
+    <div class="info">
+        <strong>ℹ️ What will be deleted:</strong>
+        <ul>
+            <li>Your user account and profile information</li>
+            <li>All Facebook page connections</li>
+            <li>All messages and conversation history</li>
+            <li>All tickets and customer service records</li>
+            <li>All settings and preferences</li>
+        </ul>
+    </div>
+    
+    <h2>Request Data Deletion</h2>
+    <form method="post" action="/legal/data-deletion/">
+        {% csrf_token %}
+        <div class="form-group">
+            <label for="email">Email Address:</label>
+            <input type="email" id="email" name="email" required 
+                   placeholder="Enter the email associated with your EchoDesk account">
+        </div>
+        
+        <div class="form-group">
+            <label for="facebook_user_id">Facebook User ID (if applicable):</label>
+            <input type="text" id="facebook_user_id" name="facebook_user_id" 
+                   placeholder="Your Facebook User ID (optional)">
+        </div>
+        
+        <div class="form-group">
+            <label for="reason">Reason for deletion (optional):</label>
+            <textarea id="reason" name="reason" rows="4" 
+                      placeholder="Please let us know why you're deleting your data (optional)"></textarea>
+        </div>
+        
+        <div class="form-group">
+            <label>
+                <input type="checkbox" name="confirm_deletion" required>
+                I understand that this action will permanently delete all my data and cannot be undone
+            </label>
+        </div>
+        
+        <button type="submit">Delete My Data</button>
+    </form>
+    
+    <h2>Alternative Options</h2>
+    <p>If you don't want to delete all your data, you can:</p>
+    <ul>
+        <li><strong>Disconnect Facebook:</strong> Remove Facebook integration while keeping your account</li>
+        <li><strong>Deactivate Account:</strong> Temporarily disable your account without deleting data</li>
+        <li><strong>Export Data:</strong> Download your data before deletion</li>
+    </ul>
+    
+    <p>For these options, please contact us at <a href="mailto:support@echodesk.ge">support@echodesk.ge</a></p>
+    
+    <h2>Facebook Data Deletion</h2>
+    <p>If you're here because you deleted the EchoDesk app from your Facebook account, we will automatically process your data deletion request. You should receive a confirmation within 24 hours.</p>
+    
+    <h2>Questions?</h2>
+    <p>If you have any questions about data deletion, please contact us:</p>
+    <ul>
+        <li>Email: <a href="mailto:support@echodesk.ge">support@echodesk.ge</a></li>
+        <li>Website: <a href="https://echodesk.ge">https://echodesk.ge</a></li>
+    </ul>
+</body>
+</html>
