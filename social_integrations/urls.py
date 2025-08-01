@@ -8,6 +8,8 @@ router.register(r'facebook-pages', views.FacebookPageConnectionViewSet, basename
 router.register(r'facebook-messages', views.FacebookMessageViewSet, basename='facebook-messages')
 router.register(r'instagram-accounts', views.InstagramAccountConnectionViewSet, basename='instagram-accounts')
 router.register(r'instagram-messages', views.InstagramMessageViewSet, basename='instagram-messages')
+router.register(r'whatsapp-connections', views.WhatsAppBusinessConnectionViewSet, basename='whatsapp-connections')
+router.register(r'whatsapp-messages', views.WhatsAppMessageViewSet, basename='whatsapp-messages')
 
 # URL patterns for the social integrations app
 urlpatterns = [
@@ -28,6 +30,13 @@ urlpatterns = [
     path('instagram/status/', views.instagram_connection_status, name='instagram-status'),
     path('instagram/disconnect/', views.instagram_disconnect, name='instagram-disconnect'),
     path('instagram/webhook/', views.instagram_webhook, name='instagram-webhook'),
+    
+    # WhatsApp Business API endpoints
+    path('whatsapp/setup/', views.whatsapp_connection_setup, name='whatsapp-setup'),
+    path('whatsapp/connect/', views.whatsapp_connect_account, name='whatsapp-connect'),
+    path('whatsapp/status/', views.whatsapp_connection_status, name='whatsapp-status'),
+    path('whatsapp/disconnect/', views.whatsapp_disconnect, name='whatsapp-disconnect'),
+    path('whatsapp/webhook/', views.whatsapp_webhook, name='whatsapp-webhook'),
 ]
 
 app_name = 'social_integrations'

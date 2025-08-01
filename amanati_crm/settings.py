@@ -311,4 +311,7 @@ SOCIAL_INTEGRATIONS = {
         'instagram_manage_messages',  # Read and send Instagram direct messages
         'pages_show_list',  # Access list of connected pages (for business accounts)
     ],
+    # WhatsApp Business API configuration
+    'WHATSAPP_VERIFY_TOKEN': config('WHATSAPP_WEBHOOK_VERIFY_TOKEN', default='echodesk_whatsapp_webhook_token_2024'),
+    'WHATSAPP_API_VERSION': config('WHATSAPP_API_VERSION', default='v18.0'),
 }

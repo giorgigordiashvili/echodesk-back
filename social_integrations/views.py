@@ -11,8 +11,16 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from .models import FacebookPageConnection, FacebookMessage, InstagramAccountConnection, InstagramMessage
-from .serializers import FacebookPageConnectionSerializer, FacebookMessageSerializer, InstagramAccountConnectionSerializer, InstagramMessageSerializer
+from .models import (
+    FacebookPageConnection, FacebookMessage, 
+    InstagramAccountConnection, InstagramMessage,
+    WhatsAppBusinessConnection, WhatsAppMessage
+)
+from .serializers import (
+    FacebookPageConnectionSerializer, FacebookMessageSerializer, 
+    InstagramAccountConnectionSerializer, InstagramMessageSerializer,
+    WhatsAppBusinessConnectionSerializer, WhatsAppMessageSerializer
+)
 
 
 class FacebookPageConnectionViewSet(viewsets.ModelViewSet):
@@ -53,6 +61,26 @@ class InstagramMessageViewSet(viewsets.ReadOnlyModelViewSet):
     def get_queryset(self):
         user_accounts = InstagramAccountConnection.objects.filter(user=self.request.user)
         return InstagramMessage.objects.filter(account_connection__in=user_accounts)
+
+
+class WhatsAppBusinessConnectionViewSet(viewsets.ModelViewSet):
+    serializer_class = WhatsAppBusinessConnectionSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        return WhatsAppBusinessConnection.objects.filter(user=self.request.user)
+    
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
+
+
+class WhatsAppMessageViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = WhatsAppMessageSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        user_connections = WhatsAppBusinessConnection.objects.filter(user=self.request.user)
+        return WhatsAppMessage.objects.filter(connection__in=user_connections)
 
 
 @api_view(['GET'])
@@ -531,6 +559,254 @@ def instagram_webhook(request):
         except Exception as e:
             return JsonResponse({
                 'error': f'Instagram webhook processing failed: {str(e)}'
+            }, status=500)
+    
+    return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+
+# WhatsApp Business API endpoints
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def whatsapp_connection_setup(request):
+    """Start WhatsApp Business API connection setup"""
+    try:
+        # Return instructions for WhatsApp Business API setup
+        setup_info = {
+            'status': 'setup_required',
+            'message': 'WhatsApp Business API requires manual setup',
+            'instructions': [
+                '1. Create a WhatsApp Business Account at business.whatsapp.com',
+                '2. Get your Business Account ID and Phone Number ID from Meta Business Manager',
+                '3. Generate a permanent access token',
+                '4. Configure webhook URL in your WhatsApp Business API settings',
+                '5. Add your credentials to connect your WhatsApp account'
+            ],
+            'webhook_url': request.build_absolute_uri(reverse('whatsapp_webhook')),
+            'verify_token': getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('WHATSAPP_VERIFY_TOKEN', 'echodesk_whatsapp_webhook_token_2024')
+        }
+        
+        return Response(setup_info)
+        
+    except Exception as e:
+        return Response({
+            'error': f'Failed to get WhatsApp setup info: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def whatsapp_connect_account(request):
+    """Connect a WhatsApp Business Account"""
+    try:
+        business_account_id = request.data.get('business_account_id')
+        phone_number_id = request.data.get('phone_number_id')
+        access_token = request.data.get('access_token')
+        
+        if not all([business_account_id, phone_number_id, access_token]):
+            return Response({
+                'error': 'Missing required fields: business_account_id, phone_number_id, access_token'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Verify the WhatsApp Business Account
+        verify_url = f"https://graph.facebook.com/v18.0/{phone_number_id}"
+        headers = {'Authorization': f'Bearer {access_token}'}
+        
+        response = requests.get(verify_url, headers=headers)
+        if response.status_code != 200:
+            return Response({
+                'error': 'Invalid WhatsApp credentials or phone number ID'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        phone_data = response.json()
+        
+        # Create or update the WhatsApp connection
+        connection, created = WhatsAppBusinessConnection.objects.update_or_create(
+            user=request.user,
+            phone_number_id=phone_number_id,
+            defaults={
+                'business_account_id': business_account_id,
+                'phone_number': phone_data.get('display_phone_number', ''),
+                'display_phone_number': phone_data.get('display_phone_number', ''),
+                'verified_name': phone_data.get('verified_name', ''),
+                'access_token': access_token,
+                'is_active': True
+            }
+        )
+        
+        serializer = WhatsAppBusinessConnectionSerializer(connection)
+        return Response({
+            'status': 'connected' if created else 'updated',
+            'connection': serializer.data
+        })
+        
+    except Exception as e:
+        return Response({
+            'error': f'Failed to connect WhatsApp account: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def whatsapp_connection_status(request):
+    """Get WhatsApp connection status for the current user"""
+    try:
+        connections = WhatsAppBusinessConnection.objects.filter(user=request.user, is_active=True)
+        serializer = WhatsAppBusinessConnectionSerializer(connections, many=True)
+        
+        return Response({
+            'connected': connections.exists(),
+            'connections': serializer.data
+        })
+        
+    except Exception as e:
+        return Response({
+            'error': f'Failed to get WhatsApp connection status: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def whatsapp_disconnect(request):
+    """Disconnect WhatsApp Business Account"""
+    try:
+        phone_number_id = request.data.get('phone_number_id')
+        
+        if not phone_number_id:
+            return Response({
+                'error': 'phone_number_id is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        connection = WhatsAppBusinessConnection.objects.filter(
+            user=request.user,
+            phone_number_id=phone_number_id
+        ).first()
+        
+        if not connection:
+            return Response({
+                'error': 'WhatsApp connection not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        connection.is_active = False
+        connection.save()
+        
+        return Response({'status': 'disconnected'})
+        
+    except Exception as e:
+        return Response({
+            'error': f'Failed to disconnect WhatsApp: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@csrf_exempt
+@require_http_methods(["GET", "POST"])
+def whatsapp_webhook(request):
+    """Handle WhatsApp Business API webhook"""
+    if request.method == 'GET':
+        # Webhook verification
+        hub_mode = request.GET.get('hub.mode')
+        hub_challenge = request.GET.get('hub.challenge')
+        hub_verify_token = request.GET.get('hub.verify_token')
+        
+        # Get verify token from settings
+        verify_token = getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('WHATSAPP_VERIFY_TOKEN', 'echodesk_whatsapp_webhook_token_2024')
+        
+        if hub_mode == 'subscribe' and hub_verify_token == verify_token:
+            return HttpResponse(hub_challenge, content_type='text/plain')
+        else:
+            return HttpResponse('Forbidden', status=403)
+    
+    elif request.method == 'POST':
+        # Handle incoming WhatsApp messages
+        try:
+            import json
+            from datetime import datetime
+            
+            data = json.loads(request.body.decode('utf-8'))
+            
+            # WhatsApp webhook structure
+            for entry in data.get('entry', []):
+                for change in entry.get('changes', []):
+                    value = change.get('value', {})
+                    
+                    # Process messages
+                    for message in value.get('messages', []):
+                        phone_number_id = value.get('metadata', {}).get('phone_number_id')
+                        
+                        if not phone_number_id:
+                            continue
+                        
+                        # Find the WhatsApp connection
+                        connection = WhatsAppBusinessConnection.objects.filter(
+                            phone_number_id=phone_number_id,
+                            is_active=True
+                        ).first()
+                        
+                        if not connection:
+                            continue
+                        
+                        message_id = message.get('id')
+                        from_number = message.get('from')
+                        timestamp = datetime.fromtimestamp(int(message.get('timestamp')))
+                        message_type = message.get('type', 'text')
+                        
+                        # Extract message content
+                        message_text = ''
+                        media_url = ''
+                        media_mime_type = ''
+                        
+                        if message_type == 'text':
+                            message_text = message.get('text', {}).get('body', '')
+                        elif message_type in ['image', 'document', 'audio', 'video']:
+                            media_data = message.get(message_type, {})
+                            media_url = media_data.get('url', '')
+                            media_mime_type = media_data.get('mime_type', '')
+                            message_text = media_data.get('caption', '')
+                        elif message_type == 'location':
+                            location = message.get('location', {})
+                            message_text = f"Location: {location.get('latitude')}, {location.get('longitude')}"
+                        
+                        # Get contact name if available
+                        contact_name = ''
+                        for contact in value.get('contacts', []):
+                            if contact.get('wa_id') == from_number:
+                                profile = contact.get('profile', {})
+                                contact_name = profile.get('name', '')
+                                break
+                        
+                        # Save the WhatsApp message
+                        WhatsAppMessage.objects.update_or_create(
+                            message_id=message_id,
+                            defaults={
+                                'connection': connection,
+                                'from_number': from_number,
+                                'to_number': connection.phone_number,
+                                'contact_name': contact_name,
+                                'message_text': message_text,
+                                'message_type': message_type,
+                                'media_url': media_url,
+                                'media_mime_type': media_mime_type,
+                                'timestamp': timestamp,
+                                'is_from_business': False,
+                                'is_read': False,
+                                'delivery_status': 'delivered'
+                            }
+                        )
+                    
+                    # Process message status updates
+                    for status_update in value.get('statuses', []):
+                        message_id = status_update.get('id')
+                        status_value = status_update.get('status')
+                        
+                        # Update message delivery status
+                        WhatsAppMessage.objects.filter(message_id=message_id).update(
+                            delivery_status=status_value
+                        )
+            
+            return JsonResponse({'status': 'received'})
+            
+        except Exception as e:
+            return JsonResponse({
+                'error': f'WhatsApp webhook processing failed: {str(e)}'
             }, status=500)
     
     return JsonResponse({'error': 'Method not allowed'}, status=405)

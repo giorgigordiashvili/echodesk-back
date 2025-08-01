@@ -1,5 +1,9 @@
 from rest_framework import serializers
-from .models import FacebookPageConnection, FacebookMessage, InstagramAccountConnection, InstagramMessage
+from .models import (
+    FacebookPageConnection, FacebookMessage, 
+    InstagramAccountConnection, InstagramMessage,
+    WhatsAppBusinessConnection, WhatsAppMessage
+)
 
 
 class FacebookPageConnectionSerializer(serializers.ModelSerializer):
@@ -39,3 +43,29 @@ class InstagramMessageSerializer(serializers.ModelSerializer):
             'is_from_business', 'account_username', 'created_at'
         ]
         read_only_fields = ['id', 'created_at']
+
+
+class WhatsAppBusinessConnectionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = WhatsAppBusinessConnection
+        fields = [
+            'id', 'business_account_id', 'phone_number_id', 'phone_number', 
+            'display_phone_number', 'verified_name', 'webhook_url', 'is_active', 
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class WhatsAppMessageSerializer(serializers.ModelSerializer):
+    connection_phone = serializers.CharField(source='connection.display_phone_number', read_only=True)
+    connection_name = serializers.CharField(source='connection.verified_name', read_only=True)
+    
+    class Meta:
+        model = WhatsAppMessage
+        fields = [
+            'id', 'message_id', 'from_number', 'to_number', 'contact_name', 
+            'message_text', 'message_type', 'media_url', 'media_mime_type', 
+            'timestamp', 'is_from_business', 'is_read', 'delivery_status',
+            'connection_phone', 'connection_name', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
