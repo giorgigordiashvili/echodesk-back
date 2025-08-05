@@ -18,7 +18,8 @@ class FacebookPageConnection(models.Model):
         unique_together = ['user', 'page_id']
     
     def __str__(self):
-        return f"{self.page_name} - {self.user.username}"
+        user_display = self.user.get_full_name() or self.user.email
+        return f"{self.page_name} - {user_display}"
 
 
 class FacebookMessage(models.Model):
