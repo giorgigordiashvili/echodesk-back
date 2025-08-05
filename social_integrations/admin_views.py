@@ -10,6 +10,15 @@ from django.urls import reverse
 from .models import FacebookPageConnection
 
 
+def get_admin_redirect_url(original_domain=None):
+    """Helper function to get the correct admin redirect URL"""
+    if original_domain and original_domain != 'api.echodesk.ge':
+        return f'https://{original_domain}/admin/social_integrations/facebookpageconnection/'
+    else:
+        # Fallback to amanati tenant
+        return 'https://amanati.echodesk.ge/admin/social_integrations/facebookpageconnection/'
+
+
 @staff_member_required
 @login_required
 def facebook_oauth_admin_start(request):
@@ -18,7 +27,7 @@ def facebook_oauth_admin_start(request):
         fb_app_id = getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_APP_ID')
         if not fb_app_id:
             messages.error(request, 'Facebook App ID not configured')
-            return redirect('admin:social_integrations_facebookpageconnection_changelist')
+            return redirect(get_admin_redirect_url())
         
         # Always use api.echodesk.ge as the single OAuth redirect URI
         redirect_uri = 'https://api.echodesk.ge/api/social/admin/facebook/oauth/callback/'
@@ -41,11 +50,11 @@ def facebook_oauth_admin_start(request):
         
     except Exception as e:
         messages.error(request, f'Failed to start Facebook OAuth: {str(e)}')
-        return redirect('admin:social_integrations_facebookpageconnection_changelist')
+        return redirect(get_admin_redirect_url())
         fb_app_id = getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_APP_ID')
         if not fb_app_id:
             messages.error(request, 'Facebook App ID not configured')
-            return redirect('admin:social_integrations_facebookpageconnection_changelist')
+            return redirect(get_admin_redirect_url())
         
         # Use admin callback URL - build manually since reverse might fail in tenant context
         callback_path = '/api/social/admin/facebook/oauth/callback/'
@@ -68,7 +77,7 @@ def facebook_oauth_admin_start(request):
         
     except Exception as e:
         messages.error(request, f'Failed to start Facebook OAuth: {str(e)}')
-        return redirect('admin:social_integrations_facebookpageconnection_changelist')
+        return redirect(get_admin_redirect_url())
 
 
 @staff_member_required
@@ -85,18 +94,26 @@ def facebook_oauth_admin_callback(request):
         if error:
             error_msg = f'Facebook OAuth failed: {error_description or error}'
             messages.error(request, error_msg)
-            # Redirect back to original domain if available
+            # Always redirect back to original domain if available
             if state:
                 for param in state.split('&'):
                     if param.startswith('domain='):
                         domain = param.split('=')[1]
                         if domain and domain != 'api.echodesk.ge':
                             return redirect(f'https://{domain}/admin/social_integrations/facebookpageconnection/')
-            return redirect('admin:social_integrations_facebookpageconnection_changelist')
+            # Fallback to amanati tenant
+            return redirect('https://amanati.echodesk.ge/admin/social_integrations/facebookpageconnection/')
         
         if not code:
             messages.error(request, 'No authorization code received from Facebook')
-            return redirect('admin:social_integrations_facebookpageconnection_changelist')
+            # Always redirect back to original domain if available
+            if state:
+                for param in state.split('&'):
+                    if param.startswith('domain='):
+                        domain = param.split('=')[1]
+                        if domain and domain != 'api.echodesk.ge':
+                            return redirect(f'https://{domain}/admin/social_integrations/facebookpageconnection/')
+            return redirect('https://amanati.echodesk.ge/admin/social_integrations/facebookpageconnection/')
         
         # Parse state to get user info and original domain
         user_id = None
@@ -113,7 +130,10 @@ def facebook_oauth_admin_callback(request):
         
         if not user_id:
             messages.error(request, 'Invalid state parameter - missing user ID')
-            return redirect('admin:social_integrations_facebookpageconnection_changelist')
+            # Always redirect back to original domain if available
+            if state and original_domain and original_domain != 'api.echodesk.ge':
+                return redirect(f'https://{original_domain}/admin/social_integrations/facebookpageconnection/')
+            return redirect('https://amanati.echodesk.ge/admin/social_integrations/facebookpageconnection/')
         
         # Get the user (you might need to implement cross-tenant user lookup)
         from django.contrib.auth import get_user_model
@@ -122,7 +142,10 @@ def facebook_oauth_admin_callback(request):
             user = User.objects.get(id=user_id)
         except User.DoesNotExist:
             messages.error(request, 'User not found')
-            return redirect('admin:social_integrations_facebookpageconnection_changelist')
+            # Always redirect back to original domain if available
+            if original_domain and original_domain != 'api.echodesk.ge':
+                return redirect(f'https://{original_domain}/admin/social_integrations/facebookpageconnection/')
+            return redirect('https://amanati.echodesk.ge/admin/social_integrations/facebookpageconnection/')
         
         # Exchange code for access token
         fb_app_id = getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_APP_ID')
@@ -140,14 +163,14 @@ def facebook_oauth_admin_callback(request):
         token_response = requests.get(token_url, params=token_params)
         if token_response.status_code != 200:
             messages.error(request, 'Failed to exchange code for access token')
-            return redirect('admin:social_integrations_facebookpageconnection_changelist')
+            return redirect(get_admin_redirect_url())
         
         token_data = token_response.json()
         user_access_token = token_data.get('access_token')
         
         if not user_access_token:
             messages.error(request, 'No access token received from Facebook')
-            return redirect('admin:social_integrations_facebookpageconnection_changelist')
+            return redirect(get_admin_redirect_url())
         
         # Get user's pages
         pages_url = 'https://graph.facebook.com/v23.0/me/accounts'
@@ -159,17 +182,18 @@ def facebook_oauth_admin_callback(request):
         pages_response = requests.get(pages_url, params=pages_params)
         if pages_response.status_code != 200:
             messages.error(request, 'Failed to fetch Facebook pages')
-            return redirect('admin:social_integrations_facebookpageconnection_changelist')
+            return redirect(get_admin_redirect_url())
         
         pages_data = pages_response.json()
         pages = pages_data.get('data', [])
         
         if not pages:
             messages.warning(request, 'No Facebook pages found. Make sure you have admin access to Facebook pages.')
-            # Redirect back to original domain
+            # Always redirect back to original domain
             if original_domain and original_domain != 'api.echodesk.ge':
                 return redirect(f'https://{original_domain}/admin/social_integrations/facebookpageconnection/')
-            return redirect('admin:social_integrations_facebookpageconnection_changelist')
+            else:
+                return redirect('https://amanati.echodesk.ge/admin/social_integrations/facebookpageconnection/')
         
         # Create or update page connections
         created_count = 0
@@ -205,15 +229,17 @@ def facebook_oauth_admin_callback(request):
         if updated_count > 0:
             messages.success(request, f'Updated {updated_count} existing Facebook page connection(s)')
         
-        # Redirect back to original domain admin
+        # Always redirect back to original domain admin (not api.echodesk.ge)
         if original_domain and original_domain != 'api.echodesk.ge':
-            return redirect(f'https://{original_domain}/admin/social_integrations/facebookpageconnection/')
+            redirect_url = f'https://{original_domain}/admin/social_integrations/facebookpageconnection/'
+            return redirect(redirect_url)
         else:
-            return redirect('admin:social_integrations_facebookpageconnection_changelist')
+            # Fallback: if no original domain, redirect to amanati tenant
+            return redirect('https://amanati.echodesk.ge/admin/social_integrations/facebookpageconnection/')
         
     except Exception as e:
         messages.error(request, f'Facebook OAuth callback failed: {str(e)}')
-        return redirect('admin:social_integrations_facebookpageconnection_changelist')
+        return redirect(get_admin_redirect_url())
     try:
         # Get parameters from Facebook callback
         code = request.GET.get('code')
@@ -224,11 +250,11 @@ def facebook_oauth_admin_callback(request):
         # Handle Facebook errors
         if error:
             messages.error(request, f'Facebook OAuth failed: {error_description or error}')
-            return redirect('admin:social_integrations_facebookpageconnection_changelist')
+            return redirect(get_admin_redirect_url())
         
         if not code:
             messages.error(request, 'No authorization code received from Facebook')
-            return redirect('admin:social_integrations_facebookpageconnection_changelist')
+            return redirect(get_admin_redirect_url())
         
         # Parse state to get user info
         user_id = None
@@ -240,7 +266,7 @@ def facebook_oauth_admin_callback(request):
         
         if not user_id or str(request.user.id) != user_id:
             messages.error(request, 'Invalid state parameter')
-            return redirect('admin:social_integrations_facebookpageconnection_changelist')
+            return redirect(get_admin_redirect_url())
         
         # Exchange code for access token
         fb_app_id = getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_APP_ID')
@@ -259,14 +285,14 @@ def facebook_oauth_admin_callback(request):
         token_response = requests.get(token_url, params=token_params)
         if token_response.status_code != 200:
             messages.error(request, 'Failed to exchange code for access token')
-            return redirect('admin:social_integrations_facebookpageconnection_changelist')
+            return redirect(get_admin_redirect_url())
         
         token_data = token_response.json()
         user_access_token = token_data.get('access_token')
         
         if not user_access_token:
             messages.error(request, 'No access token received from Facebook')
-            return redirect('admin:social_integrations_facebookpageconnection_changelist')
+            return redirect(get_admin_redirect_url())
         
         # Get user's pages
         pages_url = 'https://graph.facebook.com/v23.0/me/accounts'
@@ -278,14 +304,14 @@ def facebook_oauth_admin_callback(request):
         pages_response = requests.get(pages_url, params=pages_params)
         if pages_response.status_code != 200:
             messages.error(request, 'Failed to fetch Facebook pages')
-            return redirect('admin:social_integrations_facebookpageconnection_changelist')
+            return redirect(get_admin_redirect_url())
         
         pages_data = pages_response.json()
         pages = pages_data.get('data', [])
         
         if not pages:
             messages.warning(request, 'No Facebook pages found. Make sure you have admin access to Facebook pages.')
-            return redirect('admin:social_integrations_facebookpageconnection_changelist')
+            return redirect(get_admin_redirect_url())
         
         # Create or update page connections
         created_count = 0
@@ -321,8 +347,8 @@ def facebook_oauth_admin_callback(request):
         if updated_count > 0:
             messages.success(request, f'Updated {updated_count} existing Facebook page connection(s)')
         
-        return redirect('admin:social_integrations_facebookpageconnection_changelist')
+        return redirect(get_admin_redirect_url())
         
     except Exception as e:
         messages.error(request, f'Facebook OAuth callback failed: {str(e)}')
-        return redirect('admin:social_integrations_facebookpageconnection_changelist')
+        return redirect(get_admin_redirect_url())
