@@ -19,8 +19,9 @@ def facebook_oauth_admin_start(request):
             messages.error(request, 'Facebook App ID not configured')
             return redirect('admin:social_integrations_facebookpageconnection_changelist')
         
-        # Use admin callback URL
-        redirect_uri = request.build_absolute_uri(reverse('admin_facebook_oauth_callback'))
+        # Use admin callback URL - build manually since reverse might fail in tenant context
+        callback_path = '/api/social/admin/facebook/oauth/callback/'
+        redirect_uri = request.build_absolute_uri(callback_path)
         
         # Include user info in state parameter
         state = f'user={request.user.id}&tenant={getattr(request, "tenant", "amanati")}'
@@ -76,7 +77,8 @@ def facebook_oauth_admin_callback(request):
         # Exchange code for access token
         fb_app_id = getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_APP_ID')
         fb_app_secret = getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_APP_SECRET')
-        redirect_uri = request.build_absolute_uri(reverse('admin_facebook_oauth_callback'))
+        callback_path = '/api/social/admin/facebook/oauth/callback/'
+        redirect_uri = request.build_absolute_uri(callback_path)
         
         token_url = 'https://graph.facebook.com/v23.0/oauth/access_token'
         token_params = {
