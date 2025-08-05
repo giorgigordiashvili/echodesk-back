@@ -1,6 +1,6 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from . import views
+from . import views, admin_views
 
 # Create a router and register our viewsets with it
 router = DefaultRouter()
@@ -37,6 +37,10 @@ urlpatterns = [
     path('whatsapp/status/', views.whatsapp_connection_status, name='whatsapp-status'),
     path('whatsapp/disconnect/', views.whatsapp_disconnect, name='whatsapp-disconnect'),
     path('whatsapp/webhook/', views.whatsapp_webhook, name='whatsapp-webhook'),
+    
+    # Admin OAuth endpoints
+    path('admin/facebook/oauth/start/', admin_views.facebook_oauth_admin_start, name='admin_facebook_oauth_start'),
+    path('admin/facebook/oauth/callback/', admin_views.facebook_oauth_admin_callback, name='admin_facebook_oauth_callback'),
 ]
 
 app_name = 'social_integrations'

@@ -1,4 +1,7 @@
 from django.contrib import admin
+from django.urls import reverse
+from django.utils.html import format_html
+from django.utils.safestring import mark_safe
 from .models import (
     FacebookPageConnection, FacebookMessage, 
     InstagramAccountConnection, InstagramMessage,
@@ -11,6 +14,20 @@ class FacebookPageConnectionAdmin(admin.ModelAdmin):
     list_display = ['page_name', 'user', 'page_id', 'is_active', 'created_at']
     list_filter = ['is_active', 'created_at']
     search_fields = ['page_name', 'user__username', 'page_id']
+    readonly_fields = ['page_access_token']
+    
+    def changelist_view(self, request, extra_context=None):
+        extra_context = extra_context or {}
+        
+        # Add "Connect to Facebook" button
+        connect_url = reverse('social_integrations:admin_facebook_oauth_start')
+        extra_context['connect_facebook_button'] = format_html(
+            '<a class="button" href="{}" style="background-color: #1877f2; color: white; margin-bottom: 10px;">'
+            'Connect to Facebook</a>',
+            connect_url
+        )
+        
+        return super().changelist_view(request, extra_context=extra_context)
 
 
 @admin.register(FacebookMessage)
