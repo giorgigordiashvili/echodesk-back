@@ -19,7 +19,7 @@ class FacebookMessageSerializer(serializers.ModelSerializer):
     class Meta:
         model = FacebookMessage
         fields = [
-            'id', 'message_id', 'sender_id', 'sender_name', 'message_text', 
+            'id', 'message_id', 'sender_id', 'sender_name', 'profile_pic_url', 'message_text', 
             'timestamp', 'is_from_page', 'page_name', 'created_at'
         ]
         read_only_fields = ['id', 'created_at']

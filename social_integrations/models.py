@@ -27,6 +27,7 @@ class FacebookMessage(models.Model):
     message_id = models.CharField(max_length=100, unique=True)
     sender_id = models.CharField(max_length=100)
     sender_name = models.CharField(max_length=200, blank=True)
+    profile_pic_url = models.URLField(blank=True, null=True)  # User's profile picture
     message_text = models.TextField()
     timestamp = models.DateTimeField()
     is_from_page = models.BooleanField(default=False)  # True if message is from page to user

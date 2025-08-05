@@ -44,7 +44,7 @@
    ```bash
    FACEBOOK_APP_ID=your-actual-app-id-here
    FACEBOOK_APP_SECRET=your-actual-app-secret-here
-   FACEBOOK_APP_VERSION=v18.0
+   FACEBOOK_APP_VERSION=v23.0
    FACEBOOK_WEBHOOK_VERIFY_TOKEN=echodesk_webhook_token_2024
    ```
 
@@ -66,7 +66,25 @@
 1. **Go to Messenger > Settings**
    - Add Callback URL: `https://yourdomain.com/api/social/facebook/webhook/`
    - Verify Token: `echodesk_webhook_token_2024` (must match your .env)
-   - Subscribe to: `messages`, `messaging_postbacks`
+   
+2. **Subscribe to Webhook Fields (v23.0)**
+   
+   **Essential Fields for receiving and sending messages:**
+   - `messages` - To receive incoming messages from users
+   - `messaging_postbacks` - To handle button clicks and quick replies
+   
+   **Additional Recommended Fields:**
+   - `message_deliveries` - To track message delivery status
+   - `message_echoes` - To receive copies of messages sent by your page
+   - `message_reads` - To know when users read your messages
+   - `messaging_optins` - To handle users opting into messaging
+   - `messaging_referrals` - To track how users discovered your page
+   - `messaging_account_linking` - For account linking features
+
+3. **Profile Picture Support**
+   - Profile pictures are fetched automatically using the Graph API
+   - Requires `pages_messaging` permission to access user profile data
+   - User profile pictures are retrieved when processing incoming messages
 
 ## Step 6: Test Integration
 

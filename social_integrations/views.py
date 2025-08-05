@@ -102,7 +102,7 @@ def facebook_oauth_start(request):
         
         # Facebook OAuth URL for business pages with pages_messaging scope
         oauth_url = (
-            f"https://www.facebook.com/v18.0/dialog/oauth?"
+            f"https://www.facebook.com/v23.0/dialog/oauth?"
             f"client_id={fb_app_id}&"
             f"redirect_uri={redirect_uri}&"
             f"scope=pages_manage_metadata,pages_messaging,pages_read_engagement&"
@@ -285,15 +285,40 @@ def facebook_webhook(request):
                                 message_data = message_event['message']
                                 sender_id = message_event['sender']['id']
                                 
+                                # Get sender profile information including profile picture
+                                sender_name = 'Unknown'
+                                profile_pic_url = None
+                                
+                                if sender_id != page_id:  # Don't fetch profile for page itself
+                                    try:
+                                        # Use the page access token to get user profile
+                                        profile_url = f"https://graph.facebook.com/v23.0/{sender_id}"
+                                        profile_params = {
+                                            'fields': 'first_name,last_name,profile_pic',
+                                            'access_token': page_connection.page_access_token
+                                        }
+                                        profile_response = requests.get(profile_url, params=profile_params)
+                                        
+                                        if profile_response.status_code == 200:
+                                            profile_data = profile_response.json()
+                                            first_name = profile_data.get('first_name', '')
+                                            last_name = profile_data.get('last_name', '')
+                                            sender_name = f"{first_name} {last_name}".strip()
+                                            profile_pic_url = profile_data.get('profile_pic')
+                                        
+                                    except Exception as e:
+                                        print(f"Failed to fetch profile for {sender_id}: {e}")
+                                
                                 # Save the message
                                 FacebookMessage.objects.create(
                                     page_connection=page_connection,
                                     message_id=message_data.get('mid', ''),
                                     sender_id=sender_id,
-                                    sender_name='Unknown',  # Can be enriched with additional API call
+                                    sender_name=sender_name,
                                     message_text=message_data.get('text', ''),
                                     timestamp=message_event.get('timestamp', 0),
-                                    is_from_page=(sender_id == page_id)
+                                    is_from_page=(sender_id == page_id),
+                                    profile_pic_url=profile_pic_url
                                 )
             
             return JsonResponse({'status': 'received'})
