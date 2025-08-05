@@ -13,10 +13,16 @@ from .models import FacebookPageConnection
 def get_admin_redirect_url(original_domain=None):
     """Helper function to get the correct admin redirect URL"""
     if original_domain and original_domain != 'api.echodesk.ge':
-        return f'https://{original_domain}/admin/social_integrations/facebookpageconnection/'
+        # Convert frontend domain to API domain for Django admin
+        if original_domain.endswith('.echodesk.ge'):
+            tenant_subdomain = original_domain.replace('.echodesk.ge', '')
+            api_domain = f'{tenant_subdomain}.api.echodesk.ge'
+            return f'https://{api_domain}/admin/social_integrations/facebookpageconnection/'
+        else:
+            return f'https://{original_domain}/admin/social_integrations/facebookpageconnection/'
     else:
-        # Fallback to amanati tenant
-        return 'https://amanati.echodesk.ge/admin/social_integrations/facebookpageconnection/'
+        # Fallback to amanati tenant API domain
+        return 'https://amanati.api.echodesk.ge/admin/social_integrations/facebookpageconnection/'
 
 
 @staff_member_required
@@ -102,7 +108,7 @@ def facebook_oauth_admin_callback(request):
                         if domain and domain != 'api.echodesk.ge':
                             return redirect(f'https://{domain}/admin/social_integrations/facebookpageconnection/')
             # Fallback to amanati tenant
-            return redirect('https://amanati.echodesk.ge/admin/social_integrations/facebookpageconnection/')
+            return redirect('https://amanati.api.echodesk.ge/admin/social_integrations/facebookpageconnection/')
         
         if not code:
             messages.error(request, 'No authorization code received from Facebook')
@@ -113,7 +119,7 @@ def facebook_oauth_admin_callback(request):
                         domain = param.split('=')[1]
                         if domain and domain != 'api.echodesk.ge':
                             return redirect(f'https://{domain}/admin/social_integrations/facebookpageconnection/')
-            return redirect('https://amanati.echodesk.ge/admin/social_integrations/facebookpageconnection/')
+            return redirect('https://amanati.api.echodesk.ge/admin/social_integrations/facebookpageconnection/')
         
         # Parse state to get user info and original domain
         user_id = None
@@ -133,7 +139,7 @@ def facebook_oauth_admin_callback(request):
             # Always redirect back to original domain if available
             if state and original_domain and original_domain != 'api.echodesk.ge':
                 return redirect(f'https://{original_domain}/admin/social_integrations/facebookpageconnection/')
-            return redirect('https://amanati.echodesk.ge/admin/social_integrations/facebookpageconnection/')
+            return redirect('https://amanati.api.echodesk.ge/admin/social_integrations/facebookpageconnection/')
         
         # Get the user (you might need to implement cross-tenant user lookup)
         from django.contrib.auth import get_user_model
@@ -145,7 +151,7 @@ def facebook_oauth_admin_callback(request):
             # Always redirect back to original domain if available
             if original_domain and original_domain != 'api.echodesk.ge':
                 return redirect(f'https://{original_domain}/admin/social_integrations/facebookpageconnection/')
-            return redirect('https://amanati.echodesk.ge/admin/social_integrations/facebookpageconnection/')
+            return redirect('https://amanati.api.echodesk.ge/admin/social_integrations/facebookpageconnection/')
         
         # Exchange code for access token
         fb_app_id = getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_APP_ID')
@@ -193,7 +199,7 @@ def facebook_oauth_admin_callback(request):
             if original_domain and original_domain != 'api.echodesk.ge':
                 return redirect(f'https://{original_domain}/admin/social_integrations/facebookpageconnection/')
             else:
-                return redirect('https://amanati.echodesk.ge/admin/social_integrations/facebookpageconnection/')
+                return redirect('https://amanati.api.echodesk.ge/admin/social_integrations/facebookpageconnection/')
         
         # Create or update page connections
         created_count = 0
@@ -235,7 +241,7 @@ def facebook_oauth_admin_callback(request):
             return redirect(redirect_url)
         else:
             # Fallback: if no original domain, redirect to amanati tenant
-            return redirect('https://amanati.echodesk.ge/admin/social_integrations/facebookpageconnection/')
+            return redirect('https://amanati.api.echodesk.ge/admin/social_integrations/facebookpageconnection/')
         
     except Exception as e:
         messages.error(request, f'Facebook OAuth callback failed: {str(e)}')
