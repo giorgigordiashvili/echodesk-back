@@ -215,19 +215,19 @@ def facebook_oauth_callback(request):
                     user_id = param.split('=', 1)[1]
         
         # Frontend dashboard URL
-        frontend_url = f"https://{tenant_name.split('(')[1].split(')')[0] if tenant_name else 'amanati'}.echodesk.ge/dashboard"
+        frontend_url = f"https://{tenant_name.split('(')[1].split(')')[0] if tenant_name else 'amanati'}.echodesk.ge"
         
         # Handle Facebook errors (user denied, etc.)
         if error:
             error_msg = f"Facebook OAuth failed: {error_description or error}"
             logger.error(f"Facebook OAuth error: {error} - {error_description}")
-            return redirect(f"{frontend_url}?facebook_status=error&message={quote_plus(error_msg)}")
+            return redirect(f"{frontend_url}/?facebook_status=error&message={quote_plus(error_msg)}")
         
         # Handle missing code
         if not code:
             error_msg = "Authorization code not provided by Facebook"
             logger.error("Facebook OAuth callback missing authorization code")
-            return redirect(f"{frontend_url}?facebook_status=error&message={quote_plus(error_msg)}")
+            return redirect(f"{frontend_url}/?facebook_status=error&message={quote_plus(error_msg)}")
         
         # Exchange authorization code for access token
         token_url = f"https://graph.facebook.com/v{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_APP_VERSION', 'v18.0')}/oauth/access_token"
@@ -245,13 +245,13 @@ def facebook_oauth_callback(request):
         if 'error' in token_data:
             error_msg = f"Token exchange failed: {token_data.get('error', {}).get('message', 'Unknown error')}"
             logger.error(f"Facebook token exchange error: {token_data}")
-            return redirect(f"{frontend_url}?facebook_status=error&message={quote_plus(error_msg)}")
+            return redirect(f"{frontend_url}/?facebook_status=error&message={quote_plus(error_msg)}")
         
         user_access_token = token_data.get('access_token')
         if not user_access_token:
             error_msg = "No access token received from Facebook"
             logger.error("Facebook token exchange did not return access token")
-            return redirect(f"{frontend_url}?facebook_status=error&message={quote_plus(error_msg)}")
+            return redirect(f"{frontend_url}/?facebook_status=error&message={quote_plus(error_msg)}")
         
         # Get user's Facebook pages
         pages_url = f"https://graph.facebook.com/v{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_APP_VERSION', 'v18.0')}/me/accounts"
@@ -267,13 +267,13 @@ def facebook_oauth_callback(request):
         if 'error' in pages_data:
             error_msg = f"Failed to fetch pages: {pages_data.get('error', {}).get('message', 'Unknown error')}"
             logger.error(f"Facebook pages fetch error: {pages_data}")
-            return redirect(f"{frontend_url}?facebook_status=error&message={quote_plus(error_msg)}")
+            return redirect(f"{frontend_url}/?facebook_status=error&message={quote_plus(error_msg)}")
         
         pages = pages_data.get('data', [])
         if not pages:
             error_msg = "No Facebook pages found for this account"
             logger.warning("User has no Facebook pages")
-            return redirect(f"{frontend_url}?facebook_status=error&message={quote_plus(error_msg)}")
+            return redirect(f"{frontend_url}/?facebook_status=error&message={quote_plus(error_msg)}")
         
         # Save page connections to database
         saved_pages = 0
@@ -304,14 +304,14 @@ def facebook_oauth_callback(request):
         # Redirect back to frontend with success
         success_msg = f"Successfully connected {saved_pages} Facebook page(s)"
         logger.info(f"Facebook OAuth completed successfully: {saved_pages} pages saved")
-        return redirect(f"{frontend_url}?facebook_status=connected&pages={saved_pages}&message={quote_plus(success_msg)}")
+        return redirect(f"{frontend_url}/?facebook_status=connected&pages={saved_pages}&message={quote_plus(success_msg)}")
         
     except Exception as e:
         logger.error(f"Facebook OAuth callback processing failed: {e}")
         # Fallback frontend URL if parsing fails
-        frontend_url = "https://amanati.echodesk.ge/dashboard"
+        frontend_url = "https://amanati.echodesk.ge"
         error_msg = f"OAuth processing failed: {str(e)}"
-        return redirect(f"{frontend_url}?facebook_status=error&message={quote_plus(error_msg)}")
+        return redirect(f"{frontend_url}/?facebook_status=error&message={quote_plus(error_msg)}")
 
 
 @api_view(['GET'])
@@ -1108,19 +1108,19 @@ def instagram_oauth_callback(request):
                     user_id = param.split('=', 1)[1]
         
         # Frontend dashboard URL
-        frontend_url = f"https://{tenant_name.split('(')[1].split(')')[0] if tenant_name else 'amanati'}.echodesk.ge/dashboard"
+        frontend_url = f"https://{tenant_name.split('(')[1].split(')')[0] if tenant_name else 'amanati'}.echodesk.ge"
         
         # Handle Instagram errors (user denied, etc.)
         if error:
             error_msg = f"Instagram OAuth failed: {error_description or error}"
             logger.error(f"Instagram OAuth error: {error} - {error_description}")
-            return redirect(f"{frontend_url}?instagram_status=error&message={quote_plus(error_msg)}")
+            return redirect(f"{frontend_url}/?instagram_status=error&message={quote_plus(error_msg)}")
         
         # Handle missing code
         if not code:
             error_msg = "Authorization code not provided by Instagram"
             logger.error("Instagram OAuth callback missing authorization code")
-            return redirect(f"{frontend_url}?instagram_status=error&message={quote_plus(error_msg)}")
+            return redirect(f"{frontend_url}/?instagram_status=error&message={quote_plus(error_msg)}")
         
         # Exchange authorization code for access token
         token_url = f"https://graph.facebook.com/v{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_APP_VERSION', 'v18.0')}/oauth/access_token"
@@ -1138,13 +1138,13 @@ def instagram_oauth_callback(request):
         if 'error' in token_data:
             error_msg = f"Token exchange failed: {token_data.get('error', {}).get('message', 'Unknown error')}"
             logger.error(f"Instagram token exchange error: {token_data}")
-            return redirect(f"{frontend_url}?instagram_status=error&message={quote_plus(error_msg)}")
+            return redirect(f"{frontend_url}/?instagram_status=error&message={quote_plus(error_msg)}")
         
         user_access_token = token_data.get('access_token')
         if not user_access_token:
             error_msg = "No access token received from Instagram"
             logger.error("Instagram token exchange did not return access token")
-            return redirect(f"{frontend_url}?instagram_status=error&message={quote_plus(error_msg)}")
+            return redirect(f"{frontend_url}/?instagram_status=error&message={quote_plus(error_msg)}")
         
         # Get user's Instagram business accounts
         # First get user info to get the user ID
@@ -1161,7 +1161,7 @@ def instagram_oauth_callback(request):
         if 'error' in user_data:
             error_msg = f"Failed to fetch user info: {user_data.get('error', {}).get('message', 'Unknown error')}"
             logger.error(f"Instagram user fetch error: {user_data}")
-            return redirect(f"{frontend_url}?instagram_status=error&message={quote_plus(error_msg)}")
+            return redirect(f"{frontend_url}/?instagram_status=error&message={quote_plus(error_msg)}")
         
         # Get user's Facebook pages (needed for Instagram business accounts)
         pages_url = f"https://graph.facebook.com/v{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_APP_VERSION', 'v18.0')}/me/accounts"
@@ -1177,7 +1177,7 @@ def instagram_oauth_callback(request):
         if 'error' in pages_data:
             error_msg = f"Failed to fetch pages: {pages_data.get('error', {}).get('message', 'Unknown error')}"
             logger.error(f"Instagram pages fetch error: {pages_data}")
-            return redirect(f"{frontend_url}?instagram_status=error&message={quote_plus(error_msg)}")
+            return redirect(f"{frontend_url}/?instagram_status=error&message={quote_plus(error_msg)}")
         
         pages = pages_data.get('data', [])
         instagram_accounts = []
@@ -1209,7 +1209,7 @@ def instagram_oauth_callback(request):
         if not instagram_accounts:
             error_msg = "No Instagram business accounts found for this Facebook account"
             logger.warning("User has no Instagram business accounts")
-            return redirect(f"{frontend_url}?instagram_status=error&message={quote_plus(error_msg)}")
+            return redirect(f"{frontend_url}/?instagram_status=error&message={quote_plus(error_msg)}")
         
         # Save Instagram account connections to database
         saved_accounts = 0
@@ -1240,14 +1240,14 @@ def instagram_oauth_callback(request):
         # Redirect back to frontend with success
         success_msg = f"Successfully connected {saved_accounts} Instagram account(s)"
         logger.info(f"Instagram OAuth completed successfully: {saved_accounts} accounts saved")
-        return redirect(f"{frontend_url}?instagram_status=connected&accounts={saved_accounts}&message={quote_plus(success_msg)}")
+        return redirect(f"{frontend_url}/?instagram_status=connected&accounts={saved_accounts}&message={quote_plus(success_msg)}")
         
     except Exception as e:
         logger.error(f"Instagram OAuth callback processing failed: {e}")
         # Fallback frontend URL if parsing fails
-        frontend_url = "https://amanati.echodesk.ge/dashboard"
+        frontend_url = "https://amanati.echodesk.ge"
         error_msg = f"OAuth processing failed: {str(e)}"
-        return redirect(f"{frontend_url}?instagram_status=error&message={quote_plus(error_msg)}")
+        return redirect(f"{frontend_url}/?instagram_status=error&message={quote_plus(error_msg)}")
 
 
 @api_view(['GET'])
