@@ -77,6 +77,7 @@ TENANT_MODEL = "tenants.Tenant"
 
 MIDDLEWARE = [
     'amanati_crm.middleware.EchoDeskTenantMiddleware',  # Custom tenant middleware
+    'amanati_crm.middleware.RequestLoggingMiddleware',  # Custom request logging middleware
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',  # Static file serving
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -263,18 +264,50 @@ PUBLIC_SCHEMA_URLCONF = 'amanati_crm.urls_public'
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
+    'formatters': {
+        'detailed': {
+            'format': '{asctime} [{levelname}] {name}: {message}',
+            'style': '{',
+        },
+        'simple': {
+            'format': '{levelname} {message}',
+            'style': '{',
+        },
+    },
     'handlers': {
         'file': {
             'level': 'INFO',
             'class': 'logging.FileHandler',
             'filename': BASE_DIR / 'debug.log',
+            'formatter': 'detailed',
+        },
+        'request_file': {
+            'level': 'INFO',
+            'class': 'logging.FileHandler',
+            'filename': BASE_DIR / 'requests.log',
+            'formatter': 'detailed',
+        },
+        'console': {
+            'level': 'DEBUG' if DEBUG else 'INFO',
+            'class': 'logging.StreamHandler',
+            'formatter': 'simple',
         },
     },
     'loggers': {
         'django': {
-            'handlers': ['file'],
+            'handlers': ['file', 'console'] if DEBUG else ['file'],
             'level': 'INFO',
             'propagate': True,
+        },
+        'django.request': {
+            'handlers': ['request_file', 'console'] if DEBUG else ['request_file'],
+            'level': 'INFO',
+            'propagate': False,  # Don't duplicate in django logger
+        },
+        'django.server': {
+            'handlers': ['file', 'console'] if DEBUG else ['file'],
+            'level': 'INFO',
+            'propagate': False,
         },
     },
 }
