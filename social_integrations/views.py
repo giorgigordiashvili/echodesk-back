@@ -234,7 +234,7 @@ def facebook_oauth_callback(request):
         token_params = {
             'client_id': getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_APP_ID'),
             'client_secret': getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_APP_SECRET'),
-            'redirect_uri': request.build_absolute_uri(reverse('facebook_oauth_callback')),
+            'redirect_uri': request.build_absolute_uri(reverse('social_integrations:facebook_oauth_callback')),
             'code': code
         }
         
@@ -1778,7 +1778,7 @@ def whatsapp_connection_setup(request):
                 '4. Configure webhook URL in your WhatsApp Business API settings',
                 '5. Add your credentials to connect your WhatsApp account'
             ],
-            'webhook_url': request.build_absolute_uri(reverse('whatsapp_webhook')),
+            'webhook_url': request.build_absolute_uri(reverse('social_integrations:whatsapp_webhook')),
             'verify_token': getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('WHATSAPP_VERIFY_TOKEN', 'echodesk_whatsapp_webhook_token_2024')
         }
         
