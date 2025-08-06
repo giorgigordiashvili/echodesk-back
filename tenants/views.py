@@ -488,7 +488,7 @@ def register_tenant_form(request):
 @extend_schema(
     operation_id='register_tenant',
     summary='Register New Tenant',
-    description='Register a new tenant with admin user creation. Only available from the main domain.',
+    description='Register a new tenant with admin user creation and package selection. Only available from the main domain.',
     request=TenantRegistrationSerializer,
     responses={
         201: OpenApiResponse(
@@ -498,6 +498,7 @@ def register_tenant_form(request):
                 'properties': {
                     'message': {'type': 'string'},
                     'tenant': {'type': 'object'},
+                    'subscription': {'type': 'object'},
                     'frontend_url': {'type': 'string'},
                     'api_url': {'type': 'string'}
                 }
@@ -512,7 +513,7 @@ def register_tenant_form(request):
 @permission_classes([])  # No authentication required
 def register_tenant(request):
     """
-    Public endpoint for tenant registration with admin user creation
+    Public endpoint for tenant registration with admin user creation and package selection
     """
     # Only allow access from public schema
     if hasattr(request, 'tenant') and request.tenant.schema_name != get_public_schema_name():
@@ -529,6 +530,13 @@ def register_tenant(request):
     
     try:
         with transaction.atomic():
+            # Get selected package
+            from .models import Package, TenantSubscription
+            from datetime import datetime, timedelta
+            from django.utils import timezone
+            
+            package = Package.objects.get(id=validated_data['package_id'], is_active=True)
+            
             # Create tenant
             domain_name = validated_data['domain']
             schema_name = domain_name.lower().replace('-', '_')
@@ -541,10 +549,24 @@ def register_tenant(request):
                 admin_email=validated_data['admin_email'],
                 admin_name=f"{validated_data['admin_first_name']} {validated_data['admin_last_name']}",
                 preferred_language=validated_data.get('preferred_language', 'en'),
-                plan='basic',  # Default plan
-                max_users=10,  # Default limits
-                max_storage=1024,  # 1GB default
+                plan='basic',  # Legacy field
+                max_users=package.max_users or 1000,  # Set from package
+                max_storage=package.max_storage_gb * 1024,  # Convert to MB
                 deployment_status='deploying'  # Set initial status
+            )
+            
+            # Create subscription
+            subscription = TenantSubscription.objects.create(
+                tenant=tenant,
+                package=package,
+                is_active=True,
+                starts_at=timezone.now(),
+                expires_at=timezone.now() + timedelta(days=30),  # 30-day trial
+                agent_count=validated_data.get('agent_count', 1),
+                current_users=1,  # Admin user will be created
+                whatsapp_messages_used=0,
+                storage_used_gb=0,
+                next_billing_date=timezone.now() + timedelta(days=30)
             )
             
             # Create admin user in tenant schema
@@ -575,6 +597,18 @@ def register_tenant(request):
                         'preferred_language': tenant.preferred_language,
                         'deployment_status': 'deployed',
                         'frontend_url': tenant.frontend_url
+                    },
+                    'subscription': {
+                        'package_name': package.display_name,
+                        'pricing_model': package.pricing_model,
+                        'monthly_cost': float(subscription.monthly_cost),
+                        'agent_count': subscription.agent_count,
+                        'trial_expires': subscription.expires_at,
+                        'limits': {
+                            'max_users': package.max_users,
+                            'max_whatsapp_messages': package.max_whatsapp_messages,
+                            'max_storage_gb': package.max_storage_gb
+                        }
                     },
                     'domain_url': tenant.domain_url,
                     'admin_email': validated_data['admin_email'],

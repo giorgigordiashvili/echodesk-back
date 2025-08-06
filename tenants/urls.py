@@ -6,16 +6,27 @@ from .views import (
     get_all_tenants, check_deployment_status, tenant_login, tenant_logout,
     tenant_dashboard, tenant_profile, update_tenant_profile, change_tenant_password
 )
+from .package_views import (
+    PackageViewSet, list_packages_by_model, calculate_pricing, get_package_features
+)
 from .cors_test_views import cors_test, preflight_test
 from .cors_views import simple_cors_test
 
 router = DefaultRouter()
 router.register(r'tenants', TenantViewSet)
+router.register(r'packages', PackageViewSet, basename='packages')
 
 urlpatterns = [
     path('', public_homepage, name='public_homepage'),
     path('register-tenant/', register_tenant_form, name='register_tenant_form'),
     path('api/register/', register_tenant, name='register_tenant'),
+    
+    # Package endpoints (public access for registration)
+    path('api/packages/', include([
+        path('by-model/', list_packages_by_model, name='list_packages_by_model'),
+        path('calculate-pricing/', calculate_pricing, name='calculate_pricing'),
+        path('<int:package_id>/features/', get_package_features, name='get_package_features'),
+    ])),
     
     # Authentication endpoints
     path('api/auth/login/', tenant_login, name='tenant_login'),
