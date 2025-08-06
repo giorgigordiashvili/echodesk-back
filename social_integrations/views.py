@@ -41,6 +41,29 @@ def convert_facebook_timestamp(timestamp):
         return timezone.now()
 
 
+def find_tenant_by_page_id(page_id):
+    """Find which tenant schema contains the given Facebook page ID"""
+    from django.db import connection
+    from tenants.models import Client
+    from tenant_schemas.utils import schema_context
+    
+    # Get all tenant schemas
+    tenants = Client.objects.all()
+    
+    for tenant in tenants:
+        try:
+            # Switch to tenant schema and check if page exists
+            with schema_context(tenant.schema_name):
+                from social_integrations.models import FacebookPageConnection
+                if FacebookPageConnection.objects.filter(page_id=page_id, is_active=True).exists():
+                    return tenant.schema_name
+        except Exception as e:
+            # Skip tenant if there's an error (e.g., table doesn't exist)
+            continue
+    
+    return None
+
+
 class FacebookPageConnectionViewSet(viewsets.ModelViewSet):
     serializer_class = FacebookPageConnectionSerializer
     permission_classes = [IsAuthenticated]
@@ -292,17 +315,38 @@ def facebook_webhook(request):
             data = json.loads(request.body)
             logger.info(f"Webhook received data: {data}")
             
-            # Process webhook within the tenant context
-            # For now, hardcode to amanati tenant - in production you might determine this from the request
-            with schema_context('amanati'):
+            # First, extract page_id to determine which tenant to use
+            page_id = None
+            
+            # Handle Facebook Developer Console test format
+            if 'field' in data and 'value' in data and data['field'] == 'messages':
+                test_value = data['value']
+                page_id = test_value.get('metadata', {}).get('page_id') or test_value.get('page_id') or "655864257621107"
+            
+            # Handle standard webhook format (real messages)  
+            elif 'entry' in data and len(data['entry']) > 0:
+                page_id = data['entry'][0].get('id')
+            
+            if not page_id:
+                logger.error("No page_id found in webhook data")
+                return JsonResponse({'error': 'No page_id found'}, status=400)
+            
+            # Find which tenant this page belongs to
+            tenant_schema = find_tenant_by_page_id(page_id)
+            if not tenant_schema:
+                logger.error(f"No tenant found for page_id: {page_id}")
+                return JsonResponse({'error': f'No tenant found for page_id: {page_id}'}, status=404)
+            
+            logger.info(f"Processing webhook for page_id {page_id} in tenant: {tenant_schema}")
+            
+            # Process webhook within the correct tenant context
+            with schema_context(tenant_schema):
                 # Handle Facebook Developer Console test format
                 if 'field' in data and 'value' in data and data['field'] == 'messages':
                     # This is a test message from Facebook Developer Console
                     test_value = data['value']
                     
                     # Extract data from test format
-                    # Use the actual page_id from the data, or fallback to our known page
-                    page_id = test_value.get('metadata', {}).get('page_id') or test_value.get('page_id') or "655864257621107"
                     sender_id = test_value.get('sender', {}).get('id', 'test_sender')
                     message_data = test_value.get('message', {})
                     timestamp = test_value.get('timestamp', 0)
@@ -317,6 +361,7 @@ def facebook_webhook(request):
                         with open(log_file, 'a') as f:
                             f.write(f"\n=== FACEBOOK TEST MESSAGE ===\n")
                             f.write(f"Time: {datetime.now()}\n")
+                            f.write(f"Tenant: {tenant_schema}\n")
                             f.write(f"Page ID: {page_id}\n")
                             f.write(f"Sender ID: {sender_id}\n")
                             f.write(f"Message Data: {message_data}\n")
