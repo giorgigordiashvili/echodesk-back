@@ -253,9 +253,66 @@ def facebook_webhook(request):
             logger = logging.getLogger(__name__)
             
             data = json.loads(request.body)
+            logger.info(f"Webhook received data: {data}")
             
-            # Process messaging events
-            if 'entry' in data:
+            # Handle Facebook Developer Console test format
+            if 'field' in data and 'value' in data and data['field'] == 'messages':
+                # This is a test message from Facebook Developer Console
+                test_value = data['value']
+                
+                # Extract data from test format
+                page_id = test_value.get('recipient', {}).get('id')
+                sender_id = test_value.get('sender', {}).get('id')
+                message_data = test_value.get('message', {})
+                timestamp = test_value.get('timestamp', 0)
+                
+                if page_id and sender_id and message_data:
+                    # Find the page connection
+                    try:
+                        page_connection = FacebookPageConnection.objects.get(
+                            page_id=page_id, 
+                            is_active=True
+                        )
+                        
+                        # Process the test message
+                        message_id = message_data.get('mid', '')
+                        message_text = message_data.get('text', '')
+                        
+                        # Skip if this is an echo (message sent by the page)
+                        if message_data.get('is_echo'):
+                            return JsonResponse({'status': 'received'})
+                        
+                        # For test messages, use simple sender info
+                        sender_name = f"Test User {sender_id}"
+                        profile_pic_url = None
+                        
+                        # Save the message (avoid duplicates)
+                        if message_id and not FacebookMessage.objects.filter(message_id=message_id).exists():
+                            try:
+                                FacebookMessage.objects.create(
+                                    page_connection=page_connection,
+                                    message_id=message_id,
+                                    sender_id=sender_id,
+                                    sender_name=sender_name,
+                                    message_text=message_text,
+                                    timestamp=int(timestamp) if timestamp else 0,
+                                    is_from_page=(sender_id == page_id),
+                                    profile_pic_url=profile_pic_url
+                                )
+                                logger.info(f"Saved test Facebook message from {sender_name}")
+                            except Exception as e:
+                                logger.error(f"Failed to save test Facebook message: {e}")
+                        
+                    except FacebookPageConnection.DoesNotExist:
+                        logger.warning(f"No active page connection found for test page_id: {page_id}")
+                        # List available connections for debugging
+                        all_connections = FacebookPageConnection.objects.filter(is_active=True)
+                        logger.info(f"Available connections: {[(conn.page_id, conn.page_name) for conn in all_connections]}")
+                
+                return JsonResponse({'status': 'received'})
+            
+            # Handle standard webhook format (real messages)
+            elif 'entry' in data:
                 for entry in data['entry']:
                     page_id = entry.get('id')
                     
