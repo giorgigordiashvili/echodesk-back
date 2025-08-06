@@ -26,6 +26,7 @@ urlpatterns = [
     path('facebook/pages/debug/', views.debug_facebook_pages, name='facebook-pages-debug'),
     path('facebook/status/', views.facebook_connection_status, name='facebook-status'),
     path('facebook/disconnect/', views.facebook_disconnect, name='facebook-disconnect'),
+    path('facebook/send-message/', views.facebook_send_message, name='facebook-send-message'),
     path('facebook/webhook/', views.facebook_webhook, name='facebook-webhook'),
     
     # Instagram OAuth endpoints

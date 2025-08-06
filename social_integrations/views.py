@@ -264,6 +264,103 @@ def facebook_disconnect(request):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def facebook_send_message(request):
+    """Send a message to a Facebook user"""
+    try:
+        recipient_id = request.data.get('recipient_id')
+        message_text = request.data.get('message')
+        page_id = request.data.get('page_id')
+        
+        if not all([recipient_id, message_text, page_id]):
+            return Response({
+                'error': 'Missing required fields: recipient_id, message, page_id'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Get the page connection for the authenticated user
+        try:
+            page_connection = FacebookPageConnection.objects.get(
+                user=request.user,
+                page_id=page_id,
+                is_active=True
+            )
+        except FacebookPageConnection.DoesNotExist:
+            return Response({
+                'error': 'Page not found or not connected'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        # Send message using Facebook Graph API
+        send_url = f"https://graph.facebook.com/v23.0/me/messages"
+        
+        message_data = {
+            'recipient': {'id': recipient_id},
+            'message': {'text': message_text},
+            'messaging_type': 'RESPONSE'  # Responding to user message
+        }
+        
+        headers = {
+            'Content-Type': 'application/json',
+        }
+        
+        params = {
+            'access_token': page_connection.page_access_token
+        }
+        
+        print(f"🚀 Sending Facebook message:")
+        print(f"   Page: {page_connection.page_name}")
+        print(f"   To: {recipient_id}")
+        print(f"   Message: {message_text}")
+        
+        response = requests.post(
+            send_url,
+            json=message_data,
+            headers=headers,
+            params=params
+        )
+        
+        print(f"📤 Facebook API Response: {response.status_code} - {response.text}")
+        
+        if response.status_code == 200:
+            response_data = response.json()
+            message_id = response_data.get('message_id')
+            
+            # Optionally save the sent message to our database
+            try:
+                FacebookMessage.objects.create(
+                    page_connection=page_connection,
+                    message_id=message_id or f"sent_{datetime.now().timestamp()}",
+                    sender_id=page_id,  # Page is the sender
+                    sender_name=page_connection.page_name,
+                    message_text=message_text,
+                    timestamp=datetime.now(),
+                    is_from_page=True
+                )
+                print(f"✅ Saved sent message to database")
+            except Exception as e:
+                print(f"⚠️ Failed to save sent message to database: {e}")
+            
+            return Response({
+                'status': 'sent',
+                'message_id': message_id,
+                'recipient_id': recipient_id
+            })
+        else:
+            error_data = response.json() if response.content else {}
+            error_message = error_data.get('error', {}).get('message', 'Unknown error')
+            
+            return Response({
+                'error': f'Failed to send message: {error_message}',
+                'facebook_error': error_data
+            }, status=status.HTTP_400_BAD_REQUEST)
+            
+    except Exception as e:
+        print(f"❌ Exception in facebook_send_message: {e}")
+        return Response({
+            'error': f'Failed to send message: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 @csrf_exempt
 @require_http_methods(["GET", "POST"])
 def facebook_webhook(request):
