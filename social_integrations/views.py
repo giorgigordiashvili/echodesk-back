@@ -1,8 +1,10 @@
 import os
 import requests
+from datetime import datetime
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse, HttpResponse
+from django.utils import timezone
 from django.shortcuts import redirect
 from django.urls import reverse
 from django.views.decorators.csrf import csrf_exempt
@@ -21,6 +23,22 @@ from .serializers import (
     InstagramAccountConnectionSerializer, InstagramMessageSerializer,
     WhatsAppBusinessConnectionSerializer, WhatsAppMessageSerializer
 )
+
+
+def convert_facebook_timestamp(timestamp):
+    """Convert Facebook timestamp (Unix timestamp in milliseconds or seconds) to datetime object"""
+    try:
+        if timestamp == 0:
+            return timezone.now()
+        
+        # Facebook timestamps can be in seconds or milliseconds
+        # If timestamp is very large, it's probably in milliseconds
+        if timestamp > 10000000000:  # If timestamp is greater than year 2286 in seconds, it's milliseconds
+            timestamp = timestamp / 1000
+        
+        return datetime.fromtimestamp(timestamp, tz=timezone.utc)
+    except (ValueError, TypeError):
+        return timezone.now()
 
 
 class FacebookPageConnectionViewSet(viewsets.ModelViewSet):
@@ -324,7 +342,7 @@ def facebook_webhook(request):
                                         sender_id=sender_id,
                                         sender_name=sender_name,
                                         message_text=message_text,
-                                        timestamp=int(timestamp) if timestamp else 0,
+                                        timestamp=convert_facebook_timestamp(int(timestamp) if timestamp else 0),
                                         is_from_page=(sender_id == page_id),
                                         profile_pic_url=profile_pic_url
                                     )
@@ -422,7 +440,7 @@ def facebook_webhook(request):
                                                 sender_id=sender_id,
                                                 sender_name=sender_name,
                                                 message_text=message_data.get('text', ''),
-                                                timestamp=message_event.get('timestamp', 0),
+                                                timestamp=convert_facebook_timestamp(message_event.get('timestamp', 0)),
                                                 is_from_page=(sender_id == page_id),
                                                 profile_pic_url=profile_pic_url
                                             )
@@ -573,7 +591,7 @@ def test_database_save(request):
             sender_id="test_sender_123",
             sender_name="Test User",
             message_text="This is a test message created manually",
-            timestamp=int(datetime.now().timestamp()),
+            timestamp=timezone.now(),
             is_from_page=False,
             profile_pic_url=None
         )
@@ -824,7 +842,7 @@ def instagram_webhook(request):
                                     message_text=message_text,
                                     message_type=message_type,
                                     attachment_url=attachment_url,
-                                    timestamp=message_event.get('timestamp', 0),
+                                    timestamp=convert_facebook_timestamp(message_event.get('timestamp', 0)),
                                     is_from_business=(sender_id == instagram_account_id)
                                 )
             
