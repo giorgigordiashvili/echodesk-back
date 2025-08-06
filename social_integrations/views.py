@@ -251,6 +251,7 @@ def facebook_webhook(request):
             import json
             import logging
             from datetime import datetime
+            from tenant_schemas.utils import schema_context
             logger = logging.getLogger(__name__)
             
             # Simple file logging to verify we're receiving callbacks
@@ -273,92 +274,163 @@ def facebook_webhook(request):
             data = json.loads(request.body)
             logger.info(f"Webhook received data: {data}")
             
-            # Handle Facebook Developer Console test format
-            if 'field' in data and 'value' in data and data['field'] == 'messages':
-                # This is a test message from Facebook Developer Console
-                test_value = data['value']
-                
-                # Extract data from test format
-                # Force the page_id for testing purposes
-                page_id = "655864257621107"  # Force to your page ID
-                sender_id = test_value.get('sender', {}).get('id')
-                message_data = test_value.get('message', {})
-                timestamp = test_value.get('timestamp', 0)
-                
-                logger.info(f"Processing test message - forced page_id: {page_id}, sender_id: {sender_id}")
-                
-                if page_id and sender_id and message_data:
-                    # Find the page connection
-                    try:
-                        page_connection = FacebookPageConnection.objects.get(
-                            page_id=page_id, 
-                            is_active=True
-                        )
-                        logger.info(f"Found page connection: {page_connection}")
-                        
-                        # Process the test message
-                        message_id = message_data.get('mid', '')
-                        message_text = message_data.get('text', '')
-                        
-                        logger.info(f"Processing message - ID: {message_id}, Text: {message_text}")
-                        
-                        # Skip if this is an echo (message sent by the page)
-                        if message_data.get('is_echo'):
-                            logger.info("Skipping echo message")
-                            return JsonResponse({'status': 'received'})
-                        
-                        # For test messages, use simple sender info
-                        sender_name = f"Test User {sender_id}"
-                        profile_pic_url = None
-                        
-                        # Save the message (avoid duplicates)
-                        if message_id and not FacebookMessage.objects.filter(message_id=message_id).exists():
-                            try:
-                                message_obj = FacebookMessage.objects.create(
-                                    page_connection=page_connection,
-                                    message_id=message_id,
-                                    sender_id=sender_id,
-                                    sender_name=sender_name,
-                                    message_text=message_text,
-                                    timestamp=int(timestamp) if timestamp else 0,
-                                    is_from_page=(sender_id == page_id),
-                                    profile_pic_url=profile_pic_url
-                                )
-                                logger.info(f"✅ SUCCESSFULLY SAVED MESSAGE TO DATABASE - ID: {message_obj.id}, Text: '{message_text}'")
-                                
-                                # Also write to file for debugging
+            # Process webhook within the tenant context
+            # For now, hardcode to amanati tenant - in production you might determine this from the request
+            with schema_context('amanati'):
+                # Handle Facebook Developer Console test format
+                if 'field' in data and 'value' in data and data['field'] == 'messages':
+                    # This is a test message from Facebook Developer Console
+                    test_value = data['value']
+                    
+                    # Extract data from test format
+                    # Force the page_id for testing purposes
+                    page_id = "655864257621107"  # Force to your page ID
+                    sender_id = test_value.get('sender', {}).get('id')
+                    message_data = test_value.get('message', {})
+                    timestamp = test_value.get('timestamp', 0)
+                    
+                    logger.info(f"Processing test message - forced page_id: {page_id}, sender_id: {sender_id}")
+                    
+                    if page_id and sender_id and message_data:
+                        # Find the page connection
+                        try:
+                            page_connection = FacebookPageConnection.objects.get(
+                                page_id=page_id, 
+                                is_active=True
+                            )
+                            logger.info(f"Found page connection: {page_connection}")
+                            
+                            # Process the test message
+                            message_id = message_data.get('mid', '')
+                            message_text = message_data.get('text', '')
+                            
+                            logger.info(f"Processing message - ID: {message_id}, Text: {message_text}")
+                            
+                            # Skip if this is an echo (message sent by the page)
+                            if message_data.get('is_echo'):
+                                logger.info("Skipping echo message")
+                                return JsonResponse({'status': 'received'})
+                            
+                            # For test messages, use simple sender info
+                            sender_name = f"Test User {sender_id}"
+                            profile_pic_url = None
+                            
+                            # Save the message (avoid duplicates)
+                            if message_id and not FacebookMessage.objects.filter(message_id=message_id).exists():
                                 try:
-                                    with open('/tmp/facebook_webhook_log.txt', 'a') as f:
-                                        f.write(f"✅ SAVED TO DATABASE: Message ID {message_obj.id} - '{message_text}'\n")
-                                except:
-                                    pass
+                                    message_obj = FacebookMessage.objects.create(
+                                        page_connection=page_connection,
+                                        message_id=message_id,
+                                        sender_id=sender_id,
+                                        sender_name=sender_name,
+                                        message_text=message_text,
+                                        timestamp=int(timestamp) if timestamp else 0,
+                                        is_from_page=(sender_id == page_id),
+                                        profile_pic_url=profile_pic_url
+                                    )
+                                    logger.info(f"✅ SUCCESSFULLY SAVED MESSAGE TO DATABASE - ID: {message_obj.id}, Text: '{message_text}'")
                                     
-                            except Exception as e:
-                                logger.error(f"❌ FAILED TO SAVE MESSAGE TO DATABASE: {e}")
+                                    # Also write to file for debugging
+                                    try:
+                                        with open(log_file, 'a') as f:
+                                            f.write(f"✅ SAVED TO DATABASE: Message ID {message_obj.id} - '{message_text}'\n")
+                                    except:
+                                        pass
+                                            
+                                except Exception as e:
+                                    logger.error(f"❌ FAILED TO SAVE MESSAGE TO DATABASE: {e}")
+                                    try:
+                                        with open(log_file, 'a') as f:
+                                            f.write(f"❌ DATABASE SAVE FAILED: {e}\n")
+                                    except:
+                                        pass
+                            else:
+                                reason = "No message_id provided" if not message_id else f"Message {message_id} already exists"
+                                logger.info(f"⚠️ SKIPPED SAVING MESSAGE: {reason}")
                                 try:
-                                    with open('/tmp/facebook_webhook_log.txt', 'a') as f:
-                                        f.write(f"❌ DATABASE SAVE FAILED: {e}\n")
+                                    with open(log_file, 'a') as f:
+                                        f.write(f"⚠️ SKIPPED: {reason}\n")
                                 except:
                                     pass
-                        else:
-                            reason = "No message_id provided" if not message_id else f"Message {message_id} already exists"
-                            logger.info(f"⚠️ SKIPPED SAVING MESSAGE: {reason}")
-                            try:
-                                with open('/tmp/facebook_webhook_log.txt', 'a') as f:
-                                    f.write(f"⚠️ SKIPPED: {reason}\n")
-                            except:
-                                pass
-                        
-                    except FacebookPageConnection.DoesNotExist:
-                        logger.warning(f"No active page connection found for forced page_id: {page_id}")
-                        # List available connections for debugging
-                        all_connections = FacebookPageConnection.objects.filter(is_active=True)
-                        logger.info(f"Available connections: {[(conn.page_id, conn.page_name) for conn in all_connections]}")
+                            
+                        except FacebookPageConnection.DoesNotExist:
+                            logger.warning(f"No active page connection found for forced page_id: {page_id}")
+                            # List available connections for debugging
+                            all_connections = FacebookPageConnection.objects.filter(is_active=True)
+                            logger.info(f"Available connections: {[(conn.page_id, conn.page_name) for conn in all_connections]}")
+                    
+                    return JsonResponse({'status': 'received'})
                 
-                return JsonResponse({'status': 'received'})
+                # Handle standard webhook format (real messages)
+                elif 'entry' in data:
+                    for entry in data['entry']:
+                        page_id = entry.get('id')
+                        
+                        # Find the page connection
+                        try:
+                            page_connection = FacebookPageConnection.objects.get(
+                                page_id=page_id, 
+                                is_active=True
+                            )
+                        except FacebookPageConnection.DoesNotExist:
+                            # Log for debugging but continue processing other entries
+                            logger.warning(f"No active page connection found for page_id: {page_id}")
+                            continue
+                        
+                        # Process messaging events
+                        if 'messaging' in entry:
+                            for message_event in entry['messaging']:
+                                if 'message' in message_event:
+                                    message_data = message_event['message']
+                                    sender_id = message_event['sender']['id']
+                                    
+                                    # Skip if this is an echo (message sent by the page)
+                                    if message_data.get('is_echo'):
+                                        continue
+                                    
+                                    # Get sender profile information including profile picture
+                                    sender_name = 'Unknown'
+                                    profile_pic_url = None
+                                    
+                                    if sender_id != page_id:  # Don't fetch profile for page itself
+                                        try:
+                                            # Use the page access token to get user profile
+                                            profile_url = f"https://graph.facebook.com/v23.0/{sender_id}"
+                                            profile_params = {
+                                                'fields': 'first_name,last_name,profile_pic',
+                                                'access_token': page_connection.page_access_token
+                                            }
+                                            profile_response = requests.get(profile_url, params=profile_params, timeout=10)
+                                            
+                                            if profile_response.status_code == 200:
+                                                profile_data = profile_response.json()
+                                                first_name = profile_data.get('first_name', '')
+                                                last_name = profile_data.get('last_name', '')
+                                                sender_name = f"{first_name} {last_name}".strip() or 'Unknown'
+                                                profile_pic_url = profile_data.get('profile_pic')
+                                            
+                                        except Exception as e:
+                                            logger.error(f"Failed to fetch profile for {sender_id}: {e}")
+                                    
+                                    # Save the message (avoid duplicates)
+                                    message_id = message_data.get('mid', '')
+                                    if message_id and not FacebookMessage.objects.filter(message_id=message_id).exists():
+                                        try:
+                                            FacebookMessage.objects.create(
+                                                page_connection=page_connection,
+                                                message_id=message_id,
+                                                sender_id=sender_id,
+                                                sender_name=sender_name,
+                                                message_text=message_data.get('text', ''),
+                                                timestamp=message_event.get('timestamp', 0),
+                                                is_from_page=(sender_id == page_id),
+                                                profile_pic_url=profile_pic_url
+                                            )
+                                            logger.info(f"Saved Facebook message from {sender_name}")
+                                        except Exception as e:
+                                            logger.error(f"Failed to save Facebook message: {e}")
             
-            # Handle standard webhook format (real messages)
-            elif 'entry' in data:
+            return JsonResponse({'status': 'received'})
                 for entry in data['entry']:
                     page_id = entry.get('id')
                     
@@ -494,6 +566,54 @@ def webhook_test_endpoint(request):
         'body_received': request.body.decode('utf-8') if request.body else None,
         'log_file': os.path.join(os.getcwd(), 'webhook_test_log.txt')
     })
+
+
+@csrf_exempt
+@api_view(['GET'])
+@permission_classes([])
+def debug_database_status(request):
+    """Debug endpoint to check database table status"""
+    from django.db import connection
+    
+    try:
+        # Check if tables exist
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT table_name 
+                FROM information_schema.tables 
+                WHERE table_schema = 'public' 
+                AND table_name LIKE '%social_integrations%'
+            """)
+            tables = [row[0] for row in cursor.fetchall()]
+        
+        # Try to count records
+        try:
+            page_count = FacebookPageConnection.objects.count()
+            message_count = FacebookMessage.objects.count()
+        except Exception as e:
+            page_count = f"Error: {e}"
+            message_count = f"Error: {e}"
+        
+        # Check migrations
+        from django.db.migrations.recorder import MigrationRecorder
+        try:
+            applied_migrations = MigrationRecorder.Migration.objects.filter(app='social_integrations')
+            migrations_list = [f"{m.app}.{m.name}" for m in applied_migrations]
+        except Exception as e:
+            migrations_list = f"Error: {e}"
+        
+        return Response({
+            'database_tables': tables,
+            'page_connections_count': page_count,
+            'messages_count': message_count,
+            'applied_migrations': migrations_list,
+            'database_url': getattr(settings, 'DATABASE_URL', 'Not found')[:50] + '...' if hasattr(settings, 'DATABASE_URL') else 'Not configured'
+        })
+        
+    except Exception as e:
+        return Response({
+            'error': f'Database check failed: {str(e)}'
+        }, status=500)
 
 
 @csrf_exempt

@@ -22,6 +22,7 @@ urlpatterns = [
     path('facebook/oauth/debug/', views.facebook_debug_callback, name='facebook-debug-callback'),
     path('facebook/webhook/test/', views.webhook_test_endpoint, name='webhook-test'),
     path('facebook/database/test/', views.test_database_save, name='database-test'),
+    path('facebook/database/debug/', views.debug_database_status, name='database-debug'),
     path('facebook/status/', views.facebook_connection_status, name='facebook-status'),
     path('facebook/disconnect/', views.facebook_disconnect, name='facebook-disconnect'),
     path('facebook/webhook/', views.facebook_webhook, name='facebook-webhook'),
