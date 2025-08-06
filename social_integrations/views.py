@@ -4,6 +4,7 @@ from datetime import datetime
 from asgiref.sync import async_to_sync
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
+from django.db.models import F
 from django.http import JsonResponse, HttpResponse
 from django.utils import timezone
 from django.shortcuts import redirect
@@ -40,6 +41,29 @@ def convert_facebook_timestamp(timestamp):
         return datetime.fromtimestamp(timestamp, tz=timezone.utc)
     except (ValueError, TypeError):
         return timezone.now()
+
+
+def find_tenant_by_instagram_account_id(instagram_account_id):
+    """Find which tenant schema contains the given Instagram account ID"""
+    from django.db import connection
+    from tenants.models import Tenant
+    from tenant_schemas.utils import schema_context
+    
+    # Get all tenant schemas
+    tenants = Tenant.objects.all()
+    
+    for tenant in tenants:
+        try:
+            # Switch to tenant schema and check if account exists
+            with schema_context(tenant.schema_name):
+                from social_integrations.models import InstagramAccountConnection
+                if InstagramAccountConnection.objects.filter(instagram_account_id=instagram_account_id, is_active=True).exists():
+                    return tenant.schema_name
+        except Exception as e:
+            # Skip tenant if there's an error (e.g., table doesn't exist)
+            continue
+    
+    return None
 
 
 def find_tenant_by_page_id(page_id):
@@ -1088,6 +1112,195 @@ def instagram_disconnect(request):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def instagram_send_message(request):
+    """Send a message to an Instagram user"""
+    try:
+        recipient_id = request.data.get('recipient_id')
+        message_text = request.data.get('message')
+        instagram_account_id = request.data.get('instagram_account_id')
+        
+        if not all([recipient_id, message_text, instagram_account_id]):
+            return Response({
+                'error': 'Missing required fields: recipient_id, message, instagram_account_id'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Get the Instagram account connection for the authenticated user
+        try:
+            account_connection = InstagramAccountConnection.objects.get(
+                user=request.user,
+                instagram_account_id=instagram_account_id,
+                is_active=True
+            )
+        except InstagramAccountConnection.DoesNotExist:
+            return Response({
+                'error': 'Instagram account not found or not connected'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        # Send message using Instagram Graph API
+        send_url = f"https://graph.facebook.com/v18.0/{instagram_account_id}/messages"
+        
+        message_data = {
+            'recipient': {'id': recipient_id},
+            'message': {'text': message_text}
+        }
+        
+        headers = {
+            'Content-Type': 'application/json',
+        }
+        
+        params = {
+            'access_token': account_connection.access_token
+        }
+        
+        print(f"🚀 Sending Instagram message:")
+        print(f"   Account: @{account_connection.username}")
+        print(f"   To: {recipient_id}")
+        print(f"   Message: {message_text}")
+        
+        response = requests.post(
+            send_url,
+            json=message_data,
+            headers=headers,
+            params=params
+        )
+        
+        print(f"📤 Instagram API Response: {response.status_code} - {response.text}")
+        
+        if response.status_code == 200:
+            response_data = response.json()
+            message_id = response_data.get('message_id')
+            
+            # Save the sent message to our database
+            try:
+                InstagramMessage.objects.create(
+                    account_connection=account_connection,
+                    message_id=message_id or f"sent_{datetime.now().timestamp()}",
+                    conversation_id=recipient_id,  # Use recipient_id as conversation_id
+                    sender_id=instagram_account_id,  # Business account is the sender
+                    sender_username=account_connection.username,
+                    message_text=message_text,
+                    message_type='text',
+                    timestamp=datetime.now(),
+                    is_from_business=True
+                )
+                print(f"✅ Saved sent Instagram message to database")
+            except Exception as e:
+                print(f"⚠️ Failed to save sent Instagram message to database: {e}")
+            
+            return Response({
+                'status': 'sent',
+                'message_id': message_id,
+                'recipient_id': recipient_id
+            })
+        else:
+            error_data = response.json() if response.content else {}
+            error_message = error_data.get('error', {}).get('message', 'Unknown error')
+            
+            return Response({
+                'error': f'Failed to send Instagram message: {error_message}',
+                'instagram_error': error_data
+            }, status=status.HTTP_400_BAD_REQUEST)
+            
+    except Exception as e:
+        print(f"❌ Exception in instagram_send_message: {e}")
+        return Response({
+            'error': f'Failed to send Instagram message: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def instagram_conversations(request):
+    """Get Instagram conversations for the authenticated user"""
+    try:
+        # Get all Instagram accounts for the user
+        user_accounts = InstagramAccountConnection.objects.filter(user=request.user, is_active=True)
+        
+        if not user_accounts.exists():
+            return Response({
+                'conversations': [],
+                'message': 'No Instagram accounts connected'
+            })
+        
+        # Get conversations (grouped by conversation_id/sender_id)
+        from django.db.models import Max, Count
+        conversations = InstagramMessage.objects.filter(
+            account_connection__in=user_accounts
+        ).values(
+            'conversation_id',
+            'account_connection__username',
+            'account_connection__instagram_account_id'
+        ).annotate(
+            last_message_time=Max('timestamp'),
+            unread_count=Count('id'),  # Simplified - could add read status later
+            last_message_text=Max('message_text'),  # This is not perfect but works for basic display
+            sender_username=Max('sender_username')
+        ).order_by('-last_message_time')
+        
+        conversations_data = []
+        for conv in conversations:
+            # Get the actual last message
+            last_message = InstagramMessage.objects.filter(
+                conversation_id=conv['conversation_id'],
+                account_connection__in=user_accounts
+            ).order_by('-timestamp').first()
+            
+            conversations_data.append({
+                'conversation_id': conv['conversation_id'],
+                'sender_username': conv['sender_username'],
+                'account_username': conv['account_connection__username'],
+                'instagram_account_id': conv['account_connection__instagram_account_id'],
+                'last_message_time': last_message.timestamp.isoformat() if last_message else None,
+                'last_message_text': last_message.message_text if last_message else '',
+                'last_message_from_business': last_message.is_from_business if last_message else False,
+                'unread_count': 0  # Simplified for now
+            })
+        
+        return Response({
+            'conversations': conversations_data
+        })
+        
+    except Exception as e:
+        return Response({
+            'error': f'Failed to get Instagram conversations: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def instagram_conversation_messages(request, conversation_id):
+    """Get messages for a specific Instagram conversation"""
+    try:
+        # Get all Instagram accounts for the user
+        user_accounts = InstagramAccountConnection.objects.filter(user=request.user, is_active=True)
+        
+        if not user_accounts.exists():
+            return Response({
+                'error': 'No Instagram accounts connected'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        # Get messages for this conversation
+        messages = InstagramMessage.objects.filter(
+            conversation_id=conversation_id,
+            account_connection__in=user_accounts
+        ).order_by('timestamp')
+        
+        # Serialize the messages
+        serializer = InstagramMessageSerializer(messages, many=True)
+        
+        return Response({
+            'conversation_id': conversation_id,
+            'messages': serializer.data
+        })
+        
+    except Exception as e:
+        return Response({
+            'error': f'Failed to get Instagram conversation messages: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 @csrf_exempt
 @require_http_methods(["GET", "POST"])
 def instagram_webhook(request):
@@ -1127,12 +1340,77 @@ def instagram_webhook(request):
         # Handle webhook events
         try:
             import json
-            data = json.loads(request.body)
+            import logging
+            from datetime import datetime
+            from tenant_schemas.utils import schema_context
+            logger = logging.getLogger(__name__)
             
-            # Process Instagram messaging events
-            if 'entry' in data:
-                for entry in data['entry']:
-                    instagram_account_id = entry.get('id')
+            print(f"🔵 INSTAGRAM WEBHOOK POST PROCESSING STARTED at {datetime.now()}")
+            
+            # Simple file logging to verify we're receiving callbacks
+            try:
+                import os
+                log_file = os.path.join(os.getcwd(), 'instagram_webhook_log.txt')
+                with open(log_file, 'a') as f:
+                    f.write(f"\n=== INSTAGRAM WEBHOOK RECEIVED ===\n")
+                    f.write(f"Time: {datetime.now()}\n")
+                    f.write(f"Method: {request.method}\n")
+                    f.write(f"Headers: {dict(request.headers)}\n")
+                    f.write(f"Body: {request.body.decode('utf-8')}\n")
+                    f.write("=" * 50 + "\n")
+                print(f"INSTAGRAM WEBHOOK: Logged to {log_file}")
+            except Exception as e:
+                print(f"INSTAGRAM WEBHOOK: Failed to write to log file: {e}")
+                print(f"INSTAGRAM WEBHOOK RECEIVED at {datetime.now()}: {request.body.decode('utf-8')}")
+            
+            data = json.loads(request.body)
+            print(f"🔍 PARSED INSTAGRAM WEBHOOK DATA: {data}")
+            logger.info(f"Instagram webhook received data: {data}")
+            
+            # Extract Instagram account ID to determine which tenant to use
+            instagram_account_id = None
+            print(f"🔍 EXTRACTING INSTAGRAM_ACCOUNT_ID from data: {data}")
+            
+            # Handle new Instagram webhook format with field/value structure
+            if 'field' in data and 'value' in data:
+                print(f"🔍 NEW FORMAT - Field: {data['field']}")
+                # Extract account ID from value structure
+                value_data = data['value']
+                instagram_account_id = (value_data.get('recipient', {}).get('id') or 
+                                      value_data.get('sender', {}).get('id'))
+                print(f"🔍 NEW FORMAT - Extracted instagram_account_id: {instagram_account_id}")
+            
+            # Handle standard Instagram webhook format (legacy)
+            elif 'entry' in data and len(data['entry']) > 0:
+                instagram_account_id = data['entry'][0].get('id')
+                print(f"🔍 STANDARD FORMAT - Extracted instagram_account_id: {instagram_account_id}")
+            
+            if not instagram_account_id:
+                print(f"❌ NO INSTAGRAM_ACCOUNT_ID FOUND in webhook data: {data}")
+                logger.error("No instagram_account_id found in webhook data")
+                return JsonResponse({'error': 'No instagram_account_id found'}, status=400)
+            
+            # Find which tenant this Instagram account belongs to
+            print(f"🔍 FINDING TENANT for instagram_account_id: {instagram_account_id}")
+            tenant_schema = find_tenant_by_instagram_account_id(instagram_account_id)
+            print(f"🔍 TENANT RESULT: {tenant_schema}")
+            
+            if not tenant_schema:
+                print(f"❌ NO TENANT FOUND for instagram_account_id: {instagram_account_id}")
+                logger.error(f"No tenant found for instagram_account_id: {instagram_account_id}")
+                return JsonResponse({'error': f'No tenant found for instagram_account_id: {instagram_account_id}'}, status=404)
+            
+            logger.info(f"Processing Instagram webhook for account_id {instagram_account_id} in tenant: {tenant_schema}")
+            
+            # Process webhook within the correct tenant context
+            with schema_context(tenant_schema):
+                # Handle new Instagram webhook format with field/value structure
+                if 'field' in data and 'value' in data:
+                    field = data['field']
+                    value_data = data['value']
+                    
+                    print(f"🔄 Processing Instagram webhook field: {field}")
+                    logger.info(f"Processing Instagram webhook field: {field}")
                     
                     # Find the Instagram account connection
                     try:
@@ -1140,47 +1418,252 @@ def instagram_webhook(request):
                             instagram_account_id=instagram_account_id, 
                             is_active=True
                         )
+                        logger.info(f"✅ Found Instagram account connection: @{account_connection.username}")
                     except InstagramAccountConnection.DoesNotExist:
-                        continue
+                        logger.warning(f"❌ No active Instagram account connection found for account_id: {instagram_account_id}")
+                        all_connections = InstagramAccountConnection.objects.filter(is_active=True)
+                        logger.warning(f"Available Instagram connections: {[(conn.instagram_account_id, conn.username) for conn in all_connections]}")
+                        return JsonResponse({'error': f'No Instagram account connection found for account_id: {instagram_account_id}'}, status=404)
                     
-                    # Process messaging events
-                    if 'messaging' in entry:
-                        for message_event in entry['messaging']:
-                            if 'message' in message_event:
-                                message_data = message_event['message']
-                                sender_id = message_event['sender']['id']
-                                
-                                # Determine message type and content
-                                message_text = message_data.get('text', '')
-                                message_type = 'text'
-                                attachment_url = None
-                                
-                                # Handle attachments (images, videos, etc.)
-                                if 'attachments' in message_data:
-                                    attachments = message_data['attachments']
-                                    if attachments:
-                                        attachment = attachments[0]
-                                        message_type = attachment.get('type', 'unknown')
-                                        if 'payload' in attachment and 'url' in attachment['payload']:
-                                            attachment_url = attachment['payload']['url']
-                                
-                                # Save the Instagram message
-                                InstagramMessage.objects.create(
+                    # Process different webhook field types
+                    if field == 'messages':
+                        # Handle incoming messages
+                        sender_id = value_data.get('sender', {}).get('id')
+                        recipient_id = value_data.get('recipient', {}).get('id')
+                        message_data = value_data.get('message', {})
+                        timestamp = value_data.get('timestamp', 0)
+                        
+                        logger.info(f"📝 Instagram message from {sender_id} to {recipient_id}: {message_data}")
+                        
+                        # Skip if this is from the business account (echo)
+                        if sender_id == instagram_account_id:
+                            logger.info("⏭️ Skipping echo message from business account")
+                            return JsonResponse({'status': 'received'})
+                        
+                        # Extract message content
+                        message_text = message_data.get('text', '')
+                        message_id = message_data.get('mid', '')
+                        message_type = 'text'
+                        attachment_url = None
+                        
+                        # Handle attachments
+                        if 'attachments' in message_data:
+                            attachments = message_data['attachments']
+                            if attachments:
+                                attachment = attachments[0]
+                                message_type = attachment.get('type', 'unknown')
+                                if 'payload' in attachment and 'url' in attachment['payload']:
+                                    attachment_url = attachment['payload']['url']
+                                if not message_text:
+                                    message_text = f"Sent a {message_type}"
+                        
+                        # Save the Instagram message
+                        if message_id and not InstagramMessage.objects.filter(message_id=message_id).exists():
+                            try:
+                                message_obj = InstagramMessage.objects.create(
                                     account_connection=account_connection,
-                                    message_id=message_data.get('mid', ''),
-                                    conversation_id=message_event.get('recipient', {}).get('id', ''),
+                                    message_id=message_id,
+                                    conversation_id=sender_id,
                                     sender_id=sender_id,
-                                    sender_username='Unknown',  # Can be enriched with additional API call
+                                    sender_username=f"user_{sender_id}",
                                     message_text=message_text,
                                     message_type=message_type,
                                     attachment_url=attachment_url,
-                                    timestamp=convert_facebook_timestamp(message_event.get('timestamp', 0)),
-                                    is_from_business=(sender_id == instagram_account_id)
+                                    timestamp=convert_facebook_timestamp(int(timestamp) if timestamp else 0),
+                                    is_from_business=False
                                 )
+                                logger.info(f"✅ SUCCESSFULLY SAVED INSTAGRAM MESSAGE - ID: {message_obj.id}, Text: '{message_text}'")
+                                print(f"✅ SUCCESS: Instagram message saved with ID {message_obj.id}")
+                            except Exception as e:
+                                logger.error(f"❌ FAILED TO SAVE INSTAGRAM MESSAGE: {e}")
+                                print(f"❌ INSTAGRAM SAVE FAILED: {e}")
+                    
+                    elif field == 'messaging_seen':
+                        # Handle read receipts
+                        sender_id = value_data.get('sender', {}).get('id')
+                        read_data = value_data.get('read', {})
+                        last_read_mid = read_data.get('mid')
+                        
+                        logger.info(f"📖 Instagram message read receipt from {sender_id}, last read: {last_read_mid}")
+                        
+                        # Update message read status (simplified - could be enhanced)
+                        if last_read_mid:
+                            try:
+                                InstagramMessage.objects.filter(
+                                    message_id=last_read_mid,
+                                    account_connection=account_connection
+                                ).update(message_text=F('message_text'))  # Touch the record
+                                logger.info(f"✅ Updated read status for message {last_read_mid}")
+                            except Exception as e:
+                                logger.error(f"❌ Failed to update read status: {e}")
+                    
+                    elif field == 'messaging_postbacks':
+                        # Handle button clicks and postbacks
+                        sender_id = value_data.get('sender', {}).get('id')
+                        postback_data = value_data.get('postback', {})
+                        postback_mid = postback_data.get('mid')
+                        postback_title = postback_data.get('title', '')
+                        postback_payload = postback_data.get('payload', '')
+                        timestamp = value_data.get('timestamp', 0)
+                        
+                        logger.info(f"🔘 Instagram postback from {sender_id}: {postback_title} ({postback_payload})")
+                        
+                        # Save postback as a message
+                        if postback_mid and not InstagramMessage.objects.filter(message_id=postback_mid).exists():
+                            try:
+                                message_obj = InstagramMessage.objects.create(
+                                    account_connection=account_connection,
+                                    message_id=postback_mid,
+                                    conversation_id=sender_id,
+                                    sender_id=sender_id,
+                                    sender_username=f"user_{sender_id}",
+                                    message_text=f"Clicked: {postback_title}",
+                                    message_type='postback',
+                                    timestamp=convert_facebook_timestamp(int(timestamp) if timestamp else 0),
+                                    is_from_business=False
+                                )
+                                logger.info(f"✅ SUCCESSFULLY SAVED INSTAGRAM POSTBACK - ID: {message_obj.id}")
+                            except Exception as e:
+                                logger.error(f"❌ FAILED TO SAVE INSTAGRAM POSTBACK: {e}")
+                    
+                    elif field == 'messaging_handover':
+                        # Handle handover events
+                        handover_data = value_data.get('pass_thread_control', {})
+                        previous_owner = handover_data.get('previous_owner_app_id')
+                        new_owner = handover_data.get('new_owner_app_id')
+                        metadata = handover_data.get('metadata', '')
+                        
+                        logger.info(f"🔄 Instagram handover: {previous_owner} → {new_owner} ({metadata})")
+                        
+                        # Log handover event (could be enhanced to save as special message type)
+                        print(f"📧 Instagram handover logged: {previous_owner} → {new_owner}")
+                    
+                    else:
+                        logger.info(f"ℹ️ Unknown Instagram webhook field: {field}")
+                
+                # Handle legacy Instagram webhook format
+                elif 'entry' in data:
+                    logger.info(f"🔄 Processing Instagram webhook with {len(data['entry'])} entries")
+                    
+                    for entry in data['entry']:
+                        instagram_account_id = entry.get('id')
+                        logger.info(f"🔍 Processing entry for instagram_account_id: {instagram_account_id}")
+                        
+                        # Find the Instagram account connection
+                        try:
+                            account_connection = InstagramAccountConnection.objects.get(
+                                instagram_account_id=instagram_account_id, 
+                                is_active=True
+                            )
+                            logger.info(f"✅ Found Instagram account connection: @{account_connection.username}")
+                        except InstagramAccountConnection.DoesNotExist:
+                            # Log for debugging but continue processing other entries
+                            logger.warning(f"❌ No active Instagram account connection found for account_id: {instagram_account_id}")
+                            # List available connections for debugging
+                            all_connections = InstagramAccountConnection.objects.filter(is_active=True)
+                            logger.warning(f"Available Instagram connections: {[(conn.instagram_account_id, conn.username) for conn in all_connections]}")
+                            continue
+                        
+                        # Process messaging events
+                        if 'messaging' in entry:
+                            logger.info(f"📨 Found {len(entry['messaging'])} Instagram messaging events")
+                            print(f"🔍 DEBUG: Processing {len(entry['messaging'])} Instagram messaging events for account {instagram_account_id}")
+                            for message_event in entry['messaging']:
+                                logger.info(f"🔍 Processing Instagram message event: {message_event}")
+                                
+                                if 'message' in message_event:
+                                    message_data = message_event['message']
+                                    sender_id = message_event['sender']['id']
+                                    recipient_id = message_event.get('recipient', {}).get('id', '')
+                                    logger.info(f"📝 Instagram message from {sender_id}: {message_data}")
+                                    
+                                    # Skip if this is an echo (message sent by the business account)
+                                    if sender_id == instagram_account_id:
+                                        logger.info("⏭️ Skipping echo message from business account")
+                                        continue
+                                    
+                                    # Determine message type and content
+                                    message_text = message_data.get('text', '')
+                                    message_type = 'text'
+                                    attachment_url = None
+                                    
+                                    # Handle attachments (images, videos, etc.)
+                                    if 'attachments' in message_data:
+                                        attachments = message_data['attachments']
+                                        if attachments:
+                                            attachment = attachments[0]
+                                            message_type = attachment.get('type', 'unknown')
+                                            if 'payload' in attachment and 'url' in attachment['payload']:
+                                                attachment_url = attachment['payload']['url']
+                                            # If there's an attachment but no text, use attachment type as message
+                                            if not message_text:
+                                                message_text = f"Sent a {message_type}"
+                                    
+                                    # Get sender username (could be enhanced with additional API call)
+                                    sender_username = f"user_{sender_id}"
+                                    
+                                    # Save the Instagram message (avoid duplicates)
+                                    message_id = message_data.get('mid', '')
+                                    logger.info(f"💾 Attempting to save Instagram message: ID={message_id}, Text='{message_text}'")
+                                    
+                                    if message_id and not InstagramMessage.objects.filter(message_id=message_id).exists():
+                                        try:
+                                            print(f"🔄 Creating InstagramMessage object...")
+                                            message_obj = InstagramMessage.objects.create(
+                                                account_connection=account_connection,
+                                                message_id=message_id,
+                                                conversation_id=sender_id,  # Use sender_id as conversation_id for DMs
+                                                sender_id=sender_id,
+                                                sender_username=sender_username,
+                                                message_text=message_text,
+                                                message_type=message_type,
+                                                attachment_url=attachment_url,
+                                                timestamp=convert_facebook_timestamp(message_event.get('timestamp', 0)),
+                                                is_from_business=False
+                                            )
+                                            logger.info(f"✅ SUCCESSFULLY SAVED INSTAGRAM MESSAGE TO DATABASE - ID: {message_obj.id}, Text: '{message_text}'")
+                                            print(f"✅ SUCCESS: Instagram message saved with ID {message_obj.id}")
+                                            
+                                            # Message saved successfully - frontend will pick it up on next refresh
+                                            print(f"📧 Instagram message saved successfully. Frontend will pick it up on next refresh.")
+                                            
+                                        except Exception as e:
+                                            logger.error(f"❌ FAILED TO SAVE INSTAGRAM MESSAGE TO DATABASE: {e}")
+                                            logger.error(f"❌ Error details: {str(e)}")
+                                            print(f"❌ INSTAGRAM SAVE FAILED: {e}")
+                                            
+                                            # Log to file for debugging
+                                            try:
+                                                log_file = os.path.join(os.getcwd(), 'instagram_webhook_log.txt')
+                                                with open(log_file, 'a') as f:
+                                                    f.write(f"\n❌ INSTAGRAM MESSAGE SAVE FAILED ❌\n")
+                                                    f.write(f"Time: {datetime.now()}\n")
+                                                    f.write(f"Error: {e}\n")
+                                                    f.write(f"Error type: {type(e).__name__}\n")
+                                                    f.write(f"Account ID: {instagram_account_id}\n")
+                                                    f.write(f"Message ID: {message_id}\n")
+                                                    f.write(f"Sender ID: {sender_id}\n")
+                                                    f.write(f"Message text: {message_text}\n")
+                                                    f.write("=" * 50 + "\n")
+                                            except Exception as log_error:
+                                                logger.error(f"Failed to write Instagram error log: {log_error}")
+                                    else:
+                                        if not message_id:
+                                            logger.warning(f"⚠️ No message_id provided for Instagram message, skipping save")
+                                        else:
+                                            logger.warning(f"⚠️ Instagram message {message_id} already exists, skipping save")
+                                else:
+                                    logger.info(f"ℹ️ Instagram message event has no 'message' field: {message_event}")
+                        else:
+                            logger.info(f"ℹ️ Instagram entry has no 'messaging' field: {entry}")
+                else:
+                    logger.warning(f"⚠️ Unknown Instagram webhook format - no 'entry' found in data: {data}")
             
             return JsonResponse({'status': 'received'})
             
         except Exception as e:
+            logger = logging.getLogger(__name__)
+            logger.error(f"Instagram webhook processing failed: {e}")
             return JsonResponse({
                 'error': f'Instagram webhook processing failed: {str(e)}'
             }, status=500)

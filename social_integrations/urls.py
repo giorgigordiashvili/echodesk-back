@@ -34,6 +34,9 @@ urlpatterns = [
     path('instagram/oauth/callback/', views.instagram_oauth_callback, name='instagram-oauth-callback'),
     path('instagram/status/', views.instagram_connection_status, name='instagram-status'),
     path('instagram/disconnect/', views.instagram_disconnect, name='instagram-disconnect'),
+    path('instagram/send-message/', views.instagram_send_message, name='instagram-send-message'),
+    path('instagram/conversations/', views.instagram_conversations, name='instagram-conversations'),
+    path('instagram/conversations/<str:conversation_id>/messages/', views.instagram_conversation_messages, name='instagram-conversation-messages'),
     path('instagram/webhook/', views.instagram_webhook, name='instagram-webhook'),
     
     # WhatsApp Business API endpoints

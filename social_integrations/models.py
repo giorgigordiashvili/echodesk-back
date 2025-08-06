@@ -56,7 +56,8 @@ class InstagramAccountConnection(models.Model):
         unique_together = ['user', 'instagram_account_id']
     
     def __str__(self):
-        return f"@{self.username} - {self.user.username}"
+        user_display = self.user.get_full_name() or self.user.email
+        return f"@{self.username} - {user_display}"
 
 
 class InstagramMessage(models.Model):
