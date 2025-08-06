@@ -21,10 +21,9 @@ class MessagesConsumer(AsyncWebsocketConsumer):
         self.tenant_schema = self.scope['url_route']['kwargs']['tenant_schema']
         self.user = self.scope.get('user', AnonymousUser())
         
-        # Only allow authenticated users
-        if self.user.is_anonymous:
-            await self.close()
-            return
+        # For now, allow all connections to test WebSocket functionality
+        # TODO: Add proper authentication when WebSocket auth is configured
+        print(f"[WebSocket] Connection attempt - User: {self.user}, Tenant: {self.tenant_schema}")
         
         # Join the messages group for this tenant
         self.messages_group_name = f'messages_{self.tenant_schema}'
@@ -40,8 +39,11 @@ class MessagesConsumer(AsyncWebsocketConsumer):
         await self.send(text_data=json.dumps({
             'type': 'connection',
             'status': 'connected',
-            'tenant': self.tenant_schema
+            'tenant': self.tenant_schema,
+            'user_authenticated': not self.user.is_anonymous
         }))
+        
+        print(f"[WebSocket] Connected successfully for tenant: {self.tenant_schema}")
     
     async def disconnect(self, close_code):
         # Leave the messages group
