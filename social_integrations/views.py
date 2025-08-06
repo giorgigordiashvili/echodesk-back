@@ -255,15 +255,20 @@ def facebook_webhook(request):
             
             # Simple file logging to verify we're receiving callbacks
             try:
-                with open('/tmp/facebook_webhook_log.txt', 'a') as f:
+                import os
+                log_file = os.path.join(os.getcwd(), 'facebook_webhook_log.txt')
+                with open(log_file, 'a') as f:
                     f.write(f"\n=== WEBHOOK RECEIVED ===\n")
                     f.write(f"Time: {datetime.now()}\n")
                     f.write(f"Method: {request.method}\n")
                     f.write(f"Headers: {dict(request.headers)}\n")
                     f.write(f"Body: {request.body.decode('utf-8')}\n")
                     f.write("=" * 50 + "\n")
+                print(f"WEBHOOK: Logged to {log_file}")
             except Exception as e:
-                print(f"Failed to write to log file: {e}")
+                print(f"WEBHOOK: Failed to write to log file: {e}")
+                # Also try to write to stdout as fallback
+                print(f"WEBHOOK RECEIVED at {datetime.now()}: {request.body.decode('utf-8')}")
             
             data = json.loads(request.body)
             logger.info(f"Webhook received data: {data}")
@@ -319,11 +324,30 @@ def facebook_webhook(request):
                                     is_from_page=(sender_id == page_id),
                                     profile_pic_url=profile_pic_url
                                 )
-                                logger.info(f"Successfully saved test Facebook message with ID: {message_obj.id}")
+                                logger.info(f"✅ SUCCESSFULLY SAVED MESSAGE TO DATABASE - ID: {message_obj.id}, Text: '{message_text}'")
+                                
+                                # Also write to file for debugging
+                                try:
+                                    with open('/tmp/facebook_webhook_log.txt', 'a') as f:
+                                        f.write(f"✅ SAVED TO DATABASE: Message ID {message_obj.id} - '{message_text}'\n")
+                                except:
+                                    pass
+                                    
                             except Exception as e:
-                                logger.error(f"Failed to save test Facebook message: {e}")
+                                logger.error(f"❌ FAILED TO SAVE MESSAGE TO DATABASE: {e}")
+                                try:
+                                    with open('/tmp/facebook_webhook_log.txt', 'a') as f:
+                                        f.write(f"❌ DATABASE SAVE FAILED: {e}\n")
+                                except:
+                                    pass
                         else:
-                            logger.info(f"Message {message_id} already exists or no message_id provided")
+                            reason = "No message_id provided" if not message_id else f"Message {message_id} already exists"
+                            logger.info(f"⚠️ SKIPPED SAVING MESSAGE: {reason}")
+                            try:
+                                with open('/tmp/facebook_webhook_log.txt', 'a') as f:
+                                    f.write(f"⚠️ SKIPPED: {reason}\n")
+                            except:
+                                pass
                         
                     except FacebookPageConnection.DoesNotExist:
                         logger.warning(f"No active page connection found for forced page_id: {page_id}")
@@ -446,25 +470,77 @@ def facebook_debug_callback(request):
 def webhook_test_endpoint(request):
     """Simple test endpoint to verify webhook connectivity"""
     from datetime import datetime
+    import os
     
     # Log everything to file
     try:
-        with open('/tmp/webhook_test_log.txt', 'a') as f:
+        log_file = os.path.join(os.getcwd(), 'webhook_test_log.txt')
+        with open(log_file, 'a') as f:
             f.write(f"\n=== WEBHOOK TEST ===\n")
             f.write(f"Time: {datetime.now()}\n")
             f.write(f"Method: {request.method}\n")
             f.write(f"Body: {request.body.decode('utf-8') if request.body else 'No body'}\n")
             f.write("=" * 50 + "\n")
+        print(f"TEST: Logged to {log_file}")
     except Exception as e:
-        pass
+        print(f"TEST: Failed to write to log file: {e}")
+        print(f"TEST WEBHOOK at {datetime.now()}: {request.method} - {request.body.decode('utf-8') if request.body else 'No body'}")
     
     return Response({
         'status': 'success',
         'message': 'Webhook test endpoint working',
         'method': request.method,
         'timestamp': str(datetime.now()),
-        'body_received': request.body.decode('utf-8') if request.body else None
+        'body_received': request.body.decode('utf-8') if request.body else None,
+        'log_file': os.path.join(os.getcwd(), 'webhook_test_log.txt')
     })
+
+
+@csrf_exempt
+@api_view(['GET', 'POST'])
+@permission_classes([])
+def test_database_save(request):
+    """Test endpoint to manually create a Facebook message in database"""
+    try:
+        # Find the first active page connection
+        page_connection = FacebookPageConnection.objects.filter(is_active=True).first()
+        
+        if not page_connection:
+            return Response({
+                'error': 'No active Facebook page connections found',
+                'available_connections': list(FacebookPageConnection.objects.values('page_id', 'page_name', 'is_active'))
+            }, status=400)
+        
+        # Create a test message
+        from datetime import datetime
+        import random
+        
+        test_message = FacebookMessage.objects.create(
+            page_connection=page_connection,
+            message_id=f"test_message_{random.randint(1000, 9999)}",
+            sender_id="test_sender_123",
+            sender_name="Test User",
+            message_text="This is a test message created manually",
+            timestamp=int(datetime.now().timestamp()),
+            is_from_page=False,
+            profile_pic_url=None
+        )
+        
+        return Response({
+            'success': True,
+            'message_id': test_message.id,
+            'message_text': test_message.message_text,
+            'page_connection': {
+                'page_id': page_connection.page_id,
+                'page_name': page_connection.page_name
+            },
+            'admin_url': f'https://amanati.api.echodesk.ge/admin/social_integrations/facebookmessage/{test_message.id}/change/'
+        })
+        
+    except Exception as e:
+        return Response({
+            'error': f'Failed to create test message: {str(e)}'
+        }, status=500)
 
 
 # Instagram Integration Functions
