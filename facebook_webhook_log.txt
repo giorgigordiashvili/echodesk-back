@@ -1,0 +1,111 @@
+
+=== WEBHOOK RECEIVED ===
+Time: 2025-08-06 20:18:31.647405
+Method: POST
+Headers: {'Cookie': '', 'Content-Length': '283', 'Content-Type': 'application/json'}
+Body: {"object": "page", "entry": [{"time": 1754511268443, "id": "655864257621107", "messaging": [{"sender": {"id": "29118806107789715"}, "recipient": {"id": "655864257621107"}, "timestamp": 1754511179168, "message": {"mid": "test_message_for_debug_123", "text": "Debug test message"}}]}]}
+==================================================
+
+=== WEBHOOK RECEIVED ===
+Time: 2025-08-06 20:18:42.016634
+Method: POST
+Headers: {'Content-Length': '459', 'Content-Type': 'application/json', 'Host': '127.0.0.1:8000', 'Accept': '*/*', 'User-Agent': 'facebookexternalua'}
+Body: {
+    "object": "page",
+    "entry": [
+      {
+        "time": 1754511268443,
+        "id": "655864257621107",
+        "messaging": [
+          {
+            "sender": {"id": "29118806107789715"},
+            "recipient": {"id": "655864257621107"},
+            "timestamp": 1754511179168,
+            "message": {
+              "mid": "test_debug_message_456",
+              "text": "Debug test from curl"
+            }
+          }
+        ]
+      }
+    ]
+  }
+==================================================
+
+=== WEBHOOK RECEIVED ===
+Time: 2025-08-06 20:20:56.461814
+Method: POST
+Headers: {'Content-Length': '471', 'Content-Type': 'application/json', 'Host': '127.0.0.1:8000', 'Accept': '*/*', 'User-Agent': 'facebookexternalua'}
+Body: {
+    "object": "page",
+    "entry": [
+      {
+        "time": 1754511268443,
+        "id": "655864257621107",
+        "messaging": [
+          {
+            "sender": {"id": "29118806107789715"},
+            "recipient": {"id": "655864257621107"},
+            "timestamp": 1754511179168,
+            "message": {
+              "mid": "test_debug_message_999",
+              "text": "Debug test with enhanced logging"
+            }
+          }
+        ]
+      }
+    ]
+  }
+==================================================
+
+=== WEBHOOK RECEIVED ===
+Time: 2025-08-06 20:22:06.861611
+Method: POST
+Headers: {'Content-Length': '449', 'Content-Type': 'application/json', 'Host': '127.0.0.1:8000', 'Accept': '*/*', 'User-Agent': 'facebookexternalua'}
+Body: {
+    "object": "page",
+    "entry": [
+      {
+        "time": 1754511268443,
+        "id": "655864257621107",
+        "messaging": [
+          {
+            "sender": {"id": "29118806107789715"},
+            "recipient": {"id": "655864257621107"},
+            "timestamp": 1754511179168,
+            "message": {
+              "mid": "short_test_123",
+              "text": "Short test message"
+            }
+          }
+        ]
+      }
+    ]
+  }
+==================================================
+
+=== WEBHOOK RECEIVED ===
+Time: 2025-08-06 20:24:37.409495
+Method: POST
+Headers: {'Content-Length': '449', 'Content-Type': 'application/json', 'Host': 'localhost:8000', 'Accept': '*/*', 'User-Agent': 'facebookexternalua'}
+Body: {
+    "object": "page",
+    "entry": [
+      {
+        "time": 1754511268443,
+        "id": "655864257621107",
+        "messaging": [
+          {
+            "sender": {"id": "29118806107789715"},
+            "recipient": {"id": "655864257621107"},
+            "timestamp": 1754511179168,
+            "message": {
+              "mid": "short_test_456",
+              "text": "Another short test"
+            }
+          }
+        ]
+      }
+    ]
+  }
+==================================================
