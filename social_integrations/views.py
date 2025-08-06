@@ -547,6 +547,11 @@ def facebook_webhook(request):
                                                 last_name = profile_data.get('last_name', '')
                                                 sender_name = f"{first_name} {last_name}".strip() or 'Unknown'
                                                 profile_pic_url = profile_data.get('profile_pic')
+                                                
+                                                # Validate URL length to prevent database errors
+                                                if profile_pic_url and len(profile_pic_url) > 500:
+                                                    logger.warning(f"Profile pic URL too long ({len(profile_pic_url)} chars), truncating: {profile_pic_url[:50]}...")
+                                                    profile_pic_url = None  # Don't save extremely long URLs
                                             
                                         except Exception as e:
                                             logger.error(f"Failed to fetch profile for {sender_id}: {e}")
@@ -564,7 +569,9 @@ def facebook_webhook(request):
                                     print(f"   message_text length: {len(message_text)} chars - '{message_text}'")
                                     print(f"   page_id length: {len(str(page_id))} chars - '{page_id}'")
                                     if profile_pic_url:
-                                        print(f"   profile_pic_url length: {len(profile_pic_url)} chars")
+                                        print(f"   profile_pic_url length: {len(profile_pic_url)} chars - '{profile_pic_url[:50]}...'")
+                                    else:
+                                        print(f"   profile_pic_url: None")
                                     
                                     if message_id and not FacebookMessage.objects.filter(message_id=message_id).exists():
                                         try:
