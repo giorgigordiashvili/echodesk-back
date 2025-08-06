@@ -513,6 +513,7 @@ def facebook_webhook(request):
                         # Process messaging events
                         if 'messaging' in entry:
                             logger.info(f"📨 Found {len(entry['messaging'])} messaging events")
+                            print(f"🔍 DEBUG: Processing {len(entry['messaging'])} messaging events for page {page_id}")
                             for message_event in entry['messaging']:
                                 logger.info(f"🔍 Processing message event: {message_event}")
                                 
@@ -555,8 +556,19 @@ def facebook_webhook(request):
                                     message_text = message_data.get('text', '')
                                     logger.info(f"💾 Attempting to save message: ID={message_id}, Text='{message_text}'")
                                     
+                                    # Enhanced debugging - check field lengths
+                                    print(f"🔍 FIELD LENGTH DEBUG:")
+                                    print(f"   message_id length: {len(message_id)} chars - '{message_id}'")
+                                    print(f"   sender_id length: {len(sender_id)} chars - '{sender_id}'")
+                                    print(f"   sender_name length: {len(sender_name)} chars - '{sender_name}'")
+                                    print(f"   message_text length: {len(message_text)} chars - '{message_text}'")
+                                    print(f"   page_id length: {len(str(page_id))} chars - '{page_id}'")
+                                    if profile_pic_url:
+                                        print(f"   profile_pic_url length: {len(profile_pic_url)} chars")
+                                    
                                     if message_id and not FacebookMessage.objects.filter(message_id=message_id).exists():
                                         try:
+                                            print(f"🔄 Creating FacebookMessage object...")
                                             message_obj = FacebookMessage.objects.create(
                                                 page_connection=page_connection,
                                                 message_id=message_id,
@@ -568,9 +580,29 @@ def facebook_webhook(request):
                                                 profile_pic_url=profile_pic_url
                                             )
                                             logger.info(f"✅ SUCCESSFULLY SAVED MESSAGE TO DATABASE - ID: {message_obj.id}, Text: '{message_text}'")
+                                            print(f"✅ SUCCESS: Message saved with ID {message_obj.id}")
                                         except Exception as e:
                                             logger.error(f"❌ FAILED TO SAVE MESSAGE TO DATABASE: {e}")
                                             logger.error(f"❌ Error details: {str(e)}")
+                                            print(f"❌ SAVE FAILED: {e}")
+                                            print(f"❌ Error type: {type(e).__name__}")
+                                            
+                                            # Log to file for debugging
+                                            try:
+                                                import os
+                                                log_file = os.path.join(os.getcwd(), 'facebook_webhook_log.txt')
+                                                with open(log_file, 'a') as f:
+                                                    f.write(f"\n❌ STANDARD FORMAT SAVE FAILED ❌\n")
+                                                    f.write(f"Time: {datetime.now()}\n")
+                                                    f.write(f"Error: {e}\n")
+                                                    f.write(f"Error type: {type(e).__name__}\n")
+                                                    f.write(f"Page ID: {page_id}\n")
+                                                    f.write(f"Message ID: {message_id}\n")
+                                                    f.write(f"Sender ID: {sender_id}\n")
+                                                    f.write(f"Message text: {message_text}\n")
+                                                    f.write("=" * 50 + "\n")
+                                            except Exception as log_error:
+                                                logger.error(f"Failed to write error log: {log_error}")
                                     else:
                                         if not message_id:
                                             logger.warning(f"⚠️ No message_id provided, skipping save")
