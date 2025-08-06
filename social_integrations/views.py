@@ -236,32 +236,22 @@ def facebook_webhook(request):
         # Verify token from settings
         verify_token = getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_VERIFY_TOKEN', 'echodesk_webhook_token_2024')
         
-        # Log the verification attempt for debugging
-        print(f"[WEBHOOK] Verification attempt:")
-        print(f"  Mode: {mode}")
-        print(f"  Token received: {token}")
-        print(f"  Token expected: {verify_token}")
-        print(f"  Challenge: {challenge}")
-        
         # Verify the mode and token
         if mode == 'subscribe' and token == verify_token:
-            print(f"[WEBHOOK] Verification successful, returning challenge")
             # Return the challenge as plain text (not JSON)
-            from django.http import HttpResponse
             return HttpResponse(challenge, content_type='text/plain')
         else:
-            print(f"[WEBHOOK] Verification failed")
             return JsonResponse({
-                'error': 'Invalid verify token or mode',
-                'expected_token': verify_token,
-                'received_token': token,
-                'mode': mode
+                'error': 'Invalid verify token or mode'
             }, status=403)
     
     elif request.method == 'POST':
         # Handle webhook events
         try:
             import json
+            import logging
+            logger = logging.getLogger(__name__)
+            
             data = json.loads(request.body)
             
             # Process messaging events
@@ -276,6 +266,8 @@ def facebook_webhook(request):
                             is_active=True
                         )
                     except FacebookPageConnection.DoesNotExist:
+                        # Log for debugging but continue processing other entries
+                        logger.warning(f"No active page connection found for page_id: {page_id}")
                         continue
                     
                     # Process messaging events
@@ -284,6 +276,10 @@ def facebook_webhook(request):
                             if 'message' in message_event:
                                 message_data = message_event['message']
                                 sender_id = message_event['sender']['id']
+                                
+                                # Skip if this is an echo (message sent by the page)
+                                if message_data.get('is_echo'):
+                                    continue
                                 
                                 # Get sender profile information including profile picture
                                 sender_name = 'Unknown'
@@ -297,33 +293,40 @@ def facebook_webhook(request):
                                             'fields': 'first_name,last_name,profile_pic',
                                             'access_token': page_connection.page_access_token
                                         }
-                                        profile_response = requests.get(profile_url, params=profile_params)
+                                        profile_response = requests.get(profile_url, params=profile_params, timeout=10)
                                         
                                         if profile_response.status_code == 200:
                                             profile_data = profile_response.json()
                                             first_name = profile_data.get('first_name', '')
                                             last_name = profile_data.get('last_name', '')
-                                            sender_name = f"{first_name} {last_name}".strip()
+                                            sender_name = f"{first_name} {last_name}".strip() or 'Unknown'
                                             profile_pic_url = profile_data.get('profile_pic')
                                         
                                     except Exception as e:
-                                        print(f"Failed to fetch profile for {sender_id}: {e}")
+                                        logger.error(f"Failed to fetch profile for {sender_id}: {e}")
                                 
-                                # Save the message
-                                FacebookMessage.objects.create(
-                                    page_connection=page_connection,
-                                    message_id=message_data.get('mid', ''),
-                                    sender_id=sender_id,
-                                    sender_name=sender_name,
-                                    message_text=message_data.get('text', ''),
-                                    timestamp=message_event.get('timestamp', 0),
-                                    is_from_page=(sender_id == page_id),
-                                    profile_pic_url=profile_pic_url
-                                )
+                                # Save the message (avoid duplicates)
+                                message_id = message_data.get('mid', '')
+                                if message_id and not FacebookMessage.objects.filter(message_id=message_id).exists():
+                                    try:
+                                        FacebookMessage.objects.create(
+                                            page_connection=page_connection,
+                                            message_id=message_id,
+                                            sender_id=sender_id,
+                                            sender_name=sender_name,
+                                            message_text=message_data.get('text', ''),
+                                            timestamp=message_event.get('timestamp', 0),
+                                            is_from_page=(sender_id == page_id),
+                                            profile_pic_url=profile_pic_url
+                                        )
+                                        logger.info(f"Saved Facebook message from {sender_name}")
+                                    except Exception as e:
+                                        logger.error(f"Failed to save Facebook message: {e}")
             
             return JsonResponse({'status': 'received'})
             
         except Exception as e:
+            logger.error(f"Webhook processing failed: {e}")
             return JsonResponse({
                 'error': f'Webhook processing failed: {str(e)}'
             }, status=500)
