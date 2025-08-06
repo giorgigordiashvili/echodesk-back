@@ -6,6 +6,55 @@ from django.contrib import admin
 from django.urls import path, include
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from social_integrations import legal_views
+from django.http import JsonResponse
+
+def websocket_diagnostic(request):
+    """
+    Diagnostic endpoint to check WebSocket configuration
+    """
+    import django
+    from django.conf import settings
+    
+    # Check if Django Channels is installed
+    try:
+        import channels
+        channels_version = channels.__version__
+        channels_installed = True
+    except ImportError:
+        channels_version = None
+        channels_installed = False
+    
+    # Check if ASGI application is configured
+    asgi_application = getattr(settings, 'ASGI_APPLICATION', None)
+    
+    # Check if channel layers are configured
+    channel_layers = getattr(settings, 'CHANNEL_LAYERS', None)
+    
+    # Check server type
+    server_type = "ASGI configured" if asgi_application else "WSGI only"
+    
+    # Check Redis connection if configured
+    redis_status = "Not configured"
+    if channel_layers and 'default' in channel_layers:
+        backend = channel_layers['default'].get('BACKEND', '')
+        if 'redis' in backend.lower():
+            redis_status = "Redis configured"
+    
+    return JsonResponse({
+        'django_version': django.get_version(),
+        'channels_installed': channels_installed,
+        'channels_version': channels_version,
+        'asgi_application': asgi_application,
+        'server_type': server_type,
+        'channel_layers_configured': channel_layers is not None,
+        'redis_status': redis_status,
+        'websocket_urls_should_be_available': [
+            '/ws/messages/<tenant_schema>/',
+            '/ws/typing/<tenant_schema>/<conversation_id>/'
+        ] if channels_installed and asgi_application else [],
+        'debug_mode': settings.DEBUG,
+        'deployment_issue': 'WebSocket 404 means server is not running with ASGI or WebSocket routing is missing'
+    })
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -13,6 +62,9 @@ urlpatterns = [
     # API Documentation
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
     path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
+    
+    # WebSocket diagnostic
+    path('websocket-diagnostic/', websocket_diagnostic, name='websocket_diagnostic'),
     
     # Legal pages (required for Facebook app compliance)
     path('legal/privacy-policy/', legal_views.privacy_policy, name='privacy-policy'),

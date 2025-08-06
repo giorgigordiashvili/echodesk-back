@@ -1,18 +1,13 @@
-"""
-URL configuration for amanati_crm project.
-This is the main URL configuration for tenant-specific routes.
-"""
-from django.contrib import admin
-from django.urls import path, include
-from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+import django
+from django.conf import settings
 
+@csrf_exempt
 def websocket_diagnostic(request):
     """
     Diagnostic endpoint to check WebSocket configuration
     """
-    import django
-    from django.conf import settings
     
     # Check if Django Channels is installed
     try:
@@ -31,17 +26,29 @@ def websocket_diagnostic(request):
     
     # Check if this is running under ASGI or WSGI
     server_type = "Unknown"
-    if hasattr(settings, 'ASGI_APPLICATION'):
-        server_type = "ASGI configured"
-    else:
-        server_type = "WSGI only"
+    try:
+        # This will be available if running under ASGI
+        from django.core.asgi import get_asgi_application
+        server_type = "ASGI (WebSocket supported)"
+    except:
+        try:
+            # This indicates WSGI
+            from django.core.wsgi import get_wsgi_application
+            server_type = "WSGI (WebSocket NOT supported)"
+        except:
+            pass
     
     # Check Redis connection if configured
     redis_status = "Not configured"
     if channel_layers and 'default' in channel_layers:
         backend = channel_layers['default'].get('BACKEND', '')
         if 'redis' in backend.lower():
-            redis_status = "Redis configured"
+            try:
+                from channels.layers import get_channel_layer
+                channel_layer = get_channel_layer()
+                redis_status = "Configured (Redis)"
+            except Exception as e:
+                redis_status = f"Configured but error: {str(e)}"
     
     return JsonResponse({
         'django_version': django.get_version(),
@@ -58,23 +65,3 @@ def websocket_diagnostic(request):
         'debug_mode': settings.DEBUG,
         'message': 'WebSocket functionality requires ASGI server and Django Channels'
     })
-
-urlpatterns = [
-    path('admin/', admin.site.urls),
-    
-    # API Documentation
-    path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
-    path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
-    
-    # WebSocket diagnostic endpoint
-    path('websocket-diagnostic/', websocket_diagnostic, name='websocket_diagnostic'),
-    
-    # Authentication and tenant management
-    path('', include('tenants.urls')),
-    
-    # Tenant-specific apps
-    path('', include('users.urls')),
-    path('', include('crm.urls')),
-    path('', include('tickets.urls')),
-    path('api/social/', include('social_integrations.urls')),
-]
