@@ -7,6 +7,7 @@ from django.urls import path, include
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from social_integrations import legal_views
 from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
 
 def websocket_diagnostic(request):
     """
@@ -56,6 +57,66 @@ def websocket_diagnostic(request):
         'deployment_issue': 'WebSocket 404 means server is not running with ASGI or WebSocket routing is missing'
     })
 
+@csrf_exempt
+def test_websocket_notification(request):
+    """
+    Test endpoint to manually trigger a WebSocket notification
+    """
+    from django.http import JsonResponse
+    import json
+    import time
+    import traceback
+    
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            tenant_schema = data.get('tenant_schema', 'echodesk_georgeguajabidze_gmail_com')
+            message_text = data.get('message', 'Test WebSocket message')
+            
+            # Try to send WebSocket notification
+            from asgiref.sync import async_to_sync
+            from social_integrations.consumers import send_new_message_notification
+            
+            test_message_data = {
+                'id': 999999,
+                'message_id': 'test_' + str(int(time.time())),
+                'sender_id': 'test_sender',
+                'sender_name': 'WebSocket Test',
+                'message_text': message_text,
+                'timestamp': '2024-01-01T00:00:00Z',
+                'is_from_page': False,
+                'page_name': 'Test Page',
+            }
+            
+            async_to_sync(send_new_message_notification)(
+                tenant_schema=tenant_schema,
+                conversation_id='test_conversation',
+                message_data=test_message_data
+            )
+            
+            return JsonResponse({
+                'status': 'success',
+                'message': 'WebSocket notification sent',
+                'tenant_schema': tenant_schema,
+                'test_data': test_message_data
+            })
+            
+        except Exception as e:
+            return JsonResponse({
+                'status': 'error',
+                'message': str(e),
+                'traceback': traceback.format_exc()
+            })
+    
+    return JsonResponse({
+        'status': 'error',
+        'message': 'POST request required',
+        'example': {
+            'tenant_schema': 'echodesk_georgeguajabidze_gmail_com',
+            'message': 'Test message'
+        }
+    })
+
 urlpatterns = [
     path('admin/', admin.site.urls),
     
@@ -63,8 +124,9 @@ urlpatterns = [
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
     path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
     
-    # WebSocket diagnostic
+    # WebSocket diagnostic and testing
     path('websocket-diagnostic/', websocket_diagnostic, name='websocket_diagnostic'),
+    path('test-websocket/', test_websocket_notification, name='test_websocket'),
     
     # Legal pages (required for Facebook app compliance)
     path('legal/privacy-policy/', legal_views.privacy_policy, name='privacy-policy'),
