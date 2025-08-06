@@ -38,19 +38,7 @@ class PackageViewSet(viewsets.ReadOnlyModelViewSet):
     responses={
         200: OpenApiResponse(
             description='Packages organized by pricing model',
-            response={
-                'type': 'object',
-                'properties': {
-                    'agent_based': {
-                        'type': 'array',
-                        'items': PackageListSerializer
-                    },
-                    'crm_based': {
-                        'type': 'array', 
-                        'items': PackageListSerializer
-                    }
-                }
-            }
+            response=PackageListSerializer(many=True)
         )
     },
     tags=['Packages']
