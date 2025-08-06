@@ -321,7 +321,10 @@ def facebook_webhook(request):
             # Handle Facebook Developer Console test format
             if 'field' in data and 'value' in data and data['field'] == 'messages':
                 test_value = data['value']
-                page_id = test_value.get('metadata', {}).get('page_id') or test_value.get('page_id')
+                # Try multiple places where Facebook might put the page ID
+                page_id = (test_value.get('metadata', {}).get('page_id') or 
+                          test_value.get('page_id') or 
+                          test_value.get('recipient', {}).get('id'))
             
             # Handle standard webhook format (real messages)  
             elif 'entry' in data and len(data['entry']) > 0:
