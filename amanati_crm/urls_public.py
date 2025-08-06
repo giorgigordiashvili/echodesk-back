@@ -73,6 +73,17 @@ def test_websocket_notification(request):
             tenant_schema = data.get('tenant_schema', 'echodesk_georgeguajabidze_gmail_com')
             message_text = data.get('message', 'Test WebSocket message')
             
+            # Check if channel layer is available
+            from channels.layers import get_channel_layer
+            channel_layer = get_channel_layer()
+            
+            if channel_layer is None:
+                return JsonResponse({
+                    'status': 'error',
+                    'message': 'Channel layer not configured',
+                    'suggestion': 'WebSocket functionality requires Django Channels with Redis or InMemory backend'
+                })
+            
             # Try to send WebSocket notification
             from asgiref.sync import async_to_sync
             from social_integrations.consumers import send_new_message_notification
@@ -96,16 +107,18 @@ def test_websocket_notification(request):
             
             return JsonResponse({
                 'status': 'success',
-                'message': 'WebSocket notification sent',
+                'message': 'WebSocket notification sent successfully',
                 'tenant_schema': tenant_schema,
-                'test_data': test_message_data
+                'test_data': test_message_data,
+                'channel_backend': str(type(channel_layer).__name__)
             })
             
         except Exception as e:
             return JsonResponse({
                 'status': 'error',
                 'message': str(e),
-                'traceback': traceback.format_exc()
+                'traceback': traceback.format_exc(),
+                'suggestion': 'Check if Redis is running or configure InMemory channel layer'
             })
     
     return JsonResponse({

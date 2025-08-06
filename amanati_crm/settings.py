@@ -355,11 +355,27 @@ SOCIAL_INTEGRATIONS = {
 ASGI_APPLICATION = 'amanati_crm.asgi.application'
 
 # Channel Layers for WebSocket support
-CHANNEL_LAYERS = {
-    'default': {
-        'BACKEND': 'channels_redis.core.RedisChannelLayer',
-        'CONFIG': {
-            "hosts": [('127.0.0.1', 6379)],
+# Try Redis first, fall back to in-memory if Redis is not available
+try:
+    import redis
+    # Test Redis connection
+    r = redis.Redis(host='127.0.0.1', port=6379, db=0)
+    r.ping()
+    # If Redis is available, use it
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels_redis.core.RedisChannelLayer',
+            'CONFIG': {
+                "hosts": [('127.0.0.1', 6379)],
+            },
         },
-    },
-}
+    }
+    print("✅ Using Redis for WebSocket channel layers")
+except (ImportError, redis.ConnectionError, Exception) as e:
+    # Fall back to in-memory backend for development/testing
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels.layers.InMemoryChannelLayer',
+        },
+    }
+    print(f"⚠️  Redis not available ({e}), using in-memory channel layer for WebSockets")
