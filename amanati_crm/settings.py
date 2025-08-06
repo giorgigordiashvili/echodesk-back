@@ -43,6 +43,7 @@ SHARED_APPS = [
     'rest_framework.authtoken',
     'drf_spectacular',
     'corsheaders',
+    'channels',  # Add channels for WebSocket support
     
     # Shared apps
     'tenants',  # This must be in SHARED_APPS
@@ -62,6 +63,7 @@ TENANT_APPS = [
     'rest_framework.authtoken',
     'drf_spectacular',
     'django_filters',
+    'channels',  # Add channels for WebSocket support
     
     # Tenant-specific apps
     'users',    # Only available in tenant schemas
@@ -347,4 +349,17 @@ SOCIAL_INTEGRATIONS = {
     # WhatsApp Business API configuration
     'WHATSAPP_VERIFY_TOKEN': config('WHATSAPP_WEBHOOK_VERIFY_TOKEN', default='echodesk_whatsapp_webhook_token_2024'),
     'WHATSAPP_API_VERSION': config('WHATSAPP_API_VERSION', default='v18.0'),
+}
+
+# ASGI Application for WebSocket support
+ASGI_APPLICATION = 'amanati_crm.asgi.application'
+
+# Channel Layers for WebSocket support
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {
+            "hosts": [('127.0.0.1', 6379)],
+        },
+    },
 }
