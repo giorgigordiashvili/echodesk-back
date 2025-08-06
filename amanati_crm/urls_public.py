@@ -58,76 +58,40 @@ def websocket_diagnostic(request):
     })
 
 @csrf_exempt
-def test_websocket_notification(request):
+def test_polling_system(request):
     """
-    Test endpoint to manually trigger a WebSocket notification
+    Test endpoint to verify the polling system is working
     """
     from django.http import JsonResponse
     import json
     import time
-    import traceback
     
     if request.method == 'POST':
         try:
             data = json.loads(request.body)
             tenant_schema = data.get('tenant_schema', 'echodesk_georgeguajabidze_gmail_com')
-            message_text = data.get('message', 'Test WebSocket message')
-            
-            # Check if channel layer is available
-            from channels.layers import get_channel_layer
-            channel_layer = get_channel_layer()
-            
-            if channel_layer is None:
-                return JsonResponse({
-                    'status': 'error',
-                    'message': 'Channel layer not configured',
-                    'suggestion': 'WebSocket functionality requires Django Channels with Redis or InMemory backend'
-                })
-            
-            # Try to send WebSocket notification
-            from asgiref.sync import async_to_sync
-            from social_integrations.consumers import send_new_message_notification
-            
-            test_message_data = {
-                'id': 999999,
-                'message_id': 'test_' + str(int(time.time())),
-                'sender_id': 'test_sender',
-                'sender_name': 'WebSocket Test',
-                'message_text': message_text,
-                'timestamp': '2024-01-01T00:00:00Z',
-                'is_from_page': False,
-                'page_name': 'Test Page',
-            }
-            
-            async_to_sync(send_new_message_notification)(
-                tenant_schema=tenant_schema,
-                conversation_id='test_conversation',
-                message_data=test_message_data
-            )
+            message_text = data.get('message', 'Test polling system message')
             
             return JsonResponse({
                 'status': 'success',
-                'message': 'WebSocket notification sent successfully',
+                'message': 'Polling system is active - messages refresh every 10 seconds',
                 'tenant_schema': tenant_schema,
-                'test_data': test_message_data,
-                'channel_backend': str(type(channel_layer).__name__)
+                'test_message': message_text,
+                'refresh_interval': '10 seconds',
+                'system_type': 'Simple polling (no WebSocket complexity)'
             })
             
         except Exception as e:
             return JsonResponse({
                 'status': 'error',
-                'message': str(e),
-                'traceback': traceback.format_exc(),
-                'suggestion': 'Check if Redis is running or configure InMemory channel layer'
+                'message': str(e)
             })
     
     return JsonResponse({
-        'status': 'error',
-        'message': 'POST request required',
-        'example': {
-            'tenant_schema': 'echodesk_georgeguajabidze_gmail_com',
-            'message': 'Test message'
-        }
+        'status': 'info',
+        'message': 'Simple polling system active',
+        'refresh_interval': '10 seconds',
+        'system_type': 'Reliable polling without WebSocket complexity'
     })
 
 urlpatterns = [
@@ -137,9 +101,9 @@ urlpatterns = [
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
     path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
     
-    # WebSocket diagnostic and testing
+    # Testing endpoints
     path('websocket-diagnostic/', websocket_diagnostic, name='websocket_diagnostic'),
-    path('test-websocket/', test_websocket_notification, name='test_websocket'),
+    path('test-polling/', test_polling_system, name='test_polling'),
     
     # Legal pages (required for Facebook app compliance)
     path('legal/privacy-policy/', legal_views.privacy_policy, name='privacy-policy'),

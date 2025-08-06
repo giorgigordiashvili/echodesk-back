@@ -536,44 +536,10 @@ def facebook_webhook(request):
                                     print(f"✅ SUCCESSFULLY SAVED MESSAGE TO DATABASE - ID: {message_obj.id}, Text: '{message_text}'")
                                     logger.info(f"✅ SUCCESSFULLY SAVED MESSAGE TO DATABASE - ID: {message_obj.id}, Text: '{message_text}'")
                                     
-                                    # Send WebSocket notification for real-time updates
-                                    try:
-                                        from .consumers import send_new_message_notification, send_conversation_update
-                                        
-                                        # Prepare message data for WebSocket
-                                        message_data = {
-                                            'id': str(message_obj.id),
-                                            'message_id': message_obj.message_id,
-                                            'sender_id': message_obj.sender_id,
-                                            'sender_name': message_obj.sender_name,
-                                            'message_text': message_obj.message_text,
-                                            'timestamp': message_obj.timestamp.isoformat(),
-                                            'is_from_page': message_obj.is_from_page,
-                                            'page_id': page_connection.page_id,
-                                            'page_name': page_connection.page_name,
-                                            'profile_pic_url': message_obj.profile_pic_url
-                                        }
-                                        
-                                        # Send notifications asynchronously
-                                        async_to_sync(send_new_message_notification)(
-                                            tenant_schema, 
-                                            sender_id, 
-                                            message_data
-                                        )
-                                        async_to_sync(send_conversation_update)(
-                                            tenant_schema, 
-                                            sender_id, 
-                                            message_data
-                                        )
-                                        
-                                        print(f"🔔 WebSocket notifications sent for message {message_obj.id}")
-                                        logger.info(f"🔔 WebSocket notifications sent for message {message_obj.id}")
-                                        
-                                    except Exception as ws_error:
-                                        print(f"⚠️ Failed to send WebSocket notification: {ws_error}")
-                                        logger.warning(f"Failed to send WebSocket notification: {ws_error}")
+                                    # WebSocket notifications removed - using simple polling instead
+                                    print(f"📧 Message saved successfully. Frontend will pick it up on next refresh.")
                                     
-                                    # Also write to file for debugging
+                                    # Write to file for debugging
                                     try:
                                         with open(log_file, 'a') as f:
                                             f.write(f"✅ SAVED TO DATABASE: Message ID {message_obj.id} - '{message_text}'\n")
@@ -724,42 +690,8 @@ def facebook_webhook(request):
                                             logger.info(f"✅ SUCCESSFULLY SAVED MESSAGE TO DATABASE - ID: {message_obj.id}, Text: '{message_text}'")
                                             print(f"✅ SUCCESS: Message saved with ID {message_obj.id}")
                                             
-                                            # Send WebSocket notification for real-time updates
-                                            try:
-                                                from .consumers import send_new_message_notification, send_conversation_update
-                                                
-                                                # Prepare message data for WebSocket
-                                                message_data_ws = {
-                                                    'id': str(message_obj.id),
-                                                    'message_id': message_obj.message_id,
-                                                    'sender_id': message_obj.sender_id,
-                                                    'sender_name': message_obj.sender_name,
-                                                    'message_text': message_obj.message_text,
-                                                    'timestamp': message_obj.timestamp.isoformat(),
-                                                    'is_from_page': message_obj.is_from_page,
-                                                    'page_id': page_connection.page_id,
-                                                    'page_name': page_connection.page_name,
-                                                    'profile_pic_url': message_obj.profile_pic_url
-                                                }
-                                                
-                                                # Send notifications asynchronously
-                                                async_to_sync(send_new_message_notification)(
-                                                    tenant_schema, 
-                                                    sender_id, 
-                                                    message_data_ws
-                                                )
-                                                async_to_sync(send_conversation_update)(
-                                                    tenant_schema, 
-                                                    sender_id, 
-                                                    message_data_ws
-                                                )
-                                                
-                                                print(f"🔔 WebSocket notifications sent for message {message_obj.id}")
-                                                logger.info(f"🔔 WebSocket notifications sent for message {message_obj.id}")
-                                                
-                                            except Exception as ws_error:
-                                                print(f"⚠️ Failed to send WebSocket notification: {ws_error}")
-                                                logger.warning(f"Failed to send WebSocket notification: {ws_error}")
+                                            # WebSocket notifications removed - using simple polling instead
+                                            print(f"📧 Message saved successfully. Frontend will pick it up on next refresh.")
                                             
                                         except Exception as e:
                                             logger.error(f"❌ FAILED TO SAVE MESSAGE TO DATABASE: {e}")
