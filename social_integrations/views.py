@@ -301,13 +301,29 @@ def facebook_webhook(request):
                     test_value = data['value']
                     
                     # Extract data from test format
-                    # Force the page_id for testing purposes
-                    page_id = "655864257621107"  # Force to your page ID
-                    sender_id = test_value.get('sender', {}).get('id')
+                    # Use the actual page_id from the data, or fallback to our known page
+                    page_id = test_value.get('metadata', {}).get('page_id') or test_value.get('page_id') or "655864257621107"
+                    sender_id = test_value.get('sender', {}).get('id', 'test_sender')
                     message_data = test_value.get('message', {})
                     timestamp = test_value.get('timestamp', 0)
                     
-                    logger.info(f"Processing test message - forced page_id: {page_id}, sender_id: {sender_id}")
+                    logger.info(f"Processing test message - page_id: {page_id}, sender_id: {sender_id}")
+                    logger.info(f"Test value structure: {test_value}")
+                    
+                    # Log to file for debugging
+                    try:
+                        import os
+                        log_file = os.path.join(os.getcwd(), 'facebook_webhook_log.txt')
+                        with open(log_file, 'a') as f:
+                            f.write(f"\n=== FACEBOOK TEST MESSAGE ===\n")
+                            f.write(f"Time: {datetime.now()}\n")
+                            f.write(f"Page ID: {page_id}\n")
+                            f.write(f"Sender ID: {sender_id}\n")
+                            f.write(f"Message Data: {message_data}\n")
+                            f.write(f"Full Test Value: {test_value}\n")
+                            f.write("=" * 50 + "\n")
+                    except Exception as log_error:
+                        logger.error(f"Failed to write test log: {log_error}")
                     
                     if page_id and sender_id and message_data:
                         # Find the page connection
@@ -319,8 +335,8 @@ def facebook_webhook(request):
                             logger.info(f"Found page connection: {page_connection}")
                             
                             # Process the test message
-                            message_id = message_data.get('mid', '')
-                            message_text = message_data.get('text', '')
+                            message_id = message_data.get('mid', f'test_mid_{timestamp}')
+                            message_text = message_data.get('text', 'Test message from Facebook')
                             
                             logger.info(f"Processing message - ID: {message_id}, Text: {message_text}")
                             
@@ -372,10 +388,26 @@ def facebook_webhook(request):
                                     pass
                             
                         except FacebookPageConnection.DoesNotExist:
-                            logger.warning(f"No active page connection found for forced page_id: {page_id}")
+                            logger.warning(f"No active page connection found for page_id: {page_id}")
                             # List available connections for debugging
                             all_connections = FacebookPageConnection.objects.filter(is_active=True)
-                            logger.info(f"Available connections: {[(conn.page_id, conn.page_name) for conn in all_connections]}")
+                            logger.warning(f"Available connections: {[(conn.page_id, conn.page_name) for conn in all_connections]}")
+                            
+                            # Log to file for debugging
+                            try:
+                                import os
+                                log_file = os.path.join(os.getcwd(), 'facebook_webhook_log.txt')
+                                with open(log_file, 'a') as f:
+                                    f.write(f"\n❌ NO PAGE CONNECTION FOUND ❌\n")
+                                    f.write(f"Time: {datetime.now()}\n")
+                                    f.write(f"Looking for page_id: {page_id}\n")
+                                    f.write(f"Available pages: {[(conn.page_id, conn.page_name) for conn in all_connections]}\n")
+                                    f.write(f"Test value structure: {test_value}\n")
+                                    f.write("=" * 50 + "\n")
+                            except Exception as log_error:
+                                logger.error(f"Failed to write error log: {log_error}")
+                            
+                            return JsonResponse({'error': f'No page connection found for page_id: {page_id}'}, status=404)
                     
                     return JsonResponse({'status': 'received'})
                 
@@ -516,6 +548,59 @@ def webhook_test_endpoint(request):
         'body_received': request.body.decode('utf-8') if request.body else None,
         'log_file': os.path.join(os.getcwd(), 'webhook_test_log.txt')
     })
+
+
+@csrf_exempt
+@api_view(['GET'])
+@permission_classes([])
+def debug_facebook_pages(request):
+    """Debug endpoint to show available Facebook page connections"""
+    try:
+        from tenant_schemas.utils import schema_context
+        from social_integrations.models import FacebookPageConnection, FacebookMessage
+        
+        result = {}
+        
+        with schema_context('amanati'):
+            # Get all page connections
+            page_connections = FacebookPageConnection.objects.all()
+            result['page_connections'] = []
+            
+            for pc in page_connections:
+                page_info = {
+                    'page_id': pc.page_id,
+                    'page_name': pc.page_name,
+                    'user_email': pc.user.email if pc.user else 'No user',
+                    'is_active': pc.is_active,
+                    'created_at': pc.created_at.isoformat() if pc.created_at else None,
+                    'message_count': FacebookMessage.objects.filter(page_connection=pc).count()
+                }
+                result['page_connections'].append(page_info)
+            
+            # Get recent messages
+            recent_messages = FacebookMessage.objects.all().order_by('-created_at')[:5]
+            result['recent_messages'] = []
+            
+            for msg in recent_messages:
+                msg_info = {
+                    'message_id': msg.message_id,
+                    'sender_name': msg.sender_name,
+                    'message_text': msg.message_text[:100],
+                    'page_name': msg.page_connection.page_name,
+                    'timestamp': msg.timestamp.isoformat() if msg.timestamp else None,
+                    'created_at': msg.created_at.isoformat() if msg.created_at else None
+                }
+                result['recent_messages'].append(msg_info)
+            
+            result['total_pages'] = len(result['page_connections'])
+            result['total_messages'] = FacebookMessage.objects.count()
+            
+        return JsonResponse(result)
+        
+    except Exception as e:
+        return JsonResponse({
+            'error': f'Debug failed: {str(e)}'
+        }, status=500)
 
 
 @csrf_exempt
