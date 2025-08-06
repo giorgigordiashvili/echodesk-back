@@ -250,7 +250,20 @@ def facebook_webhook(request):
         try:
             import json
             import logging
+            from datetime import datetime
             logger = logging.getLogger(__name__)
+            
+            # Simple file logging to verify we're receiving callbacks
+            try:
+                with open('/tmp/facebook_webhook_log.txt', 'a') as f:
+                    f.write(f"\n=== WEBHOOK RECEIVED ===\n")
+                    f.write(f"Time: {datetime.now()}\n")
+                    f.write(f"Method: {request.method}\n")
+                    f.write(f"Headers: {dict(request.headers)}\n")
+                    f.write(f"Body: {request.body.decode('utf-8')}\n")
+                    f.write("=" * 50 + "\n")
+            except Exception as e:
+                print(f"Failed to write to log file: {e}")
             
             data = json.loads(request.body)
             logger.info(f"Webhook received data: {data}")
@@ -404,6 +417,17 @@ def facebook_webhook(request):
 @permission_classes([])  # No authentication required for debugging
 def facebook_debug_callback(request):
     """Debug endpoint to see what Facebook is actually sending"""
+    # Also log to file for debugging
+    try:
+        from datetime import datetime
+        with open('/tmp/facebook_debug_log.txt', 'a') as f:
+            f.write(f"\n=== DEBUG ENDPOINT HIT ===\n")
+            f.write(f"Time: {datetime.now()}\n")
+            f.write(f"Method: {request.method}\n")
+            f.write("=" * 50 + "\n")
+    except:
+        pass
+    
     return Response({
         'method': request.method,
         'path': request.path,
@@ -411,7 +435,35 @@ def facebook_debug_callback(request):
         'get_params': dict(request.GET.items()),
         'post_params': dict(request.POST.items()) if hasattr(request, 'POST') else {},
         'headers': {k: v for k, v in request.META.items() if k.startswith('HTTP_')},
-        'message': 'This endpoint shows exactly what Facebook sends to the callback'
+        'message': 'This endpoint shows exactly what Facebook sends to the callback',
+        'timestamp': str(datetime.now())
+    })
+
+
+@csrf_exempt
+@api_view(['GET', 'POST'])
+@permission_classes([])
+def webhook_test_endpoint(request):
+    """Simple test endpoint to verify webhook connectivity"""
+    from datetime import datetime
+    
+    # Log everything to file
+    try:
+        with open('/tmp/webhook_test_log.txt', 'a') as f:
+            f.write(f"\n=== WEBHOOK TEST ===\n")
+            f.write(f"Time: {datetime.now()}\n")
+            f.write(f"Method: {request.method}\n")
+            f.write(f"Body: {request.body.decode('utf-8') if request.body else 'No body'}\n")
+            f.write("=" * 50 + "\n")
+    except Exception as e:
+        pass
+    
+    return Response({
+        'status': 'success',
+        'message': 'Webhook test endpoint working',
+        'method': request.method,
+        'timestamp': str(datetime.now()),
+        'body_received': request.body.decode('utf-8') if request.body else None
     })
 
 
