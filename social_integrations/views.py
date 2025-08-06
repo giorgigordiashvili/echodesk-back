@@ -44,11 +44,11 @@ def convert_facebook_timestamp(timestamp):
 def find_tenant_by_page_id(page_id):
     """Find which tenant schema contains the given Facebook page ID"""
     from django.db import connection
-    from tenants.models import Client
+    from tenants.models import Tenant
     from tenant_schemas.utils import schema_context
     
     # Get all tenant schemas
-    tenants = Client.objects.all()
+    tenants = Tenant.objects.all()
     
     for tenant in tenants:
         try:
