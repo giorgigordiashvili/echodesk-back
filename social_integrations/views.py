@@ -279,67 +279,16 @@ def facebook_oauth_callback(request):
                 'debug_info': {'tenant_schema': tenant_schema}
             })
         
-        # Get user's Facebook pages
+        # Get user's Facebook pages - simplified approach
         pages_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v18.0')}/me/accounts"
         pages_params = {
             'access_token': user_access_token,
-            'fields': 'id,name,access_token,category,tasks'
+            'fields': 'id,name,access_token,category'
         }
         
-        logger.info(f"Fetching Facebook pages for user...")
-        logger.info(f"Pages URL: {pages_url}")
-        logger.info(f"Pages params: {dict(pages_params, access_token='[HIDDEN]')}")
-        
-        # Also get user info to see what permissions we have
-        user_info_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v18.0')}/me"
-        user_info_params = {
-            'access_token': user_access_token,
-            'fields': 'id,name,email'
-        }
-        user_info_response = requests.get(user_info_url, params=user_info_params)
-        user_info_data = user_info_response.json()
-        
-        # Get permissions granted to our app
-        permissions_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v18.0')}/me/permissions"
-        permissions_params = {
-            'access_token': user_access_token
-        }
-        permissions_response = requests.get(permissions_url, params=permissions_params)
-        permissions_data = permissions_response.json()
-        
+        logger.info(f"Fetching Facebook pages for user {user_id}...")
         pages_response = requests.get(pages_url, params=pages_params)
         pages_data = pages_response.json()
-        
-        # Debug: Try to get specific page info if we have a suspected page ID
-        suspected_page_id = "61578872527104"  # From the profile URL provided by user
-        specific_page_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v18.0')}/{suspected_page_id}"
-        specific_page_params = {'access_token': user_access_token, 'fields': 'id,name,category,access_token'}
-        specific_page_response = requests.get(specific_page_url, params=specific_page_params)
-        specific_page_data = specific_page_response.json()
-        
-        # Debug: Check app details and development mode
-        app_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v18.0')}/app"
-        app_params = {'access_token': user_access_token}
-        app_response = requests.get(app_url, params=app_params)
-        app_data = app_response.json()
-        
-        # Debug: Try alternative endpoints for pages
-        business_pages_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v18.0')}/me"
-        business_pages_params = {
-            'access_token': user_access_token,
-            'fields': 'id,name,accounts'
-        }
-        business_pages_response = requests.get(business_pages_url, params=business_pages_params)
-        business_pages_data = business_pages_response.json()
-        
-        # Check if app is in development mode by trying to get app details
-        app_details_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v18.0')}/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_APP_ID')}"
-        app_details_params = {
-            'access_token': user_access_token,
-            'fields': 'id,name,development,restrictions'
-        }
-        app_details_response = requests.get(app_details_url, params=app_details_params)
-        app_details_data = app_details_response.json()
         
         if 'error' in pages_data:
             error_msg = f"Failed to fetch pages: {pages_data.get('error', {}).get('message', 'Unknown error')}"
@@ -347,54 +296,16 @@ def facebook_oauth_callback(request):
             return JsonResponse({
                 'status': 'error',
                 'message': error_msg,
-                'pages_response': pages_data,
-                'pages_url': pages_url,
-                'debug_info': {'tenant_schema': tenant_schema, 'access_token_exists': bool(user_access_token)}
+                'error_details': pages_data
             })
         
         pages = pages_data.get('data', [])
         if not pages:
-            error_msg = "No Facebook pages found for this account"
-            logger.warning("User has no Facebook pages")
+            logger.warning("User has no Facebook pages to connect")
             return JsonResponse({
-                'status': 'error',
-                'message': error_msg,
-                'pages_response': pages_data,
-                'user_info': user_info_data,
-                'permissions': permissions_data,
-                'specific_page_check': {
-                    'page_id': suspected_page_id,
-                    'url': specific_page_url,
-                    'response': specific_page_data
-                },
-                'app_info': {
-                    'url': app_url,
-                    'response': app_data
-                },
-                'app_development_check': {
-                    'url': app_details_url,
-                    'response': app_details_data
-                },
-                'alternative_pages_check': {
-                    'url': business_pages_url,
-                    'response': business_pages_data
-                },
-                'debug_info': {
-                    'tenant_schema': tenant_schema,
-                    'pages_url': pages_url,
-                    'user_info_url': user_info_url,
-                    'permissions_url': permissions_url,
-                    'access_token_received': bool(user_access_token),
-                    'pages_count': len(pages),
-                    'instructions': [
-                        'Check if the Facebook account has any pages',
-                        'Verify that pages_show_list permission was granted',
-                        'Make sure the OAuth flow included correct scopes',
-                        f'Specific page check for ID {suspected_page_id} - see specific_page_check field',
-                        'Check app_info for development mode status',
-                        'Check alternative_pages_check for extended page data'
-                    ]
-                }
+                'status': 'error', 
+                'message': 'No Facebook pages found for this account. Please ensure you have business pages to connect.',
+                'help': 'Create a Facebook business page at facebook.com/pages/create'
             })
         
         # Import tenant schema context for multi-tenant database operations
@@ -403,73 +314,51 @@ def facebook_oauth_callback(request):
         # Save page connections to database with proper tenant context
         saved_pages = 0
         with schema_context(tenant_schema):
+            # First, delete all existing Facebook page connections for this user
+            existing_connections = FacebookPageConnection.objects.filter(user_id=user_id)
+            deleted_count = existing_connections.count()
+            if deleted_count > 0:
+                existing_connections.delete()
+                logger.info(f"🗑️ Deleted {deleted_count} existing Facebook page connections for user {user_id}")
+            
+            # Create new connections for all pages from callback
             for page in pages:
                 page_id = page.get('id')
                 page_name = page.get('name')
                 page_access_token = page.get('access_token')
                 
-                if page_id and page_access_token:
-                    # Create or update page connection
-                    page_connection, created = FacebookPageConnection.objects.update_or_create(
+                if page_id and page_access_token and page_name:
+                    # Create new page connection
+                    page_connection = FacebookPageConnection.objects.create(
                         page_id=page_id,
-                        defaults={
-                            'page_name': page_name,
-                            'page_access_token': page_access_token,
-                            'user_id': user_id,
-                            'is_active': True
-                        }
+                        page_name=page_name,
+                        page_access_token=page_access_token,
+                        user_id=user_id,
+                        is_active=True
                     )
                     
-                    if created:
-                        logger.info(f"✅ Created new Facebook page connection: {page_name} ({page_id}) in schema {tenant_schema}")
-                    else:
-                        logger.info(f"🔄 Updated existing Facebook page connection: {page_name} ({page_id}) in schema {tenant_schema}")
-                    
+                    logger.info(f"✅ Created Facebook page connection: {page_name} ({page_id}) in schema {tenant_schema}")
                     saved_pages += 1
+                else:
+                    logger.warning(f"⚠️ Skipped page with missing data: {page}")
         
-        # Return detailed JSON response instead of redirect for debugging
+        # Return success response
         success_msg = f"Successfully connected {saved_pages} Facebook page(s)"
         logger.info(f"Facebook OAuth completed successfully: {saved_pages} pages saved")
-        
-        # Collect detailed page information for response
-        page_details = []
-        with schema_context(tenant_schema):
-            for page in pages:
-                page_id = page.get('id')
-                page_name = page.get('name')
-                if page_id:
-                    try:
-                        page_connection = FacebookPageConnection.objects.get(page_id=page_id)
-                        page_details.append({
-                            'page_id': page_id,
-                            'page_name': page_name,
-                            'database_id': page_connection.id,
-                            'user_id': page_connection.user_id,
-                            'is_active': page_connection.is_active,
-                            'created_at': page_connection.created_at.isoformat() if hasattr(page_connection, 'created_at') else 'N/A'
-                        })
-                    except FacebookPageConnection.DoesNotExist:
-                        page_details.append({
-                            'page_id': page_id,
-                            'page_name': page_name,
-                            'error': 'Page not found in database after save attempt'
-                        })
         
         return JsonResponse({
             'status': 'success',
             'message': success_msg,
-            'tenant_schema': tenant_schema,
-            'user_id': user_id,
-            'pages_processed': len(pages),
-            'pages_saved': saved_pages,
-            'page_details': page_details,
-            'raw_facebook_data': pages[:2] if pages else [],  # Show first 2 pages for debugging
-            'debug_info': {
-                'tenant_name_from_state': tenant_name,
-                'frontend_url': frontend_url,
-                'code_received': bool(code),
-                'access_token_received': bool(user_access_token)
-            }
+            'pages_connected': saved_pages,
+            'pages_data': [
+                {
+                    'page_id': page.get('id'),
+                    'page_name': page.get('name'),
+                    'category': page.get('category')
+                }
+                for page in pages
+                if page.get('id') and page.get('name')
+            ]
         })
         
         # Commented out redirect for debugging:
@@ -501,7 +390,7 @@ def facebook_oauth_callback(request):
 def facebook_connection_status(request):
     """Check Facebook connection status for current user"""
     try:
-        pages = FacebookPageConnection.objects.filter(user=request.user, is_active=True)
+        pages = FacebookPageConnection.objects.filter(user=request.user)
         pages_data = []
         
         for page in pages:
@@ -527,16 +416,21 @@ def facebook_connection_status(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def facebook_disconnect(request):
-    """Disconnect Facebook integration for current user"""
+    """Disconnect Facebook integration for current user - completely removes page records"""
     try:
-        updated_count = FacebookPageConnection.objects.filter(
-            user=request.user
-        ).update(is_active=False)
+        # Get count before deletion for response
+        pages_to_delete = FacebookPageConnection.objects.filter(user=request.user)
+        deleted_count = pages_to_delete.count()
+        page_names = list(pages_to_delete.values_list('page_name', flat=True))
+        
+        # Delete all Facebook page connections for this user
+        pages_to_delete.delete()
         
         return Response({
             'status': 'disconnected',
-            'pages_disconnected': updated_count,
-            'message': f'Disconnected {updated_count} Facebook pages'
+            'pages_deleted': deleted_count,
+            'deleted_pages': page_names,
+            'message': f'Permanently removed {deleted_count} Facebook page connection(s)'
         })
     except Exception as e:
         return Response({
