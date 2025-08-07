@@ -317,6 +317,21 @@ def facebook_oauth_callback(request):
         specific_page_response = requests.get(specific_page_url, params=specific_page_params)
         specific_page_data = specific_page_response.json()
         
+        # Debug: Check app details and development mode
+        app_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v18.0')}/app"
+        app_params = {'access_token': user_access_token}
+        app_response = requests.get(app_url, params=app_params)
+        app_data = app_response.json()
+        
+        # Debug: Try alternative endpoints for pages
+        business_pages_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v18.0')}/me"
+        business_pages_params = {
+            'access_token': user_access_token,
+            'fields': 'accounts{id,name,category,access_token,perms},business_users,businesses'
+        }
+        business_pages_response = requests.get(business_pages_url, params=business_pages_params)
+        business_pages_data = business_pages_response.json()
+        
         if 'error' in pages_data:
             error_msg = f"Failed to fetch pages: {pages_data.get('error', {}).get('message', 'Unknown error')}"
             logger.error(f"Facebook pages fetch error: {pages_data}")
@@ -343,6 +358,14 @@ def facebook_oauth_callback(request):
                     'url': specific_page_url,
                     'response': specific_page_data
                 },
+                'app_info': {
+                    'url': app_url,
+                    'response': app_data
+                },
+                'alternative_pages_check': {
+                    'url': business_pages_url,
+                    'response': business_pages_data
+                },
                 'debug_info': {
                     'tenant_schema': tenant_schema,
                     'pages_url': pages_url,
@@ -354,7 +377,9 @@ def facebook_oauth_callback(request):
                         'Check if the Facebook account has any pages',
                         'Verify that pages_show_list permission was granted',
                         'Make sure the OAuth flow included correct scopes',
-                        f'Specific page check for ID {suspected_page_id} - see specific_page_check field'
+                        f'Specific page check for ID {suspected_page_id} - see specific_page_check field',
+                        'Check app_info for development mode status',
+                        'Check alternative_pages_check for extended page data'
                     ]
                 }
             })
