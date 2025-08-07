@@ -327,10 +327,19 @@ def facebook_oauth_callback(request):
         business_pages_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v18.0')}/me"
         business_pages_params = {
             'access_token': user_access_token,
-            'fields': 'accounts{id,name,category,access_token,perms},business_users,businesses'
+            'fields': 'id,name,accounts'
         }
         business_pages_response = requests.get(business_pages_url, params=business_pages_params)
         business_pages_data = business_pages_response.json()
+        
+        # Check if app is in development mode by trying to get app details
+        app_details_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v18.0')}/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_APP_ID')}"
+        app_details_params = {
+            'access_token': user_access_token,
+            'fields': 'id,name,development,restrictions'
+        }
+        app_details_response = requests.get(app_details_url, params=app_details_params)
+        app_details_data = app_details_response.json()
         
         if 'error' in pages_data:
             error_msg = f"Failed to fetch pages: {pages_data.get('error', {}).get('message', 'Unknown error')}"
@@ -361,6 +370,10 @@ def facebook_oauth_callback(request):
                 'app_info': {
                     'url': app_url,
                     'response': app_data
+                },
+                'app_development_check': {
+                    'url': app_details_url,
+                    'response': app_details_data
                 },
                 'alternative_pages_check': {
                     'url': business_pages_url,
