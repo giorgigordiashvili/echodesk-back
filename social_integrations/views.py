@@ -1649,10 +1649,10 @@ def instagram_webhook(request):
             
             print(f"🔵 INSTAGRAM WEBHOOK POST PROCESSING STARTED at {datetime.now()}")
             
-            # Simple file logging to verify we're receiving callbacks
+            # Log Instagram webhooks to dedicated instagram.logs file
             try:
                 import os
-                log_file = os.path.join(os.getcwd(), 'instagram_webhook_log.txt')
+                log_file = os.path.join(os.getcwd(), 'instagram.logs')
                 with open(log_file, 'a') as f:
                     f.write(f"\n=== INSTAGRAM WEBHOOK RECEIVED ===\n")
                     f.write(f"Time: {datetime.now()}\n")
