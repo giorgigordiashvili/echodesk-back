@@ -214,8 +214,11 @@ def facebook_oauth_callback(request):
                 elif param.startswith('user='):
                     user_id = param.split('=', 1)[1]
         
+        # Extract tenant schema name from tenant_name
+        tenant_schema = tenant_name.split('(')[1].split(')')[0] if tenant_name and '(' in tenant_name else 'amanati'
+        
         # Frontend dashboard URL
-        frontend_url = f"https://{tenant_name.split('(')[1].split(')')[0] if tenant_name else 'amanati'}.echodesk.ge"
+        frontend_url = f"https://{tenant_schema}.echodesk.ge"
         
         # Handle Facebook errors (user denied, etc.)
         if error:
@@ -276,31 +279,35 @@ def facebook_oauth_callback(request):
             logger.warning("User has no Facebook pages")
             return redirect(f"{frontend_url}/?facebook_status=error&message={quote_plus(error_msg)}")
         
-        # Save page connections to database
+        # Import tenant schema context for multi-tenant database operations
+        from tenant_schemas.utils import schema_context
+        
+        # Save page connections to database with proper tenant context
         saved_pages = 0
-        for page in pages:
-            page_id = page.get('id')
-            page_name = page.get('name')
-            page_access_token = page.get('access_token')
-            
-            if page_id and page_access_token:
-                # Create or update page connection
-                page_connection, created = FacebookPageConnection.objects.update_or_create(
-                    page_id=page_id,
-                    defaults={
-                        'page_name': page_name,
-                        'page_access_token': page_access_token,
-                        'user_id': user_id,
-                        'is_active': True
-                    }
-                )
+        with schema_context(tenant_schema):
+            for page in pages:
+                page_id = page.get('id')
+                page_name = page.get('name')
+                page_access_token = page.get('access_token')
                 
-                if created:
-                    logger.info(f"✅ Created new Facebook page connection: {page_name} ({page_id})")
-                else:
-                    logger.info(f"🔄 Updated existing Facebook page connection: {page_name} ({page_id})")
-                
-                saved_pages += 1
+                if page_id and page_access_token:
+                    # Create or update page connection
+                    page_connection, created = FacebookPageConnection.objects.update_or_create(
+                        page_id=page_id,
+                        defaults={
+                            'page_name': page_name,
+                            'page_access_token': page_access_token,
+                            'user_id': user_id,
+                            'is_active': True
+                        }
+                    )
+                    
+                    if created:
+                        logger.info(f"✅ Created new Facebook page connection: {page_name} ({page_id}) in schema {tenant_schema}")
+                    else:
+                        logger.info(f"🔄 Updated existing Facebook page connection: {page_name} ({page_id}) in schema {tenant_schema}")
+                    
+                    saved_pages += 1
         
         # Redirect back to frontend with success
         success_msg = f"Successfully connected {saved_pages} Facebook page(s)"
@@ -1108,8 +1115,11 @@ def instagram_oauth_callback(request):
                 elif param.startswith('user='):
                     user_id = param.split('=', 1)[1]
         
+        # Extract tenant schema name from tenant_name
+        tenant_schema = tenant_name.split('(')[1].split(')')[0] if tenant_name and '(' in tenant_name else 'amanati'
+        
         # Frontend dashboard URL
-        frontend_url = f"https://{tenant_name.split('(')[1].split(')')[0] if tenant_name else 'amanati'}.echodesk.ge"
+        frontend_url = f"https://{tenant_schema}.echodesk.ge"
         
         # Handle Instagram errors (user denied, etc.)
         if error:
@@ -1212,31 +1222,35 @@ def instagram_oauth_callback(request):
             logger.warning("User has no Instagram business accounts")
             return redirect(f"{frontend_url}/?instagram_status=error&message={quote_plus(error_msg)}")
         
-        # Save Instagram account connections to database
+        # Import tenant schema context for multi-tenant database operations
+        from tenant_schemas.utils import schema_context
+        
+        # Save Instagram account connections to database with proper tenant context
         saved_accounts = 0
-        for account in instagram_accounts:
-            account_id = account['account_id']
-            username = account['username']
-            
-            # Create or update Instagram account connection
-            account_connection, created = InstagramAccountConnection.objects.update_or_create(
-                instagram_account_id=account_id,
-                defaults={
-                    'username': username,
-                    'name': account['name'],
-                    'profile_picture_url': account['profile_picture_url'],
-                    'access_token': account['access_token'],
-                    'user_id': user_id,
-                    'is_active': True
-                }
-            )
-            
-            if created:
-                logger.info(f"✅ Created new Instagram account connection: @{username} ({account_id})")
-            else:
-                logger.info(f"🔄 Updated existing Instagram account connection: @{username} ({account_id})")
-            
-            saved_accounts += 1
+        with schema_context(tenant_schema):
+            for account in instagram_accounts:
+                account_id = account['account_id']
+                username = account['username']
+                
+                # Create or update Instagram account connection
+                account_connection, created = InstagramAccountConnection.objects.update_or_create(
+                    instagram_account_id=account_id,
+                    defaults={
+                        'username': username,
+                        'name': account['name'],
+                        'profile_picture_url': account['profile_picture_url'],
+                        'access_token': account['access_token'],
+                        'user_id': user_id,
+                        'is_active': True
+                    }
+                )
+                
+                if created:
+                    logger.info(f"✅ Created new Instagram account connection: @{username} ({account_id}) in schema {tenant_schema}")
+                else:
+                    logger.info(f"🔄 Updated existing Instagram account connection: @{username} ({account_id}) in schema {tenant_schema}")
+                
+                saved_accounts += 1
         
         # Redirect back to frontend with success
         success_msg = f"Successfully connected {saved_accounts} Instagram account(s)"
