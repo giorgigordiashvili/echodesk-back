@@ -244,7 +244,7 @@ def facebook_oauth_callback(request):
             })
         
         # Exchange authorization code for access token
-        token_url = f"https://graph.facebook.com/{getattr(settings, "SOCIAL_INTEGRATIONS", {}).get("FACEBOOK_API_VERSION", "v18.0")}/oauth/access_token"
+        token_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v18.0')}/oauth/access_token"
         token_params = {
             'client_id': getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_APP_ID'),
             'client_secret': getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_APP_SECRET'),
@@ -280,7 +280,7 @@ def facebook_oauth_callback(request):
             })
         
         # Get user's Facebook pages
-        pages_url = f"https://graph.facebook.com/{getattr(settings, "SOCIAL_INTEGRATIONS", {}).get("FACEBOOK_API_VERSION", "v18.0")}/me/accounts"
+        pages_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v18.0')}/me/accounts"
         pages_params = {
             'access_token': user_access_token,
             'fields': 'id,name,access_token,category,tasks'
@@ -1223,7 +1223,7 @@ def instagram_oauth_callback(request):
             return redirect(f"{frontend_url}/?instagram_status=error&message={quote_plus(error_msg)}")
         
         # Exchange authorization code for access token
-        token_url = f"https://graph.facebook.com/{getattr(settings, "SOCIAL_INTEGRATIONS", {}).get("FACEBOOK_API_VERSION", "v18.0")}/oauth/access_token"
+        token_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v18.0')}/oauth/access_token"
         token_params = {
             'client_id': getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('INSTAGRAM_APP_ID'),
             'client_secret': getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('INSTAGRAM_APP_SECRET'),
@@ -1248,7 +1248,7 @@ def instagram_oauth_callback(request):
         
         # Get user's Instagram business accounts
         # First get user info to get the user ID
-        user_url = f"https://graph.facebook.com/{getattr(settings, "SOCIAL_INTEGRATIONS", {}).get("FACEBOOK_API_VERSION", "v18.0")}/me"
+        user_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v18.0')}/me"
         user_params = {
             'access_token': user_access_token,
             'fields': 'id,name'
@@ -1264,7 +1264,7 @@ def instagram_oauth_callback(request):
             return redirect(f"{frontend_url}/?instagram_status=error&message={quote_plus(error_msg)}")
         
         # Get user's Facebook pages (needed for Instagram business accounts)
-        pages_url = f"https://graph.facebook.com/{getattr(settings, "SOCIAL_INTEGRATIONS", {}).get("FACEBOOK_API_VERSION", "v18.0")}/me/accounts"
+        pages_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v18.0')}/me/accounts"
         pages_params = {
             'access_token': user_access_token,
             'fields': 'id,name,instagram_business_account'
@@ -1288,7 +1288,7 @@ def instagram_oauth_callback(request):
                 instagram_account_id = page['instagram_business_account']['id']
                 
                 # Get Instagram account details
-                instagram_url = f"https://graph.facebook.com/{getattr(settings, "SOCIAL_INTEGRATIONS", {}).get("FACEBOOK_API_VERSION", "v18.0")}"
+                instagram_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v18.0')}"
                 instagram_params = {
                     'access_token': user_access_token,
                     'fields': 'id,username,name,profile_picture_url'
