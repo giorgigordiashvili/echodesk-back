@@ -59,6 +59,7 @@ db.sqlite3
 # Custom log files
 instagram.logs
 facebook_webhook_log.txt
+whatsapp.logs
 requests.log
 server.log
 debug.log

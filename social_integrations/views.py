@@ -91,6 +91,29 @@ def find_tenant_by_page_id(page_id):
     return None
 
 
+def find_tenant_by_whatsapp_phone_id(phone_number_id):
+    """Find which tenant schema contains the given WhatsApp phone number ID"""
+    from django.db import connection
+    from tenants.models import Tenant
+    from tenant_schemas.utils import schema_context
+    
+    # Get all tenant schemas
+    tenants = Tenant.objects.all()
+    
+    for tenant in tenants:
+        try:
+            # Switch to tenant schema and check if WhatsApp connection exists
+            with schema_context(tenant.schema_name):
+                from social_integrations.models import WhatsAppBusinessConnection
+                if WhatsAppBusinessConnection.objects.filter(phone_number_id=phone_number_id, is_active=True).exists():
+                    return tenant.schema_name
+        except Exception as e:
+            # Skip tenant if there's an error (e.g., table doesn't exist)
+            continue
+    
+    return None
+
+
 class FacebookPageConnectionViewSet(viewsets.ModelViewSet):
     serializer_class = FacebookPageConnectionSerializer
     permission_classes = [IsAuthenticated]
@@ -2022,103 +2045,224 @@ def whatsapp_webhook(request):
         # Get verify token from settings
         verify_token = getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('WHATSAPP_VERIFY_TOKEN', 'echodesk_whatsapp_webhook_token_2024')
         
+        # Log the verification attempt for debugging
+        print(f"[WHATSAPP WEBHOOK] Verification attempt:")
+        print(f"  Mode: {hub_mode}")
+        print(f"  Token received: {hub_verify_token}")
+        print(f"  Token expected: {verify_token}")
+        print(f"  Challenge: {hub_challenge}")
+        
         if hub_mode == 'subscribe' and hub_verify_token == verify_token:
+            print(f"[WHATSAPP WEBHOOK] Verification successful, returning challenge")
             return HttpResponse(hub_challenge, content_type='text/plain')
         else:
-            return HttpResponse('Forbidden', status=403)
+            print(f"[WHATSAPP WEBHOOK] Verification failed")
+            return JsonResponse({
+                'error': 'Invalid verify token or mode',
+                'expected_token': verify_token,
+                'received_token': hub_verify_token,
+                'mode': hub_mode
+            }, status=403)
     
     elif request.method == 'POST':
         # Handle incoming WhatsApp messages
         try:
             import json
+            import logging
             from datetime import datetime
+            from tenant_schemas.utils import schema_context
+            logger = logging.getLogger(__name__)
+            
+            print(f"🔵 WHATSAPP WEBHOOK POST PROCESSING STARTED at {datetime.now()}")
+            
+            # Log WhatsApp webhooks to dedicated whatsapp.logs file
+            try:
+                import os
+                log_file = os.path.join(os.getcwd(), 'whatsapp.logs')
+                with open(log_file, 'a') as f:
+                    f.write(f"\n=== WHATSAPP WEBHOOK RECEIVED ===\n")
+                    f.write(f"Time: {datetime.now()}\n")
+                    f.write(f"Method: {request.method}\n")
+                    f.write(f"Headers: {dict(request.headers)}\n")
+                    f.write(f"Body: {request.body.decode('utf-8')}\n")
+                    f.write("=" * 50 + "\n")
+                print(f"WHATSAPP WEBHOOK: Logged to {log_file}")
+            except Exception as e:
+                print(f"WHATSAPP WEBHOOK: Failed to write to log file: {e}")
+                print(f"WHATSAPP WEBHOOK RECEIVED at {datetime.now()}: {request.body.decode('utf-8')}")
             
             data = json.loads(request.body.decode('utf-8'))
+            print(f"🔍 PARSED WHATSAPP WEBHOOK DATA: {data}")
+            logger.info(f"WhatsApp webhook received data: {data}")
             
-            # WhatsApp webhook structure
-            for entry in data.get('entry', []):
-                for change in entry.get('changes', []):
-                    value = change.get('value', {})
-                    
-                    # Process messages
-                    for message in value.get('messages', []):
-                        phone_number_id = value.get('metadata', {}).get('phone_number_id')
-                        
-                        if not phone_number_id:
-                            continue
-                        
-                        # Find the WhatsApp connection
-                        connection = WhatsAppBusinessConnection.objects.filter(
-                            phone_number_id=phone_number_id,
-                            is_active=True
-                        ).first()
-                        
-                        if not connection:
-                            continue
-                        
-                        message_id = message.get('id')
-                        from_number = message.get('from')
-                        timestamp = datetime.fromtimestamp(int(message.get('timestamp')))
-                        message_type = message.get('type', 'text')
-                        
-                        # Extract message content
-                        message_text = ''
-                        media_url = ''
-                        media_mime_type = ''
-                        
-                        if message_type == 'text':
-                            message_text = message.get('text', {}).get('body', '')
-                        elif message_type in ['image', 'document', 'audio', 'video']:
-                            media_data = message.get(message_type, {})
-                            media_url = media_data.get('url', '')
-                            media_mime_type = media_data.get('mime_type', '')
-                            message_text = media_data.get('caption', '')
-                        elif message_type == 'location':
-                            location = message.get('location', {})
-                            message_text = f"Location: {location.get('latitude')}, {location.get('longitude')}"
-                        
-                        # Get contact name if available
-                        contact_name = ''
-                        for contact in value.get('contacts', []):
-                            if contact.get('wa_id') == from_number:
-                                profile = contact.get('profile', {})
-                                contact_name = profile.get('name', '')
-                                break
-                        
-                        # Save the WhatsApp message
-                        WhatsAppMessage.objects.update_or_create(
-                            message_id=message_id,
-                            defaults={
-                                'connection': connection,
-                                'from_number': from_number,
-                                'to_number': connection.phone_number,
-                                'contact_name': contact_name,
-                                'message_text': message_text,
-                                'message_type': message_type,
-                                'media_url': media_url,
-                                'media_mime_type': media_mime_type,
-                                'timestamp': timestamp,
-                                'is_from_business': False,
-                                'is_read': False,
-                                'delivery_status': 'delivered'
-                            }
-                        )
-                    
-                    # Process message status updates
-                    for status_update in value.get('statuses', []):
-                        message_id = status_update.get('id')
-                        status_value = status_update.get('status')
-                        
-                        # Update message delivery status
-                        WhatsAppMessage.objects.filter(message_id=message_id).update(
-                            delivery_status=status_value
-                        )
+            # Extract phone number ID to determine which tenant to use
+            phone_number_id = None
+            print(f"🔍 EXTRACTING PHONE_NUMBER_ID from data: {data}")
             
-            return JsonResponse({'status': 'received'})
+            # WhatsApp webhook structure: entry[].changes[].value.metadata.phone_number_id
+            if 'entry' in data and len(data['entry']) > 0:
+                entry = data['entry'][0]
+                
+                if 'changes' in entry and len(entry['changes']) > 0:
+                    for change in entry['changes']:
+                        value_data = change.get('value', {})
+                        metadata = value_data.get('metadata', {})
+                        phone_number_id = metadata.get('phone_number_id')
+                        if phone_number_id:
+                            break
+                    print(f"🔍 WHATSAPP CHANGES FORMAT - Extracted phone_number_id: {phone_number_id}")
             
+            if not phone_number_id:
+                print(f"❌ NO PHONE_NUMBER_ID FOUND in webhook data: {data}")
+                logger.error("No phone_number_id found in webhook data")
+                return JsonResponse({'error': 'No phone_number_id found'}, status=400)
+            
+            # Find which tenant this WhatsApp phone number belongs to
+            print(f"🔍 FINDING TENANT for phone_number_id: {phone_number_id}")
+            tenant_schema = find_tenant_by_whatsapp_phone_id(phone_number_id)
+            print(f"🔍 TENANT RESULT: {tenant_schema}")
+            
+            if not tenant_schema:
+                print(f"❌ NO TENANT FOUND for phone_number_id: {phone_number_id}")
+                logger.error(f"No tenant found for phone_number_id: {phone_number_id}")
+                return JsonResponse({'error': f'No tenant found for phone_number_id: {phone_number_id}'}, status=404)
+            
+            logger.info(f"Processing WhatsApp webhook for phone_number_id {phone_number_id} in tenant: {tenant_schema}")
+            
+            # Process webhook within the correct tenant context
+            with schema_context(tenant_schema):
+                # Find the WhatsApp connection
+                try:
+                    connection = WhatsAppBusinessConnection.objects.get(
+                        phone_number_id=phone_number_id,
+                        is_active=True
+                    )
+                    logger.info(f"✅ Found WhatsApp connection: {connection.business_name} ({phone_number_id})")
+                except WhatsAppBusinessConnection.DoesNotExist:
+                    logger.warning(f"❌ No active WhatsApp connection found for phone_number_id: {phone_number_id}")
+                    all_connections = WhatsAppBusinessConnection.objects.filter(is_active=True)
+                    logger.warning(f"Available WhatsApp connections: {[(conn.phone_number_id, conn.business_name) for conn in all_connections]}")
+                    return JsonResponse({'error': f'No WhatsApp connection found for phone_number_id: {phone_number_id}'}, status=404)
+                
+                # Process webhook data
+                messages_processed = 0
+                statuses_processed = 0
+                
+                for entry in data.get('entry', []):
+                    for change in entry.get('changes', []):
+                        value = change.get('value', {})
+                        
+                        # Process incoming messages
+                        for message in value.get('messages', []):
+                            try:
+                                message_id = message.get('id')
+                                from_number = message.get('from')
+                                timestamp = datetime.fromtimestamp(int(message.get('timestamp')))
+                                message_type = message.get('type', 'text')
+                                
+                                # Extract message content based on type
+                                message_text = ''
+                                media_url = ''
+                                media_mime_type = ''
+                                
+                                if message_type == 'text':
+                                    message_text = message.get('text', {}).get('body', '')
+                                elif message_type in ['image', 'document', 'audio', 'video']:
+                                    media_data = message.get(message_type, {})
+                                    media_url = media_data.get('url', '')
+                                    media_mime_type = media_data.get('mime_type', '')
+                                    message_text = media_data.get('caption', '')
+                                elif message_type == 'location':
+                                    location = message.get('location', {})
+                                    message_text = f"Location: {location.get('latitude')}, {location.get('longitude')}"
+                                elif message_type == 'interactive':
+                                    # Handle button/list responses
+                                    interactive = message.get('interactive', {})
+                                    if interactive.get('type') == 'button_reply':
+                                        button_reply = interactive.get('button_reply', {})
+                                        message_text = f"Button: {button_reply.get('title', '')}"
+                                    elif interactive.get('type') == 'list_reply':
+                                        list_reply = interactive.get('list_reply', {})
+                                        message_text = f"List: {list_reply.get('title', '')}"
+                                
+                                # Get contact name if available
+                                contact_name = ''
+                                for contact in value.get('contacts', []):
+                                    if contact.get('wa_id') == from_number:
+                                        profile = contact.get('profile', {})
+                                        contact_name = profile.get('name', '')
+                                        break
+                                
+                                # Save the WhatsApp message
+                                whatsapp_message, created = WhatsAppMessage.objects.update_or_create(
+                                    message_id=message_id,
+                                    defaults={
+                                        'connection': connection,
+                                        'from_number': from_number,
+                                        'to_number': connection.phone_number,
+                                        'contact_name': contact_name,
+                                        'message_text': message_text,
+                                        'message_type': message_type,
+                                        'media_url': media_url,
+                                        'media_mime_type': media_mime_type,
+                                        'timestamp': timestamp,
+                                        'is_from_business': False,
+                                        'is_read': False,
+                                        'delivery_status': 'delivered'
+                                    }
+                                )
+                                
+                                if created:
+                                    logger.info(f"✅ Saved new WhatsApp message: {message_id} from {contact_name or from_number}")
+                                else:
+                                    logger.info(f"🔄 Updated existing WhatsApp message: {message_id}")
+                                
+                                messages_processed += 1
+                                
+                            except Exception as e:
+                                logger.error(f"❌ Failed to process WhatsApp message {message.get('id', 'unknown')}: {e}")
+                                continue
+                        
+                        # Process message status updates (delivered, read, failed)
+                        for status_update in value.get('statuses', []):
+                            try:
+                                message_id = status_update.get('id')
+                                status_value = status_update.get('status')
+                                timestamp = datetime.fromtimestamp(int(status_update.get('timestamp', 0)))
+                                
+                                # Update message delivery status
+                                updated = WhatsAppMessage.objects.filter(message_id=message_id).update(
+                                    delivery_status=status_value,
+                                    status_timestamp=timestamp
+                                )
+                                
+                                if updated:
+                                    logger.info(f"✅ Updated WhatsApp message status: {message_id} -> {status_value}")
+                                    statuses_processed += 1
+                                else:
+                                    logger.warning(f"⚠️ No message found to update status for: {message_id}")
+                                
+                            except Exception as e:
+                                logger.error(f"❌ Failed to process WhatsApp status update {status_update.get('id', 'unknown')}: {e}")
+                                continue
+                
+                logger.info(f"🎉 WhatsApp webhook processing completed: {messages_processed} messages, {statuses_processed} status updates")
+                
+                return JsonResponse({
+                    'status': 'success',
+                    'messages_processed': messages_processed,
+                    'statuses_processed': statuses_processed,
+                    'phone_number_id': phone_number_id,
+                    'tenant': tenant_schema
+                })
+                
         except Exception as e:
+            logger.error(f"❌ WhatsApp webhook processing failed: {e}")
+            print(f"❌ WHATSAPP WEBHOOK ERROR: {e}")
             return JsonResponse({
-                'error': f'WhatsApp webhook processing failed: {str(e)}'
+                'status': 'error',
+                'message': f'WhatsApp webhook processing failed: {str(e)}',
+                'error_type': type(e).__name__
             }, status=500)
     
     return JsonResponse({'error': 'Method not allowed'}, status=405)
