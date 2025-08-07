@@ -310,6 +310,13 @@ def facebook_oauth_callback(request):
         pages_response = requests.get(pages_url, params=pages_params)
         pages_data = pages_response.json()
         
+        # Debug: Try to get specific page info if we have a suspected page ID
+        suspected_page_id = "61578872527104"  # From the profile URL provided by user
+        specific_page_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v18.0')}/{suspected_page_id}"
+        specific_page_params = {'access_token': user_access_token, 'fields': 'id,name,category,access_token'}
+        specific_page_response = requests.get(specific_page_url, params=specific_page_params)
+        specific_page_data = specific_page_response.json()
+        
         if 'error' in pages_data:
             error_msg = f"Failed to fetch pages: {pages_data.get('error', {}).get('message', 'Unknown error')}"
             logger.error(f"Facebook pages fetch error: {pages_data}")
@@ -331,6 +338,11 @@ def facebook_oauth_callback(request):
                 'pages_response': pages_data,
                 'user_info': user_info_data,
                 'permissions': permissions_data,
+                'specific_page_check': {
+                    'page_id': suspected_page_id,
+                    'url': specific_page_url,
+                    'response': specific_page_data
+                },
                 'debug_info': {
                     'tenant_schema': tenant_schema,
                     'pages_url': pages_url,
@@ -341,7 +353,8 @@ def facebook_oauth_callback(request):
                     'instructions': [
                         'Check if the Facebook account has any pages',
                         'Verify that pages_show_list permission was granted',
-                        'Make sure the OAuth flow included correct scopes'
+                        'Make sure the OAuth flow included correct scopes',
+                        f'Specific page check for ID {suspected_page_id} - see specific_page_check field'
                     ]
                 }
             })
