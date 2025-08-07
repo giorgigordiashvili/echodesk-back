@@ -287,8 +287,14 @@ def facebook_oauth_callback(request):
         }
         
         logger.info(f"Fetching Facebook pages for user {user_id}...")
+        logger.info(f"Pages API URL: {pages_url}")
+        logger.info(f"Pages API params: {dict(pages_params, access_token='[HIDDEN]')}")
+        
         pages_response = requests.get(pages_url, params=pages_params)
         pages_data = pages_response.json()
+        
+        logger.info(f"Pages API response status: {pages_response.status_code}")
+        logger.info(f"Pages API response data: {pages_data}")
         
         if 'error' in pages_data:
             error_msg = f"Failed to fetch pages: {pages_data.get('error', {}).get('message', 'Unknown error')}"
@@ -296,16 +302,42 @@ def facebook_oauth_callback(request):
             return JsonResponse({
                 'status': 'error',
                 'message': error_msg,
-                'error_details': pages_data
+                'error_details': pages_data,
+                'api_url': pages_url,
+                'app_mode': 'Development mode may limit page access'
             })
         
         pages = pages_data.get('data', [])
+        
+        # Enhanced debugging for no pages scenario
         if not pages:
             logger.warning("User has no Facebook pages to connect")
+            
+            # Also try to get user info to see what we can access
+            user_info_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v18.0')}/me"
+            user_info_params = {
+                'access_token': user_access_token,
+                'fields': 'id,name,email'
+            }
+            user_info_response = requests.get(user_info_url, params=user_info_params)
+            user_info_data = user_info_response.json()
+            
             return JsonResponse({
                 'status': 'error', 
-                'message': 'No Facebook pages found for this account. Please ensure you have business pages to connect.',
-                'help': 'Create a Facebook business page at facebook.com/pages/create'
+                'message': 'No Facebook pages found for this account.',
+                'help': 'This could be because your app is in Development Mode. Only pages you admin can be accessed.',
+                'debug_info': {
+                    'pages_response': pages_data,
+                    'user_info': user_info_data,
+                    'api_url': pages_url,
+                    'app_mode': 'Development Mode - limited access',
+                    'solutions': [
+                        'Make sure you are an admin of the Facebook page',
+                        'Create a Facebook business page at facebook.com/pages/create',
+                        'Switch app to Live Mode (requires app review)',
+                        'Add your Facebook account as a developer/tester in the app'
+                    ]
+                }
             })
         
         # Import tenant schema context for multi-tenant database operations
