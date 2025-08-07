@@ -173,7 +173,7 @@ def facebook_oauth_start(request):
             f"https://www.facebook.com/v23.0/dialog/oauth?"
             f"client_id={fb_app_id}&"
             f"redirect_uri={redirect_uri}&"
-            f"scope=pages_manage_metadata,pages_messaging,pages_read_engagement&"
+            f"scope=pages_show_list,pages_manage_metadata,pages_messaging,pages_read_engagement&"
             f"state={state}&"
             f"response_type=code"
         )
@@ -287,6 +287,26 @@ def facebook_oauth_callback(request):
         }
         
         logger.info(f"Fetching Facebook pages for user...")
+        logger.info(f"Pages URL: {pages_url}")
+        logger.info(f"Pages params: {dict(pages_params, access_token='[HIDDEN]')}")
+        
+        # Also get user info to see what permissions we have
+        user_info_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v18.0')}/me"
+        user_info_params = {
+            'access_token': user_access_token,
+            'fields': 'id,name,email'
+        }
+        user_info_response = requests.get(user_info_url, params=user_info_params)
+        user_info_data = user_info_response.json()
+        
+        # Get permissions granted to our app
+        permissions_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v18.0')}/me/permissions"
+        permissions_params = {
+            'access_token': user_access_token
+        }
+        permissions_response = requests.get(permissions_url, params=permissions_params)
+        permissions_data = permissions_response.json()
+        
         pages_response = requests.get(pages_url, params=pages_params)
         pages_data = pages_response.json()
         
@@ -309,7 +329,21 @@ def facebook_oauth_callback(request):
                 'status': 'error',
                 'message': error_msg,
                 'pages_response': pages_data,
-                'debug_info': {'tenant_schema': tenant_schema}
+                'user_info': user_info_data,
+                'permissions': permissions_data,
+                'debug_info': {
+                    'tenant_schema': tenant_schema,
+                    'pages_url': pages_url,
+                    'user_info_url': user_info_url,
+                    'permissions_url': permissions_url,
+                    'access_token_received': bool(user_access_token),
+                    'pages_count': len(pages),
+                    'instructions': [
+                        'Check if the Facebook account has any pages',
+                        'Verify that pages_show_list permission was granted',
+                        'Make sure the OAuth flow included correct scopes'
+                    ]
+                }
             })
         
         # Import tenant schema context for multi-tenant database operations
