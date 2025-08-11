@@ -192,17 +192,20 @@ def facebook_oauth_start(request):
         
         # Include tenant info in state parameter - no user_id needed since tenant is unique
         from urllib.parse import quote
-        tenant_raw = getattr(request, "tenant", "amanati")
-        # Extract schema name if tenant contains display name with schema in parentheses
-        if '(' in tenant_raw and ')' in tenant_raw:
-            tenant_name = tenant_raw.split('(')[1].split(')')[0]  # Extract schema from "Display Name (schema)"
+        tenant_obj = getattr(request, "tenant", None)
+        
+        # Extract tenant schema name from Tenant object or use default
+        if tenant_obj and hasattr(tenant_obj, 'schema_name'):
+            tenant_name = tenant_obj.schema_name
+        elif tenant_obj and hasattr(tenant_obj, 'name'):
+            tenant_name = tenant_obj.name
         else:
-            tenant_name = tenant_raw  # Use as-is if no parentheses
+            tenant_name = "amanati"  # Default fallback
         
         # Simplified state parameter with just tenant schema
         state_raw = f'tenant={tenant_name}'
         state = quote(state_raw)  # URL encode the state
-        logger.info(f"Raw tenant from request: {tenant_raw}")
+        logger.info(f"Tenant object: {tenant_obj}")
         logger.info(f"Extracted tenant schema: {tenant_name}")
         logger.info(f"Generated raw state parameter: {state_raw}")
         logger.info(f"URL encoded state parameter: {state}")
