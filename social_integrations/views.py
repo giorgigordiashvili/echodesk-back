@@ -178,6 +178,8 @@ class WhatsAppMessageViewSet(viewsets.ReadOnlyModelViewSet):
 @permission_classes([IsAuthenticated])
 def facebook_oauth_start(request):
     """Generate Facebook OAuth URL for business pages access"""
+    logger = logging.getLogger(__name__)
+    
     try:
         fb_app_id = getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_APP_ID')
         if not fb_app_id:
@@ -188,8 +190,15 @@ def facebook_oauth_start(request):
         # Use public callback URL since Facebook needs a consistent redirect URI
         redirect_uri = 'https://api.echodesk.ge/api/social/facebook/oauth/callback/'
         
+        # Validate user is authenticated
+        if not request.user or not request.user.id:
+            return Response({
+                'error': 'User not authenticated'
+            }, status=status.HTTP_401_UNAUTHORIZED)
+        
         # Include tenant info in state parameter for multi-tenant support
         state = f'tenant={getattr(request, "tenant", "amanati")}&user={request.user.id}'
+        logger.info(f"Generated state parameter: {state}")
         
         # Facebook OAuth URL for business pages with business_management permission
         oauth_url = (
@@ -227,16 +236,44 @@ def facebook_oauth_callback(request):
         error_reason = request.GET.get('error_reason')
         state = request.GET.get('state')
         
-        # Parse state to get tenant and user info
+        # Parse state to get tenant and user info with better error handling
         tenant_name = None
         user_id = None
         if state:
+            from urllib.parse import unquote
+            # URL decode the state parameter in case it's encoded
+            decoded_state = unquote(state)
+            logger.info(f"Raw state parameter: {state}")
+            logger.info(f"Decoded state parameter: {decoded_state}")
+            
             # State format: "tenant=Amanati Ltd (amanati)&user=1"
-            for param in state.split('&'):
-                if param.startswith('tenant='):
-                    tenant_name = param.split('=', 1)[1]
-                elif param.startswith('user='):
-                    user_id = param.split('=', 1)[1]
+            try:
+                for param in decoded_state.split('&'):
+                    if param.startswith('tenant='):
+                        tenant_name = param.split('=', 1)[1]
+                        logger.info(f"Parsed tenant_name: {tenant_name}")
+                    elif param.startswith('user='):
+                        user_id_str = param.split('=', 1)[1]
+                        user_id = int(user_id_str)  # Convert to integer
+                        logger.info(f"Parsed user_id: {user_id}")
+            except (ValueError, IndexError) as e:
+                logger.error(f"Error parsing state parameter: {e}")
+                return JsonResponse({
+                    'status': 'error',
+                    'message': f'Invalid state parameter format: {state}',
+                    'error': str(e),
+                    'expected_format': 'tenant=TenantName&user=123'
+                })
+        
+        # Validate that we have required parameters
+        if not user_id:
+            logger.error(f"No user_id found in state: {state}")
+            return JsonResponse({
+                'status': 'error',
+                'message': 'User ID not found in state parameter',
+                'state_received': state,
+                'debug_info': {'parsed_tenant_name': tenant_name, 'parsed_user_id': user_id}
+            })
         
         # Extract tenant schema name from tenant_name
         tenant_schema = tenant_name.split('(')[1].split(')')[0] if tenant_name and '(' in tenant_name else 'amanati'
@@ -428,10 +465,11 @@ def facebook_oauth_callback(request):
             'message': f"OAuth processing failed: {str(e)}",
             'error_type': type(e).__name__,
             'debug_info': {
-                'tenant_name_from_state': globals().get('tenant_name', 'Not parsed'),
-                'user_id': globals().get('user_id', 'Not parsed'),
+                'tenant_name_from_state': tenant_name if 'tenant_name' in locals() else 'Not parsed',
+                'user_id_from_state': user_id if 'user_id' in locals() else 'Not parsed',
                 'code_received': bool(request.GET.get('code')),
-                'state_received': bool(request.GET.get('state'))
+                'state_received': bool(request.GET.get('state')),
+                'state_parameter': request.GET.get('state', 'No state parameter')
             }
         })
         
