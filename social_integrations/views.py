@@ -191,14 +191,15 @@ def facebook_oauth_start(request):
         # Include tenant info in state parameter for multi-tenant support
         state = f'tenant={getattr(request, "tenant", "amanati")}&user={request.user.id}'
         
-        # Facebook OAuth URL for business pages with pages_messaging scope
+        # Facebook OAuth URL for business pages with business_management permission
         oauth_url = (
             f"https://www.facebook.com/v23.0/dialog/oauth?"
             f"client_id={fb_app_id}&"
             f"redirect_uri={redirect_uri}&"
-            f"scope=pages_show_list,pages_manage_metadata,pages_messaging,pages_read_engagement&"
+            f"scope=business_management,pages_show_list,pages_manage_metadata,pages_messaging,pages_read_engagement,public_profile,email&"
             f"state={state}&"
-            f"response_type=code"
+            f"response_type=code&"
+            f"auth_type=rerequest"
         )
         
         return Response({
@@ -1123,6 +1124,119 @@ def debug_database_status(request):
     except Exception as e:
         return Response({
             'error': f'Database check failed: {str(e)}'
+        }, status=500)
+
+
+@csrf_exempt
+@api_view(['GET', 'POST'])
+@permission_classes([])
+def test_facebook_api_access(request):
+    """Test Facebook API access with current permissions"""
+    try:
+        access_token = request.GET.get('access_token') or request.POST.get('access_token')
+        
+        if not access_token:
+            return JsonResponse({
+                'error': 'access_token parameter required',
+                'usage': 'GET /api/social/facebook/api/test/?access_token=YOUR_TOKEN',
+                'note': 'Use this to test what Facebook APIs return with your current access token'
+            })
+        
+        api_version = getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v23.0')
+        results = {}
+        
+        # Test 1: Get user info
+        try:
+            user_url = f"https://graph.facebook.com/{api_version}/me"
+            user_params = {
+                'access_token': access_token,
+                'fields': 'id,name,email'
+            }
+            user_response = requests.get(user_url, params=user_params)
+            results['user_info'] = {
+                'status_code': user_response.status_code,
+                'data': user_response.json()
+            }
+        except Exception as e:
+            results['user_info'] = {'error': str(e)}
+        
+        # Test 2: Get user permissions
+        try:
+            permissions_url = f"https://graph.facebook.com/{api_version}/me/permissions"
+            permissions_params = {'access_token': access_token}
+            permissions_response = requests.get(permissions_url, params=permissions_params)
+            results['permissions'] = {
+                'status_code': permissions_response.status_code,
+                'data': permissions_response.json()
+            }
+        except Exception as e:
+            results['permissions'] = {'error': str(e)}
+        
+        # Test 3: Get pages using /me/accounts (traditional way)
+        try:
+            accounts_url = f"https://graph.facebook.com/{api_version}/me/accounts"
+            accounts_params = {
+                'access_token': access_token,
+                'fields': 'id,name,access_token,category,about,is_published,tasks'
+            }
+            accounts_response = requests.get(accounts_url, params=accounts_params)
+            results['me_accounts'] = {
+                'status_code': accounts_response.status_code,
+                'data': accounts_response.json()
+            }
+        except Exception as e:
+            results['me_accounts'] = {'error': str(e)}
+        
+        # Test 4: Get businesses (with business_management permission)
+        try:
+            businesses_url = f"https://graph.facebook.com/{api_version}/me/businesses"
+            businesses_params = {
+                'access_token': access_token,
+                'fields': 'id,name,verification_status'
+            }
+            businesses_response = requests.get(businesses_url, params=businesses_params)
+            results['businesses'] = {
+                'status_code': businesses_response.status_code,
+                'data': businesses_response.json()
+            }
+        except Exception as e:
+            results['businesses'] = {'error': str(e)}
+        
+        # Test 5: Try pages via business management (if we have businesses)
+        try:
+            if 'businesses' in results and 'data' in results['businesses'] and results['businesses']['data'].get('data'):
+                business_id = results['businesses']['data']['data'][0]['id']
+                business_pages_url = f"https://graph.facebook.com/{api_version}/{business_id}/owned_pages"
+                business_pages_params = {
+                    'access_token': access_token,
+                    'fields': 'id,name,category,about'
+                }
+                business_pages_response = requests.get(business_pages_url, params=business_pages_params)
+                results['business_pages'] = {
+                    'status_code': business_pages_response.status_code,
+                    'data': business_pages_response.json()
+                }
+            else:
+                results['business_pages'] = {'skipped': 'No businesses found'}
+        except Exception as e:
+            results['business_pages'] = {'error': str(e)}
+        
+        return JsonResponse({
+            'status': 'success',
+            'api_version': api_version,
+            'tests_performed': len(results),
+            'results': results,
+            'recommendations': [
+                'Check permissions data to see what permissions are granted',
+                'If no pages in me/accounts, user may not have admin role on any pages',
+                'If business_management permission is granted, check businesses and business_pages',
+                'Ensure your Facebook app has business_management permission configured'
+            ]
+        })
+        
+    except Exception as e:
+        return JsonResponse({
+            'error': f'API test failed: {str(e)}'
         }, status=500)
 
 

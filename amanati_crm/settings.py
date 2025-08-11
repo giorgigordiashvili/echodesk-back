@@ -334,10 +334,13 @@ SOCIAL_INTEGRATIONS = {
     'FACEBOOK_API_VERSION': FACEBOOK_APP_VERSION,
     'FACEBOOK_VERIFY_TOKEN': config('FACEBOOK_WEBHOOK_VERIFY_TOKEN', default='echodesk_webhook_token_2024'),
     'FACEBOOK_SCOPES': [
+        'business_management',  # Essential for accessing Pages and Business assets
         'pages_messaging',  # Read and send messages on behalf of pages
         'pages_show_list',  # Access list of pages
         'pages_read_engagement',  # Read page posts and comments
         'pages_manage_metadata',  # Access page metadata
+        'public_profile',  # Basic profile information
+        'email',  # Email address
     ],
     # Instagram configuration (uses Facebook app credentials)
     'INSTAGRAM_VERIFY_TOKEN': config('INSTAGRAM_WEBHOOK_VERIFY_TOKEN', default='echodesk_instagram_webhook_token_2024'),

@@ -51,15 +51,19 @@
 ## Step 4: Configure Permissions
 
 1. **App Review > Permissions and Features**
-   - Request these permissions:
+   - Request these essential permissions:
+     - `business_management` - **CRITICAL** - To access Pages and Business assets
      - `pages_messaging` - To read and send messages
      - `pages_show_list` - To access list of pages
      - `pages_read_engagement` - To read page posts and comments
      - `pages_manage_metadata` - To access page metadata
+     - `public_profile` - Basic profile information
+     - `email` - Email address
 
 2. **For Development/Testing**
    - You can test with your own pages without app review
    - Add test users in App Roles > Test Users
+   - **Important**: Add your Facebook account as Admin/Developer in the app dashboard
 
 ## Step 5: Configure Webhooks (for Production)
 
@@ -117,5 +121,41 @@ python manage.py tenant_command test_facebook_integration -s amanati
 
 **Production:**
 - Use HTTPS URLs only
-- Submit app for review for advanced permissions
-- Configure proper webhook endpoints
+- Requires app review for most permissions
+- Business verification may be required
+
+## Troubleshooting "No Pages Found"
+
+If you get "No Facebook pages found for this account" error:
+
+1. **Check App Roles**
+   - Go to developers.facebook.com/apps/[your-app-id]/roles
+   - Add your Facebook account as Admin, Developer, or Tester
+
+2. **Verify business_management Permission**
+   - Test API access: `GET /api/social/facebook/api/test/?access_token=YOUR_TOKEN`
+   - Check if business_management permission is granted
+   - Ensure your app requests business_management in OAuth
+
+3. **Page Admin Rights**
+   - You must be an admin of the Facebook page you want to connect
+   - Go to facebook.com/[your-page-name]/settings and check admin list
+
+4. **App Development Mode**
+   - In Development Mode, only pages owned by app team members are accessible
+   - Create a test page or add team members who own pages
+
+5. **Debug Steps**
+   - Test OAuth: `GET /api/social/facebook/oauth/start/`
+   - Test callback: Use Facebook's Access Token Debugger
+   - Check API access: `GET /api/social/facebook/api/test/?access_token=TOKEN`
+
+## Debug Commands
+
+```bash
+# Test Facebook integration
+python manage.py tenant_command test_facebook_integration -s amanati
+
+# Debug API access with your token
+curl "https://api.echodesk.ge/api/social/facebook/api/test/?access_token=YOUR_TOKEN"
+```

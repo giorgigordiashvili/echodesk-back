@@ -20,6 +20,7 @@ urlpatterns = [
     path('facebook/oauth/start/', views.facebook_oauth_start, name='facebook_oauth_start'),
     path('facebook/oauth/callback/', views.facebook_oauth_callback, name='facebook_oauth_callback'),
     path('facebook/oauth/debug/', views.facebook_debug_callback, name='facebook_debug_callback'),
+    path('facebook/api/test/', views.test_facebook_api_access, name='facebook_api_test'),
     path('facebook/webhook/test/', views.webhook_test_endpoint, name='webhook_test'),
     path('facebook/database/test/', views.test_database_save, name='database_test'),
     path('facebook/database/debug/', views.debug_database_status, name='database_debug'),
