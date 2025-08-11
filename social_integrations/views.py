@@ -192,10 +192,18 @@ def facebook_oauth_start(request):
         
         # Include tenant info in state parameter - no user_id needed since tenant is unique
         from urllib.parse import quote
-        tenant_name = getattr(request, "tenant", "amanati")
-        # Simplified state parameter with just tenant information
+        tenant_raw = getattr(request, "tenant", "amanati")
+        # Extract schema name if tenant contains display name with schema in parentheses
+        if '(' in tenant_raw and ')' in tenant_raw:
+            tenant_name = tenant_raw.split('(')[1].split(')')[0]  # Extract schema from "Display Name (schema)"
+        else:
+            tenant_name = tenant_raw  # Use as-is if no parentheses
+        
+        # Simplified state parameter with just tenant schema
         state_raw = f'tenant={tenant_name}'
         state = quote(state_raw)  # URL encode the state
+        logger.info(f"Raw tenant from request: {tenant_raw}")
+        logger.info(f"Extracted tenant schema: {tenant_name}")
         logger.info(f"Generated raw state parameter: {state_raw}")
         logger.info(f"URL encoded state parameter: {state}")
         
@@ -262,15 +270,16 @@ def facebook_oauth_callback(request):
         # Validate that we have required parameters
         if not tenant_name:
             logger.error(f"No tenant_name found in state: {state}")
-            return JsonResponse({
-                'status': 'error',
-                'message': 'Tenant name not found in state parameter',
-                'state_received': state,
-                'debug_info': {'parsed_tenant_name': tenant_name}
-            })
+            frontend_url = "https://amanati.echodesk.ge"  # Default fallback
+            error_msg = "Tenant name not found in state parameter"
+            from urllib.parse import quote_plus
+            return redirect(f"{frontend_url}/?facebook_status=error&message={quote_plus(error_msg)}")
         
-        # Extract tenant schema name from tenant_name
-        tenant_schema = tenant_name.split('(')[1].split(')')[0] if tenant_name and '(' in tenant_name else 'amanati'
+        # Extract tenant schema name from tenant_name - use tenant_name directly as schema
+        tenant_schema = tenant_name if tenant_name else 'amanati'
+        
+        # Frontend dashboard URL using tenant name
+        frontend_url = f"https://{tenant_schema}.echodesk.ge"
         
         # Find a suitable user for this tenant (superuser or admin)
         from tenant_schemas.utils import schema_context
@@ -299,12 +308,10 @@ def facebook_oauth_callback(request):
         
         if not user_id:
             logger.error(f"No active users found in tenant {tenant_schema}")
-            return JsonResponse({
-                'status': 'error',
-                'message': f'No active users found in tenant {tenant_schema}',
-                'tenant_schema': tenant_schema,
-                'solution': 'Please ensure at least one active user exists in the tenant'
-            })
+            frontend_url = f"https://{tenant_schema}.echodesk.ge"
+            error_msg = f"No active users found in tenant {tenant_schema}"
+            from urllib.parse import quote_plus
+            return redirect(f"{frontend_url}/?facebook_status=error&message={quote_plus(error_msg)}")
         
         # Frontend dashboard URL
         frontend_url = f"https://{tenant_schema}.echodesk.ge"
@@ -313,24 +320,15 @@ def facebook_oauth_callback(request):
         if error:
             error_msg = f"Facebook OAuth failed: {error_description or error}"
             logger.error(f"Facebook OAuth error: {error} - {error_description}")
-            return JsonResponse({
-                'status': 'error',
-                'message': error_msg,
-                'error_code': error,
-                'error_description': error_description,
-                'error_reason': error_reason,
-                'debug_info': {'tenant_schema': tenant_schema, 'frontend_url': frontend_url}
-            })
+            from urllib.parse import quote_plus
+            return redirect(f"{frontend_url}/?facebook_status=error&message={quote_plus(error_msg)}")
         
         # Handle missing code
         if not code:
             error_msg = "Authorization code not provided by Facebook"
             logger.error("Facebook OAuth callback missing authorization code")
-            return JsonResponse({
-                'status': 'error', 
-                'message': error_msg,
-                'debug_info': {'tenant_schema': tenant_schema, 'state_received': bool(state)}
-            })
+            from urllib.parse import quote_plus
+            return redirect(f"{frontend_url}/?facebook_status=error&message={quote_plus(error_msg)}")
         
         # Exchange authorization code for access token
         token_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v18.0')}/oauth/access_token"
@@ -349,24 +347,15 @@ def facebook_oauth_callback(request):
         if 'error' in token_data:
             error_msg = f"Token exchange failed: {token_data.get('error', {}).get('message', 'Unknown error')}"
             logger.error(f"Facebook token exchange error: {token_data}")
-            return JsonResponse({
-                'status': 'error',
-                'message': error_msg,
-                'token_response': token_data,
-                'token_url': token_url,
-                'debug_info': {'tenant_schema': tenant_schema}
-            })
+            from urllib.parse import quote_plus
+            return redirect(f"{frontend_url}/?facebook_status=error&message={quote_plus(error_msg)}")
         
         user_access_token = token_data.get('access_token')
         if not user_access_token:
             error_msg = "No access token received from Facebook"
             logger.error("Facebook token exchange did not return access token")
-            return JsonResponse({
-                'status': 'error',
-                'message': error_msg,
-                'token_response': token_data,
-                'debug_info': {'tenant_schema': tenant_schema}
-            })
+            from urllib.parse import quote_plus
+            return redirect(f"{frontend_url}/?facebook_status=error&message={quote_plus(error_msg)}")
         
         # Get user's Facebook pages - simplified approach
         pages_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v18.0')}/me/accounts"
@@ -388,13 +377,8 @@ def facebook_oauth_callback(request):
         if 'error' in pages_data:
             error_msg = f"Failed to fetch pages: {pages_data.get('error', {}).get('message', 'Unknown error')}"
             logger.error(f"Facebook pages fetch error: {pages_data}")
-            return JsonResponse({
-                'status': 'error',
-                'message': error_msg,
-                'error_details': pages_data,
-                'api_url': pages_url,
-                'app_mode': 'Development mode may limit page access'
-            })
+            from urllib.parse import quote_plus
+            return redirect(f"{frontend_url}/?facebook_status=error&message={quote_plus(error_msg)}")
         
         pages = pages_data.get('data', [])
         
@@ -462,48 +446,24 @@ def facebook_oauth_callback(request):
                 else:
                     logger.warning(f"⚠️ Skipped page with missing data: {page}")
         
-        # Return success response
+        # Return success response with redirect to tenant frontend
         success_msg = f"Successfully connected {saved_pages} Facebook page(s)"
         logger.info(f"Facebook OAuth completed successfully: {saved_pages} pages saved")
         
-        return JsonResponse({
-            'status': 'success',
-            'message': success_msg,
-            'pages_connected': saved_pages,
-            'pages_data': [
-                {
-                    'page_id': page.get('id'),
-                    'page_name': page.get('name'),
-                    'category': page.get('category')
-                }
-                for page in pages
-                if page.get('id') and page.get('name')
-            ]
-        })
-        
-        # Commented out redirect for debugging:
-        # return redirect(f"{frontend_url}/?facebook_status=connected&pages={saved_pages}&message={quote_plus(success_msg)}")
+        # Redirect to tenant frontend with success parameters
+        from urllib.parse import quote_plus
+        return redirect(f"{frontend_url}/?facebook_status=connected&pages={saved_pages}&message={quote_plus(success_msg)}")
         
     except Exception as e:
         logger.error(f"Facebook OAuth callback processing failed: {e}")
-        # Return JSON error response instead of redirect for debugging
-        return JsonResponse({
-            'status': 'error',
-            'message': f"OAuth processing failed: {str(e)}",
-            'error_type': type(e).__name__,
-            'debug_info': {
-                'tenant_name_from_state': tenant_name if 'tenant_name' in locals() else 'Not parsed',
-                'user_id_from_state': user_id if 'user_id' in locals() else 'Not parsed',
-                'code_received': bool(request.GET.get('code')),
-                'state_received': bool(request.GET.get('state')),
-                'state_parameter': request.GET.get('state', 'No state parameter')
-            }
-        })
+        # Redirect to frontend with error message
+        frontend_url = f"https://amanati.echodesk.ge"  # Default fallback
+        if 'tenant_schema' in locals() and tenant_schema:
+            frontend_url = f"https://{tenant_schema}.echodesk.ge"
         
-        # Commented out redirect for debugging:
-        # frontend_url = "https://amanati.echodesk.ge"
-        # error_msg = f"OAuth processing failed: {str(e)}"
-        # return redirect(f"{frontend_url}/?facebook_status=error&message={quote_plus(error_msg)}")
+        error_msg = f"OAuth processing failed: {str(e)}"
+        from urllib.parse import quote_plus
+        return redirect(f"{frontend_url}/?facebook_status=error&message={quote_plus(error_msg)}")
 
 
 @api_view(['GET'])
