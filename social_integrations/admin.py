@@ -13,10 +13,10 @@ from .models import (
 
 @admin.register(FacebookPageConnection)
 class FacebookPageConnectionAdmin(admin.ModelAdmin):
-    list_display = ['page_name', 'user', 'page_id', 'is_active', 'created_at']
+    list_display = ['page_name', 'page_id', 'is_active', 'created_at']
     list_filter = ['is_active', 'created_at']
-    search_fields = ['page_name', 'user__username', 'page_id']
-    fields = ['user', 'page_name', 'page_id', 'page_access_token', 'is_active']
+    search_fields = ['page_name', 'page_id']
+    fields = ['page_name', 'page_id', 'page_access_token', 'is_active']
     
     def changelist_view(self, request, extra_context=None):
         extra_context = extra_context or {}
@@ -32,10 +32,6 @@ class FacebookPageConnectionAdmin(admin.ModelAdmin):
         return super().changelist_view(request, extra_context=extra_context)
     
     def save_model(self, request, obj, form, change):
-        # Pre-fill the user if not set
-        if not obj.user:
-            obj.user = request.user
-        
         # If page_access_token was manually entered, validate it
         if 'page_access_token' in form.changed_data and obj.page_access_token:
             try:

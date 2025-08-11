@@ -119,10 +119,10 @@ class FacebookPageConnectionViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     
     def get_queryset(self):
-        return FacebookPageConnection.objects.filter(user=self.request.user)
+        return FacebookPageConnection.objects.all()  # Tenant schema provides isolation
     
     def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
+        serializer.save()  # No user assignment needed in multi-tenant setup
 
 
 class FacebookMessageViewSet(viewsets.ReadOnlyModelViewSet):
@@ -130,8 +130,8 @@ class FacebookMessageViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
     
     def get_queryset(self):
-        user_pages = FacebookPageConnection.objects.filter(user=self.request.user)
-        return FacebookMessage.objects.filter(page_connection__in=user_pages)
+        tenant_pages = FacebookPageConnection.objects.all()  # All pages for this tenant
+        return FacebookMessage.objects.filter(page_connection__in=tenant_pages)
 
 
 class InstagramAccountConnectionViewSet(viewsets.ModelViewSet):
@@ -449,12 +449,11 @@ def facebook_oauth_callback(request):
                 page_access_token = page.get('access_token')
                 
                 if page_id and page_access_token and page_name:
-                    # Create new page connection without user_id
+                    # Create new page connection for this tenant
                     page_connection = FacebookPageConnection.objects.create(
                         page_id=page_id,
                         page_name=page_name,
                         page_access_token=page_access_token,
-                        user_id=None,  # No user association needed
                         is_active=True
                     )
                     
@@ -510,9 +509,9 @@ def facebook_oauth_callback(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def facebook_connection_status(request):
-    """Check Facebook connection status for current user"""
+    """Check Facebook connection status for current tenant"""
     try:
-        pages = FacebookPageConnection.objects.filter(user=request.user)
+        pages = FacebookPageConnection.objects.all()  # All pages for this tenant
         pages_data = []
         
         for page in pages:
@@ -538,21 +537,21 @@ def facebook_connection_status(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def facebook_disconnect(request):
-    """Disconnect Facebook integration for current user - completely removes page records"""
+    """Disconnect Facebook integration for current tenant - completely removes page records"""
     try:
         # Get count before deletion for response
-        pages_to_delete = FacebookPageConnection.objects.filter(user=request.user)
+        pages_to_delete = FacebookPageConnection.objects.all()  # All pages for this tenant
         deleted_count = pages_to_delete.count()
         page_names = list(pages_to_delete.values_list('page_name', flat=True))
         
-        # Delete all Facebook page connections for this user
+        # Delete all Facebook page connections for this tenant
         pages_to_delete.delete()
         
         return Response({
             'status': 'disconnected',
             'pages_deleted': deleted_count,
             'deleted_pages': page_names,
-            'message': f'Permanently removed {deleted_count} Facebook page connection(s)'
+            'message': f'Permanently removed {deleted_count} Facebook page connection(s) for this tenant'
         })
     except Exception as e:
         return Response({
@@ -574,16 +573,15 @@ def facebook_send_message(request):
                 'error': 'Missing required fields: recipient_id, message, page_id'
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        # Get the page connection for the authenticated user
+        # Get the page connection for this tenant
         try:
             page_connection = FacebookPageConnection.objects.get(
-                user=request.user,
                 page_id=page_id,
                 is_active=True
             )
         except FacebookPageConnection.DoesNotExist:
             return Response({
-                'error': 'Page not found or not connected'
+                'error': 'Page not found or not connected to this tenant'
             }, status=status.HTTP_404_NOT_FOUND)
         
         # Send message using Facebook Graph API

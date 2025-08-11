@@ -5,8 +5,7 @@ User = get_user_model()
 
 
 class FacebookPageConnection(models.Model):
-    """Stores Facebook page connection details for a user"""
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='facebook_pages')
+    """Stores Facebook page connection details for a tenant"""
     page_id = models.CharField(max_length=100)
     page_name = models.CharField(max_length=200)
     page_access_token = models.TextField()
@@ -15,11 +14,10 @@ class FacebookPageConnection(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     
     class Meta:
-        unique_together = ['user', 'page_id']
+        unique_together = ['page_id']  # Only page_id needs to be unique per tenant
     
     def __str__(self):
-        user_display = self.user.get_full_name() or self.user.email
-        return f"{self.page_name} - {user_display}"
+        return f"{self.page_name} - Tenant Page"
 
 
 class FacebookMessage(models.Model):
