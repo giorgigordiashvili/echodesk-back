@@ -190,21 +190,20 @@ def facebook_oauth_start(request):
         # Use public callback URL since Facebook needs a consistent redirect URI
         redirect_uri = 'https://api.echodesk.ge/api/social/facebook/oauth/callback/'
         
-        # Validate user is authenticated
-        if not request.user or not request.user.id:
-            return Response({
-                'error': 'User not authenticated'
-            }, status=status.HTTP_401_UNAUTHORIZED)
-        
-        # Include tenant info in state parameter for multi-tenant support
-        state = f'tenant={getattr(request, "tenant", "amanati")}&user={request.user.id}'
-        logger.info(f"Generated state parameter: {state}")
+        # Include tenant info in state parameter - no user_id needed since tenant is unique
+        from urllib.parse import quote
+        tenant_name = getattr(request, "tenant", "amanati")
+        # Simplified state parameter with just tenant information
+        state_raw = f'tenant={tenant_name}'
+        state = quote(state_raw)  # URL encode the state
+        logger.info(f"Generated raw state parameter: {state_raw}")
+        logger.info(f"URL encoded state parameter: {state}")
         
         # Facebook OAuth URL for business pages with business_management permission
         oauth_url = (
             f"https://www.facebook.com/v23.0/dialog/oauth?"
             f"client_id={fb_app_id}&"
-            f"redirect_uri={redirect_uri}&"
+            f"redirect_uri={quote(redirect_uri)}&"
             f"scope=business_management,pages_show_list,pages_manage_metadata,pages_messaging,pages_read_engagement,public_profile,email&"
             f"state={state}&"
             f"response_type=code&"
@@ -236,9 +235,8 @@ def facebook_oauth_callback(request):
         error_reason = request.GET.get('error_reason')
         state = request.GET.get('state')
         
-        # Parse state to get tenant and user info with better error handling
+        # Parse state to get tenant info - no user_id needed
         tenant_name = None
-        user_id = None
         if state:
             from urllib.parse import unquote
             # URL decode the state parameter in case it's encoded
@@ -246,37 +244,67 @@ def facebook_oauth_callback(request):
             logger.info(f"Raw state parameter: {state}")
             logger.info(f"Decoded state parameter: {decoded_state}")
             
-            # State format: "tenant=Amanati Ltd (amanati)&user=1"
+            # State format: "tenant=amanati" (simplified)
             try:
                 for param in decoded_state.split('&'):
                     if param.startswith('tenant='):
                         tenant_name = param.split('=', 1)[1]
                         logger.info(f"Parsed tenant_name: {tenant_name}")
-                    elif param.startswith('user='):
-                        user_id_str = param.split('=', 1)[1]
-                        user_id = int(user_id_str)  # Convert to integer
-                        logger.info(f"Parsed user_id: {user_id}")
             except (ValueError, IndexError) as e:
                 logger.error(f"Error parsing state parameter: {e}")
                 return JsonResponse({
                     'status': 'error',
                     'message': f'Invalid state parameter format: {state}',
                     'error': str(e),
-                    'expected_format': 'tenant=TenantName&user=123'
+                    'expected_format': 'tenant=TenantName'
                 })
         
         # Validate that we have required parameters
-        if not user_id:
-            logger.error(f"No user_id found in state: {state}")
+        if not tenant_name:
+            logger.error(f"No tenant_name found in state: {state}")
             return JsonResponse({
                 'status': 'error',
-                'message': 'User ID not found in state parameter',
+                'message': 'Tenant name not found in state parameter',
                 'state_received': state,
-                'debug_info': {'parsed_tenant_name': tenant_name, 'parsed_user_id': user_id}
+                'debug_info': {'parsed_tenant_name': tenant_name}
             })
         
         # Extract tenant schema name from tenant_name
         tenant_schema = tenant_name.split('(')[1].split(')')[0] if tenant_name and '(' in tenant_name else 'amanati'
+        
+        # Find a suitable user for this tenant (superuser or admin)
+        from tenant_schemas.utils import schema_context
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        
+        user_id = None
+        with schema_context(tenant_schema):
+            # Try to find a superuser first
+            superuser = User.objects.filter(is_superuser=True, is_active=True).first()
+            if superuser:
+                user_id = superuser.id
+                logger.info(f"Found superuser for tenant {tenant_schema}: {superuser.email}")
+            else:
+                # If no superuser, try to find an admin
+                admin_user = User.objects.filter(role='admin', is_active=True).first()
+                if admin_user:
+                    user_id = admin_user.id
+                    logger.info(f"Found admin user for tenant {tenant_schema}: {admin_user.email}")
+                else:
+                    # If no admin, use any active user
+                    any_user = User.objects.filter(is_active=True).first()
+                    if any_user:
+                        user_id = any_user.id
+                        logger.info(f"Found active user for tenant {tenant_schema}: {any_user.email}")
+        
+        if not user_id:
+            logger.error(f"No active users found in tenant {tenant_schema}")
+            return JsonResponse({
+                'status': 'error',
+                'message': f'No active users found in tenant {tenant_schema}',
+                'tenant_schema': tenant_schema,
+                'solution': 'Please ensure at least one active user exists in the tenant'
+            })
         
         # Frontend dashboard URL
         frontend_url = f"https://{tenant_schema}.echodesk.ge"
@@ -347,7 +375,7 @@ def facebook_oauth_callback(request):
             'fields': 'id,name,access_token,category'
         }
         
-        logger.info(f"Fetching Facebook pages for user {user_id}...")
+        logger.info(f"Fetching Facebook pages for tenant {tenant_name}...")
         logger.info(f"Pages API URL: {pages_url}")
         logger.info(f"Pages API params: {dict(pages_params, access_token='[HIDDEN]')}")
         
@@ -407,12 +435,12 @@ def facebook_oauth_callback(request):
         # Save page connections to database with proper tenant context
         saved_pages = 0
         with schema_context(tenant_schema):
-            # First, delete all existing Facebook page connections for this user
-            existing_connections = FacebookPageConnection.objects.filter(user_id=user_id)
+            # First, delete all existing Facebook page connections for this tenant
+            existing_connections = FacebookPageConnection.objects.all()
             deleted_count = existing_connections.count()
             if deleted_count > 0:
                 existing_connections.delete()
-                logger.info(f"🗑️ Deleted {deleted_count} existing Facebook page connections for user {user_id}")
+                logger.info(f"🗑️ Deleted {deleted_count} existing Facebook page connections for tenant {tenant_schema}")
             
             # Create new connections for all pages from callback
             for page in pages:
@@ -421,12 +449,12 @@ def facebook_oauth_callback(request):
                 page_access_token = page.get('access_token')
                 
                 if page_id and page_access_token and page_name:
-                    # Create new page connection
+                    # Create new page connection without user_id
                     page_connection = FacebookPageConnection.objects.create(
                         page_id=page_id,
                         page_name=page_name,
                         page_access_token=page_access_token,
-                        user_id=user_id,
+                        user_id=None,  # No user association needed
                         is_active=True
                     )
                     
