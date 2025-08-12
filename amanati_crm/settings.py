@@ -325,7 +325,7 @@ VERCEL_PROJECT_ID = config('VERCEL_PROJECT_ID', default='')
 # Facebook Integration Settings
 FACEBOOK_APP_ID = config('FACEBOOK_APP_ID', default='')
 FACEBOOK_APP_SECRET = config('FACEBOOK_APP_SECRET', default='')
-FACEBOOK_APP_VERSION = config('FACEBOOK_APP_VERSION', default='v18.0')
+FACEBOOK_APP_VERSION = config('FACEBOOK_APP_VERSION', default='v23.0')
 
 # Social Integration Configuration
 SOCIAL_INTEGRATIONS = {

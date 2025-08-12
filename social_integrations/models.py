@@ -40,22 +40,18 @@ class FacebookMessage(models.Model):
 
 
 class InstagramAccountConnection(models.Model):
-    """Stores Instagram business account connection details for a user"""
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='instagram_accounts')
-    instagram_account_id = models.CharField(max_length=100)
+    """Stores Instagram business account connection details"""
+    instagram_account_id = models.CharField(max_length=100, unique=True)
     username = models.CharField(max_length=200)
-    account_name = models.CharField(max_length=200, blank=True)
+    name = models.CharField(max_length=200, blank=True)  # Updated field name to match usage
+    profile_picture_url = models.URLField(blank=True)  # Added field for profile picture
     access_token = models.TextField()
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
-    class Meta:
-        unique_together = ['user', 'instagram_account_id']
-    
     def __str__(self):
-        user_display = self.user.get_full_name() or self.user.email
-        return f"@{self.username} - {user_display}"
+        return f"@{self.username} ({self.instagram_account_id})"
 
 
 class InstagramMessage(models.Model):

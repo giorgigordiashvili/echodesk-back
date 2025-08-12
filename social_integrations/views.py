@@ -1320,6 +1320,8 @@ def test_database_save(request):
 @permission_classes([IsAuthenticated])
 def instagram_oauth_start(request):
     """Generate Instagram OAuth URL for business account access"""
+    logger = logging.getLogger(__name__)
+    
     try:
         fb_app_id = getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_APP_ID')
         if not fb_app_id:
@@ -1330,17 +1332,35 @@ def instagram_oauth_start(request):
         # Use public callback URL since Instagram needs a consistent redirect URI
         redirect_uri = 'https://api.echodesk.ge/api/social/instagram/oauth/callback/'
         
-        # Include tenant info in state parameter for multi-tenant support
-        state = f'tenant={getattr(request, "tenant", "amanati")}&user={request.user.id}'
+        # Include tenant info in state parameter - no user_id needed since tenant is unique
+        from urllib.parse import quote
+        tenant_obj = getattr(request, "tenant", None)
         
-        # Instagram OAuth URL (using Facebook OAuth with Instagram permissions)
+        # Extract tenant schema name from Tenant object or use default
+        if tenant_obj and hasattr(tenant_obj, 'schema_name'):
+            tenant_name = tenant_obj.schema_name
+        elif tenant_obj and hasattr(tenant_obj, 'name'):
+            tenant_name = tenant_obj.name
+        else:
+            tenant_name = "amanati"  # Default fallback
+        
+        # Simplified state parameter with just tenant schema
+        state_raw = f'tenant={tenant_name}'
+        state = quote(state_raw)  # URL encode the state
+        logger.info(f"Tenant object: {tenant_obj}")
+        logger.info(f"Extracted tenant schema: {tenant_name}")
+        logger.info(f"Generated raw state parameter: {state_raw}")
+        logger.info(f"URL encoded state parameter: {state}")
+        
+        # Instagram OAuth URL (using Facebook OAuth v23.0 with Instagram permissions)
         oauth_url = (
-            f"https://www.facebook.com/v18.0/dialog/oauth?"
+            f"https://www.facebook.com/v23.0/dialog/oauth?"
             f"client_id={fb_app_id}&"
-            f"redirect_uri={redirect_uri}&"
-            f"scope=instagram_basic,instagram_manage_messages,pages_show_list&"
+            f"redirect_uri={quote(redirect_uri)}&"
+            f"scope=instagram_basic,instagram_manage_messages,pages_show_list,business_management&"
             f"state={state}&"
-            f"response_type=code"
+            f"response_type=code&"
+            f"auth_type=rerequest"
         )
         
         return Response({
@@ -1368,90 +1388,138 @@ def instagram_oauth_callback(request):
         error_reason = request.GET.get('error_reason')
         state = request.GET.get('state')
         
-        # Parse state to get tenant and user info
+        # Parse state to get tenant info - no user_id needed
         tenant_name = None
-        user_id = None
         if state:
-            # State format: "tenant=Amanati Ltd (amanati)&user=1"
-            for param in state.split('&'):
-                if param.startswith('tenant='):
-                    tenant_name = param.split('=', 1)[1]
-                elif param.startswith('user='):
-                    user_id = param.split('=', 1)[1]
+            from urllib.parse import unquote
+            # URL decode the state parameter in case it's encoded
+            decoded_state = unquote(state)
+            logger.info(f"Raw state parameter: {state}")
+            logger.info(f"Decoded state parameter: {decoded_state}")
+            
+            # State format: "tenant=amanati" (simplified)
+            try:
+                for param in decoded_state.split('&'):
+                    if param.startswith('tenant='):
+                        tenant_name = param.split('=', 1)[1]
+                        logger.info(f"Parsed tenant_name: {tenant_name}")
+            except (ValueError, IndexError) as e:
+                logger.error(f"Error parsing state parameter: {e}")
+                return JsonResponse({
+                    'status': 'error',
+                    'message': f'Invalid state parameter format: {state}',
+                    'error': str(e),
+                    'expected_format': 'tenant=TenantName'
+                })
         
-        # Extract tenant schema name from tenant_name
-        tenant_schema = tenant_name.split('(')[1].split(')')[0] if tenant_name and '(' in tenant_name else 'amanati'
+        # Validate that we have required parameters
+        if not tenant_name:
+            logger.error(f"No tenant_name found in state: {state}")
+            frontend_url = "https://amanati.echodesk.ge"  # Default fallback
+            error_msg = "Tenant name not found in state parameter"
+            from urllib.parse import quote_plus
+            return redirect(f"{frontend_url}/?instagram_status=error&message={quote_plus(error_msg)}")
         
-        # Frontend dashboard URL
+        # Extract tenant schema name from tenant_name - use tenant_name directly as schema
+        tenant_schema = tenant_name if tenant_name else 'amanati'
+        
+        # Frontend dashboard URL using tenant name
         frontend_url = f"https://{tenant_schema}.echodesk.ge"
+        
+        # Find a suitable user for this tenant (superuser or admin)
+        from tenant_schemas.utils import schema_context
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        
+        user_id = None
+        with schema_context(tenant_schema):
+            # Try to find a superuser first
+            superuser = User.objects.filter(is_superuser=True, is_active=True).first()
+            if superuser:
+                user_id = superuser.id
+                logger.info(f"Found superuser for tenant {tenant_schema}: {superuser.email}")
+            else:
+                # If no superuser, try to find an admin
+                admin_user = User.objects.filter(role='admin', is_active=True).first()
+                if admin_user:
+                    user_id = admin_user.id
+                    logger.info(f"Found admin user for tenant {tenant_schema}: {admin_user.email}")
+                else:
+                    # If no admin, use any active user
+                    any_user = User.objects.filter(is_active=True).first()
+                    if any_user:
+                        user_id = any_user.id
+                        logger.info(f"Found active user for tenant {tenant_schema}: {any_user.email}")
+        
+        if not user_id:
+            logger.error(f"No active users found in tenant {tenant_schema}")
+            frontend_url = f"https://{tenant_schema}.echodesk.ge"
+            error_msg = f"No active users found in tenant {tenant_schema}"
+            from urllib.parse import quote_plus
+            return redirect(f"{frontend_url}/?instagram_status=error&message={quote_plus(error_msg)}")
         
         # Handle Instagram errors (user denied, etc.)
         if error:
             error_msg = f"Instagram OAuth failed: {error_description or error}"
             logger.error(f"Instagram OAuth error: {error} - {error_description}")
+            from urllib.parse import quote_plus
             return redirect(f"{frontend_url}/?instagram_status=error&message={quote_plus(error_msg)}")
         
         # Handle missing code
         if not code:
             error_msg = "Authorization code not provided by Instagram"
             logger.error("Instagram OAuth callback missing authorization code")
+            from urllib.parse import quote_plus
             return redirect(f"{frontend_url}/?instagram_status=error&message={quote_plus(error_msg)}")
         
         # Exchange authorization code for access token
-        token_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v18.0')}/oauth/access_token"
+        token_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v23.0')}/oauth/access_token"
         token_params = {
-            'client_id': getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('INSTAGRAM_APP_ID'),
-            'client_secret': getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('INSTAGRAM_APP_SECRET'),
-            'redirect_uri': getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('INSTAGRAM_REDIRECT_URI'),
+            'client_id': getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_APP_ID'),
+            'client_secret': getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_APP_SECRET'),
+            'redirect_uri': 'https://api.echodesk.ge/api/social/instagram/oauth/callback/',
             'code': code
         }
         
-        logger.info(f"Exchanging Instagram code for access token...")
+        logger.info(f"Exchanging Instagram code for access token using URL: {token_url}")
+        logger.info(f"Token exchange parameters: {dict(token_params, client_secret='[HIDDEN]')}")
         token_response = requests.get(token_url, params=token_params)
         token_data = token_response.json()
         
         if 'error' in token_data:
             error_msg = f"Token exchange failed: {token_data.get('error', {}).get('message', 'Unknown error')}"
             logger.error(f"Instagram token exchange error: {token_data}")
+            from urllib.parse import quote_plus
             return redirect(f"{frontend_url}/?instagram_status=error&message={quote_plus(error_msg)}")
         
         user_access_token = token_data.get('access_token')
         if not user_access_token:
             error_msg = "No access token received from Instagram"
             logger.error("Instagram token exchange did not return access token")
-            return redirect(f"{frontend_url}/?instagram_status=error&message={quote_plus(error_msg)}")
-        
-        # Get user's Instagram business accounts
-        # First get user info to get the user ID
-        user_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v18.0')}/me"
-        user_params = {
-            'access_token': user_access_token,
-            'fields': 'id,name'
-        }
-        
-        logger.info(f"Fetching Instagram user info...")
-        user_response = requests.get(user_url, params=user_params)
-        user_data = user_response.json()
-        
-        if 'error' in user_data:
-            error_msg = f"Failed to fetch user info: {user_data.get('error', {}).get('message', 'Unknown error')}"
-            logger.error(f"Instagram user fetch error: {user_data}")
+            from urllib.parse import quote_plus
             return redirect(f"{frontend_url}/?instagram_status=error&message={quote_plus(error_msg)}")
         
         # Get user's Facebook pages (needed for Instagram business accounts)
-        pages_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v18.0')}/me/accounts"
+        pages_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v23.0')}/me/accounts"
         pages_params = {
             'access_token': user_access_token,
             'fields': 'id,name,instagram_business_account'
         }
         
-        logger.info(f"Fetching Facebook pages with Instagram business accounts...")
+        logger.info(f"Fetching Facebook pages with Instagram business accounts for tenant {tenant_name}...")
+        logger.info(f"Pages API URL: {pages_url}")
+        logger.info(f"Pages API params: {dict(pages_params, access_token='[HIDDEN]')}")
+        
         pages_response = requests.get(pages_url, params=pages_params)
         pages_data = pages_response.json()
+        
+        logger.info(f"Pages API response status: {pages_response.status_code}")
+        logger.info(f"Pages API response data: {pages_data}")
         
         if 'error' in pages_data:
             error_msg = f"Failed to fetch pages: {pages_data.get('error', {}).get('message', 'Unknown error')}"
             logger.error(f"Instagram pages fetch error: {pages_data}")
+            from urllib.parse import quote_plus
             return redirect(f"{frontend_url}/?instagram_status=error&message={quote_plus(error_msg)}")
         
         pages = pages_data.get('data', [])
@@ -1463,12 +1531,13 @@ def instagram_oauth_callback(request):
                 instagram_account_id = page['instagram_business_account']['id']
                 
                 # Get Instagram account details
-                instagram_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v18.0')}"
+                instagram_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v23.0')}/{instagram_account_id}"
                 instagram_params = {
                     'access_token': user_access_token,
                     'fields': 'id,username,name,profile_picture_url'
                 }
                 
+                logger.info(f"Fetching Instagram account details for {instagram_account_id}...")
                 instagram_response = requests.get(instagram_url, params=instagram_params)
                 instagram_data = instagram_response.json()
                 
@@ -1480,10 +1549,13 @@ def instagram_oauth_callback(request):
                         'profile_picture_url': instagram_data.get('profile_picture_url', ''),
                         'access_token': user_access_token
                     })
+                else:
+                    logger.warning(f"Failed to fetch Instagram account details for {instagram_account_id}: {instagram_data}")
         
         if not instagram_accounts:
             error_msg = "No Instagram business accounts found for this Facebook account"
             logger.warning("User has no Instagram business accounts")
+            from urllib.parse import quote_plus
             return redirect(f"{frontend_url}/?instagram_status=error&message={quote_plus(error_msg)}")
         
         # Import tenant schema context for multi-tenant database operations
@@ -1496,7 +1568,7 @@ def instagram_oauth_callback(request):
                 account_id = account['account_id']
                 username = account['username']
                 
-                # Create or update Instagram account connection
+                # Create or update Instagram account connection (without user field)
                 account_connection, created = InstagramAccountConnection.objects.update_or_create(
                     instagram_account_id=account_id,
                     defaults={
@@ -1504,7 +1576,6 @@ def instagram_oauth_callback(request):
                         'name': account['name'],
                         'profile_picture_url': account['profile_picture_url'],
                         'access_token': account['access_token'],
-                        'user_id': user_id,
                         'is_active': True
                     }
                 )
@@ -1519,6 +1590,7 @@ def instagram_oauth_callback(request):
         # Redirect back to frontend with success
         success_msg = f"Successfully connected {saved_accounts} Instagram account(s)"
         logger.info(f"Instagram OAuth completed successfully: {saved_accounts} accounts saved")
+        from urllib.parse import quote_plus
         return redirect(f"{frontend_url}/?instagram_status=connected&accounts={saved_accounts}&message={quote_plus(success_msg)}")
         
     except Exception as e:
@@ -1526,6 +1598,7 @@ def instagram_oauth_callback(request):
         # Fallback frontend URL if parsing fails
         frontend_url = "https://amanati.echodesk.ge"
         error_msg = f"OAuth processing failed: {str(e)}"
+        from urllib.parse import quote_plus
         return redirect(f"{frontend_url}/?instagram_status=error&message={quote_plus(error_msg)}")
 
 

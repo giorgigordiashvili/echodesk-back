@@ -65,9 +65,9 @@ class FacebookMessageAdmin(admin.ModelAdmin):
 
 @admin.register(InstagramAccountConnection)
 class InstagramAccountConnectionAdmin(admin.ModelAdmin):
-    list_display = ['username', 'account_name', 'user', 'instagram_account_id', 'is_active', 'created_at']
+    list_display = ['username', 'name', 'instagram_account_id', 'is_active', 'created_at']
     list_filter = ['is_active', 'created_at']
-    search_fields = ['username', 'account_name', 'user__username', 'instagram_account_id']
+    search_fields = ['username', 'name', 'instagram_account_id']
 
 
 @admin.register(InstagramMessage)
