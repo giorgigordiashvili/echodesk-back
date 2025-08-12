@@ -6,15 +6,12 @@ User = get_user_model()
 
 class FacebookPageConnection(models.Model):
     """Stores Facebook page connection details for a tenant"""
-    page_id = models.CharField(max_length=100)
+    page_id = models.CharField(max_length=100, unique=True)  # Make unique directly
     page_name = models.CharField(max_length=200)
     page_access_token = models.TextField()
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
-    class Meta:
-        unique_together = ['page_id']  # Only page_id needs to be unique per tenant
     
     def __str__(self):
         return f"{self.page_name} - Tenant Page"
@@ -42,9 +39,9 @@ class FacebookMessage(models.Model):
 class InstagramAccountConnection(models.Model):
     """Stores Instagram business account connection details"""
     instagram_account_id = models.CharField(max_length=100, unique=True)
-    username = models.CharField(max_length=200)
-    name = models.CharField(max_length=200, blank=True)  # Updated field name to match usage
-    profile_picture_url = models.URLField(blank=True)  # Added field for profile picture
+    username = models.CharField(max_length=500)  # Increased from 200 to handle longer usernames
+    name = models.CharField(max_length=500, blank=True)  # Increased from 200 to handle longer names/emojis
+    profile_picture_url = models.URLField(max_length=2000, blank=True)  # Increased for longer URLs
     access_token = models.TextField()
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
