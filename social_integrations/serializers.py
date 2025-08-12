@@ -28,7 +28,7 @@ class FacebookMessageSerializer(serializers.ModelSerializer):
 class InstagramAccountConnectionSerializer(serializers.ModelSerializer):
     class Meta:
         model = InstagramAccountConnection
-        fields = ['id', 'instagram_account_id', 'username', 'account_name', 'is_active', 'created_at', 'updated_at']
+        fields = ['id', 'instagram_account_id', 'username', 'name', 'profile_picture_url', 'is_active', 'created_at', 'updated_at']
         read_only_fields = ['id', 'created_at', 'updated_at']
 
 

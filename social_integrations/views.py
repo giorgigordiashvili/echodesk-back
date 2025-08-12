@@ -139,10 +139,12 @@ class InstagramAccountConnectionViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     
     def get_queryset(self):
-        return InstagramAccountConnection.objects.filter(user=self.request.user)
+        # Return all Instagram accounts for this tenant (no user filtering)
+        return InstagramAccountConnection.objects.filter(is_active=True)
     
     def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
+        # Save without user field since it's removed
+        serializer.save()
 
 
 class InstagramMessageViewSet(viewsets.ReadOnlyModelViewSet):
@@ -150,8 +152,9 @@ class InstagramMessageViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
     
     def get_queryset(self):
-        user_accounts = InstagramAccountConnection.objects.filter(user=self.request.user)
-        return InstagramMessage.objects.filter(account_connection__in=user_accounts)
+        # Get all active Instagram accounts for this tenant
+        tenant_accounts = InstagramAccountConnection.objects.filter(is_active=True)
+        return InstagramMessage.objects.filter(account_connection__in=tenant_accounts)
 
 
 class WhatsAppBusinessConnectionViewSet(viewsets.ModelViewSet):
@@ -1605,9 +1608,10 @@ def instagram_oauth_callback(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def instagram_connection_status(request):
-    """Check Instagram connection status for current user"""
+    """Check Instagram connection status for current tenant"""
     try:
-        accounts = InstagramAccountConnection.objects.filter(user=request.user, is_active=True)
+        # Get all active Instagram accounts for this tenant (no user filtering needed)
+        accounts = InstagramAccountConnection.objects.filter(is_active=True)
         accounts_data = []
         
         for account in accounts:
@@ -1615,7 +1619,8 @@ def instagram_connection_status(request):
                 'id': account.id,
                 'instagram_account_id': account.instagram_account_id,
                 'username': account.username,
-                'account_name': account.account_name,
+                'name': account.name,  # Updated field name
+                'profile_picture_url': account.profile_picture_url,
                 'is_active': account.is_active,
                 'connected_at': account.created_at.isoformat()
             })
@@ -1634,10 +1639,11 @@ def instagram_connection_status(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def instagram_disconnect(request):
-    """Disconnect Instagram integration for current user"""
+    """Disconnect Instagram integration for current tenant"""
     try:
+        # Disconnect all Instagram accounts for this tenant
         updated_count = InstagramAccountConnection.objects.filter(
-            user=request.user
+            is_active=True
         ).update(is_active=False)
         
         return Response({
@@ -1665,10 +1671,9 @@ def instagram_send_message(request):
                 'error': 'Missing required fields: recipient_id, message, instagram_account_id'
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        # Get the Instagram account connection for the authenticated user
+        # Get the Instagram account connection for this tenant
         try:
             account_connection = InstagramAccountConnection.objects.get(
-                user=request.user,
                 instagram_account_id=instagram_account_id,
                 is_active=True
             )
@@ -1752,12 +1757,12 @@ def instagram_send_message(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def instagram_conversations(request):
-    """Get Instagram conversations for the authenticated user"""
+    """Get Instagram conversations for the current tenant"""
     try:
-        # Get all Instagram accounts for the user
-        user_accounts = InstagramAccountConnection.objects.filter(user=request.user, is_active=True)
+        # Get all Instagram accounts for this tenant
+        tenant_accounts = InstagramAccountConnection.objects.filter(is_active=True)
         
-        if not user_accounts.exists():
+        if not tenant_accounts.exists():
             return Response({
                 'conversations': [],
                 'message': 'No Instagram accounts connected'
@@ -1766,7 +1771,7 @@ def instagram_conversations(request):
         # Get conversations (grouped by conversation_id/sender_id)
         from django.db.models import Max, Count
         conversations = InstagramMessage.objects.filter(
-            account_connection__in=user_accounts
+            account_connection__in=tenant_accounts
         ).values(
             'conversation_id',
             'account_connection__username',
@@ -1783,7 +1788,7 @@ def instagram_conversations(request):
             # Get the actual last message
             last_message = InstagramMessage.objects.filter(
                 conversation_id=conv['conversation_id'],
-                account_connection__in=user_accounts
+                account_connection__in=tenant_accounts
             ).order_by('-timestamp').first()
             
             conversations_data.append({
@@ -1812,10 +1817,10 @@ def instagram_conversations(request):
 def instagram_conversation_messages(request, conversation_id):
     """Get messages for a specific Instagram conversation"""
     try:
-        # Get all Instagram accounts for the user
-        user_accounts = InstagramAccountConnection.objects.filter(user=request.user, is_active=True)
+        # Get all Instagram accounts for this tenant
+        tenant_accounts = InstagramAccountConnection.objects.filter(is_active=True)
         
-        if not user_accounts.exists():
+        if not tenant_accounts.exists():
             return Response({
                 'error': 'No Instagram accounts connected'
             }, status=status.HTTP_404_NOT_FOUND)
@@ -1823,7 +1828,7 @@ def instagram_conversation_messages(request, conversation_id):
         # Get messages for this conversation
         messages = InstagramMessage.objects.filter(
             conversation_id=conversation_id,
-            account_connection__in=user_accounts
+            account_connection__in=tenant_accounts
         ).order_by('timestamp')
         
         # Serialize the messages
