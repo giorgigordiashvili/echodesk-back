@@ -45,6 +45,7 @@ urlpatterns = [
     path('whatsapp/connect/', views.whatsapp_connect_account, name='whatsapp_connect'),
     path('whatsapp/status/', views.whatsapp_connection_status, name='whatsapp_status'),
     path('whatsapp/disconnect/', views.whatsapp_disconnect, name='whatsapp_disconnect'),
+    path('whatsapp/send-message/', views.whatsapp_send_message, name='whatsapp_send_message'),
     path('whatsapp/webhook/', views.whatsapp_webhook, name='whatsapp_webhook'),
     
     # Admin OAuth endpoints

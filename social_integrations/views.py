@@ -2251,6 +2251,97 @@ def whatsapp_disconnect(request):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def whatsapp_send_message(request):
+    """Send a WhatsApp message"""
+    try:
+        phone_number_id = request.data.get('phone_number_id')
+        to_number = request.data.get('to_number')
+        message_text = request.data.get('message_text')
+        message_type = request.data.get('message_type', 'text')
+        
+        if not all([phone_number_id, to_number, message_text]):
+            return Response({
+                'error': 'Missing required fields: phone_number_id, to_number, message_text'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Find the WhatsApp connection
+        connection = WhatsAppBusinessConnection.objects.filter(
+            user=request.user,
+            phone_number_id=phone_number_id,
+            is_active=True
+        ).first()
+        
+        if not connection:
+            return Response({
+                'error': 'WhatsApp connection not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        # Prepare WhatsApp API request
+        api_version = getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('WHATSAPP_API_VERSION', 'v18.0')
+        url = f"https://graph.facebook.com/{api_version}/{phone_number_id}/messages"
+        
+        headers = {
+            'Authorization': f'Bearer {connection.access_token}',
+            'Content-Type': 'application/json'
+        }
+        
+        # Prepare message payload
+        if message_type == 'text':
+            payload = {
+                'messaging_product': 'whatsapp',
+                'to': to_number,
+                'type': 'text',
+                'text': {
+                    'body': message_text
+                }
+            }
+        else:
+            return Response({
+                'error': f'Message type "{message_type}" not yet supported'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Send message via WhatsApp API
+        response = requests.post(url, headers=headers, json=payload)
+        
+        if response.status_code == 200:
+            response_data = response.json()
+            message_id = response_data.get('messages', [{}])[0].get('id')
+            
+            # Save the sent message to database
+            whatsapp_message = WhatsAppMessage.objects.create(
+                connection=connection,
+                message_id=message_id,
+                from_number=connection.phone_number,
+                to_number=to_number,
+                message_text=message_text,
+                message_type=message_type,
+                timestamp=timezone.now(),
+                is_from_business=True,
+                delivery_status='sent'
+            )
+            
+            serializer = WhatsAppMessageSerializer(whatsapp_message)
+            
+            return Response({
+                'status': 'sent',
+                'message': serializer.data,
+                'whatsapp_response': response_data
+            })
+        else:
+            return Response({
+                'error': 'Failed to send WhatsApp message',
+                'whatsapp_error': response.json() if response.content else None,
+                'status_code': response.status_code
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+    except Exception as e:
+        return Response({
+            'error': f'Failed to send WhatsApp message: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 @csrf_exempt
 @require_http_methods(["GET", "POST"])
 def whatsapp_webhook(request):
@@ -2356,11 +2447,11 @@ def whatsapp_webhook(request):
                         phone_number_id=phone_number_id,
                         is_active=True
                     )
-                    logger.info(f"✅ Found WhatsApp connection: {connection.business_name} ({phone_number_id})")
+                    logger.info(f"✅ Found WhatsApp connection: {connection.verified_name} ({phone_number_id})")
                 except WhatsAppBusinessConnection.DoesNotExist:
                     logger.warning(f"❌ No active WhatsApp connection found for phone_number_id: {phone_number_id}")
                     all_connections = WhatsAppBusinessConnection.objects.filter(is_active=True)
-                    logger.warning(f"Available WhatsApp connections: {[(conn.phone_number_id, conn.business_name) for conn in all_connections]}")
+                    logger.warning(f"Available WhatsApp connections: {[(conn.phone_number_id, conn.verified_name) for conn in all_connections]}")
                     return JsonResponse({'error': f'No WhatsApp connection found for phone_number_id: {phone_number_id}'}, status=404)
                 
                 # Process webhook data
