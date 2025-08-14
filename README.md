@@ -1,5 +1,6 @@
 # 🎯 EchoDesk - Multi-Tenant Customer Support Platform
 
+Test 2
 [![Development Hours](https://img.shields.io/badge/Development%20Hours-135%2B-blue.svg)](./TIME_TRACKING.md)
 [![Django](https://img.shields.io/badge/Django-4.2+-green.svg)](https://djangoproject.com/)
 [![Next.js](https://img.shields.io/badge/Next.js-15.4.4-black.svg)](https://nextjs.org/)
@@ -28,23 +29,27 @@ EchoDesk is a comprehensive multi-tenant customer support platform that unifies 
 ## ✨ Features
 
 ### 🔐 **Multi-Tenant Architecture**
+
 - **Schema Isolation:** Each tenant has isolated database schema
 - **Subdomain Routing:** `tenant.echodesk.ge` automatic routing
 - **Secure Data Separation:** Complete tenant data isolation
 
 ### 📞 **Call Management System**
+
 - **SIP Integration:** Real-time call logging and recording
 - **Call Analytics:** Detailed statistics and reporting
 - **Event Tracking:** Comprehensive call event logging
 - **Recording Management:** Automatic call recording storage
 
 ### 💬 **Social Media Integration**
+
 - **Facebook Pages:** OAuth 2.0 authentication and messaging
 - **Instagram Business:** Direct message management
 - **WhatsApp Business:** API integration for customer support
 - **Real-time Webhooks:** Instant message synchronization
 
 ### 📊 **Dashboard & Analytics**
+
 - **Unified Inbox:** All communication channels in one place
 - **Real-time Updates:** Live message and call notifications
 - **Performance Metrics:** Detailed analytics and reporting
@@ -53,12 +58,14 @@ EchoDesk is a comprehensive multi-tenant customer support platform that unifies 
 ## 🚀 Quick Start
 
 ### **Prerequisites**
+
 - Python 3.11+
 - Node.js 18+
 - PostgreSQL 14+
 - Redis (for caching and sessions)
 
 ### **Backend Setup**
+
 ```bash
 # Clone and setup backend
 git clone https://github.com/giorgigordiashvili/echodesk-back.git
@@ -84,6 +91,7 @@ python manage.py runserver
 ```
 
 ### **Frontend Setup**
+
 ```bash
 # Setup frontend
 cd echodesk-frontend
@@ -119,6 +127,7 @@ echodesk-back/
 ## 🔧 Configuration
 
 ### **Environment Variables**
+
 ```bash
 # Database
 DATABASE_URL=postgresql://user:pass@localhost/echodesk
@@ -145,17 +154,20 @@ REDIS_URL=redis://localhost:6379/0
 ## 📡 API Documentation
 
 ### **Authentication Endpoints**
+
 - `POST /api/auth/login/` - User login
 - `POST /api/auth/logout/` - User logout
 - `GET /api/auth/user/` - Current user info
 
 ### **Social Media Endpoints**
+
 - `GET /api/social/facebook/pages/` - List connected Facebook pages
 - `POST /api/social/facebook/send-message/` - Send Facebook message
 - `GET /api/social/instagram/accounts/` - List Instagram accounts
 - `POST /api/social/instagram/send-message/` - Send Instagram message
 
 ### **Call Management Endpoints**
+
 - `GET /api/crm/calls/` - List call logs
 - `POST /api/crm/calls/` - Create call log
 - `GET /api/crm/calls/{id}/` - Call details
@@ -171,6 +183,7 @@ REDIS_URL=redis://localhost:6379/0
 ## 🚀 Deployment
 
 ### **Production Deployment (DigitalOcean)**
+
 ```bash
 # Build frontend
 cd echodesk-frontend
@@ -189,6 +202,7 @@ python manage.py collectstatic --noinput
 ```
 
 ### **Environment Setup**
+
 - **Domain:** `echodesk.ge` with wildcard SSL
 - **Database:** PostgreSQL with connection pooling
 - **File Storage:** DigitalOcean Spaces or AWS S3
@@ -199,6 +213,7 @@ python manage.py collectstatic --noinput
 **Total Development Time:** [135+ hours](./TIME_TRACKING.md)
 
 ### **Completed Milestones:**
+
 - ✅ Multi-tenant architecture implementation
 - ✅ Social media integrations (Facebook, Instagram, WhatsApp)
 - ✅ Call logging and SIP integration
@@ -207,6 +222,7 @@ python manage.py collectstatic --noinput
 - ✅ OAuth 2.0 flows and webhook processing
 
 ### **Current Focus:**
+
 - 🔄 Meta app review submission
 - 🔄 Instagram business page setup
 - 🔄 Production testing and optimization
