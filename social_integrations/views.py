@@ -23,7 +23,7 @@ from .models import (
     WhatsAppBusinessConnection, WhatsAppMessage
 )
 from .serializers import (
-    FacebookPageConnectionSerializer, FacebookMessageSerializer, 
+    FacebookPageConnectionSerializer, FacebookMessageSerializer, FacebookSendMessageSerializer,
     InstagramAccountConnectionSerializer, InstagramMessageSerializer,
     WhatsAppBusinessConnectionSerializer, WhatsAppMessageSerializer
 )
@@ -603,14 +603,18 @@ def facebook_disconnect(request):
 def facebook_send_message(request):
     """Send a message to a Facebook user"""
     try:
-        recipient_id = request.data.get('recipient_id')
-        message_text = request.data.get('message')
-        page_id = request.data.get('page_id')
-        
-        if not all([recipient_id, message_text, page_id]):
+        # Validate input data using serializer
+        serializer = FacebookSendMessageSerializer(data=request.data)
+        if not serializer.is_valid():
             return Response({
-                'error': 'Missing required fields: recipient_id, message, page_id'
+                'error': 'Invalid data',
+                'details': serializer.errors
             }, status=status.HTTP_400_BAD_REQUEST)
+        
+        validated_data = serializer.validated_data
+        recipient_id = validated_data['recipient_id']
+        message_text = validated_data['message']
+        page_id = validated_data['page_id']
         
         # Get the page connection for this tenant
         try:

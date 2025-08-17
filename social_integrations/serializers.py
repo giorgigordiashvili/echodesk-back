@@ -56,6 +56,12 @@ class WhatsAppBusinessConnectionSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at', 'updated_at']
 
 
+class FacebookSendMessageSerializer(serializers.Serializer):
+    recipient_id = serializers.CharField(max_length=255, help_text="Facebook user ID to send message to")
+    message = serializers.CharField(help_text="Message text to send")
+    page_id = serializers.CharField(max_length=255, help_text="Facebook page ID to send from")
+
+
 class WhatsAppMessageSerializer(serializers.ModelSerializer):
     connection_phone = serializers.CharField(source='connection.display_phone_number', read_only=True)
     connection_name = serializers.CharField(source='connection.verified_name', read_only=True)
