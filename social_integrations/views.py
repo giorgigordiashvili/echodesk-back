@@ -17,6 +17,7 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from drf_spectacular.utils import extend_schema
 from .models import (
     FacebookPageConnection, FacebookMessage, 
     InstagramAccountConnection, InstagramMessage,
@@ -598,6 +599,34 @@ def facebook_disconnect(request):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@extend_schema(
+    request=FacebookSendMessageSerializer,
+    responses={
+        200: {
+            'type': 'object',
+            'properties': {
+                'success': {'type': 'boolean'},
+                'message': {'type': 'string'},
+                'facebook_message_id': {'type': 'string'}
+            }
+        },
+        400: {
+            'type': 'object',
+            'properties': {
+                'error': {'type': 'string'},
+                'details': {'type': 'object'}
+            }
+        },
+        404: {
+            'type': 'object',
+            'properties': {
+                'error': {'type': 'string'}
+            }
+        }
+    },
+    description="Send a message to a Facebook user",
+    summary="Send Facebook Message"
+)
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def facebook_send_message(request):
