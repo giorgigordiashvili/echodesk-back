@@ -54,7 +54,7 @@ class InstagramAccountConnection(models.Model):
 class InstagramMessage(models.Model):
     """Stores Instagram direct messages"""
     account_connection = models.ForeignKey(InstagramAccountConnection, on_delete=models.CASCADE, related_name='messages')
-    message_id = models.CharField(max_length=100, unique=True)
+    message_id = models.CharField(max_length=255, unique=True)
     conversation_id = models.CharField(max_length=100)
     sender_id = models.CharField(max_length=100)
     sender_username = models.CharField(max_length=200, blank=True)
