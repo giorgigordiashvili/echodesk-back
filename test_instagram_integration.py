@@ -57,7 +57,7 @@ def check_instagram_integration():
                     
                     # Test page token validity
                     test_url = f"https://graph.facebook.com/v23.0/{page.page_id}"
-                    params = {'access_token': page.access_token, 'fields': 'id,name'}
+                    params = {'access_token': page.page_access_token, 'fields': 'id,name'}
                     
                     try:
                         response = requests.get(test_url, params=params)

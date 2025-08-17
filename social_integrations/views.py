@@ -1712,7 +1712,7 @@ def instagram_send_message(request):
         # TODO: Implement proper Instagram-to-Facebook page mapping
         if facebook_pages.exists():
             facebook_page = facebook_pages.first()
-            page_token = facebook_page.access_token
+            page_token = facebook_page.page_access_token
             page_id = facebook_page.page_id
         else:
             # Fallback to Instagram account token (may not work for messaging)
