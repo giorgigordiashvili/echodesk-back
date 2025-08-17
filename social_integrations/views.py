@@ -354,7 +354,7 @@ def facebook_oauth_callback(request):
             return redirect(f"{frontend_url}/?facebook_status=error&message={quote_plus(error_msg)}")
         
         # Exchange authorization code for access token
-        token_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v18.0')}/oauth/access_token"
+        token_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v23.0')}/oauth/access_token"
         token_params = {
             'client_id': getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_APP_ID'),
             'client_secret': getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_APP_SECRET'),
@@ -381,7 +381,7 @@ def facebook_oauth_callback(request):
             return redirect(f"{frontend_url}/?facebook_status=error&message={quote_plus(error_msg)}")
         
         # Get user's Facebook pages - simplified approach
-        pages_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v18.0')}/me/accounts"
+        pages_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v23.0')}/me/accounts"
         pages_params = {
             'access_token': user_access_token,
             'fields': 'id,name,access_token,category'
@@ -410,7 +410,7 @@ def facebook_oauth_callback(request):
             logger.warning("User has no Facebook pages to connect")
             
             # Also try to get user info to see what we can access
-            user_info_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v18.0')}/me"
+            user_info_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v23.0')}/me"
             user_info_params = {
                 'access_token': user_access_token,
                 'fields': 'id,name,email'
@@ -1699,8 +1699,32 @@ def instagram_send_message(request):
                 'error': 'Instagram account not found or not connected'
             }, status=status.HTTP_404_NOT_FOUND)
         
-        # Send message using Instagram Graph API
-        send_url = f"https://graph.facebook.com/v18.0/{instagram_account_id}/messages"
+        # Instagram messages are sent through the Facebook Pages API
+        # The Instagram account must be connected to a Facebook Page
+        # We need to use the page access token, not the Instagram token directly
+        
+        # First, try to find the associated Facebook page
+        facebook_pages = FacebookPageConnection.objects.filter(is_active=True)
+        page_token = None
+        page_id = None
+        
+        # For now, use the first available Facebook page token
+        # TODO: Implement proper Instagram-to-Facebook page mapping
+        if facebook_pages.exists():
+            facebook_page = facebook_pages.first()
+            page_token = facebook_page.access_token
+            page_id = facebook_page.page_id
+        else:
+            # Fallback to Instagram account token (may not work for messaging)
+            page_token = account_connection.access_token
+        
+        if not page_token:
+            return Response({
+                'error': 'No valid access token found. Instagram messaging requires a connected Facebook Page.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Instagram messaging API endpoint (uses the Instagram account ID)
+        send_url = f"https://graph.facebook.com/v23.0/{instagram_account_id}/messages"
         
         message_data = {
             'recipient': {'id': recipient_id},
@@ -1712,13 +1736,14 @@ def instagram_send_message(request):
         }
         
         params = {
-            'access_token': account_connection.access_token
+            'access_token': page_token
         }
         
         print(f"🚀 Sending Instagram message:")
-        print(f"   Account: @{account_connection.username}")
+        print(f"   Account: @{account_connection.username} ({instagram_account_id})")
         print(f"   To: {recipient_id}")
         print(f"   Message: {message_text}")
+        print(f"   Using token from: {'Facebook Page' if page_id else 'Instagram Account'}")
         
         response = requests.post(
             send_url,
@@ -1758,10 +1783,22 @@ def instagram_send_message(request):
         else:
             error_data = response.json() if response.content else {}
             error_message = error_data.get('error', {}).get('message', 'Unknown error')
+            error_code = error_data.get('error', {}).get('code', 'Unknown')
+            
+            # Provide more specific error messages
+            if error_code == 3:
+                error_message += " - Your app may not have Instagram messaging permissions enabled. Check Meta Developers Console."
+            elif error_code == 190:
+                error_message += " - Access token issue. The Instagram account may not be properly connected."
             
             return Response({
                 'error': f'Failed to send Instagram message: {error_message}',
-                'instagram_error': error_data
+                'instagram_error': error_data,
+                'troubleshooting': {
+                    'check_permissions': 'Ensure your Meta app has instagram_manage_messages permission',
+                    'check_connection': 'Verify Instagram account is connected to a Facebook Page',
+                    'check_app_review': 'Instagram messaging may require app review approval'
+                }
             }, status=status.HTTP_400_BAD_REQUEST)
             
     except Exception as e:
@@ -2291,7 +2328,7 @@ def whatsapp_connect_account(request):
             }, status=status.HTTP_400_BAD_REQUEST)
         
         # Verify the WhatsApp Business Account
-        verify_url = f"https://graph.facebook.com/v18.0/{phone_number_id}"
+        verify_url = f"https://graph.facebook.com/v23.0/{phone_number_id}"
         headers = {'Authorization': f'Bearer {access_token}'}
         
         response = requests.get(verify_url, headers=headers)
@@ -2408,7 +2445,7 @@ def whatsapp_send_message(request):
             }, status=status.HTTP_404_NOT_FOUND)
         
         # Prepare WhatsApp API request
-        api_version = getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('WHATSAPP_API_VERSION', 'v18.0')
+        api_version = getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('WHATSAPP_API_VERSION', 'v23.0')
         url = f"https://graph.facebook.com/{api_version}/{phone_number_id}/messages"
         
         headers = {
