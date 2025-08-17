@@ -1545,15 +1545,33 @@ def instagram_oauth_callback(request):
         pages = pages_data.get('data', [])
         instagram_accounts = []
         
-        # Find pages with Instagram business accounts
+        # Find pages with Instagram business accounts and get page access tokens
         for page in pages:
             if 'instagram_business_account' in page:
                 instagram_account_id = page['instagram_business_account']['id']
+                page_id = page['id']
+                page_name = page['name']
                 
-                # Get Instagram account details
+                # Get page access token (needed for Instagram messaging)
+                page_token_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v23.0')}/{page_id}"
+                page_token_params = {
+                    'access_token': user_access_token,
+                    'fields': 'access_token'
+                }
+                
+                page_token_response = requests.get(page_token_url, params=page_token_params)
+                page_token_data = page_token_response.json()
+                
+                if 'access_token' not in page_token_data:
+                    logger.warning(f"Failed to get page access token for {page_name}")
+                    continue
+                
+                page_access_token = page_token_data['access_token']
+                
+                # Get Instagram account details using page access token
                 instagram_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v23.0')}/{instagram_account_id}"
                 instagram_params = {
-                    'access_token': user_access_token,
+                    'access_token': page_access_token,  # Use page token, not user token
                     'fields': 'id,username,name,profile_picture_url'
                 }
                 
@@ -1567,7 +1585,9 @@ def instagram_oauth_callback(request):
                         'username': instagram_data.get('username', ''),
                         'name': instagram_data.get('name', ''),
                         'profile_picture_url': instagram_data.get('profile_picture_url', ''),
-                        'access_token': user_access_token
+                        'access_token': page_access_token,  # Store page token for messaging
+                        'page_id': page_id,
+                        'page_name': page_name
                     })
                 else:
                     logger.warning(f"Failed to fetch Instagram account details for {instagram_account_id}: {instagram_data}")
@@ -1581,29 +1601,47 @@ def instagram_oauth_callback(request):
         # Import tenant schema context for multi-tenant database operations
         from tenant_schemas.utils import schema_context
         
-        # Save Instagram account connections to database with proper tenant context
+        # Save Instagram account connections and associated Facebook pages to database
         saved_accounts = 0
         with schema_context(tenant_schema):
             for account in instagram_accounts:
                 account_id = account['account_id']
                 username = account['username']
+                page_id = account['page_id']
+                page_name = account['page_name']
+                page_access_token = account['access_token']
                 
-                # Create or update Instagram account connection (without user field)
+                # First, create or update the Facebook Page connection
+                page_connection, page_created = FacebookPageConnection.objects.update_or_create(
+                    page_id=page_id,
+                    defaults={
+                        'page_name': page_name,
+                        'page_access_token': page_access_token,
+                        'is_active': True
+                    }
+                )
+                
+                if page_created:
+                    logger.info(f"✅ Created Facebook page connection: {page_name} ({page_id})")
+                else:
+                    logger.info(f"🔄 Updated Facebook page connection: {page_name} ({page_id})")
+                
+                # Create or update Instagram account connection
                 account_connection, created = InstagramAccountConnection.objects.update_or_create(
                     instagram_account_id=account_id,
                     defaults={
                         'username': username,
                         'name': account['name'],
                         'profile_picture_url': account['profile_picture_url'],
-                        'access_token': account['access_token'],
+                        'access_token': page_access_token,  # Store page token for messaging
                         'is_active': True
                     }
                 )
                 
                 if created:
-                    logger.info(f"✅ Created new Instagram account connection: @{username} ({account_id}) in schema {tenant_schema}")
+                    logger.info(f"✅ Created new Instagram account connection: @{username} ({account_id}) linked to page {page_name}")
                 else:
-                    logger.info(f"🔄 Updated existing Instagram account connection: @{username} ({account_id}) in schema {tenant_schema}")
+                    logger.info(f"🔄 Updated existing Instagram account connection: @{username} ({account_id}) linked to page {page_name}")
                 
                 saved_accounts += 1
         
@@ -1700,27 +1738,14 @@ def instagram_send_message(request):
             }, status=status.HTTP_404_NOT_FOUND)
         
         # Instagram messages are sent through the Facebook Pages API
-        # The Instagram account must be connected to a Facebook Page
-        # We need to use the page access token, not the Instagram token directly
+        # The Instagram account should have the page access token stored
+        # We use the page token that was stored during OAuth
         
-        # First, try to find the associated Facebook page
-        facebook_pages = FacebookPageConnection.objects.filter(is_active=True)
-        page_token = None
-        page_id = None
-        
-        # For now, use the first available Facebook page token
-        # TODO: Implement proper Instagram-to-Facebook page mapping
-        if facebook_pages.exists():
-            facebook_page = facebook_pages.first()
-            page_token = facebook_page.page_access_token
-            page_id = facebook_page.page_id
-        else:
-            # Fallback to Instagram account token (may not work for messaging)
-            page_token = account_connection.access_token
+        page_token = account_connection.access_token
         
         if not page_token:
             return Response({
-                'error': 'No valid access token found. Instagram messaging requires a connected Facebook Page.'
+                'error': 'No valid access token found for Instagram account. Please reconnect your Instagram account.'
             }, status=status.HTTP_400_BAD_REQUEST)
         
         # Instagram messaging API endpoint (uses the Instagram account ID)
@@ -1743,7 +1768,7 @@ def instagram_send_message(request):
         print(f"   Account: @{account_connection.username} ({instagram_account_id})")
         print(f"   To: {recipient_id}")
         print(f"   Message: {message_text}")
-        print(f"   Using token from: {'Facebook Page' if page_id else 'Instagram Account'}")
+        print(f"   Using Instagram account's page token")
         
         response = requests.post(
             send_url,
