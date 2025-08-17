@@ -154,7 +154,24 @@ class InstagramMessageViewSet(viewsets.ReadOnlyModelViewSet):
     def get_queryset(self):
         # Get all active Instagram accounts for this tenant
         tenant_accounts = InstagramAccountConnection.objects.filter(is_active=True)
-        return InstagramMessage.objects.filter(account_connection__in=tenant_accounts)
+        queryset = InstagramMessage.objects.filter(account_connection__in=tenant_accounts)
+        
+        # Filter by account_id if provided
+        account_id = self.request.query_params.get('account_id', None)
+        if account_id:
+            queryset = queryset.filter(account_connection__instagram_account_id=account_id)
+        
+        # Filter by conversation_id if provided
+        conversation_id = self.request.query_params.get('conversation_id', None)
+        if conversation_id:
+            queryset = queryset.filter(conversation_id=conversation_id)
+        
+        # Filter by sender_id if provided (for Facebook compatibility)
+        sender_id = self.request.query_params.get('sender_id', None)
+        if sender_id:
+            queryset = queryset.filter(sender_id=sender_id)
+        
+        return queryset.order_by('-timestamp')
 
 
 class WhatsAppBusinessConnectionViewSet(viewsets.ModelViewSet):
