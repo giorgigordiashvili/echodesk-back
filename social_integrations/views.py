@@ -520,23 +520,79 @@ def facebook_connection_status(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def facebook_disconnect(request):
-    """Disconnect Facebook integration for current tenant - completely removes page records"""
+    """Disconnect Facebook integration for current tenant - removes pages and associated Instagram accounts"""
     try:
+        logger = logging.getLogger(__name__)
+        
         # Get count before deletion for response
         pages_to_delete = FacebookPageConnection.objects.all()  # All pages for this tenant
-        deleted_count = pages_to_delete.count()
+        page_count = pages_to_delete.count()
         page_names = list(pages_to_delete.values_list('page_name', flat=True))
         
-        # Delete all Facebook page connections for this tenant
+        if page_count == 0:
+            return Response({
+                'status': 'no_pages',
+                'message': 'No Facebook pages found to disconnect'
+            })
+        
+        # Since Instagram accounts are linked to Facebook pages, we should also clean up Instagram data
+        # Get Instagram accounts that will be affected (they use the same page tokens)
+        instagram_accounts = InstagramAccountConnection.objects.filter(is_active=True)
+        instagram_count = instagram_accounts.count()
+        instagram_usernames = list(instagram_accounts.values_list('username', flat=True))
+        
+        # Delete Instagram messages first
+        instagram_message_count = 0
+        for account in instagram_accounts:
+            messages_deleted = InstagramMessage.objects.filter(
+                account_connection=account
+            ).count()
+            InstagramMessage.objects.filter(account_connection=account).delete()
+            instagram_message_count += messages_deleted
+        
+        # Delete Instagram account connections
+        instagram_accounts.delete()
+        
+        # Delete Facebook messages
+        facebook_message_count = 0
+        for page in pages_to_delete:
+            messages_deleted = FacebookMessage.objects.filter(
+                page_connection=page
+            ).count()
+            FacebookMessage.objects.filter(page_connection=page).delete()
+            facebook_message_count += messages_deleted
+        
+        # Delete Facebook page connections
         pages_to_delete.delete()
         
-        return Response({
+        logger.info(f"✅ Facebook disconnect completed:")
+        logger.info(f"   - Facebook pages deleted: {page_count}")
+        logger.info(f"   - Facebook messages deleted: {facebook_message_count}")
+        logger.info(f"   - Instagram accounts deleted: {instagram_count}")
+        logger.info(f"   - Instagram messages deleted: {instagram_message_count}")
+        
+        response_data = {
             'status': 'disconnected',
-            'pages_deleted': deleted_count,
+            'facebook_pages_deleted': page_count,
+            'facebook_messages_deleted': facebook_message_count,
             'deleted_pages': page_names,
-            'message': f'Permanently removed {deleted_count} Facebook page connection(s) for this tenant'
-        })
+            'message': f'Permanently removed {page_count} Facebook page(s) and {facebook_message_count} messages'
+        }
+        
+        # Add Instagram cleanup info if applicable
+        if instagram_count > 0:
+            response_data.update({
+                'instagram_accounts_deleted': instagram_count,
+                'instagram_messages_deleted': instagram_message_count,
+                'deleted_instagram_accounts': instagram_usernames,
+                'message': f'Permanently removed {page_count} Facebook page(s), {instagram_count} Instagram account(s), and all associated messages'
+            })
+        
+        return Response(response_data)
+        
     except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.error(f"Failed to disconnect Facebook: {e}")
         return Response({
             'error': f'Failed to disconnect: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -1694,19 +1750,62 @@ def instagram_connection_status(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def instagram_disconnect(request):
-    """Disconnect Instagram integration for current tenant"""
+    """Disconnect Instagram integration for current tenant and clean up all data"""
     try:
-        # Disconnect all Instagram accounts for this tenant
-        updated_count = InstagramAccountConnection.objects.filter(
-            is_active=True
-        ).update(is_active=False)
+        logger = logging.getLogger(__name__)
+        
+        # Get all Instagram accounts for this tenant before deletion
+        instagram_accounts = InstagramAccountConnection.objects.filter(is_active=True)
+        account_count = instagram_accounts.count()
+        
+        if account_count == 0:
+            return Response({
+                'status': 'no_accounts',
+                'message': 'No active Instagram accounts found to disconnect'
+            })
+        
+        # Get account IDs and usernames for logging
+        account_info = [(acc.instagram_account_id, acc.username) for acc in instagram_accounts]
+        
+        # Delete all Instagram messages for these accounts
+        message_count = 0
+        for account in instagram_accounts:
+            messages_deleted = InstagramMessage.objects.filter(
+                account_connection=account
+            ).count()
+            
+            # Delete the messages
+            InstagramMessage.objects.filter(account_connection=account).delete()
+            message_count += messages_deleted
+            
+            logger.info(f"🗑️ Deleted {messages_deleted} messages for Instagram account @{account.username}")
+        
+        # Now delete the Instagram account connections
+        instagram_accounts.delete()
+        
+        # Note: We don't delete Facebook page connections since they might be used for Facebook messaging
+        # and Instagram accounts are linked to pages, not owned by them
+        
+        logger.info(f"✅ Instagram disconnect completed:")
+        logger.info(f"   - Accounts disconnected: {account_count}")
+        logger.info(f"   - Messages deleted: {message_count}")
+        for account_id, username in account_info:
+            logger.info(f"   - @{username} ({account_id})")
         
         return Response({
             'status': 'disconnected',
-            'accounts_disconnected': updated_count,
-            'message': f'Disconnected {updated_count} Instagram accounts'
+            'accounts_disconnected': account_count,
+            'messages_deleted': message_count,
+            'disconnected_accounts': [
+                {'username': username, 'account_id': account_id} 
+                for account_id, username in account_info
+            ],
+            'message': f'Successfully disconnected {account_count} Instagram accounts and deleted {message_count} messages'
         })
+        
     except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.error(f"Failed to disconnect Instagram: {e}")
         return Response({
             'error': f'Failed to disconnect Instagram: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
