@@ -10,6 +10,7 @@ from django.db import transaction
 from datetime import datetime, timedelta
 from decimal import Decimal
 import calendar
+import django_filters
 
 from .models import (
     WorkSchedule, LeaveType, EmployeeLeaveBalance, LeaveRequest,
@@ -373,13 +374,24 @@ class LeaveRequestViewSet(viewsets.ModelViewSet):
         return Response(calendar_events)
 
 
+class EmployeeWorkScheduleFilter(django_filters.FilterSet):
+    """Custom filter for EmployeeWorkSchedule to handle employee filtering properly"""
+    employee = django_filters.NumberFilter(field_name='employee__id')
+    work_schedule = django_filters.NumberFilter(field_name='work_schedule__id')
+    is_active = django_filters.BooleanFilter()
+    
+    class Meta:
+        model = EmployeeWorkSchedule
+        fields = ['employee', 'work_schedule', 'is_active']
+
+
 class EmployeeWorkScheduleViewSet(viewsets.ModelViewSet):
     """ViewSet for managing employee work schedules"""
     queryset = EmployeeWorkSchedule.objects.all()
     serializer_class = EmployeeWorkScheduleSerializer
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['employee', 'work_schedule', 'is_active']
+    filterset_class = EmployeeWorkScheduleFilter
     search_fields = ['employee__first_name', 'employee__last_name']
     ordering = ['-effective_from']
     

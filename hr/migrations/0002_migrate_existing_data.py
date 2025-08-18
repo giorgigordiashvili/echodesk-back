@@ -33,17 +33,30 @@ class MigrateExistingHRDataOperation(Operation):
             """)
             existing_tables = {row[0] for row in cursor.fetchall()}
             
-            if not existing_tables:
-                # No existing tables, this is a fresh installation
-                print("Fresh installation - creating default work schedule")
+            # Check if the hr_workschedule table exists before trying to insert
+            cursor.execute("""
+                SELECT table_name 
+                FROM information_schema.tables 
+                WHERE table_schema = current_schema() 
+                AND table_name = 'hr_workschedule'
+            """)
+            workschedule_table_exists = cursor.fetchone() is not None
+            
+            if not existing_tables or not workschedule_table_exists:
+                # No existing tables or work schedule table doesn't exist yet, skip data migration
+                print("Fresh installation or work schedule table not ready - skipping data migration")
+                return
+            
+            print(f"Found existing HR tables: {existing_tables}")
+            
+            # Only proceed if hr_workschedule table exists
+            if 'hr_workschedule' in existing_tables:
+                print("Creating default work schedule...")
                 cursor.execute("""
                     INSERT INTO hr_workschedule (name, description, schedule_type)
                     VALUES ('Standard 9-5', 'Standard Monday to Friday, 9 AM to 5 PM', 'standard')
                     ON CONFLICT (name) DO NOTHING;
                 """)
-                return
-            
-            print(f"Found existing HR tables: {existing_tables}")
             
             # Handle hr_leavetype table updates
             if 'hr_leavetype' in existing_tables:
