@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin, GroupAdmin as BaseGroupAdmin
 from django.contrib.auth.models import Group
-from .models import User, Department, TenantGroup
+from .models import User, Department
 
 
 # Unregister the default Group admin and register our custom one
@@ -22,35 +22,7 @@ class DepartmentAdmin(admin.ModelAdmin):
     get_employee_count.short_description = 'Employees'
 
 
-@admin.register(TenantGroup)
-class TenantGroupAdmin(admin.ModelAdmin):
-    """TenantGroup admin interface"""
-    list_display = ('name', 'description', 'get_member_count', 'get_permissions_summary')
-    list_filter = (
-        'can_view_all_tickets', 'can_manage_users', 'can_make_calls', 
-        'can_manage_groups', 'can_manage_settings'
-    )
-    search_fields = ('name', 'description')
-    ordering = ('name',)
-    
-    def get_member_count(self, obj):
-        return obj.tenant_groups.count()
-    get_member_count.short_description = 'Members'
-    
-    def get_permissions_summary(self, obj):
-        permissions = []
-        if obj.can_view_all_tickets:
-            permissions.append('View All Tickets')
-        if obj.can_manage_users:
-            permissions.append('Manage Users')
-        if obj.can_make_calls:
-            permissions.append('Make Calls')
-        if obj.can_manage_groups:
-            permissions.append('Manage Groups')
-        if obj.can_manage_settings:
-            permissions.append('Manage Settings')
-        return ', '.join(permissions) if permissions else 'No special permissions'
-    get_permissions_summary.short_description = 'Key Permissions'
+# TenantGroup admin removed - groups are no longer used
 
 
 class CustomGroupAdmin(BaseGroupAdmin):
