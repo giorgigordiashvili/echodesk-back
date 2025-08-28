@@ -70,7 +70,6 @@ TENANT_APPS = [
     'crm',      # Keep in tenant apps too for backwards compatibility
     'tickets',
     'social_integrations',
-    'hr',       # Human Resources management
 ]
 
 INSTALLED_APPS = list(SHARED_APPS) + [app for app in TENANT_APPS if app not in SHARED_APPS]
