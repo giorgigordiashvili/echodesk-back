@@ -53,8 +53,8 @@ class MigrateExistingHRDataOperation(Operation):
             if 'hr_workschedule' in existing_tables:
                 print("Creating default work schedule...")
                 cursor.execute("""
-                    INSERT INTO hr_workschedule (name, description, schedule_type)
-                    VALUES ('Standard 9-5', 'Standard Monday to Friday, 9 AM to 5 PM', 'standard')
+                    INSERT INTO hr_workschedule (name, description, schedule_type, hours_per_day, hours_per_week)
+                    VALUES ('Standard 9-5', 'Standard Monday to Friday, 9 AM to 5 PM', 'standard', 8.0, 40.0)
                     ON CONFLICT (name) DO NOTHING;
                 """)
             
@@ -240,8 +240,8 @@ class MigrateExistingHRDataOperation(Operation):
                     """)
                     # Create default schedule
                     cursor.execute("""
-                        INSERT INTO hr_workschedule (name, description, schedule_type)
-                        VALUES ('Standard 9-5', 'Standard Monday to Friday, 9 AM to 5 PM', 'standard')
+                        INSERT INTO hr_workschedule (name, description, schedule_type, hours_per_day, hours_per_week)
+                        VALUES ('Standard 9-5', 'Standard Monday to Friday, 9 AM to 5 PM', 'standard', 8.0, 40.0)
                         ON CONFLICT (name) DO NOTHING;
                     """)
                 
