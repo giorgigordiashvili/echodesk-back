@@ -1466,7 +1466,7 @@ def instagram_oauth_start(request):
             f"https://www.facebook.com/v23.0/dialog/oauth?"
             f"client_id={fb_app_id}&"
             f"redirect_uri={quote(redirect_uri)}&"
-            f"scope=instagram_basic,instagram_manage_messages,pages_show_list,business_management&"
+            f"scope=instagram_basic,instagram_manage_messages,pages_show_list,pages_messaging,business_management&"
             f"state={state}&"
             f"response_type=code&"
             f"auth_type=rerequest"
@@ -1869,18 +1869,17 @@ def instagram_send_message(request):
                 'error': 'Instagram account not found or not connected'
             }, status=status.HTTP_404_NOT_FOUND)
         
-        # Instagram messages are sent through the Facebook Pages API
-        # The Instagram account should have the page access token stored
-        # We use the page token that was stored during OAuth
+        # Instagram messages are sent through the Facebook Graph API
+        # Using the Facebook Page access token stored during OAuth
         
-        page_token = account_connection.access_token
+        page_access_token = account_connection.access_token
         
-        if not page_token:
+        if not page_access_token:
             return Response({
                 'error': 'No valid access token found for Instagram account. Please reconnect your Instagram account.'
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        # Instagram messaging API endpoint (uses the Instagram account ID)
+        # Instagram messaging via Facebook Graph API (correct approach)
         send_url = f"https://graph.facebook.com/v23.0/{instagram_account_id}/messages"
         
         message_data = {
@@ -1893,14 +1892,14 @@ def instagram_send_message(request):
         }
         
         params = {
-            'access_token': page_token
+            'access_token': page_access_token
         }
         
         print(f"🚀 Sending Instagram message:")
         print(f"   Account: @{account_connection.username} ({instagram_account_id})")
         print(f"   To: {recipient_id}")
         print(f"   Message: {message_text}")
-        print(f"   Using Instagram account's page token")
+        print(f"   Using Facebook Page access token")
         
         response = requests.post(
             send_url,
