@@ -1466,7 +1466,7 @@ def instagram_oauth_start(request):
             f"https://www.facebook.com/v23.0/dialog/oauth?"
             f"client_id={fb_app_id}&"
             f"redirect_uri={quote(redirect_uri)}&"
-            f"scope=pages_show_list,pages_messaging,business_management&"
+            f"scope=pages_show_list,pages_messaging,business_management,instagram_manage_messages&"
             f"state={state}&"
             f"response_type=code&"
             f"auth_type=rerequest"
