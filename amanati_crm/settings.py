@@ -344,11 +344,8 @@ SOCIAL_INTEGRATIONS = {
     ],
     # Instagram configuration (uses Facebook app credentials)
     'INSTAGRAM_VERIFY_TOKEN': config('INSTAGRAM_WEBHOOK_VERIFY_TOKEN', default='echodesk_instagram_webhook_token_2024'),
-    'INSTAGRAM_SCOPES': [
-        'instagram_basic',  # Access to Instagram account info
-        'instagram_manage_messages',  # Read and send Instagram direct messages
-        'pages_show_list',  # Access list of connected pages (for business accounts)
-    ],
+    # Instagram access is handled through Facebook Pages permissions
+    # No separate Instagram scopes needed when using Facebook API integration
     # WhatsApp Business API configuration
     'WHATSAPP_VERIFY_TOKEN': config('WHATSAPP_WEBHOOK_VERIFY_TOKEN', default='echodesk_whatsapp_webhook_token_2024'),
     'WHATSAPP_API_VERSION': config('WHATSAPP_API_VERSION', default='v18.0'),
