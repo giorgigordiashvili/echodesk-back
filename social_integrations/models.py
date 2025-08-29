@@ -42,6 +42,7 @@ class InstagramAccountConnection(models.Model):
     username = models.CharField(max_length=500)  # Increased from 200 to handle longer usernames
     name = models.CharField(max_length=500, blank=True)  # Increased from 200 to handle longer names/emojis
     profile_picture_url = models.URLField(max_length=2000, blank=True)  # Increased for longer URLs
+    account_type = models.CharField(max_length=20, choices=[('BUSINESS', 'Business'), ('CREATOR', 'Creator')], default='BUSINESS')  # Instagram account type
     access_token = models.TextField()
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
