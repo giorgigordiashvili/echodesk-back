@@ -1461,15 +1461,14 @@ def instagram_oauth_start(request):
         logger.info(f"Generated raw state parameter: {state_raw}")
         logger.info(f"URL encoded state parameter: {state}")
         
-        # Instagram OAuth URL (using Facebook OAuth v23.0 with Instagram permissions)
+        # Instagram Business Login OAuth URL (using Instagram OAuth)
         oauth_url = (
-            f"https://www.facebook.com/v23.0/dialog/oauth?"
+            f"https://www.instagram.com/oauth/authorize?"
             f"client_id={fb_app_id}&"
             f"redirect_uri={quote(redirect_uri)}&"
-            f"scope=pages_show_list,pages_messaging,business_management,instagram_manage_messages&"
+            f"scope=instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments&"
             f"state={state}&"
-            f"response_type=code&"
-            f"auth_type=rerequest"
+            f"response_type=code"
         )
         
         return Response({
@@ -1581,18 +1580,19 @@ def instagram_oauth_callback(request):
             from urllib.parse import quote_plus
             return redirect(f"{frontend_url}/?instagram_status=error&message={quote_plus(error_msg)}")
         
-        # Exchange authorization code for access token
-        token_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v23.0')}/oauth/access_token"
-        token_params = {
+        # Exchange authorization code for access token using Instagram API
+        token_url = f"https://api.instagram.com/oauth/access_token"
+        token_data = {
             'client_id': getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_APP_ID'),
             'client_secret': getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_APP_SECRET'),
             'redirect_uri': 'https://api.echodesk.ge/api/social/instagram/oauth/callback/',
-            'code': code
+            'code': code,
+            'grant_type': 'authorization_code'
         }
         
         logger.info(f"Exchanging Instagram code for access token using URL: {token_url}")
-        logger.info(f"Token exchange parameters: {dict(token_params, client_secret='[HIDDEN]')}")
-        token_response = requests.get(token_url, params=token_params)
+        logger.info(f"Token exchange parameters: {dict(token_data, client_secret='[HIDDEN]')}")
+        token_response = requests.post(token_url, data=token_data)
         token_data = token_response.json()
         
         if 'error' in token_data:
@@ -1608,129 +1608,78 @@ def instagram_oauth_callback(request):
             from urllib.parse import quote_plus
             return redirect(f"{frontend_url}/?instagram_status=error&message={quote_plus(error_msg)}")
         
-        # Get user's Facebook pages (needed for Instagram business accounts)
-        pages_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v23.0')}/me/accounts"
-        pages_params = {
+        # Get Instagram user info using Instagram Graph API
+        me_url = f"https://graph.instagram.com/me"
+        me_params = {
             'access_token': user_access_token,
-            'fields': 'id,name,instagram_business_account'
+            'fields': 'id,username'
         }
         
-        logger.info(f"Fetching Facebook pages with Instagram business accounts for tenant {tenant_name}...")
-        logger.info(f"Pages API URL: {pages_url}")
-        logger.info(f"Pages API params: {dict(pages_params, access_token='[HIDDEN]')}")
+        logger.info(f"Fetching Instagram user info for tenant {tenant_name}...")
+        logger.info(f"Instagram me API URL: {me_url}")
+        logger.info(f"Instagram me API params: {dict(me_params, access_token='[HIDDEN]')}")
         
-        pages_response = requests.get(pages_url, params=pages_params)
-        pages_data = pages_response.json()
+        me_response = requests.get(me_url, params=me_params)
+        me_data = me_response.json()
         
-        logger.info(f"Pages API response status: {pages_response.status_code}")
-        logger.info(f"Pages API response data: {pages_data}")
+        logger.info(f"Instagram me API response status: {me_response.status_code}")
+        logger.info(f"Instagram me API response data: {me_data}")
         
-        if 'error' in pages_data:
-            error_msg = f"Failed to fetch pages: {pages_data.get('error', {}).get('message', 'Unknown error')}"
-            logger.error(f"Instagram pages fetch error: {pages_data}")
+        if 'error' in me_data:
+            error_msg = f"Failed to fetch Instagram user info: {me_data.get('error', {}).get('message', 'Unknown error')}"
+            logger.error(f"Instagram user info fetch error: {me_data}")
             from urllib.parse import quote_plus
             return redirect(f"{frontend_url}/?instagram_status=error&message={quote_plus(error_msg)}")
         
-        pages = pages_data.get('data', [])
-        instagram_accounts = []
+        instagram_user_id = me_data.get('id')
+        instagram_username = me_data.get('username')
         
-        # Find pages with Instagram business accounts and get page access tokens
-        for page in pages:
-            if 'instagram_business_account' in page:
-                instagram_account_id = page['instagram_business_account']['id']
-                page_id = page['id']
-                page_name = page['name']
-                
-                # Get page access token (needed for Instagram messaging)
-                page_token_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v23.0')}/{page_id}"
-                page_token_params = {
-                    'access_token': user_access_token,
-                    'fields': 'access_token'
-                }
-                
-                page_token_response = requests.get(page_token_url, params=page_token_params)
-                page_token_data = page_token_response.json()
-                
-                if 'access_token' not in page_token_data:
-                    logger.warning(f"Failed to get page access token for {page_name}")
-                    continue
-                
-                page_access_token = page_token_data['access_token']
-                
-                # Get Instagram account details using page access token
-                instagram_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v23.0')}/{instagram_account_id}"
-                instagram_params = {
-                    'access_token': page_access_token,  # Use page token, not user token
-                    'fields': 'id,username,name,profile_picture_url'
-                }
-                
-                logger.info(f"Fetching Instagram account details for {instagram_account_id}...")
-                instagram_response = requests.get(instagram_url, params=instagram_params)
-                instagram_data = instagram_response.json()
-                
-                if 'error' not in instagram_data:
-                    instagram_accounts.append({
-                        'account_id': instagram_account_id,
-                        'username': instagram_data.get('username', ''),
-                        'name': instagram_data.get('name', ''),
-                        'profile_picture_url': instagram_data.get('profile_picture_url', ''),
-                        'access_token': page_access_token,  # Store page token for messaging
-                        'page_id': page_id,
-                        'page_name': page_name
-                    })
-                else:
-                    logger.warning(f"Failed to fetch Instagram account details for {instagram_account_id}: {instagram_data}")
+        if not instagram_user_id or not instagram_username:
+            error_msg = "Failed to get Instagram user info"
+            logger.error("Instagram user info incomplete")
+            from urllib.parse import quote_plus
+            return redirect(f"{frontend_url}/?instagram_status=error&message={quote_plus(error_msg)}")
+        
+        instagram_accounts = [{
+            'instagram_account_id': instagram_user_id,
+            'username': instagram_username,
+            'access_token': user_access_token
+        }]
         
         if not instagram_accounts:
-            error_msg = "No Instagram business accounts found for this Facebook account"
-            logger.warning("User has no Instagram business accounts")
+            error_msg = "No Instagram business account found"
+            logger.warning("Failed to get Instagram user info")
             from urllib.parse import quote_plus
             return redirect(f"{frontend_url}/?instagram_status=error&message={quote_plus(error_msg)}")
         
         # Import tenant schema context for multi-tenant database operations
         from tenant_schemas.utils import schema_context
         
-        # Save Instagram account connections and associated Facebook pages to database
+        # Save Instagram account connection to database (no Facebook pages needed with Instagram Business Login)
         saved_accounts = 0
         with schema_context(tenant_schema):
             for account in instagram_accounts:
-                account_id = account['account_id']
+                account_id = account['instagram_account_id']
                 username = account['username']
-                page_id = account['page_id']
-                page_name = account['page_name']
-                page_access_token = account['access_token']
-                
-                # First, create or update the Facebook Page connection
-                page_connection, page_created = FacebookPageConnection.objects.update_or_create(
-                    page_id=page_id,
-                    defaults={
-                        'page_name': page_name,
-                        'page_access_token': page_access_token,
-                        'is_active': True
-                    }
-                )
-                
-                if page_created:
-                    logger.info(f"✅ Created Facebook page connection: {page_name} ({page_id})")
-                else:
-                    logger.info(f"🔄 Updated Facebook page connection: {page_name} ({page_id})")
+                access_token = account['access_token']
                 
                 # Create or update Instagram account connection
                 account_connection, created = InstagramAccountConnection.objects.update_or_create(
                     instagram_account_id=account_id,
                     defaults={
                         'username': username,
-                        'name': account['name'],
-                        'profile_picture_url': account['profile_picture_url'],
-                        'access_token': page_access_token,  # Store page token for messaging
-                        'is_active': True
+                        'name': username,  # Use username as name
+                        'profile_picture_url': '',  # Will be fetched later if needed
+                        'access_token': access_token,  # Store Instagram access token directly
+                        'is_active': True,
+                        'account_type': 'BUSINESS'  # Instagram Business Login
                     }
                 )
                 
                 if created:
-                    logger.info(f"✅ Created new Instagram account connection: @{username} ({account_id}) linked to page {page_name}")
+                    logger.info(f"✅ Created new Instagram Business account connection: @{username} ({account_id})")
                 else:
-                    logger.info(f"🔄 Updated existing Instagram account connection: @{username} ({account_id}) linked to page {page_name}")
+                    logger.info(f"🔄 Updated existing Instagram Business account connection: @{username} ({account_id})")
                 
                 saved_accounts += 1
         
@@ -1888,9 +1837,9 @@ def instagram_send_message(request):
                 'error': 'Facebook app credentials not configured properly'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
-        # Instagram messaging via Facebook Graph API (correct approach)
-        # Ensure we're using Facebook app credentials for the API call
-        send_url = f"https://graph.facebook.com/v23.0/{instagram_account_id}/messages"
+        # Instagram messaging via Instagram Graph API (correct approach)
+        # Use Instagram Graph API endpoints, not Facebook Graph API
+        send_url = f"https://graph.instagram.com/v23.0/me/messages"
         
         message_data = {
             'recipient': {'id': recipient_id},
@@ -1898,62 +1847,25 @@ def instagram_send_message(request):
         }
         
         headers = {
+            'Authorization': f'Bearer {page_access_token}',
             'Content-Type': 'application/json',
         }
         
-        # Use Facebook Page access token obtained with Facebook app credentials
-        # Add app secret proof for enhanced security
-        import hashlib
-        import hmac
-        
-        app_secret_proof = hmac.new(
-            fb_app_secret.encode('utf-8'),
-            page_access_token.encode('utf-8'),
-            hashlib.sha256
-        ).hexdigest()
-        
-        params = {
-            'access_token': page_access_token,
-            'appsecret_proof': app_secret_proof
-        }
+        # No params needed with Bearer token authentication
+        params = {}
         
         print(f"🚀 Sending Instagram message:")
         print(f"   Account: @{account_connection.username} ({instagram_account_id})")
         print(f"   To: {recipient_id}")
         print(f"   Message: {message_text}")
-        print(f"   Using Facebook Page access token")
-        print(f"   Facebook App ID: {fb_app_id}")
+        print(f"   Using Instagram Graph API")
         print(f"   API URL: {send_url}")
-        
-        # Validate token belongs to our Facebook app
-        token_debug_url = f"https://graph.facebook.com/debug_token"
-        token_debug_params = {
-            'input_token': page_access_token,
-            'access_token': f"{fb_app_id}|{fb_app_secret}"
-        }
-        
-        try:
-            token_debug_response = requests.get(token_debug_url, params=token_debug_params)
-            if token_debug_response.status_code == 200:
-                token_info = token_debug_response.json().get('data', {})
-                app_id = token_info.get('app_id')
-                is_valid = token_info.get('is_valid', False)
-                print(f"   Token validation - App ID: {app_id}, Valid: {is_valid}")
-                
-                if app_id != fb_app_id:
-                    print(f"⚠️ WARNING: Token was issued by app {app_id}, but we're using app {fb_app_id}")
-                if not is_valid:
-                    print(f"⚠️ WARNING: Access token is not valid")
-            else:
-                print(f"⚠️ Could not validate access token: {token_debug_response.text}")
-        except Exception as token_error:
-            print(f"⚠️ Token validation failed: {token_error}")
+        print(f"   Using Bearer token authentication")
         
         response = requests.post(
             send_url,
             json=message_data,
-            headers=headers,
-            params=params
+            headers=headers
         )
         
         print(f"📤 Instagram API Response: {response.status_code} - {response.text}")
