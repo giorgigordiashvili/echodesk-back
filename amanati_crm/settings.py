@@ -342,13 +342,6 @@ SOCIAL_INTEGRATIONS = {
         'public_profile',  # Basic profile information
         'email',  # Email address
     ],
-    # Instagram configuration (uses Facebook app credentials)
-    'INSTAGRAM_VERIFY_TOKEN': config('INSTAGRAM_WEBHOOK_VERIFY_TOKEN', default='echodesk_instagram_webhook_token_2024'),
-    # Instagram access is handled through Facebook Pages permissions
-    # No separate Instagram scopes needed when using Facebook API integration
-    # WhatsApp Business API configuration
-    'WHATSAPP_VERIFY_TOKEN': config('WHATSAPP_WEBHOOK_VERIFY_TOKEN', default='echodesk_whatsapp_webhook_token_2024'),
-    'WHATSAPP_API_VERSION': config('WHATSAPP_API_VERSION', default='v18.0'),
 }
 
 # ASGI Application for WebSocket support

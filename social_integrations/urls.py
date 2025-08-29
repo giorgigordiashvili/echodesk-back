@@ -6,10 +6,6 @@ from . import views, admin_views
 router = DefaultRouter()
 router.register(r'facebook-pages', views.FacebookPageConnectionViewSet, basename='facebook_pages')
 router.register(r'facebook-messages', views.FacebookMessageViewSet, basename='facebook_messages')
-router.register(r'instagram-accounts', views.InstagramAccountConnectionViewSet, basename='instagram_accounts')
-router.register(r'instagram-messages', views.InstagramMessageViewSet, basename='instagram_messages')
-router.register(r'whatsapp-connections', views.WhatsAppBusinessConnectionViewSet, basename='whatsapp_connections')
-router.register(r'whatsapp-messages', views.WhatsAppMessageViewSet, basename='whatsapp_messages')
 
 # URL patterns for the social integrations app
 urlpatterns = [
@@ -29,24 +25,6 @@ urlpatterns = [
     path('facebook/disconnect/', views.facebook_disconnect, name='facebook_disconnect'),
     path('facebook/send-message/', views.facebook_send_message, name='facebook_send_message'),
     path('facebook/webhook/', views.facebook_webhook, name='facebook_webhook'),
-    
-    # Instagram OAuth endpoints
-    path('instagram/oauth/start/', views.instagram_oauth_start, name='instagram_oauth_start'),
-    path('instagram/oauth/callback/', views.instagram_oauth_callback, name='instagram_oauth_callback'),
-    path('instagram/status/', views.instagram_connection_status, name='instagram_status'),
-    path('instagram/disconnect/', views.instagram_disconnect, name='instagram_disconnect'),
-    path('instagram/send-message/', views.instagram_send_message, name='instagram_send_message'),
-    path('instagram/conversations/', views.instagram_conversations, name='instagram_conversations'),
-    path('instagram/conversations/<str:conversation_id>/messages/', views.instagram_conversation_messages, name='instagram_conversation_messages'),
-    path('instagram/webhook/', views.instagram_webhook, name='instagram_webhook'),
-    
-    # WhatsApp Business API endpoints
-    path('whatsapp/setup/', views.whatsapp_connection_setup, name='whatsapp_setup'),
-    path('whatsapp/connect/', views.whatsapp_connect_account, name='whatsapp_connect'),
-    path('whatsapp/status/', views.whatsapp_connection_status, name='whatsapp_status'),
-    path('whatsapp/disconnect/', views.whatsapp_disconnect, name='whatsapp_disconnect'),
-    path('whatsapp/send-message/', views.whatsapp_send_message, name='whatsapp_send_message'),
-    path('whatsapp/webhook/', views.whatsapp_webhook, name='whatsapp_webhook'),
     
     # Admin OAuth endpoints
     path('admin/facebook/oauth/start/', admin_views.facebook_oauth_admin_start, name='admin_facebook_oauth_start'),
