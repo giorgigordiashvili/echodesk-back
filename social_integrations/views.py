@@ -1879,7 +1879,17 @@ def instagram_send_message(request):
                 'error': 'No valid access token found for Instagram account. Please reconnect your Instagram account.'
             }, status=status.HTTP_400_BAD_REQUEST)
         
+        # Get Facebook app credentials first
+        fb_app_id = getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_APP_ID')
+        fb_app_secret = getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_APP_SECRET')
+        
+        if not fb_app_id or not fb_app_secret:
+            return Response({
+                'error': 'Facebook app credentials not configured properly'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
         # Instagram messaging via Facebook Graph API (correct approach)
+        # Ensure we're using Facebook app credentials for the API call
         send_url = f"https://graph.facebook.com/v23.0/{instagram_account_id}/messages"
         
         message_data = {
@@ -1891,8 +1901,20 @@ def instagram_send_message(request):
             'Content-Type': 'application/json',
         }
         
+        # Use Facebook Page access token obtained with Facebook app credentials
+        # Add app secret proof for enhanced security
+        import hashlib
+        import hmac
+        
+        app_secret_proof = hmac.new(
+            fb_app_secret.encode('utf-8'),
+            page_access_token.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+        
         params = {
-            'access_token': page_access_token
+            'access_token': page_access_token,
+            'appsecret_proof': app_secret_proof
         }
         
         print(f"🚀 Sending Instagram message:")
@@ -1900,6 +1922,32 @@ def instagram_send_message(request):
         print(f"   To: {recipient_id}")
         print(f"   Message: {message_text}")
         print(f"   Using Facebook Page access token")
+        print(f"   Facebook App ID: {fb_app_id}")
+        print(f"   API URL: {send_url}")
+        
+        # Validate token belongs to our Facebook app
+        token_debug_url = f"https://graph.facebook.com/debug_token"
+        token_debug_params = {
+            'input_token': page_access_token,
+            'access_token': f"{fb_app_id}|{fb_app_secret}"
+        }
+        
+        try:
+            token_debug_response = requests.get(token_debug_url, params=token_debug_params)
+            if token_debug_response.status_code == 200:
+                token_info = token_debug_response.json().get('data', {})
+                app_id = token_info.get('app_id')
+                is_valid = token_info.get('is_valid', False)
+                print(f"   Token validation - App ID: {app_id}, Valid: {is_valid}")
+                
+                if app_id != fb_app_id:
+                    print(f"⚠️ WARNING: Token was issued by app {app_id}, but we're using app {fb_app_id}")
+                if not is_valid:
+                    print(f"⚠️ WARNING: Access token is not valid")
+            else:
+                print(f"⚠️ Could not validate access token: {token_debug_response.text}")
+        except Exception as token_error:
+            print(f"⚠️ Token validation failed: {token_error}")
         
         response = requests.post(
             send_url,
@@ -1943,18 +1991,40 @@ def instagram_send_message(request):
             
             # Provide more specific error messages
             if error_code == 3:
-                error_message += " - Your app may not have Instagram messaging permissions enabled. Check Meta Developers Console."
+                error_message += f" - Your Facebook app (ID: {fb_app_id}) does not have Instagram messaging capability enabled."
+                troubleshooting_info = {
+                    'error_type': 'Missing App Capability',
+                    'solutions': [
+                        'Enable Instagram messaging in Meta Developers Console for your app',
+                        'Submit your app for review to access Instagram messaging features',
+                        'Ensure Instagram account is connected to a Facebook Page that your app has access to',
+                        'Verify your Facebook app has the correct permissions: pages_messaging, instagram_manage_messages'
+                    ],
+                    'app_id_used': fb_app_id,
+                    'token_source': 'Facebook Page Access Token'
+                }
             elif error_code == 190:
                 error_message += " - Access token issue. The Instagram account may not be properly connected."
+                troubleshooting_info = {
+                    'error_type': 'Token Issue',
+                    'solutions': [
+                        'Reconnect your Instagram account through Facebook OAuth',
+                        'Verify the access token was obtained using the correct Facebook app',
+                        'Check if the token has expired'
+                    ],
+                    'app_id_used': fb_app_id
+                }
+            else:
+                troubleshooting_info = {
+                    'error_type': f'API Error {error_code}',
+                    'app_id_used': fb_app_id,
+                    'token_source': 'Facebook Page Access Token'
+                }
             
             return Response({
                 'error': f'Failed to send Instagram message: {error_message}',
                 'instagram_error': error_data,
-                'troubleshooting': {
-                    'check_permissions': 'Ensure your Meta app has instagram_manage_messages permission',
-                    'check_connection': 'Verify Instagram account is connected to a Facebook Page',
-                    'check_app_review': 'Instagram messaging may require app review approval'
-                }
+                'troubleshooting': troubleshooting_info
             }, status=status.HTTP_400_BAD_REQUEST)
             
     except Exception as e:
