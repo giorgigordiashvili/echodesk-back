@@ -35,19 +35,46 @@ class TicketColumnViewSet(viewsets.ModelViewSet):
 
     def get_permissions(self):
         """
-        Only staff can create, update, or delete columns.
+        Only superadmins can create, update, or delete columns.
         Anyone authenticated can view columns.
         """
-        if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            permission_classes = [permissions.IsAdminUser]
+        if self.action in ['create', 'update', 'partial_update', 'destroy', 'reorder']:
+            permission_classes = [permissions.IsAuthenticated]
         else:
             permission_classes = [permissions.IsAuthenticated]
         
         return [permission() for permission in permission_classes]
+    
+    def check_superadmin_permission(self, request):
+        """Check if user is superadmin."""
+        if not request.user.is_superuser:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Only superadmin users can manage ticket statuses.")
+    
+    def create(self, request, *args, **kwargs):
+        """Create a new ticket column (superadmin only)."""
+        self.check_superadmin_permission(request)
+        return super().create(request, *args, **kwargs)
+    
+    def update(self, request, *args, **kwargs):
+        """Update a ticket column (superadmin only)."""
+        self.check_superadmin_permission(request)
+        return super().update(request, *args, **kwargs)
+    
+    def partial_update(self, request, *args, **kwargs):
+        """Partially update a ticket column (superadmin only)."""
+        self.check_superadmin_permission(request)
+        return super().partial_update(request, *args, **kwargs)
+    
+    def destroy(self, request, *args, **kwargs):
+        """Delete a ticket column (superadmin only)."""
+        self.check_superadmin_permission(request)
+        return super().destroy(request, *args, **kwargs)
 
-    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAdminUser])
+    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
     def reorder(self, request, pk=None):
-        """Reorder columns."""
+        """Reorder columns (superadmin only)."""
+        self.check_superadmin_permission(request)
         column = self.get_object()
         new_position = request.data.get('position')
         

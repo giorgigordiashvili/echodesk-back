@@ -111,16 +111,18 @@ class TicketSerializer(serializers.ModelSerializer):
     )
     comments = TicketCommentSerializer(many=True, read_only=True)
     comments_count = serializers.SerializerMethodField()
+    status = serializers.ReadOnlyField()  # Dynamic status from column
+    is_closed = serializers.ReadOnlyField()  # Dynamic closed status from column
     
     class Meta:
         model = Ticket
         fields = [
-            'id', 'title', 'description', 'status', 'priority',
+            'id', 'title', 'description', 'status', 'priority', 'is_closed',
             'column', 'column_id', 'position_in_column',
             'created_at', 'updated_at', 'created_by', 'assigned_to',
             'assigned_to_id', 'tags', 'tag_ids', 'comments', 'comments_count'
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at', 'created_by']
+        read_only_fields = ['id', 'created_at', 'updated_at', 'created_by', 'status', 'is_closed']
 
     def get_comments_count(self, obj):
         """Get the number of comments for this ticket."""
@@ -185,11 +187,13 @@ class TicketListSerializer(serializers.ModelSerializer):
     column = TicketColumnSerializer(read_only=True)
     tags = TagSerializer(many=True, read_only=True)
     comments_count = serializers.SerializerMethodField()
+    status = serializers.ReadOnlyField()  # Dynamic status from column
+    is_closed = serializers.ReadOnlyField()  # Dynamic closed status from column
     
     class Meta:
         model = Ticket
         fields = [
-            'id', 'title', 'status', 'priority', 'column', 'position_in_column',
+            'id', 'title', 'status', 'priority', 'is_closed', 'column', 'position_in_column',
             'created_at', 'updated_at', 'created_by', 'assigned_to', 'tags', 'comments_count'
         ]
         read_only_fields = fields

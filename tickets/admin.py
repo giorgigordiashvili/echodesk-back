@@ -1,6 +1,54 @@
 from django.contrib import admin
 from django.utils.html import format_html
-from .models import Ticket, Tag, TicketComment
+from .models import Ticket, Tag, TicketComment, TicketColumn
+
+
+@admin.register(TicketColumn)
+class TicketColumnAdmin(admin.ModelAdmin):
+    """Admin configuration for TicketColumn model."""
+    list_display = ('name', 'color_badge', 'position', 'is_default', 'is_closed_status', 'tickets_count', 'created_at')
+    list_filter = ('is_default', 'is_closed_status', 'created_at')
+    search_fields = ('name', 'description')
+    ordering = ('position', 'name')
+    readonly_fields = ('created_at', 'updated_at', 'created_by')
+    
+    fieldsets = (
+        ('Basic Information', {
+            'fields': ('name', 'description', 'color', 'position')
+        }),
+        ('Status Settings', {
+            'fields': ('is_default', 'is_closed_status')
+        }),
+        ('Metadata', {
+            'fields': ('created_by', 'created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    def color_badge(self, obj):
+        """Display color as a badge."""
+        return format_html(
+            '<span style="background-color: {}; color: white; padding: 2px 8px; border-radius: 3px; font-size: 11px;">{}</span>',
+            obj.color, obj.color
+        )
+    color_badge.short_description = 'Color'
+    
+    def tickets_count(self, obj):
+        """Display the number of tickets in this column."""
+        count = obj.tickets.count()
+        if count > 0:
+            return format_html(
+                '<a href="/admin/tickets/ticket/?column__id__exact={}">{} tickets</a>',
+                obj.id, count
+            )
+        return '0 tickets'
+    tickets_count.short_description = 'Tickets Count'
+    
+    def save_model(self, request, obj, form, change):
+        """Set created_by to current user if creating new column."""
+        if not change and not obj.created_by_id:
+            obj.created_by = request.user
+        super().save_model(request, obj, form, change)
 
 
 @admin.register(Tag)
@@ -45,7 +93,7 @@ class TicketAdmin(admin.ModelAdmin):
         'assigned_to', 'comments_count', 'created_at', 'updated_at'
     )
     list_filter = (
-        'status', 'priority', 'created_at', 'updated_at', 
+        'column', 'priority', 'created_at', 'updated_at', 
         'assigned_to', 'tags'
     )
     search_fields = (
@@ -62,7 +110,7 @@ class TicketAdmin(admin.ModelAdmin):
     
     fieldsets = (
         ('Basic Information', {
-            'fields': ('title', 'description', 'status', 'priority')
+            'fields': ('title', 'description', 'column', 'priority', 'position_in_column')
         }),
         ('Assignment', {
             'fields': ('created_by', 'assigned_to', 'tags')
@@ -77,16 +125,13 @@ class TicketAdmin(admin.ModelAdmin):
 
     def status_badge(self, obj):
         """Display status with color coding."""
-        colors = {
-            'open': '#dc3545',      # Red
-            'in_progress': '#ffc107', # Yellow
-            'resolved': '#28a745',   # Green
-            'closed': '#6c757d'      # Gray
-        }
-        color = colors.get(obj.status, '#6c757d')
+        if obj.column:
+            return format_html(
+                '<span style="background-color: {}; color: white; padding: 2px 6px; border-radius: 3px; font-size: 11px;">{}</span>',
+                obj.column.color, obj.column.name
+            )
         return format_html(
-            '<span style="color: {}; font-weight: bold;">{}</span>',
-            color, obj.get_status_display()
+            '<span style="color: #6c757d; font-style: italic;">No Status</span>'
         )
     status_badge.short_description = 'Status'
 
@@ -133,7 +178,7 @@ class TicketAdmin(admin.ModelAdmin):
 class TicketCommentAdmin(admin.ModelAdmin):
     """Admin configuration for TicketComment model."""
     list_display = ('ticket_title', 'user', 'comment_preview', 'created_at')
-    list_filter = ('created_at', 'ticket__status', 'ticket__priority')
+    list_filter = ('created_at', 'ticket__column', 'ticket__priority')
     search_fields = (
         'comment', 'ticket__title', 'user__email',
         'user__first_name', 'user__last_name'

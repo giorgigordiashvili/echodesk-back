@@ -59,13 +59,6 @@ class Tag(models.Model):
 
 class Ticket(models.Model):
     """Ticket model for managing support or internal CRM tickets."""
-    STATUS_CHOICES = [
-        ('open', 'Open'),
-        ('in_progress', 'In Progress'),
-        ('resolved', 'Resolved'),
-        ('closed', 'Closed'),
-    ]
-    
     PRIORITY_CHOICES = [
         ('low', 'Low'),
         ('medium', 'Medium'),
@@ -75,7 +68,7 @@ class Ticket(models.Model):
 
     title = models.CharField(max_length=255)
     description = models.TextField()
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
+    # Removed hardcoded status - now using dynamic columns
     priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default='medium')
     
     # Add column field for Kanban board organization
@@ -115,6 +108,16 @@ class Ticket(models.Model):
 
     def __str__(self):
         return self.title
+    
+    @property
+    def status(self):
+        """Get ticket status from its column."""
+        return self.column.name.lower().replace(' ', '_') if self.column else 'unassigned'
+    
+    @property
+    def is_closed(self):
+        """Check if ticket is in a closed status column."""
+        return self.column.is_closed_status if self.column else False
 
     def save(self, *args, **kwargs):
         # Auto-assign to default column if no column is set
