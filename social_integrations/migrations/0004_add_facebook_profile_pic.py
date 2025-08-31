@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('social_integrations', '0003_whatsappbusinessconnection_whatsappmessage'),
+        ('social_integrations', '0001_initial'),
     ]
 
     operations = [

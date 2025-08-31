@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('social_integrations', '0008_increase_instagram_field_lengths'),
+        ('social_integrations', '0006_auto_20250811_1835'),
     ]
 
     operations = [
