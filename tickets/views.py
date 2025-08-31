@@ -154,11 +154,19 @@ class TicketPermission(permissions.BasePermission):
             return (obj.created_by == request.user or 
                    obj.assigned_to == request.user)
         
-        # Only staff can assign tickets or change status to 'closed'
+        # Only staff can assign tickets or move to closed columns
         if request.method in ['PUT', 'PATCH']:
-            # Check if trying to assign ticket or close it
-            if 'assigned_to_id' in request.data or request.data.get('status') == 'closed':
+            # Check if trying to assign ticket or move to closed column
+            if 'assigned_to_id' in request.data:
                 return request.user.is_staff
+            # Check if trying to move to a closed status column
+            if 'column_id' in request.data:
+                try:
+                    column = TicketColumn.objects.get(id=request.data['column_id'])
+                    if column.is_closed_status:
+                        return request.user.is_staff
+                except TicketColumn.DoesNotExist:
+                    pass
             # Users can edit their own tickets (but not assign or close)
             return obj.created_by == request.user
         
@@ -179,9 +187,9 @@ class TicketViewSet(viewsets.ModelViewSet):
     serializer_class = TicketSerializer
     permission_classes = [TicketPermission]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['status', 'priority', 'assigned_to', 'created_by', 'tags', 'column']
+    filterset_fields = ['priority', 'assigned_to', 'created_by', 'tags', 'column']
     search_fields = ['title', 'description']
-    ordering_fields = ['created_at', 'updated_at', 'priority', 'status']
+    ordering_fields = ['created_at', 'updated_at', 'priority']
     ordering = ['-created_at']
 
     def get_serializer_class(self):
@@ -203,11 +211,7 @@ class TicketViewSet(viewsets.ModelViewSet):
                 Q(assigned_to=self.request.user)
             )
         
-        # Additional filtering by query parameters
-        status_filter = self.request.query_params.get('status')
-        if status_filter:
-            queryset = queryset.filter(status=status_filter)
-        
+        # Additional filtering by query parameters  
         priority_filter = self.request.query_params.get('priority')
         if priority_filter:
             queryset = queryset.filter(priority=priority_filter)
