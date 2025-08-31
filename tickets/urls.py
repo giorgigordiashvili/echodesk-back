@@ -1,6 +1,9 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import TicketViewSet, TagViewSet, TicketCommentViewSet, TicketColumnViewSet, SubTicketViewSet, ChecklistItemViewSet
+from .views import (
+    TicketViewSet, TagViewSet, TicketCommentViewSet, TicketColumnViewSet, 
+    SubTicketViewSet, ChecklistItemViewSet, TicketAssignmentViewSet, SubTicketAssignmentViewSet
+)
 
 # Create router and register viewsets
 router = DefaultRouter()
@@ -15,6 +18,16 @@ app_name = 'tickets'
 
 urlpatterns = [
     path('api/', include(router.urls)),
+    # Manual nested URLs for assignments
+    path('api/tickets/<int:ticket_pk>/assignments/', TicketAssignmentViewSet.as_view({'get': 'list', 'post': 'create'}), name='ticket-assignments-list'),
+    path('api/tickets/<int:ticket_pk>/assignments/<int:pk>/', TicketAssignmentViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='ticket-assignments-detail'),
+    path('api/tickets/<int:ticket_pk>/assignments/bulk_assign/', TicketAssignmentViewSet.as_view({'post': 'bulk_assign'}), name='ticket-assignments-bulk-assign'),
+    path('api/tickets/<int:ticket_pk>/assignments/bulk_unassign/', TicketAssignmentViewSet.as_view({'delete': 'bulk_unassign'}), name='ticket-assignments-bulk-unassign'),
+    
+    path('api/sub-tickets/<int:sub_ticket_pk>/assignments/', SubTicketAssignmentViewSet.as_view({'get': 'list', 'post': 'create'}), name='sub-ticket-assignments-list'),
+    path('api/sub-tickets/<int:sub_ticket_pk>/assignments/<int:pk>/', SubTicketAssignmentViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='sub-ticket-assignments-detail'),
+    path('api/sub-tickets/<int:sub_ticket_pk>/assignments/bulk_assign/', SubTicketAssignmentViewSet.as_view({'post': 'bulk_assign'}), name='sub-ticket-assignments-bulk-assign'),
+    path('api/sub-tickets/<int:sub_ticket_pk>/assignments/bulk_unassign/', SubTicketAssignmentViewSet.as_view({'delete': 'bulk_unassign'}), name='sub-ticket-assignments-bulk-unassign'),
 ]
 
 # Example URLConf for including in main router:

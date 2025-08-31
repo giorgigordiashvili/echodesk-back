@@ -1,6 +1,9 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from .models import Ticket, Tag, TicketComment, TicketColumn, SubTicket, ChecklistItem
+from .models import (
+    Ticket, Tag, TicketComment, TicketColumn, SubTicket, ChecklistItem,
+    TicketAssignment, SubTicketAssignment
+)
 
 User = get_user_model()
 
@@ -75,6 +78,28 @@ class UserMinimalSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'email', 'first_name', 'last_name']
 
 
+class TicketAssignmentSerializer(serializers.ModelSerializer):
+    """Serializer for TicketAssignment model."""
+    user = UserMinimalSerializer(read_only=True)
+    assigned_by = UserMinimalSerializer(read_only=True)
+    
+    class Meta:
+        model = TicketAssignment
+        fields = ['id', 'user', 'role', 'assigned_at', 'assigned_by']
+        read_only_fields = ['id', 'assigned_at', 'assigned_by']
+
+
+class SubTicketAssignmentSerializer(serializers.ModelSerializer):
+    """Serializer for SubTicketAssignment model."""
+    user = UserMinimalSerializer(read_only=True)
+    assigned_by = UserMinimalSerializer(read_only=True)
+    
+    class Meta:
+        model = SubTicketAssignment
+        fields = ['id', 'user', 'role', 'assigned_at', 'assigned_by']
+        read_only_fields = ['id', 'assigned_at', 'assigned_by']
+
+
 class TicketCommentSerializer(serializers.ModelSerializer):
     """Serializer for TicketComment model."""
     user = UserMinimalSerializer(read_only=True)
@@ -131,6 +156,21 @@ class SubTicketSerializer(serializers.ModelSerializer):
     created_by = UserMinimalSerializer(read_only=True)
     assigned_to = UserMinimalSerializer(read_only=True)
     assigned_to_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
+    assigned_users = UserMinimalSerializer(many=True, read_only=True)
+    assignments = SubTicketAssignmentSerializer(source='subticketassignment_set', many=True, read_only=True)
+    assigned_user_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        write_only=True,
+        required=False,
+        allow_empty=True,
+        help_text='List of user IDs to assign to this sub-ticket'
+    )
+    assignment_roles = serializers.DictField(
+        child=serializers.CharField(max_length=20),
+        write_only=True,
+        required=False,
+        help_text='Dictionary mapping user IDs to roles (e.g., {"1": "primary", "2": "collaborator"})'
+    )
     checklist_items = ChecklistItemSerializer(many=True, read_only=True)
     checklist_items_count = serializers.SerializerMethodField()
     completed_items_count = serializers.SerializerMethodField()
@@ -141,6 +181,7 @@ class SubTicketSerializer(serializers.ModelSerializer):
             'id', 'parent_ticket', 'title', 'description', 'rich_description',
             'description_format', 'priority', 'is_completed', 'position',
             'created_at', 'updated_at', 'created_by', 'assigned_to', 'assigned_to_id',
+            'assigned_users', 'assignments', 'assigned_user_ids', 'assignment_roles',
             'checklist_items', 'checklist_items_count', 'completed_items_count'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'created_by']
@@ -155,18 +196,38 @@ class SubTicketSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         assigned_to_id = validated_data.pop('assigned_to_id', None)
+        assigned_user_ids = validated_data.pop('assigned_user_ids', [])
+        assignment_roles = validated_data.pop('assignment_roles', {})
         
         # Set created_by from request context
         validated_data['created_by'] = self.context['request'].user
+        current_user = self.context['request'].user
         
         # Set assigned_to if provided
         if assigned_to_id:
             validated_data['assigned_to'] = User.objects.get(id=assigned_to_id)
         
-        return super().create(validated_data)
+        sub_ticket = super().create(validated_data)
+        
+        # Handle multiple user assignments
+        if assigned_user_ids:
+            for user_id in assigned_user_ids:
+                role = assignment_roles.get(str(user_id), 'collaborator')
+                SubTicketAssignment.objects.create(
+                    sub_ticket=sub_ticket,
+                    user_id=user_id,
+                    role=role,
+                    assigned_by=current_user
+                )
+        
+        return sub_ticket
 
     def update(self, instance, validated_data):
         assigned_to_id = validated_data.pop('assigned_to_id', None)
+        assigned_user_ids = validated_data.pop('assigned_user_ids', None)
+        assignment_roles = validated_data.pop('assignment_roles', {})
+        
+        current_user = self.context['request'].user
         
         # Handle assigned_to field
         if assigned_to_id is not None:
@@ -175,7 +236,24 @@ class SubTicketSerializer(serializers.ModelSerializer):
             else:
                 validated_data['assigned_to'] = None
         
-        return super().update(instance, validated_data)
+        sub_ticket = super().update(instance, validated_data)
+        
+        # Handle multiple user assignments update
+        if assigned_user_ids is not None:
+            # Clear existing assignments
+            SubTicketAssignment.objects.filter(sub_ticket=sub_ticket).delete()
+            
+            # Add new assignments
+            for user_id in assigned_user_ids:
+                role = assignment_roles.get(str(user_id), 'collaborator')
+                SubTicketAssignment.objects.create(
+                    sub_ticket=sub_ticket,
+                    user_id=user_id,
+                    role=role,
+                    assigned_by=current_user
+                )
+        
+        return sub_ticket
 
 
 class TicketSerializer(serializers.ModelSerializer):
@@ -183,6 +261,21 @@ class TicketSerializer(serializers.ModelSerializer):
     created_by = UserMinimalSerializer(read_only=True)
     assigned_to = UserMinimalSerializer(read_only=True)
     assigned_to_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
+    assigned_users = UserMinimalSerializer(many=True, read_only=True)
+    assignments = TicketAssignmentSerializer(source='ticketassignment_set', many=True, read_only=True)
+    assigned_user_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        write_only=True,
+        required=False,
+        allow_empty=True,
+        help_text='List of user IDs to assign to this ticket'
+    )
+    assignment_roles = serializers.DictField(
+        child=serializers.CharField(max_length=20),
+        write_only=True,
+        required=False,
+        help_text='Dictionary mapping user IDs to roles (e.g., {"1": "primary", "2": "collaborator"})'
+    )
     column = TicketColumnSerializer(read_only=True)
     column_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
     tags = TagSerializer(many=True, read_only=True)
@@ -209,7 +302,8 @@ class TicketSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'title', 'description', 'rich_description', 'description_format',
             'status', 'priority', 'is_closed', 'column', 'column_id', 'position_in_column',
-            'created_at', 'updated_at', 'created_by', 'assigned_to', 'assigned_to_id', 
+            'created_at', 'updated_at', 'created_by', 'assigned_to', 'assigned_to_id',
+            'assigned_users', 'assignments', 'assigned_user_ids', 'assignment_roles',
             'tags', 'tag_ids', 'comments', 'comments_count',
             'sub_tickets', 'sub_tickets_count', 'completed_sub_tickets_count',
             'checklist_items', 'checklist_items_count', 'completed_checklist_items_count'
@@ -239,10 +333,13 @@ class TicketSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         tag_ids = validated_data.pop('tag_ids', [])
         assigned_to_id = validated_data.pop('assigned_to_id', None)
+        assigned_user_ids = validated_data.pop('assigned_user_ids', [])
+        assignment_roles = validated_data.pop('assignment_roles', {})
         column_id = validated_data.pop('column_id', None)
         
         # Set created_by from request context
         validated_data['created_by'] = self.context['request'].user
+        current_user = self.context['request'].user
         
         # Set assigned_to if provided
         if assigned_to_id:
@@ -258,12 +355,27 @@ class TicketSerializer(serializers.ModelSerializer):
         if tag_ids:
             ticket.tags.set(tag_ids)
         
+        # Handle multiple user assignments
+        if assigned_user_ids:
+            for user_id in assigned_user_ids:
+                role = assignment_roles.get(str(user_id), 'collaborator')
+                TicketAssignment.objects.create(
+                    ticket=ticket,
+                    user_id=user_id,
+                    role=role,
+                    assigned_by=current_user
+                )
+        
         return ticket
 
     def update(self, instance, validated_data):
         tag_ids = validated_data.pop('tag_ids', None)
         assigned_to_id = validated_data.pop('assigned_to_id', None)
+        assigned_user_ids = validated_data.pop('assigned_user_ids', None)
+        assignment_roles = validated_data.pop('assignment_roles', {})
         column_id = validated_data.pop('column_id', None)
+        
+        current_user = self.context['request'].user
         
         # Handle assigned_to field
         if assigned_to_id is not None:
@@ -285,6 +397,21 @@ class TicketSerializer(serializers.ModelSerializer):
         if tag_ids is not None:
             ticket.tags.set(tag_ids)
         
+        # Handle multiple user assignments update
+        if assigned_user_ids is not None:
+            # Clear existing assignments
+            TicketAssignment.objects.filter(ticket=ticket).delete()
+            
+            # Add new assignments
+            for user_id in assigned_user_ids:
+                role = assignment_roles.get(str(user_id), 'collaborator')
+                TicketAssignment.objects.create(
+                    ticket=ticket,
+                    user_id=user_id,
+                    role=role,
+                    assigned_by=current_user
+                )
+        
         return ticket
 
 
@@ -292,6 +419,8 @@ class TicketListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for ticket lists."""
     created_by = UserMinimalSerializer(read_only=True)
     assigned_to = UserMinimalSerializer(read_only=True)
+    assigned_users = UserMinimalSerializer(many=True, read_only=True)
+    assignments = TicketAssignmentSerializer(source='ticketassignment_set', many=True, read_only=True)
     column = TicketColumnSerializer(read_only=True)
     tags = TagSerializer(many=True, read_only=True)
     comments_count = serializers.SerializerMethodField()
@@ -302,7 +431,8 @@ class TicketListSerializer(serializers.ModelSerializer):
         model = Ticket
         fields = [
             'id', 'title', 'status', 'priority', 'is_closed', 'column', 'position_in_column',
-            'created_at', 'updated_at', 'created_by', 'assigned_to', 'tags', 'comments_count'
+            'created_at', 'updated_at', 'created_by', 'assigned_to', 'assigned_users', 
+            'assignments', 'tags', 'comments_count'
         ]
         read_only_fields = fields
 

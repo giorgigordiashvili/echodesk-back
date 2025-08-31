@@ -6,12 +6,16 @@ from django.db.models import Q, F, Max
 from django.db import transaction
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse
 from drf_spectacular.openapi import OpenApiTypes
-from .models import Ticket, Tag, TicketComment, TicketColumn, SubTicket, ChecklistItem
+from .models import (
+    Ticket, Tag, TicketComment, TicketColumn, SubTicket, ChecklistItem,
+    TicketAssignment, SubTicketAssignment
+)
 from .serializers import (
     TicketSerializer, TicketListSerializer, TagSerializer, 
     TicketCommentSerializer, TicketColumnSerializer, 
     TicketColumnCreateSerializer, TicketColumnUpdateSerializer,
-    KanbanBoardSerializer, SubTicketSerializer, ChecklistItemSerializer
+    KanbanBoardSerializer, SubTicketSerializer, ChecklistItemSerializer,
+    TicketAssignmentSerializer, SubTicketAssignmentSerializer
 )
 
 
@@ -639,3 +643,121 @@ class ChecklistItemViewSet(viewsets.ModelViewSet):
         
         serializer = self.get_serializer(item)
         return Response(serializer.data)
+
+
+class TicketAssignmentViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing ticket assignments."""
+    serializer_class = TicketAssignmentSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_queryset(self):
+        """Return assignments for a specific ticket."""
+        ticket_pk = self.kwargs.get('ticket_pk')
+        if ticket_pk:
+            return TicketAssignment.objects.filter(ticket_id=ticket_pk)
+        return TicketAssignment.objects.none()
+    
+    def perform_create(self, serializer):
+        """Create a new ticket assignment."""
+        ticket_pk = self.kwargs.get('ticket_pk')
+        ticket = Ticket.objects.get(pk=ticket_pk)
+        serializer.save(ticket=ticket, assigned_by=self.request.user)
+    
+    @action(detail=False, methods=['post'])
+    def bulk_assign(self, request, ticket_pk=None):
+        """Bulk assign users to a ticket."""
+        ticket = Ticket.objects.get(pk=ticket_pk)
+        user_ids = request.data.get('user_ids', [])
+        roles = request.data.get('roles', {})
+        
+        # Clear existing assignments if replace is True
+        if request.data.get('replace', False):
+            TicketAssignment.objects.filter(ticket=ticket).delete()
+        
+        assignments = []
+        for user_id in user_ids:
+            role = roles.get(str(user_id), 'collaborator')
+            assignment, created = TicketAssignment.objects.get_or_create(
+                ticket=ticket,
+                user_id=user_id,
+                defaults={'role': role, 'assigned_by': request.user}
+            )
+            assignments.append(assignment)
+        
+        serializer = TicketAssignmentSerializer(assignments, many=True)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    
+    @action(detail=False, methods=['delete'])
+    def bulk_unassign(self, request, ticket_pk=None):
+        """Bulk remove user assignments from a ticket."""
+        ticket = Ticket.objects.get(pk=ticket_pk)
+        user_ids = request.data.get('user_ids', [])
+        
+        deleted_count, _ = TicketAssignment.objects.filter(
+            ticket=ticket,
+            user_id__in=user_ids
+        ).delete()
+        
+        return Response(
+            {'message': f'Removed {deleted_count} assignments'}, 
+            status=status.HTTP_204_NO_CONTENT
+        )
+
+
+class SubTicketAssignmentViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing sub-ticket assignments."""
+    serializer_class = SubTicketAssignmentSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_queryset(self):
+        """Return assignments for a specific sub-ticket."""
+        sub_ticket_pk = self.kwargs.get('sub_ticket_pk')
+        if sub_ticket_pk:
+            return SubTicketAssignment.objects.filter(sub_ticket_id=sub_ticket_pk)
+        return SubTicketAssignment.objects.none()
+    
+    def perform_create(self, serializer):
+        """Create a new sub-ticket assignment."""
+        sub_ticket_pk = self.kwargs.get('sub_ticket_pk')
+        sub_ticket = SubTicket.objects.get(pk=sub_ticket_pk)
+        serializer.save(sub_ticket=sub_ticket, assigned_by=self.request.user)
+    
+    @action(detail=False, methods=['post'])
+    def bulk_assign(self, request, sub_ticket_pk=None):
+        """Bulk assign users to a sub-ticket."""
+        sub_ticket = SubTicket.objects.get(pk=sub_ticket_pk)
+        user_ids = request.data.get('user_ids', [])
+        roles = request.data.get('roles', {})
+        
+        # Clear existing assignments if replace is True
+        if request.data.get('replace', False):
+            SubTicketAssignment.objects.filter(sub_ticket=sub_ticket).delete()
+        
+        assignments = []
+        for user_id in user_ids:
+            role = roles.get(str(user_id), 'collaborator')
+            assignment, created = SubTicketAssignment.objects.get_or_create(
+                sub_ticket=sub_ticket,
+                user_id=user_id,
+                defaults={'role': role, 'assigned_by': request.user}
+            )
+            assignments.append(assignment)
+        
+        serializer = SubTicketAssignmentSerializer(assignments, many=True)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    
+    @action(detail=False, methods=['delete'])
+    def bulk_unassign(self, request, sub_ticket_pk=None):
+        """Bulk remove user assignments from a sub-ticket."""
+        sub_ticket = SubTicket.objects.get(pk=sub_ticket_pk)
+        user_ids = request.data.get('user_ids', [])
+        
+        deleted_count, _ = SubTicketAssignment.objects.filter(
+            sub_ticket=sub_ticket,
+            user_id__in=user_ids
+        ).delete()
+        
+        return Response(
+            {'message': f'Removed {deleted_count} assignments'}, 
+            status=status.HTTP_204_NO_CONTENT
+        )

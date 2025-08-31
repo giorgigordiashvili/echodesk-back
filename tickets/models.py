@@ -58,6 +58,34 @@ class Tag(models.Model):
         return self.name
 
 
+class TicketAssignment(models.Model):
+    """Through model for ticket assignments with additional metadata."""
+    ROLE_CHOICES = [
+        ('primary', 'Primary Assignee'),
+        ('collaborator', 'Collaborator'),
+        ('reviewer', 'Reviewer'),
+        ('observer', 'Observer'),
+    ]
+    
+    ticket = models.ForeignKey('Ticket', on_delete=models.CASCADE)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='collaborator')
+    assigned_at = models.DateTimeField(auto_now_add=True)
+    assigned_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='ticket_assignments_made'
+    )
+    
+    class Meta:
+        unique_together = [['ticket', 'user']]
+        ordering = ['-assigned_at']
+    
+    def __str__(self):
+        return f'{self.user.email} assigned to {self.ticket.title} as {self.role}'
+
+
 class Ticket(models.Model):
     """Ticket model for managing support or internal CRM tickets."""
     PRIORITY_CHOICES = [
@@ -115,7 +143,16 @@ class Ticket(models.Model):
         related_name='assigned_tickets', 
         on_delete=models.SET_NULL, 
         null=True, 
-        blank=True
+        blank=True,
+        help_text='Primary assignee (for backward compatibility)'
+    )
+    assigned_users = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        through='TicketAssignment',
+        through_fields=('ticket', 'user'),
+        related_name='tickets_assigned',
+        blank=True,
+        help_text='All users assigned to this ticket'
     )
     tags = models.ManyToManyField(Tag, blank=True, related_name='tickets')
 
@@ -150,6 +187,34 @@ class Ticket(models.Model):
             self.position_in_column = max_position + 1
             
         super().save(*args, **kwargs)
+
+
+class SubTicketAssignment(models.Model):
+    """Through model for sub-ticket assignments with additional metadata."""
+    ROLE_CHOICES = [
+        ('primary', 'Primary Assignee'),
+        ('collaborator', 'Collaborator'),
+        ('reviewer', 'Reviewer'),
+        ('observer', 'Observer'),
+    ]
+    
+    sub_ticket = models.ForeignKey('SubTicket', on_delete=models.CASCADE)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='collaborator')
+    assigned_at = models.DateTimeField(auto_now_add=True)
+    assigned_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='sub_ticket_assignments_made'
+    )
+    
+    class Meta:
+        unique_together = [['sub_ticket', 'user']]
+        ordering = ['-assigned_at']
+    
+    def __str__(self):
+        return f'{self.user.email} assigned to {self.sub_ticket.title} as {self.role}'
 
 
 class SubTicket(models.Model):
@@ -203,7 +268,16 @@ class SubTicket(models.Model):
         related_name='assigned_sub_tickets', 
         on_delete=models.SET_NULL, 
         null=True, 
-        blank=True
+        blank=True,
+        help_text='Primary assignee (for backward compatibility)'
+    )
+    assigned_users = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        through='SubTicketAssignment',
+        through_fields=('sub_ticket', 'user'),
+        related_name='sub_tickets_assigned',
+        blank=True,
+        help_text='All users assigned to this sub-ticket'
     )
 
     class Meta:
