@@ -85,6 +85,29 @@ class TicketCommentInline(admin.TabularInline):
         return self.readonly_fields
 
 
+class ChecklistItemInline(admin.TabularInline):
+    """Inline admin for checklist items."""
+    model = ChecklistItem
+    extra = 0
+    readonly_fields = ('created_at', 'updated_at')
+    fields = ('text', 'is_checked', 'position', 'created_by', 'created_at')
+
+    def get_readonly_fields(self, request, obj=None):
+        """Make created_by field readonly if editing existing item."""
+        if obj and obj.pk:
+            return self.readonly_fields + ('created_by',)
+        return self.readonly_fields
+
+
+class SubTicketInline(admin.TabularInline):
+    """Inline admin for sub-tickets."""
+    model = SubTicket
+    extra = 0
+    readonly_fields = ('created_at', 'updated_at')
+    fields = ('title', 'priority', 'is_completed', 'assigned_to', 'position', 'created_at')
+    raw_id_fields = ('assigned_to',)
+
+
 @admin.register(Ticket)
 class TicketAdmin(admin.ModelAdmin):
     """Admin configuration for Ticket model."""
@@ -216,29 +239,6 @@ class TicketCommentAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         """Optimize queries by selecting related objects."""
         return super().get_queryset(request).select_related('ticket', 'user')
-
-
-class ChecklistItemInline(admin.TabularInline):
-    """Inline admin for checklist items."""
-    model = ChecklistItem
-    extra = 0
-    readonly_fields = ('created_at', 'updated_at')
-    fields = ('text', 'is_checked', 'position', 'created_by', 'created_at')
-
-    def get_readonly_fields(self, request, obj=None):
-        """Make created_by field readonly if editing existing item."""
-        if obj and obj.pk:
-            return self.readonly_fields + ('created_by',)
-        return self.readonly_fields
-
-
-class SubTicketInline(admin.TabularInline):
-    """Inline admin for sub-tickets."""
-    model = SubTicket
-    extra = 0
-    readonly_fields = ('created_at', 'updated_at')
-    fields = ('title', 'priority', 'is_completed', 'assigned_to', 'position', 'created_at')
-    raw_id_fields = ('assigned_to',)
 
 
 @admin.register(SubTicket)

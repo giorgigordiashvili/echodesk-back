@@ -95,6 +95,89 @@ class TicketCommentSerializer(serializers.ModelSerializer):
         return super().create(validated_data)
 
 
+class ChecklistItemSerializer(serializers.ModelSerializer):
+    """Serializer for ChecklistItem model."""
+    created_by = UserMinimalSerializer(read_only=True)
+    
+    class Meta:
+        model = ChecklistItem
+        fields = [
+            'id', 'ticket', 'sub_ticket', 'text', 'is_checked', 'position',
+            'created_at', 'updated_at', 'created_by'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at', 'created_by']
+
+    def create(self, validated_data):
+        # Set created_by from request context
+        validated_data['created_by'] = self.context['request'].user
+        return super().create(validated_data)
+
+    def validate(self, data):
+        """Ensure checklist item belongs to either ticket or sub_ticket, not both."""
+        ticket = data.get('ticket')
+        sub_ticket = data.get('sub_ticket')
+        
+        if not ticket and not sub_ticket:
+            raise serializers.ValidationError("Checklist item must belong to either a ticket or sub_ticket.")
+        
+        if ticket and sub_ticket:
+            raise serializers.ValidationError("Checklist item cannot belong to both ticket and sub_ticket.")
+        
+        return data
+
+
+class SubTicketSerializer(serializers.ModelSerializer):
+    """Serializer for SubTicket model."""
+    created_by = UserMinimalSerializer(read_only=True)
+    assigned_to = UserMinimalSerializer(read_only=True)
+    assigned_to_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
+    checklist_items = ChecklistItemSerializer(many=True, read_only=True)
+    checklist_items_count = serializers.SerializerMethodField()
+    completed_items_count = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = SubTicket
+        fields = [
+            'id', 'parent_ticket', 'title', 'description', 'rich_description',
+            'description_format', 'priority', 'is_completed', 'position',
+            'created_at', 'updated_at', 'created_by', 'assigned_to', 'assigned_to_id',
+            'checklist_items', 'checklist_items_count', 'completed_items_count'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at', 'created_by']
+
+    def get_checklist_items_count(self, obj):
+        """Get the number of checklist items for this sub-ticket."""
+        return obj.checklist_items.count()
+
+    def get_completed_items_count(self, obj):
+        """Get the number of completed checklist items."""
+        return obj.checklist_items.filter(is_checked=True).count()
+
+    def create(self, validated_data):
+        assigned_to_id = validated_data.pop('assigned_to_id', None)
+        
+        # Set created_by from request context
+        validated_data['created_by'] = self.context['request'].user
+        
+        # Set assigned_to if provided
+        if assigned_to_id:
+            validated_data['assigned_to'] = User.objects.get(id=assigned_to_id)
+        
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        assigned_to_id = validated_data.pop('assigned_to_id', None)
+        
+        # Handle assigned_to field
+        if assigned_to_id is not None:
+            if assigned_to_id:
+                validated_data['assigned_to'] = User.objects.get(id=assigned_to_id)
+            else:
+                validated_data['assigned_to'] = None
+        
+        return super().update(instance, validated_data)
+
+
 class TicketSerializer(serializers.ModelSerializer):
     """Serializer for Ticket model."""
     created_by = UserMinimalSerializer(read_only=True)
@@ -243,86 +326,3 @@ class KanbanBoardSerializer(serializers.Serializer):
             tickets_data[column.id] = TicketListSerializer(tickets, many=True, context=self.context).data
         
         return tickets_data
-
-
-class ChecklistItemSerializer(serializers.ModelSerializer):
-    """Serializer for ChecklistItem model."""
-    created_by = UserMinimalSerializer(read_only=True)
-    
-    class Meta:
-        model = ChecklistItem
-        fields = [
-            'id', 'ticket', 'sub_ticket', 'text', 'is_checked', 'position',
-            'created_at', 'updated_at', 'created_by'
-        ]
-        read_only_fields = ['id', 'created_at', 'updated_at', 'created_by']
-
-    def create(self, validated_data):
-        # Set created_by from request context
-        validated_data['created_by'] = self.context['request'].user
-        return super().create(validated_data)
-
-    def validate(self, data):
-        """Ensure checklist item belongs to either ticket or sub_ticket, not both."""
-        ticket = data.get('ticket')
-        sub_ticket = data.get('sub_ticket')
-        
-        if not ticket and not sub_ticket:
-            raise serializers.ValidationError("Checklist item must belong to either a ticket or sub_ticket.")
-        
-        if ticket and sub_ticket:
-            raise serializers.ValidationError("Checklist item cannot belong to both ticket and sub_ticket.")
-        
-        return data
-
-
-class SubTicketSerializer(serializers.ModelSerializer):
-    """Serializer for SubTicket model."""
-    created_by = UserMinimalSerializer(read_only=True)
-    assigned_to = UserMinimalSerializer(read_only=True)
-    assigned_to_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
-    checklist_items = ChecklistItemSerializer(many=True, read_only=True)
-    checklist_items_count = serializers.SerializerMethodField()
-    completed_items_count = serializers.SerializerMethodField()
-    
-    class Meta:
-        model = SubTicket
-        fields = [
-            'id', 'parent_ticket', 'title', 'description', 'rich_description',
-            'description_format', 'priority', 'is_completed', 'position',
-            'created_at', 'updated_at', 'created_by', 'assigned_to', 'assigned_to_id',
-            'checklist_items', 'checklist_items_count', 'completed_items_count'
-        ]
-        read_only_fields = ['id', 'created_at', 'updated_at', 'created_by']
-
-    def get_checklist_items_count(self, obj):
-        """Get the number of checklist items for this sub-ticket."""
-        return obj.checklist_items.count()
-
-    def get_completed_items_count(self, obj):
-        """Get the number of completed checklist items."""
-        return obj.checklist_items.filter(is_checked=True).count()
-
-    def create(self, validated_data):
-        assigned_to_id = validated_data.pop('assigned_to_id', None)
-        
-        # Set created_by from request context
-        validated_data['created_by'] = self.context['request'].user
-        
-        # Set assigned_to if provided
-        if assigned_to_id:
-            validated_data['assigned_to'] = User.objects.get(id=assigned_to_id)
-        
-        return super().create(validated_data)
-
-    def update(self, instance, validated_data):
-        assigned_to_id = validated_data.pop('assigned_to_id', None)
-        
-        # Handle assigned_to field
-        if assigned_to_id is not None:
-            if assigned_to_id:
-                validated_data['assigned_to'] = User.objects.get(id=assigned_to_id)
-            else:
-                validated_data['assigned_to'] = None
-        
-        return super().update(instance, validated_data)
