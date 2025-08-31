@@ -6,12 +6,12 @@ from django.db.models import Q, F, Max
 from django.db import transaction
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse
 from drf_spectacular.openapi import OpenApiTypes
-from .models import Ticket, Tag, TicketComment, TicketColumn
+from .models import Ticket, Tag, TicketComment, TicketColumn, SubTicket, ChecklistItem
 from .serializers import (
     TicketSerializer, TicketListSerializer, TagSerializer, 
     TicketCommentSerializer, TicketColumnSerializer, 
     TicketColumnCreateSerializer, TicketColumnUpdateSerializer,
-    KanbanBoardSerializer
+    KanbanBoardSerializer, SubTicketSerializer, ChecklistItemSerializer
 )
 
 
@@ -471,3 +471,171 @@ class TicketCommentViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         """Set the user when creating a comment."""
         serializer.save(user=self.request.user)
+
+
+class SubTicketViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing sub-tickets.
+    """
+    serializer_class = SubTicketSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['parent_ticket', 'priority', 'is_completed', 'assigned_to', 'created_by']
+    search_fields = ['title', 'description']
+    ordering_fields = ['created_at', 'updated_at', 'priority', 'position']
+    ordering = ['position', 'created_at']
+
+    def get_queryset(self):
+        """Filter sub-tickets based on user permissions."""
+        if self.request.user.is_staff:
+            return SubTicket.objects.all().select_related(
+                'parent_ticket', 'created_by', 'assigned_to'
+            ).prefetch_related('checklist_items')
+        
+        # Non-staff users can only see sub-tickets for tickets they have access to
+        return SubTicket.objects.filter(
+            Q(parent_ticket__created_by=self.request.user) | 
+            Q(parent_ticket__assigned_to=self.request.user) |
+            Q(created_by=self.request.user) |
+            Q(assigned_to=self.request.user)
+        ).select_related(
+            'parent_ticket', 'created_by', 'assigned_to'
+        ).prefetch_related('checklist_items')
+
+    @action(detail=True, methods=['patch'])
+    def toggle_completion(self, request, pk=None):
+        """Toggle the completion status of a sub-ticket."""
+        sub_ticket = self.get_object()
+        sub_ticket.is_completed = not sub_ticket.is_completed
+        sub_ticket.save()
+        serializer = self.get_serializer(sub_ticket)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['patch'])
+    def reorder(self, request, pk=None):
+        """Reorder sub-ticket within its parent ticket."""
+        sub_ticket = self.get_object()
+        new_position = request.data.get('position')
+        
+        if new_position is None:
+            return Response(
+                {'error': 'Position is required'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            new_position = int(new_position)
+        except ValueError:
+            return Response(
+                {'error': 'Position must be a number'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        with transaction.atomic():
+            # Update positions of other sub-tickets in the same parent
+            if new_position > sub_ticket.position:
+                # Moving down
+                SubTicket.objects.filter(
+                    parent_ticket=sub_ticket.parent_ticket,
+                    position__gt=sub_ticket.position,
+                    position__lte=new_position
+                ).update(position=F('position') - 1)
+            else:
+                # Moving up
+                SubTicket.objects.filter(
+                    parent_ticket=sub_ticket.parent_ticket,
+                    position__gte=new_position,
+                    position__lt=sub_ticket.position
+                ).update(position=F('position') + 1)
+            
+            # Update the sub-ticket's position
+            sub_ticket.position = new_position
+            sub_ticket.save()
+        
+        serializer = self.get_serializer(sub_ticket)
+        return Response(serializer.data)
+
+
+class ChecklistItemViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing checklist items.
+    """
+    serializer_class = ChecklistItemSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['ticket', 'sub_ticket', 'is_checked', 'created_by']
+    ordering_fields = ['created_at', 'position']
+    ordering = ['position', 'created_at']
+
+    def get_queryset(self):
+        """Filter checklist items based on user permissions."""
+        if self.request.user.is_staff:
+            return ChecklistItem.objects.all().select_related(
+                'ticket', 'sub_ticket', 'created_by'
+            )
+        
+        # Non-staff users can only see checklist items for tickets they have access to
+        return ChecklistItem.objects.filter(
+            Q(ticket__created_by=self.request.user) | 
+            Q(ticket__assigned_to=self.request.user) |
+            Q(sub_ticket__parent_ticket__created_by=self.request.user) |
+            Q(sub_ticket__parent_ticket__assigned_to=self.request.user) |
+            Q(created_by=self.request.user)
+        ).select_related('ticket', 'sub_ticket', 'created_by')
+
+    @action(detail=True, methods=['patch'])
+    def toggle_check(self, request, pk=None):
+        """Toggle the checked status of a checklist item."""
+        item = self.get_object()
+        item.is_checked = not item.is_checked
+        item.save()
+        serializer = self.get_serializer(item)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['patch'])
+    def reorder(self, request, pk=None):
+        """Reorder checklist item within its parent (ticket or sub-ticket)."""
+        item = self.get_object()
+        new_position = request.data.get('position')
+        
+        if new_position is None:
+            return Response(
+                {'error': 'Position is required'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            new_position = int(new_position)
+        except ValueError:
+            return Response(
+                {'error': 'Position must be a number'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        with transaction.atomic():
+            # Determine the parent and filter other items
+            if item.ticket:
+                other_items = ChecklistItem.objects.filter(ticket=item.ticket)
+            else:
+                other_items = ChecklistItem.objects.filter(sub_ticket=item.sub_ticket)
+            
+            # Update positions
+            if new_position > item.position:
+                # Moving down
+                other_items.filter(
+                    position__gt=item.position,
+                    position__lte=new_position
+                ).update(position=F('position') - 1)
+            else:
+                # Moving up
+                other_items.filter(
+                    position__gte=new_position,
+                    position__lt=item.position
+                ).update(position=F('position') + 1)
+            
+            # Update the item's position
+            item.position = new_position
+            item.save()
+        
+        serializer = self.get_serializer(item)
+        return Response(serializer.data)

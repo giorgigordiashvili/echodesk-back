@@ -1,6 +1,6 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import TicketViewSet, TagViewSet, TicketCommentViewSet, TicketColumnViewSet
+from .views import TicketViewSet, TagViewSet, TicketCommentViewSet, TicketColumnViewSet, SubTicketViewSet, ChecklistItemViewSet
 
 # Create router and register viewsets
 router = DefaultRouter()
@@ -8,6 +8,8 @@ router.register(r'tickets', TicketViewSet, basename='ticket')
 router.register(r'columns', TicketColumnViewSet, basename='ticketcolumn')
 router.register(r'tags', TagViewSet, basename='tag')
 router.register(r'comments', TicketCommentViewSet, basename='ticketcomment')
+router.register(r'sub-tickets', SubTicketViewSet, basename='subticket')
+router.register(r'checklist-items', ChecklistItemViewSet, basename='checklistitem')
 
 app_name = 'tickets'
 

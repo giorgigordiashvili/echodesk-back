@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.utils.html import format_html
-from .models import Ticket, Tag, TicketComment, TicketColumn
+from .models import Ticket, Tag, TicketComment, TicketColumn, SubTicket, ChecklistItem
 
 
 @admin.register(TicketColumn)
@@ -110,7 +110,7 @@ class TicketAdmin(admin.ModelAdmin):
     
     fieldsets = (
         ('Basic Information', {
-            'fields': ('title', 'description', 'column', 'priority', 'position_in_column')
+            'fields': ('title', 'description', 'rich_description', 'description_format', 'column', 'priority', 'position_in_column')
         }),
         ('Assignment', {
             'fields': ('created_by', 'assigned_to', 'tags')
@@ -121,7 +121,7 @@ class TicketAdmin(admin.ModelAdmin):
         }),
     )
     
-    inlines = [TicketCommentInline]
+    inlines = [TicketCommentInline, SubTicketInline, ChecklistItemInline]
 
     def status_badge(self, obj):
         """Display status with color coding."""
@@ -216,3 +216,179 @@ class TicketCommentAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         """Optimize queries by selecting related objects."""
         return super().get_queryset(request).select_related('ticket', 'user')
+
+
+class ChecklistItemInline(admin.TabularInline):
+    """Inline admin for checklist items."""
+    model = ChecklistItem
+    extra = 0
+    readonly_fields = ('created_at', 'updated_at')
+    fields = ('text', 'is_checked', 'position', 'created_by', 'created_at')
+
+    def get_readonly_fields(self, request, obj=None):
+        """Make created_by field readonly if editing existing item."""
+        if obj and obj.pk:
+            return self.readonly_fields + ('created_by',)
+        return self.readonly_fields
+
+
+class SubTicketInline(admin.TabularInline):
+    """Inline admin for sub-tickets."""
+    model = SubTicket
+    extra = 0
+    readonly_fields = ('created_at', 'updated_at')
+    fields = ('title', 'priority', 'is_completed', 'assigned_to', 'position', 'created_at')
+    raw_id_fields = ('assigned_to',)
+
+
+@admin.register(SubTicket)
+class SubTicketAdmin(admin.ModelAdmin):
+    """Admin configuration for SubTicket model."""
+    list_display = (
+        'title', 'parent_ticket', 'priority_badge', 'is_completed', 
+        'assigned_to', 'created_by', 'checklist_items_count', 'created_at'
+    )
+    list_filter = (
+        'priority', 'is_completed', 'created_at', 'updated_at', 
+        'parent_ticket__column', 'assigned_to'
+    )
+    search_fields = (
+        'title', 'description', 'parent_ticket__title', 
+        'created_by__email', 'assigned_to__email'
+    )
+    raw_id_fields = ('parent_ticket', 'created_by', 'assigned_to')
+    date_hierarchy = 'created_at'
+    ordering = ('parent_ticket', 'position', '-created_at')
+    readonly_fields = ('created_at', 'updated_at')
+    
+    fieldsets = (
+        ('Basic Information', {
+            'fields': ('parent_ticket', 'title', 'description', 'rich_description', 'description_format')
+        }),
+        ('Status & Priority', {
+            'fields': ('priority', 'is_completed', 'position')
+        }),
+        ('Assignment', {
+            'fields': ('created_by', 'assigned_to')
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    inlines = [ChecklistItemInline]
+
+    def priority_badge(self, obj):
+        """Display priority with color coding."""
+        colors = {
+            'low': '#28a745',       # Green
+            'medium': '#ffc107',    # Yellow
+            'high': '#fd7e14',      # Orange
+            'critical': '#dc3545'   # Red
+        }
+        color = colors.get(obj.priority, '#6c757d')
+        return format_html(
+            '<span style="color: {}; font-weight: bold;">{}</span>',
+            color, obj.get_priority_display()
+        )
+    priority_badge.short_description = 'Priority'
+
+    def checklist_items_count(self, obj):
+        """Display the number of checklist items."""
+        count = obj.checklist_items.count()
+        completed = obj.checklist_items.filter(is_checked=True).count()
+        if count > 0:
+            return format_html(
+                '<span title="{} completed out of {}">{}/{}</span>',
+                completed, count, completed, count
+            )
+        return '0/0'
+    checklist_items_count.short_description = 'Checklist'
+
+    def get_queryset(self, request):
+        """Optimize queries by prefetching related objects."""
+        return super().get_queryset(request).select_related(
+            'parent_ticket', 'created_by', 'assigned_to'
+        ).prefetch_related('checklist_items')
+
+    def save_model(self, request, obj, form, change):
+        """Set created_by to current user if creating new sub-ticket."""
+        if not change and not obj.created_by_id:
+            obj.created_by = request.user
+        super().save_model(request, obj, form, change)
+
+
+@admin.register(ChecklistItem)
+class ChecklistItemAdmin(admin.ModelAdmin):
+    """Admin configuration for ChecklistItem model."""
+    list_display = (
+        'text_preview', 'parent_type', 'parent_title', 'is_checked', 
+        'position', 'created_by', 'created_at'
+    )
+    list_filter = ('is_checked', 'created_at', 'ticket__column', 'ticket__priority')
+    search_fields = (
+        'text', 'ticket__title', 'sub_ticket__title', 
+        'created_by__email', 'created_by__first_name', 'created_by__last_name'
+    )
+    raw_id_fields = ('ticket', 'sub_ticket', 'created_by')
+    date_hierarchy = 'created_at'
+    ordering = ('ticket', 'sub_ticket', 'position', '-created_at')
+    readonly_fields = ('created_at', 'updated_at')
+
+    fieldsets = (
+        ('Basic Information', {
+            'fields': ('text', 'is_checked', 'position')
+        }),
+        ('Parent', {
+            'fields': ('ticket', 'sub_ticket'),
+            'description': 'Choose either a ticket or sub-ticket, not both.'
+        }),
+        ('Metadata', {
+            'fields': ('created_by', 'created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+
+    def text_preview(self, obj):
+        """Display a preview of the checklist item text."""
+        if len(obj.text) > 50:
+            return obj.text[:47] + '...'
+        return obj.text
+    text_preview.short_description = 'Text'
+
+    def parent_type(self, obj):
+        """Display the type of parent (ticket or sub-ticket)."""
+        if obj.ticket:
+            return 'Ticket'
+        elif obj.sub_ticket:
+            return 'Sub-Ticket'
+        return 'Unknown'
+    parent_type.short_description = 'Parent Type'
+
+    def parent_title(self, obj):
+        """Display the title of the parent with link."""
+        if obj.ticket:
+            return format_html(
+                '<a href="/admin/tickets/ticket/{}/change/">{}</a>',
+                obj.ticket.id, obj.ticket.title
+            )
+        elif obj.sub_ticket:
+            return format_html(
+                '<a href="/admin/tickets/subticket/{}/change/">{}</a>',
+                obj.sub_ticket.id, obj.sub_ticket.title
+            )
+        return 'None'
+    parent_title.short_description = 'Parent Title'
+
+    def get_queryset(self, request):
+        """Optimize queries by selecting related objects."""
+        return super().get_queryset(request).select_related(
+            'ticket', 'sub_ticket', 'created_by'
+        )
+
+    def save_model(self, request, obj, form, change):
+        """Set created_by to current user if creating new checklist item."""
+        if not change and not obj.created_by_id:
+            obj.created_by = request.user
+        super().save_model(request, obj, form, change)
