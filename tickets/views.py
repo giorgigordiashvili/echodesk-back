@@ -156,7 +156,8 @@ class TicketPermission(permissions.BasePermission):
         # Users can view tickets they created or are assigned to
         if request.method in permissions.SAFE_METHODS:
             return (obj.created_by == request.user or 
-                   obj.assigned_to == request.user)
+                   obj.assigned_to == request.user or
+                   obj.assigned_users.filter(id=request.user.id).exists())
         
         # Only staff can assign tickets or move to closed columns
         if request.method in ['PUT', 'PATCH']:
@@ -171,8 +172,10 @@ class TicketPermission(permissions.BasePermission):
                         return request.user.is_staff
                 except TicketColumn.DoesNotExist:
                     pass
-            # Users can edit their own tickets (but not assign or close)
-            return obj.created_by == request.user
+            # Users can edit tickets they created or are assigned to (but not assign or close)
+            return (obj.created_by == request.user or 
+                   obj.assigned_to == request.user or
+                   obj.assigned_users.filter(id=request.user.id).exists())
         
         # Only staff can delete tickets
         if request.method == 'DELETE':
@@ -212,7 +215,8 @@ class TicketViewSet(viewsets.ModelViewSet):
         if not self.request.user.is_staff:
             queryset = queryset.filter(
                 Q(created_by=self.request.user) | 
-                Q(assigned_to=self.request.user)
+                Q(assigned_to=self.request.user) |
+                Q(assigned_users=self.request.user)
             )
         
         # Additional filtering by query parameters  
@@ -266,7 +270,10 @@ class TicketViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def assigned_to_me(self, request):
         """Get tickets assigned to the current user."""
-        queryset = self.queryset.filter(assigned_to=request.user)
+        queryset = self.queryset.filter(
+            Q(assigned_to=request.user) |
+            Q(assigned_users=request.user)
+        )
         page = self.paginate_queryset(queryset)
         if page is not None:
             serializer = TicketListSerializer(page, many=True)
@@ -469,7 +476,8 @@ class TicketCommentViewSet(viewsets.ModelViewSet):
         # Non-staff users can only see comments on their tickets
         return TicketComment.objects.filter(
             Q(ticket__created_by=self.request.user) | 
-            Q(ticket__assigned_to=self.request.user)
+            Q(ticket__assigned_to=self.request.user) |
+            Q(ticket__assigned_users=self.request.user)
         ).select_related('user', 'ticket')
 
     def perform_create(self, serializer):
@@ -500,8 +508,10 @@ class SubTicketViewSet(viewsets.ModelViewSet):
         return SubTicket.objects.filter(
             Q(parent_ticket__created_by=self.request.user) | 
             Q(parent_ticket__assigned_to=self.request.user) |
+            Q(parent_ticket__assigned_users=self.request.user) |
             Q(created_by=self.request.user) |
-            Q(assigned_to=self.request.user)
+            Q(assigned_to=self.request.user) |
+            Q(assigned_users=self.request.user)
         ).select_related(
             'parent_ticket', 'created_by', 'assigned_to'
         ).prefetch_related('checklist_items')
@@ -582,8 +592,10 @@ class ChecklistItemViewSet(viewsets.ModelViewSet):
         return ChecklistItem.objects.filter(
             Q(ticket__created_by=self.request.user) | 
             Q(ticket__assigned_to=self.request.user) |
+            Q(ticket__assigned_users=self.request.user) |
             Q(sub_ticket__parent_ticket__created_by=self.request.user) |
             Q(sub_ticket__parent_ticket__assigned_to=self.request.user) |
+            Q(sub_ticket__parent_ticket__assigned_users=self.request.user) |
             Q(created_by=self.request.user)
         ).select_related('ticket', 'sub_ticket', 'created_by')
 
