@@ -8,14 +8,14 @@ from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiRespon
 from drf_spectacular.openapi import OpenApiTypes
 from .models import (
     Ticket, Tag, TicketComment, TicketColumn, SubTicket, ChecklistItem,
-    TicketAssignment, SubTicketAssignment
+    TicketAssignment, SubTicketAssignment, TicketTimeLog
 )
 from .serializers import (
     TicketSerializer, TicketListSerializer, TagSerializer, 
     TicketCommentSerializer, TicketColumnSerializer, 
     TicketColumnCreateSerializer, TicketColumnUpdateSerializer,
     KanbanBoardSerializer, SubTicketSerializer, ChecklistItemSerializer,
-    TicketAssignmentSerializer, SubTicketAssignmentSerializer
+    TicketAssignmentSerializer, SubTicketAssignmentSerializer, TicketTimeLogSerializer
 )
 
 
@@ -234,6 +234,19 @@ class TicketViewSet(viewsets.ModelViewSet):
         
         return queryset
 
+    def perform_create(self, serializer):
+        """Create a ticket and start time tracking if applicable."""
+        # Set the user who created the ticket
+        ticket = serializer.save(created_by=self.request.user)
+        
+        # If the assigned column has time tracking enabled, create initial time log
+        if ticket.column and ticket.column.track_time:
+            TicketTimeLog.objects.create(
+                ticket=ticket,
+                column=ticket.column,
+                user=self.request.user
+            )
+
     @action(detail=True, methods=['post'])
     def add_comment(self, request, pk=None):
         """Add a comment to a ticket."""
@@ -356,6 +369,20 @@ class TicketViewSet(viewsets.ModelViewSet):
         with transaction.atomic():
             old_column = ticket.column
             
+            # Handle time tracking for old column (if enabled and ticket is leaving a column)
+            if old_column and old_column.track_time:
+                # Find the active time log for this ticket in the old column
+                active_time_log = TicketTimeLog.objects.filter(
+                    ticket=ticket,
+                    column=old_column,
+                    exited_at__isnull=True
+                ).first()
+                
+                if active_time_log:
+                    from django.utils import timezone
+                    active_time_log.exited_at = timezone.now()
+                    active_time_log.calculate_duration()
+            
             # Remove ticket from old column and adjust positions
             if old_column:
                 Ticket.objects.filter(
@@ -380,6 +407,15 @@ class TicketViewSet(viewsets.ModelViewSet):
             
             ticket.column = new_column
             ticket.save()
+            
+            # Handle time tracking for new column (if enabled)
+            if new_column.track_time:
+                # Create a new time log entry for the new column
+                TicketTimeLog.objects.create(
+                    ticket=ticket,
+                    column=new_column,
+                    user=request.user
+                )
         
         serializer = self.get_serializer(ticket)
         return Response(serializer.data)

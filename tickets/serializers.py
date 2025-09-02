@@ -2,7 +2,7 @@ from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from .models import (
     Ticket, Tag, TicketComment, TicketColumn, SubTicket, ChecklistItem,
-    TicketAssignment, SubTicketAssignment
+    TicketAssignment, SubTicketAssignment, TicketTimeLog
 )
 
 User = get_user_model()
@@ -17,7 +17,7 @@ class TicketColumnSerializer(serializers.ModelSerializer):
         model = TicketColumn
         fields = [
             'id', 'name', 'description', 'color', 'position', 
-            'is_default', 'is_closed_status', 'created_at', 'updated_at',
+            'is_default', 'is_closed_status', 'track_time', 'created_at', 'updated_at',
             'created_by', 'tickets_count'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'created_by']
@@ -44,7 +44,7 @@ class TicketColumnCreateSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = TicketColumn
-        fields = ['name', 'description', 'color', 'position', 'is_default', 'is_closed_status']
+        fields = ['name', 'description', 'color', 'position', 'is_default', 'is_closed_status', 'track_time']
         
     def create(self, validated_data):
         # Set created_by from request context
@@ -57,7 +57,7 @@ class TicketColumnUpdateSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = TicketColumn
-        fields = ['name', 'description', 'color', 'position', 'is_default', 'is_closed_status']
+        fields = ['name', 'description', 'color', 'position', 'is_default', 'is_closed_status', 'track_time']
 
 
 class TagSerializer(serializers.ModelSerializer):
@@ -456,3 +456,19 @@ class KanbanBoardSerializer(serializers.Serializer):
             tickets_data[column.id] = TicketListSerializer(tickets, many=True, context=self.context).data
         
         return tickets_data
+
+
+class TicketTimeLogSerializer(serializers.ModelSerializer):
+    """Serializer for TicketTimeLog model."""
+    ticket = serializers.StringRelatedField(read_only=True)
+    column = TicketColumnSerializer(read_only=True)
+    user = UserMinimalSerializer(read_only=True)
+    duration_display = serializers.ReadOnlyField()
+    
+    class Meta:
+        model = TicketTimeLog
+        fields = [
+            'id', 'ticket', 'column', 'user', 'entered_at', 'exited_at',
+            'duration_seconds', 'duration_display'
+        ]
+        read_only_fields = fields

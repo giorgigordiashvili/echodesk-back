@@ -24,6 +24,10 @@ class TicketColumn(models.Model):
         default=False,
         help_text='Whether tickets in this column are considered closed/completed'
     )
+    track_time = models.BooleanField(
+        default=False,
+        help_text='Whether to track time spent by tickets in this column'
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     created_by = models.ForeignKey(
@@ -373,3 +377,92 @@ class TicketComment(models.Model):
 
     def __str__(self):
         return f'Comment on {self.ticket.title} by {self.user.email}'
+
+
+class TicketTimeLog(models.Model):
+    """Model to track time spent by tickets in columns."""
+    ticket = models.ForeignKey(
+        Ticket, 
+        related_name='time_logs', 
+        on_delete=models.CASCADE
+    )
+    column = models.ForeignKey(
+        TicketColumn,
+        related_name='time_logs',
+        on_delete=models.CASCADE
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name='ticket_time_logs',
+        on_delete=models.CASCADE,
+        help_text='User who moved the ticket to this column'
+    )
+    entered_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text='When the ticket entered this column'
+    )
+    exited_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text='When the ticket left this column'
+    )
+    duration_seconds = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text='Total time spent in this column (in seconds)'
+    )
+    
+    class Meta:
+        ordering = ['-entered_at']
+        verbose_name = 'Ticket Time Log'
+        verbose_name_plural = 'Ticket Time Logs'
+    
+    def __str__(self):
+        if self.duration_seconds:
+            duration_hours = self.duration_seconds // 3600
+            duration_minutes = (self.duration_seconds % 3600) // 60
+            return f'{self.ticket.title} in {self.column.name}: {duration_hours}h {duration_minutes}m'
+        else:
+            return f'{self.ticket.title} in {self.column.name}: active'
+    
+    @property
+    def duration_display(self):
+        """Return human-readable duration."""
+        if not self.duration_seconds:
+            if self.exited_at:
+                # Calculate duration if exited but duration not set
+                from django.utils import timezone
+                if self.entered_at:
+                    duration = (self.exited_at - self.entered_at).total_seconds()
+                    return self._format_duration(int(duration))
+            else:
+                # Still active in column
+                from django.utils import timezone
+                if self.entered_at:
+                    duration = (timezone.now() - self.entered_at).total_seconds()
+                    return f"{self._format_duration(int(duration))} (active)"
+            return "Unknown"
+        
+        return self._format_duration(self.duration_seconds)
+    
+    def _format_duration(self, seconds):
+        """Format seconds into human-readable string."""
+        if seconds < 60:
+            return f"{seconds}s"
+        elif seconds < 3600:
+            minutes = seconds // 60
+            remaining_seconds = seconds % 60
+            return f"{minutes}m {remaining_seconds}s"
+        else:
+            hours = seconds // 3600
+            remaining_minutes = (seconds % 3600) // 60
+            if remaining_minutes == 0:
+                return f"{hours}h"
+            return f"{hours}h {remaining_minutes}m"
+    
+    def calculate_duration(self):
+        """Calculate and save duration if both entered_at and exited_at are set."""
+        if self.entered_at and self.exited_at and not self.duration_seconds:
+            duration = (self.exited_at - self.entered_at).total_seconds()
+            self.duration_seconds = int(duration)
+            self.save()
