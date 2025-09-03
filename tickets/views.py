@@ -2,7 +2,7 @@ from rest_framework import viewsets, permissions, filters, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
-from django.db.models import Q, F, Max
+from django.db.models import Q, F, Max, Count
 from django.db import transaction
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse
 from drf_spectacular.openapi import OpenApiTypes
@@ -30,7 +30,9 @@ class BoardPermission(permissions.BasePermission):
         
         # Check permissions based on action
         if view.action == 'list' or view.action == 'retrieve' or view.action == 'kanban_board':
-            return request.user.has_permission('view_boards')
+            # Allow access if user has full board permissions OR order access permissions
+            return (request.user.has_permission('view_boards') or 
+                   request.user.has_permission('access_orders'))
         elif view.action == 'create':
             return request.user.has_permission('create_boards')
         elif view.action in ['update', 'partial_update']:
@@ -38,7 +40,9 @@ class BoardPermission(permissions.BasePermission):
         elif view.action == 'destroy':
             return request.user.has_permission('delete_boards')
         else:
-            return request.user.has_permission('view_boards')  # Default to view permission
+            # Default to view permission for unknown actions
+            return (request.user.has_permission('view_boards') or 
+                   request.user.has_permission('access_orders'))
     
     def has_object_permission(self, request, view, obj):
         # For object-level permissions, we can add additional checks
@@ -993,9 +997,11 @@ class BoardViewSet(viewsets.ModelViewSet):
                 # User is attached to specific boards - show only those
                 return user_attached_boards
             else:
-                # User is not attached to specific boards - show boards with no specific order users
-                # (meaning all order users can use them)
-                return Board.objects.filter(Q(order_users__isnull=True) | ~Q(order_users__exists=True))
+                # User is not attached to specific boards - show boards that have no order users assigned
+                # (meaning they are open to all order users)
+                return Board.objects.annotate(
+                    order_users_count=Count('order_users')
+                ).filter(order_users_count=0)
         
         # User has no relevant permissions - return empty queryset
         return Board.objects.none()

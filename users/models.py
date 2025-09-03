@@ -151,7 +151,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     can_export_data = models.BooleanField(default=False)
     can_manage_tags = models.BooleanField(default=False)
     can_manage_columns = models.BooleanField(default=False)
-    can_view_boards = models.BooleanField(default=True)
+    can_view_boards = models.BooleanField(default=False)
     can_create_boards = models.BooleanField(default=False)
     can_edit_boards = models.BooleanField(default=False)
     can_delete_boards = models.BooleanField(default=False)
@@ -238,7 +238,7 @@ class User(AbstractBaseUser, PermissionsMixin):
             'export_data': self.is_manager,
             'manage_tags': self.is_manager,
             'manage_columns': self.is_manager,
-            'view_boards': True,  # All users can view boards by default
+            'view_boards': self.is_manager,  # Only managers/admins get full board access by role
             'create_boards': self.is_manager,
             'edit_boards': self.is_manager,
             'delete_boards': self.is_admin,
