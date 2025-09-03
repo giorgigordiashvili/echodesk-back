@@ -2,10 +2,27 @@ from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from .models import (
     Ticket, Tag, TicketComment, TicketColumn, SubTicket, ChecklistItem,
-    TicketAssignment, SubTicketAssignment, TicketTimeLog
+    TicketAssignment, SubTicketAssignment, TicketTimeLog, Board
 )
 
 User = get_user_model()
+
+
+class BoardSerializer(serializers.ModelSerializer):
+    """Serializer for Board model."""
+    created_by = serializers.StringRelatedField(read_only=True)
+    columns_count = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Board
+        fields = [
+            'id', 'name', 'description', 'is_default',
+            'created_at', 'updated_at', 'created_by', 'columns_count'
+        ]
+        read_only_fields = ['created_at', 'updated_at', 'created_by']
+    
+    def get_columns_count(self, obj):
+        return obj.columns.count()
 
 
 class TicketColumnSerializer(serializers.ModelSerializer):
@@ -17,7 +34,7 @@ class TicketColumnSerializer(serializers.ModelSerializer):
         model = TicketColumn
         fields = [
             'id', 'name', 'description', 'color', 'position', 
-            'is_default', 'is_closed_status', 'track_time', 'created_at', 'updated_at',
+            'is_default', 'is_closed_status', 'track_time', 'board', 'created_at', 'updated_at',
             'created_by', 'tickets_count'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'created_by']

@@ -28,6 +28,14 @@ class TicketColumn(models.Model):
         default=False,
         help_text='Whether to track time spent by tickets in this column'
     )
+    board = models.ForeignKey(
+        'Board',
+        on_delete=models.CASCADE,
+        related_name='columns',
+        null=True,
+        blank=True,
+        help_text='Board this column belongs to'
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     created_by = models.ForeignKey(
@@ -38,15 +46,18 @@ class TicketColumn(models.Model):
 
     class Meta:
         ordering = ['position', 'created_at']
-        unique_together = [['name']]  # Ensure unique column names per tenant
+        unique_together = [['name', 'board']]  # Ensure unique column names per board
 
     def __str__(self):
         return self.name
 
     def save(self, *args, **kwargs):
-        # Ensure only one default column exists
-        if self.is_default:
-            TicketColumn.objects.filter(is_default=True).exclude(id=self.id).update(is_default=False)
+        # Ensure only one default column exists per board
+        if self.is_default and self.board:
+            TicketColumn.objects.filter(
+                is_default=True, 
+                board=self.board
+            ).exclude(id=self.id).update(is_default=False)
         super().save(*args, **kwargs)
 
 
@@ -466,3 +477,38 @@ class TicketTimeLog(models.Model):
             duration = (self.exited_at - self.entered_at).total_seconds()
             self.duration_seconds = int(duration)
             self.save()
+
+
+class Board(models.Model):
+    """Kanban board model to group columns and tickets."""
+    name = models.CharField(max_length=255)
+    description = models.TextField(blank=True, null=True)
+    is_default = models.BooleanField(default=False)
+    
+    # Metadata
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE
+    )
+    
+    class Meta:
+        ordering = ['name']
+        constraints = [
+            # Only one default board per tenant
+            models.UniqueConstraint(
+                fields=['is_default'],
+                condition=models.Q(is_default=True),
+                name='unique_default_board'
+            )
+        ]
+    
+    def __str__(self):
+        return self.name
+    
+    def save(self, *args, **kwargs):
+        # If this is set as default, remove default from others
+        if self.is_default:
+            Board.objects.filter(is_default=True).update(is_default=False)
+        super().save(*args, **kwargs)

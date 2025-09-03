@@ -8,7 +8,7 @@ from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiRespon
 from drf_spectacular.openapi import OpenApiTypes
 from .models import (
     Ticket, Tag, TicketComment, TicketColumn, SubTicket, ChecklistItem,
-    TicketAssignment, SubTicketAssignment, TicketTimeLog
+    TicketAssignment, SubTicketAssignment, TicketTimeLog, Board
 )
 from .serializers import (
     TicketSerializer, TicketListSerializer, TagSerializer, 
@@ -16,7 +16,7 @@ from .serializers import (
     TicketColumnCreateSerializer, TicketColumnUpdateSerializer,
     KanbanBoardSerializer, SubTicketSerializer, ChecklistItemSerializer,
     TicketAssignmentSerializer, SubTicketAssignmentSerializer, TicketTimeLogSerializer,
-    TimeTrackingSummarySerializer
+    TimeTrackingSummarySerializer, BoardSerializer
 )
 
 
@@ -27,7 +27,8 @@ class TicketColumnViewSet(viewsets.ModelViewSet):
     queryset = TicketColumn.objects.all()
     serializer_class = TicketColumnSerializer
     permission_classes = [permissions.IsAuthenticated]
-    filter_backends = [filters.OrderingFilter]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['board']
     ordering = ['position', 'created_at']
 
     def get_serializer_class(self):
@@ -130,7 +131,27 @@ class TicketColumnViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def kanban_board(self, request):
         """Get all columns with their tickets for Kanban board view."""
-        columns = self.get_queryset()
+        # Get board_id from query params, default to default board
+        board_id = request.query_params.get('board_id')
+        
+        if board_id:
+            try:
+                board = Board.objects.get(id=board_id)
+                columns = TicketColumn.objects.filter(board=board).order_by('position')
+            except Board.DoesNotExist:
+                return Response({'error': 'Board not found'}, status=404)
+        else:
+            # Get default board or first available board
+            default_board = Board.objects.filter(is_default=True).first()
+            if not default_board:
+                default_board = Board.objects.first()
+            
+            if default_board:
+                columns = TicketColumn.objects.filter(board=default_board).order_by('position')
+            else:
+                # Fallback to columns without board (legacy support)
+                columns = TicketColumn.objects.filter(board__isnull=True).order_by('position')
+        
         board_data = {
             'columns': columns
         }
@@ -921,3 +942,70 @@ class TicketTimeLogViewSet(viewsets.ReadOnlyModelViewSet):
             'recent_activity': recent_logs_data,
             'active_sessions': active_sessions_data
         })
+
+
+class BoardViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing kanban boards."""
+    serializer_class = BoardSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_queryset(self):
+        """Return boards the user can access."""
+        if self.request.user.is_staff:
+            return Board.objects.all()
+        return Board.objects.filter(created_by=self.request.user)
+    
+    def perform_create(self, serializer):
+        """Set the created_by field when creating a board."""
+        serializer.save(created_by=self.request.user)
+    
+    @action(detail=True, methods=['get'])
+    def kanban_board(self, request, pk=None):
+        """Get kanban board data for a specific board."""
+        board = self.get_object()
+        
+        # Get columns for this board
+        columns = TicketColumn.objects.filter(board=board).order_by('position')
+        
+        # Build response similar to existing kanban_board endpoint
+        columns_data = []
+        tickets_by_column = {}
+        
+        for column in columns:
+            column_serializer = TicketColumnSerializer(column, context={'request': request})
+            columns_data.append(column_serializer.data)
+            
+            # Get tickets for this column
+            tickets = Ticket.objects.filter(column=column).order_by('position_in_column')
+            tickets_serializer = TicketListSerializer(tickets, many=True, context={'request': request})
+            tickets_by_column[column.id] = tickets_serializer.data
+        
+        return Response({
+            'board': BoardSerializer(board, context={'request': request}).data,
+            'columns': columns_data,
+            'tickets_by_column': tickets_by_column
+        })
+    
+    @action(detail=True, methods=['post'])
+    def set_default(self, request, pk=None):
+        """Set this board as the default board."""
+        board = self.get_object()
+        board.is_default = True
+        board.save()
+        return Response({'status': 'default set'})
+    
+    @action(detail=False, methods=['get'])
+    def default(self, request):
+        """Get the default board."""
+        default_board = Board.objects.filter(is_default=True).first()
+        if not default_board:
+            # If no default exists, create one or use the first available
+            first_board = Board.objects.first()
+            if first_board:
+                first_board.is_default = True
+                first_board.save()
+                default_board = first_board
+        
+        if default_board:
+            return Response(BoardSerializer(default_board, context={'request': request}).data)
+        return Response({'error': 'No boards found'}, status=404)
