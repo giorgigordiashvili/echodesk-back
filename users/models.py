@@ -45,6 +45,7 @@ class TenantGroup(models.Model):
     can_create_boards = models.BooleanField(default=False, help_text="Members can create new kanban boards")
     can_edit_boards = models.BooleanField(default=False, help_text="Members can edit kanban board details")
     can_delete_boards = models.BooleanField(default=False, help_text="Members can delete kanban boards")
+    can_access_orders = models.BooleanField(default=False, help_text="Members can access order management functionality")
     
     # Meta permissions
     is_active = models.BooleanField(default=True)
@@ -68,7 +69,8 @@ class TenantGroup(models.Model):
             'can_edit_own_tickets', 'can_edit_all_tickets', 'can_delete_tickets',
             'can_assign_tickets', 'can_view_reports', 'can_export_data',
             'can_manage_tags', 'can_manage_columns', 'can_view_boards',
-            'can_create_boards', 'can_edit_boards', 'can_delete_boards'
+            'can_create_boards', 'can_edit_boards', 'can_delete_boards',
+            'can_access_orders'
         ]
         
         for field in permission_fields:
@@ -153,6 +155,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     can_create_boards = models.BooleanField(default=False)
     can_edit_boards = models.BooleanField(default=False)
     can_delete_boards = models.BooleanField(default=False)
+    can_access_orders = models.BooleanField(default=False)
     
     # Group membership
     tenant_groups = models.ManyToManyField(TenantGroup, blank=True, related_name='members')
@@ -214,6 +217,7 @@ class User(AbstractBaseUser, PermissionsMixin):
             'create_boards': self.can_create_boards,
             'edit_boards': self.can_edit_boards,
             'delete_boards': self.can_delete_boards,
+            'access_orders': self.can_access_orders,
         }
         
         # Check if user has individual permission
@@ -261,7 +265,8 @@ class User(AbstractBaseUser, PermissionsMixin):
             'manage_settings', 'create_tickets', 'edit_own_tickets', 
             'edit_all_tickets', 'delete_tickets', 'assign_tickets', 
             'view_reports', 'export_data', 'manage_tags', 'manage_columns',
-            'view_boards', 'create_boards', 'edit_boards', 'delete_boards'
+            'view_boards', 'create_boards', 'edit_boards', 'delete_boards',
+            'access_orders'
         ]
         
         for field in permission_fields:

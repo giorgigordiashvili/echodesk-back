@@ -977,9 +977,28 @@ class BoardViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         """Return boards the user can access."""
-        # All authenticated users with view_boards permission can see all boards
-        # This makes boards accessible to all team members for collaboration
-        return Board.objects.all()
+        user = self.request.user
+        
+        # Check if user has full board access permissions
+        if user.has_permission('view_boards'):
+            # Full board access - show all boards
+            return Board.objects.all()
+        
+        # Check if user has order permissions but not full board permissions (for order users)
+        if user.has_permission('access_orders'):
+            # User only has order permissions - filter to boards they're attached to
+            user_attached_boards = Board.objects.filter(order_users=user)
+            
+            if user_attached_boards.exists():
+                # User is attached to specific boards - show only those
+                return user_attached_boards
+            else:
+                # User is not attached to specific boards - show boards with no specific order users
+                # (meaning all order users can use them)
+                return Board.objects.filter(Q(order_users__isnull=True) | ~Q(order_users__exists=True))
+        
+        # User has no relevant permissions - return empty queryset
+        return Board.objects.none()
     
     def perform_create(self, serializer):
         """Set the created_by field when creating a board."""
