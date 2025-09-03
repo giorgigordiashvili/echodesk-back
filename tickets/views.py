@@ -833,3 +833,76 @@ class TicketTimeLogViewSet(viewsets.ReadOnlyModelViewSet):
             Q(ticket__assigned_to=self.request.user) |
             Q(ticket__assigned_users=self.request.user)
         ).select_related('ticket', 'column', 'user')
+    
+    @action(detail=False, methods=['get'])
+    def my_time_summary(self, request):
+        """Get time tracking summary for the current user."""
+        from django.db.models import Sum, Count, Avg
+        from datetime import datetime, timedelta
+        from django.utils import timezone
+        
+        # Get date range from query params (default to last 30 days)
+        days = int(request.query_params.get('days', 30))
+        start_date = timezone.now() - timedelta(days=days)
+        
+        # Base queryset for user's time logs
+        user_logs = TicketTimeLog.objects.filter(
+            user=request.user,
+            entered_at__gte=start_date
+        ).select_related('ticket', 'column')
+        
+        # Total time tracked
+        total_time = user_logs.filter(
+            duration_seconds__isnull=False
+        ).aggregate(
+            total_seconds=Sum('duration_seconds'),
+            total_sessions=Count('id')
+        )
+        
+        # Time by column
+        time_by_column = user_logs.filter(
+            duration_seconds__isnull=False
+        ).values(
+            'column__name', 'column__color'
+        ).annotate(
+            total_seconds=Sum('duration_seconds'),
+            session_count=Count('id'),
+            avg_seconds=Avg('duration_seconds')
+        ).order_by('-total_seconds')
+        
+        # Recent activity
+        recent_logs = user_logs.order_by('-entered_at')[:10]
+        recent_logs_data = TicketTimeLogSerializer(recent_logs, many=True).data
+        
+        # Currently active sessions
+        active_sessions = user_logs.filter(
+            exited_at__isnull=True
+        )
+        active_sessions_data = TicketTimeLogSerializer(active_sessions, many=True).data
+        
+        # Daily breakdown for the period
+        daily_stats = {}
+        for log in user_logs.filter(duration_seconds__isnull=False):
+            date_key = log.entered_at.date().isoformat()
+            if date_key not in daily_stats:
+                daily_stats[date_key] = {
+                    'date': date_key,
+                    'total_seconds': 0,
+                    'session_count': 0
+                }
+            daily_stats[date_key]['total_seconds'] += log.duration_seconds or 0
+            daily_stats[date_key]['session_count'] += 1
+        
+        daily_breakdown = list(daily_stats.values())
+        daily_breakdown.sort(key=lambda x: x['date'], reverse=True)
+        
+        return Response({
+            'period_days': days,
+            'start_date': start_date,
+            'total_time_seconds': total_time['total_seconds'] or 0,
+            'total_sessions': total_time['total_sessions'] or 0,
+            'time_by_column': list(time_by_column),
+            'daily_breakdown': daily_breakdown,
+            'recent_activity': recent_logs_data,
+            'active_sessions': active_sessions_data
+        })
