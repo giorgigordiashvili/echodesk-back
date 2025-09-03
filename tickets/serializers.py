@@ -12,17 +12,45 @@ class BoardSerializer(serializers.ModelSerializer):
     """Serializer for Board model."""
     created_by = serializers.StringRelatedField(read_only=True)
     columns_count = serializers.SerializerMethodField()
+    order_users = UserMinimalSerializer(many=True, read_only=True)
+    order_user_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        write_only=True,
+        required=False,
+        allow_empty=True,
+        help_text='List of user IDs who can create orders on this board'
+    )
     
     class Meta:
         model = Board
         fields = [
             'id', 'name', 'description', 'is_default',
-            'created_at', 'updated_at', 'created_by', 'columns_count'
+            'created_at', 'updated_at', 'created_by', 'columns_count',
+            'order_users', 'order_user_ids'
         ]
         read_only_fields = ['created_at', 'updated_at', 'created_by']
     
     def get_columns_count(self, obj):
         return obj.columns.count()
+    
+    def create(self, validated_data):
+        order_user_ids = validated_data.pop('order_user_ids', [])
+        validated_data['created_by'] = self.context['request'].user
+        board = super().create(validated_data)
+        
+        if order_user_ids:
+            board.order_users.set(order_user_ids)
+        
+        return board
+    
+    def update(self, instance, validated_data):
+        order_user_ids = validated_data.pop('order_user_ids', None)
+        board = super().update(instance, validated_data)
+        
+        if order_user_ids is not None:
+            board.order_users.set(order_user_ids)
+        
+        return board
 
 
 class TicketColumnSerializer(serializers.ModelSerializer):
