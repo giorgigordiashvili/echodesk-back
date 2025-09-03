@@ -332,6 +332,76 @@ class TenantGroupViewSet(viewsets.ModelViewSet):
         if not self.request.user.has_permission('manage_groups') and not self.request.user.is_staff:
             raise permissions.PermissionDenied("You don't have permission to manage groups")
         instance.delete()
+    
+    @action(detail=True, methods=['post'])
+    def add_users(self, request, pk=None):
+        """Add users to this tenant group"""
+        if not request.user.has_permission('manage_groups') and not request.user.is_staff:
+            return Response(
+                {'error': 'You do not have permission to manage groups'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        tenant_group = self.get_object()
+        user_ids = request.data.get('user_ids', [])
+        
+        if not user_ids:
+            return Response(
+                {'error': 'user_ids is required'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        users = User.objects.filter(id__in=user_ids)
+        for user in users:
+            user.tenant_groups.add(tenant_group)
+        
+        return Response({
+            'message': f'Added {len(users)} users to tenant group {tenant_group.name}',
+            'added_users': [user.email for user in users]
+        })
+    
+    @action(detail=True, methods=['post'])
+    def remove_users(self, request, pk=None):
+        """Remove users from this tenant group"""
+        if not request.user.has_permission('manage_groups') and not request.user.is_staff:
+            return Response(
+                {'error': 'You do not have permission to manage groups'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        tenant_group = self.get_object()
+        user_ids = request.data.get('user_ids', [])
+        
+        if not user_ids:
+            return Response(
+                {'error': 'user_ids is required'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        users = User.objects.filter(id__in=user_ids)
+        for user in users:
+            user.tenant_groups.remove(tenant_group)
+        
+        return Response({
+            'message': f'Removed {len(users)} users from tenant group {tenant_group.name}',
+            'removed_users': [user.email for user in users]
+        })
+    
+    @action(detail=True, methods=['get'])
+    def members(self, request, pk=None):
+        """Get all members of this tenant group"""
+        tenant_group = self.get_object()
+        members = tenant_group.members.all()
+        
+        # Use the UserSerializer to return user data
+        from .serializers import UserSerializer
+        serializer = UserSerializer(members, many=True)
+        
+        return Response({
+            'count': len(members),
+            'group': tenant_group.name,
+            'members': serializer.data
+        })
 
 
 def tenant_homepage(request):

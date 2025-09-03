@@ -104,6 +104,7 @@ class UserSerializer(serializers.ModelSerializer):
     group_permissions = serializers.SerializerMethodField()
     all_permissions = serializers.SerializerMethodField()
     groups = GroupSerializer(many=True, read_only=True)
+    tenant_groups = TenantGroupSerializer(many=True, read_only=True)
     department = DepartmentSerializer(read_only=True)
     department_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
     group_ids = serializers.ListField(
@@ -111,6 +112,12 @@ class UserSerializer(serializers.ModelSerializer):
         write_only=True,
         required=False,
         help_text="List of group IDs to assign to this user"
+    )
+    tenant_group_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        write_only=True,
+        required=False,
+        help_text="List of tenant group IDs to assign to this user"
     )
     user_permission_ids = serializers.ListField(
         child=serializers.IntegerField(),
@@ -126,7 +133,7 @@ class UserSerializer(serializers.ModelSerializer):
             'role', 'status', 'phone_number', 'job_title', 'department', 'department_id',
             'is_active', 'is_staff', 'date_joined', 'last_login',
             'permissions', 'group_permissions', 'all_permissions',
-            'groups', 'group_ids', 'user_permission_ids'
+            'groups', 'group_ids', 'tenant_groups', 'tenant_group_ids', 'user_permission_ids'
         ]
         read_only_fields = ['id', 'date_joined', 'last_login']
     
@@ -144,6 +151,7 @@ class UserSerializer(serializers.ModelSerializer):
     
     def update(self, instance, validated_data):
         group_ids = validated_data.pop('group_ids', None)
+        tenant_group_ids = validated_data.pop('tenant_group_ids', None)
         user_permission_ids = validated_data.pop('user_permission_ids', None)
         department_id = validated_data.pop('department_id', None)
         
@@ -166,6 +174,10 @@ class UserSerializer(serializers.ModelSerializer):
         if group_ids is not None:
             groups = Group.objects.filter(id__in=group_ids)
             instance.groups.set(groups)
+        
+        if tenant_group_ids is not None:
+            tenant_groups = TenantGroup.objects.filter(id__in=tenant_group_ids)
+            instance.tenant_groups.set(tenant_groups)
         
         if user_permission_ids is not None:
             permissions = Permission.objects.filter(id__in=user_permission_ids)
