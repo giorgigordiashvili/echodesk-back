@@ -10,7 +10,8 @@ from .models import Department, TenantGroup
 from .serializers import (
     UserSerializer, UserCreateSerializer, UserUpdateSerializer,
     GroupSerializer, GroupCreateSerializer, PermissionSerializer,
-    BulkUserActionSerializer, PasswordChangeSerializer, DepartmentSerializer
+    BulkUserActionSerializer, PasswordChangeSerializer, DepartmentSerializer,
+    TenantGroupSerializer, TenantGroupCreateSerializer
 )
 
 User = get_user_model()
@@ -301,6 +302,36 @@ class UserViewSet(viewsets.ModelViewSet):
             return Response({'message': 'Password changed successfully'})
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class TenantGroupViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing TenantGroups with custom permissions"""
+    queryset = TenantGroup.objects.all()
+    serializer_class = TenantGroupSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return TenantGroupCreateSerializer
+        return TenantGroupSerializer
+    
+    def perform_create(self, serializer):
+        # Check if user has permission to manage groups
+        if not self.request.user.has_permission('manage_groups') and not self.request.user.is_staff:
+            raise permissions.PermissionDenied("You don't have permission to manage groups")
+        serializer.save()
+    
+    def perform_update(self, serializer):
+        # Check if user has permission to manage groups
+        if not self.request.user.has_permission('manage_groups') and not self.request.user.is_staff:
+            raise permissions.PermissionDenied("You don't have permission to manage groups")
+        serializer.save()
+    
+    def perform_destroy(self, instance):
+        # Check if user has permission to manage groups
+        if not self.request.user.has_permission('manage_groups') and not self.request.user.is_staff:
+            raise permissions.PermissionDenied("You don't have permission to manage groups")
+        instance.delete()
 
 
 def tenant_homepage(request):

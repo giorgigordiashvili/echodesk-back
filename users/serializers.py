@@ -314,3 +314,45 @@ class UserLoginSerializer(serializers.Serializer):
             return attrs
         else:
             raise serializers.ValidationError('Must include email and password.')
+
+
+class TenantGroupSerializer(serializers.ModelSerializer):
+    """Serializer for TenantGroup model with custom permissions"""
+    member_count = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = TenantGroup
+        fields = [
+            'id', 'name', 'description', 'is_active', 'created_at', 'updated_at',
+            'member_count',
+            # Group-level permissions
+            'can_view_all_tickets', 'can_manage_users', 'can_make_calls',
+            'can_manage_groups', 'can_manage_settings', 'can_create_tickets',
+            'can_edit_own_tickets', 'can_edit_all_tickets', 'can_delete_tickets',
+            'can_assign_tickets', 'can_view_reports', 'can_export_data',
+            'can_manage_tags', 'can_manage_columns', 'can_view_boards',
+            'can_create_boards', 'can_edit_boards', 'can_delete_boards',
+            'can_access_orders'
+        ]
+        read_only_fields = ['created_at', 'updated_at', 'member_count']
+    
+    def get_member_count(self, obj):
+        return obj.members.count()
+
+
+class TenantGroupCreateSerializer(serializers.ModelSerializer):
+    """Serializer for creating TenantGroup"""
+    
+    class Meta:
+        model = TenantGroup
+        fields = [
+            'name', 'description',
+            # Group-level permissions
+            'can_view_all_tickets', 'can_manage_users', 'can_make_calls',
+            'can_manage_groups', 'can_manage_settings', 'can_create_tickets',
+            'can_edit_own_tickets', 'can_edit_all_tickets', 'can_delete_tickets',
+            'can_assign_tickets', 'can_view_reports', 'can_export_data',
+            'can_manage_tags', 'can_manage_columns', 'can_view_boards',
+            'can_create_boards', 'can_edit_boards', 'can_delete_boards',
+            'can_access_orders'
+        ]
