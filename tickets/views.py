@@ -809,3 +809,27 @@ class SubTicketAssignmentViewSet(viewsets.ModelViewSet):
             {'message': f'Removed {deleted_count} assignments'}, 
             status=status.HTTP_204_NO_CONTENT
         )
+
+
+class TicketTimeLogViewSet(viewsets.ReadOnlyModelViewSet):
+    """ViewSet for viewing ticket time logs."""
+    serializer_class = TicketTimeLogSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['ticket', 'column', 'user']
+    ordering_fields = ['entered_at', 'exited_at', 'duration_seconds']
+    ordering = ['-entered_at']
+    
+    def get_queryset(self):
+        """Return time logs for tickets the user has access to."""
+        if self.request.user.is_staff:
+            return TicketTimeLog.objects.all().select_related(
+                'ticket', 'column', 'user'
+            )
+        
+        # Non-staff users can only see time logs for tickets they have access to
+        return TicketTimeLog.objects.filter(
+            Q(ticket__created_by=self.request.user) | 
+            Q(ticket__assigned_to=self.request.user) |
+            Q(ticket__assigned_users=self.request.user)
+        ).select_related('ticket', 'column', 'user')
