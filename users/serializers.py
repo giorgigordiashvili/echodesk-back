@@ -283,6 +283,11 @@ class UserUpdateSerializer(serializers.ModelSerializer):
         required=False,
         help_text="List of group IDs to assign to this user"
     )
+    tenant_group_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        required=False,
+        help_text="List of tenant group IDs to assign to this user"
+    )
     user_permission_ids = serializers.ListField(
         child=serializers.IntegerField(),
         required=False,
@@ -294,11 +299,12 @@ class UserUpdateSerializer(serializers.ModelSerializer):
         fields = [
             'first_name', 'last_name', 'role', 'status', 
             'phone_number', 'job_title', 'is_active',
-            'group_ids', 'user_permission_ids'
+            'group_ids', 'tenant_group_ids', 'user_permission_ids'
         ]
     
     def update(self, instance, validated_data):
         group_ids = validated_data.pop('group_ids', None)
+        tenant_group_ids = validated_data.pop('tenant_group_ids', None)
         user_permission_ids = validated_data.pop('user_permission_ids', None)
         
         for attr, value in validated_data.items():
@@ -308,6 +314,10 @@ class UserUpdateSerializer(serializers.ModelSerializer):
         if group_ids is not None:
             groups = Group.objects.filter(id__in=group_ids)
             instance.groups.set(groups)
+        
+        if tenant_group_ids is not None:
+            tenant_groups = TenantGroup.objects.filter(id__in=tenant_group_ids)
+            instance.tenant_groups.set(tenant_groups)
         
         if user_permission_ids is not None:
             permissions = Permission.objects.filter(id__in=user_permission_ids)
