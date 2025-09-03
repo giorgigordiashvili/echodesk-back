@@ -32,8 +32,6 @@ class TicketColumn(models.Model):
         'Board',
         on_delete=models.CASCADE,
         related_name='columns',
-        null=True,
-        blank=True,
         help_text='Board this column belongs to'
     )
     created_at = models.DateTimeField(auto_now_add=True)

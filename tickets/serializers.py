@@ -61,7 +61,7 @@ class TicketColumnCreateSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = TicketColumn
-        fields = ['name', 'description', 'color', 'position', 'is_default', 'is_closed_status', 'track_time']
+        fields = ['name', 'description', 'color', 'position', 'is_default', 'is_closed_status', 'track_time', 'board']
         
     def create(self, validated_data):
         # Set created_by from request context
@@ -74,7 +74,7 @@ class TicketColumnUpdateSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = TicketColumn
-        fields = ['name', 'description', 'color', 'position', 'is_default', 'is_closed_status', 'track_time']
+        fields = ['name', 'description', 'color', 'position', 'is_default', 'is_closed_status', 'track_time', 'board']
 
 
 class TagSerializer(serializers.ModelSerializer):
