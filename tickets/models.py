@@ -168,6 +168,12 @@ class Ticket(models.Model):
         help_text='All users assigned to this ticket'
     )
     tags = models.ManyToManyField(Tag, blank=True, related_name='tickets')
+    
+    # Field to distinguish orders from regular tickets
+    is_order = models.BooleanField(
+        default=False,
+        help_text='Whether this is an order (created by order users) or a regular ticket'
+    )
 
     class Meta:
         ordering = ['column__position', 'position_in_column', '-created_at']
@@ -482,6 +488,14 @@ class Board(models.Model):
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True, null=True)
     is_default = models.BooleanField(default=False)
+    
+    # Users who can create orders on this board
+    order_users = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        related_name='order_boards',
+        blank=True,
+        help_text='Users who can create orders on this board'
+    )
     
     # Metadata
     created_at = models.DateTimeField(auto_now_add=True)

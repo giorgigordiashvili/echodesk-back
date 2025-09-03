@@ -318,7 +318,7 @@ class TicketSerializer(serializers.ModelSerializer):
         model = Ticket
         fields = [
             'id', 'title', 'description', 'rich_description', 'description_format',
-            'status', 'priority', 'is_closed', 'column', 'column_id', 'position_in_column',
+            'status', 'priority', 'is_closed', 'is_order', 'column', 'column_id', 'position_in_column',
             'created_at', 'updated_at', 'created_by', 'assigned_to', 'assigned_to_id',
             'assigned_users', 'assignments', 'assigned_user_ids', 'assignment_roles',
             'tags', 'tag_ids', 'comments', 'comments_count',
@@ -353,6 +353,7 @@ class TicketSerializer(serializers.ModelSerializer):
         assigned_user_ids = validated_data.pop('assigned_user_ids', [])
         assignment_roles = validated_data.pop('assignment_roles', {})
         column_id = validated_data.pop('column_id', None)
+        is_order = validated_data.get('is_order', False)
         
         # Set created_by from request context
         validated_data['created_by'] = self.context['request'].user
@@ -362,8 +363,18 @@ class TicketSerializer(serializers.ModelSerializer):
         if assigned_to_id:
             validated_data['assigned_to'] = User.objects.get(id=assigned_to_id)
         
-        # Set column if provided
-        if column_id:
+        # Handle order-specific logic
+        if is_order and column_id:
+            # For orders, automatically assign to the first column of the board
+            column = TicketColumn.objects.get(id=column_id)
+            board = column.board
+            first_column = board.columns.order_by('position').first()
+            if first_column:
+                validated_data['column'] = first_column
+            else:
+                validated_data['column'] = column  # fallback to provided column
+        elif column_id:
+            # Set column if provided (regular tickets)
             validated_data['column'] = TicketColumn.objects.get(id=column_id)
         
         ticket = Ticket.objects.create(**validated_data)
