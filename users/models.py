@@ -306,6 +306,7 @@ class User(AbstractBaseUser, PermissionsMixin):
             ('can_create_boards', 'create_boards'),
             ('can_edit_boards', 'edit_boards'),
             ('can_delete_boards', 'delete_boards'),
+            ('can_access_orders', 'access_orders'),
         ]
         
         for field_name, permission_name in permission_fields:
