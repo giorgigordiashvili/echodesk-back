@@ -8,6 +8,15 @@ from .models import (
 User = get_user_model()
 
 
+class UserMinimalSerializer(serializers.ModelSerializer):
+    """Minimal user serializer for ticket relationships."""
+    
+    class Meta:
+        model = User
+        fields = ['id', 'email', 'first_name', 'last_name']
+        read_only_fields = ['id', 'email', 'first_name', 'last_name']
+
+
 class BoardSerializer(serializers.ModelSerializer):
     """Serializer for Board model."""
     created_by = serializers.StringRelatedField(read_only=True)
@@ -113,14 +122,6 @@ class TagSerializer(serializers.ModelSerializer):
         fields = ['id', 'name', 'created_at']
         read_only_fields = ['created_at']
 
-
-class UserMinimalSerializer(serializers.ModelSerializer):
-    """Minimal user serializer for ticket relationships."""
-    
-    class Meta:
-        model = User
-        fields = ['id', 'email', 'first_name', 'last_name']
-        read_only_fields = ['id', 'email', 'first_name', 'last_name']
 
 
 class TicketAssignmentSerializer(serializers.ModelSerializer):
