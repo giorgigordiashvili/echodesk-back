@@ -472,3 +472,15 @@ class TicketTimeLogSerializer(serializers.ModelSerializer):
             'duration_seconds', 'duration_display'
         ]
         read_only_fields = fields
+
+
+class TimeTrackingSummarySerializer(serializers.Serializer):
+    """Serializer for time tracking summary data."""
+    period_days = serializers.IntegerField()
+    start_date = serializers.DateTimeField()
+    total_time_seconds = serializers.IntegerField()
+    total_sessions = serializers.IntegerField()
+    time_by_column = serializers.ListField()
+    daily_breakdown = serializers.ListField()
+    recent_activity = TicketTimeLogSerializer(many=True)
+    active_sessions = TicketTimeLogSerializer(many=True)

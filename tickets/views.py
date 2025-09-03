@@ -15,7 +15,8 @@ from .serializers import (
     TicketCommentSerializer, TicketColumnSerializer, 
     TicketColumnCreateSerializer, TicketColumnUpdateSerializer,
     KanbanBoardSerializer, SubTicketSerializer, ChecklistItemSerializer,
-    TicketAssignmentSerializer, SubTicketAssignmentSerializer, TicketTimeLogSerializer
+    TicketAssignmentSerializer, SubTicketAssignmentSerializer, TicketTimeLogSerializer,
+    TimeTrackingSummarySerializer
 )
 
 
@@ -811,6 +812,7 @@ class SubTicketAssignmentViewSet(viewsets.ModelViewSet):
         )
 
 
+@extend_schema(tags=['Time Tracking'])
 class TicketTimeLogViewSet(viewsets.ReadOnlyModelViewSet):
     """ViewSet for viewing ticket time logs."""
     serializer_class = TicketTimeLogSerializer
@@ -834,6 +836,19 @@ class TicketTimeLogViewSet(viewsets.ReadOnlyModelViewSet):
             Q(ticket__assigned_users=self.request.user)
         ).select_related('ticket', 'column', 'user')
     
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                name='days',
+                type=OpenApiTypes.INT,
+                location=OpenApiParameter.QUERY,
+                description='Number of days to include in summary (default: 30)',
+                default=30
+            )
+        ],
+        responses={200: TimeTrackingSummarySerializer},
+        tags=['Time Tracking']
+    )
     @action(detail=False, methods=['get'])
     def my_time_summary(self, request):
         """Get time tracking summary for the current user."""
