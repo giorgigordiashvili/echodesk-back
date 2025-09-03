@@ -20,6 +20,32 @@ from .serializers import (
 )
 
 
+class BoardPermission(permissions.BasePermission):
+    """
+    Custom permission class for Board operations.
+    """
+    def has_permission(self, request, view):
+        if not request.user.is_authenticated:
+            return False
+        
+        # Check permissions based on action
+        if view.action == 'list' or view.action == 'retrieve' or view.action == 'kanban_board':
+            return request.user.has_permission('view_boards')
+        elif view.action == 'create':
+            return request.user.has_permission('create_boards')
+        elif view.action in ['update', 'partial_update']:
+            return request.user.has_permission('edit_boards')
+        elif view.action == 'destroy':
+            return request.user.has_permission('delete_boards')
+        else:
+            return request.user.has_permission('view_boards')  # Default to view permission
+    
+    def has_object_permission(self, request, view, obj):
+        # For object-level permissions, we can add additional checks
+        # For now, rely on the general permission check
+        return self.has_permission(request, view)
+
+
 class TicketColumnViewSet(viewsets.ModelViewSet):
     """
     ViewSet for managing ticket columns (Kanban board columns).
@@ -947,13 +973,13 @@ class TicketTimeLogViewSet(viewsets.ReadOnlyModelViewSet):
 class BoardViewSet(viewsets.ModelViewSet):
     """ViewSet for managing kanban boards."""
     serializer_class = BoardSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [BoardPermission]
     
     def get_queryset(self):
         """Return boards the user can access."""
-        if self.request.user.is_staff:
-            return Board.objects.all()
-        return Board.objects.filter(created_by=self.request.user)
+        # All authenticated users with view_boards permission can see all boards
+        # This makes boards accessible to all team members for collaboration
+        return Board.objects.all()
     
     def perform_create(self, serializer):
         """Set the created_by field when creating a board."""

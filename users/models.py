@@ -41,6 +41,10 @@ class TenantGroup(models.Model):
     can_export_data = models.BooleanField(default=False, help_text="Members can export data")
     can_manage_tags = models.BooleanField(default=False, help_text="Members can manage ticket tags")
     can_manage_columns = models.BooleanField(default=False, help_text="Members can manage kanban board columns")
+    can_view_boards = models.BooleanField(default=True, help_text="Members can view and access kanban boards")
+    can_create_boards = models.BooleanField(default=False, help_text="Members can create new kanban boards")
+    can_edit_boards = models.BooleanField(default=False, help_text="Members can edit kanban board details")
+    can_delete_boards = models.BooleanField(default=False, help_text="Members can delete kanban boards")
     
     # Meta permissions
     is_active = models.BooleanField(default=True)
@@ -63,7 +67,8 @@ class TenantGroup(models.Model):
             'can_manage_groups', 'can_manage_settings', 'can_create_tickets',
             'can_edit_own_tickets', 'can_edit_all_tickets', 'can_delete_tickets',
             'can_assign_tickets', 'can_view_reports', 'can_export_data',
-            'can_manage_tags', 'can_manage_columns'
+            'can_manage_tags', 'can_manage_columns', 'can_view_boards',
+            'can_create_boards', 'can_edit_boards', 'can_delete_boards'
         ]
         
         for field in permission_fields:
@@ -144,6 +149,10 @@ class User(AbstractBaseUser, PermissionsMixin):
     can_export_data = models.BooleanField(default=False)
     can_manage_tags = models.BooleanField(default=False)
     can_manage_columns = models.BooleanField(default=False)
+    can_view_boards = models.BooleanField(default=True)
+    can_create_boards = models.BooleanField(default=False)
+    can_edit_boards = models.BooleanField(default=False)
+    can_delete_boards = models.BooleanField(default=False)
     
     # Group membership
     tenant_groups = models.ManyToManyField(TenantGroup, blank=True, related_name='members')
@@ -201,6 +210,10 @@ class User(AbstractBaseUser, PermissionsMixin):
             'export_data': self.can_export_data,
             'manage_tags': self.can_manage_tags,
             'manage_columns': self.can_manage_columns,
+            'view_boards': self.can_view_boards,
+            'create_boards': self.can_create_boards,
+            'edit_boards': self.can_edit_boards,
+            'delete_boards': self.can_delete_boards,
         }
         
         # Check if user has individual permission
@@ -221,6 +234,10 @@ class User(AbstractBaseUser, PermissionsMixin):
             'export_data': self.is_manager,
             'manage_tags': self.is_manager,
             'manage_columns': self.is_manager,
+            'view_boards': True,  # All users can view boards by default
+            'create_boards': self.is_manager,
+            'edit_boards': self.is_manager,
+            'delete_boards': self.is_admin,
         }
         
         if role_permissions.get(permission, False):
@@ -243,7 +260,8 @@ class User(AbstractBaseUser, PermissionsMixin):
             'view_all_tickets', 'manage_users', 'make_calls', 'manage_groups', 
             'manage_settings', 'create_tickets', 'edit_own_tickets', 
             'edit_all_tickets', 'delete_tickets', 'assign_tickets', 
-            'view_reports', 'export_data', 'manage_tags', 'manage_columns'
+            'view_reports', 'export_data', 'manage_tags', 'manage_columns',
+            'view_boards', 'create_boards', 'edit_boards', 'delete_boards'
         ]
         
         for field in permission_fields:
@@ -279,6 +297,10 @@ class User(AbstractBaseUser, PermissionsMixin):
             ('can_export_data', 'export_data'),
             ('can_manage_tags', 'manage_tags'),
             ('can_manage_columns', 'manage_columns'),
+            ('can_view_boards', 'view_boards'),
+            ('can_create_boards', 'create_boards'),
+            ('can_edit_boards', 'edit_boards'),
+            ('can_delete_boards', 'delete_boards'),
         ]
         
         for field_name, permission_name in permission_fields:
