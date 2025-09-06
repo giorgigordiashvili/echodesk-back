@@ -1,23 +1,83 @@
 from django.contrib import admin
 from django.utils.html import format_html
-from .models import Ticket, Tag, TicketComment, TicketColumn, SubTicket, ChecklistItem
+from .models import Ticket, Tag, TicketComment, TicketColumn, SubTicket, ChecklistItem, Board, TicketTimeLog
+
+
+@admin.register(Board)
+class BoardAdmin(admin.ModelAdmin):
+    list_display = ('name', 'is_default', 'columns_count', 'tickets_count', 'order_users_count', 'created_by', 'created_at')
+    list_filter = ('is_default', 'created_at', 'updated_at')
+    search_fields = ('name', 'description')
+    filter_horizontal = ('order_users',)
+    readonly_fields = ('created_at', 'updated_at')
+    ordering = ('-is_default', 'name')
+    
+    fieldsets = (
+        ('Basic Information', {
+            'fields': ('name', 'description', 'is_default')
+        }),
+        ('Order Users', {
+            'fields': ('order_users',),
+            'description': 'Users who can create orders on this board'
+        }),
+        ('Metadata', {
+            'fields': ('created_by', 'created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    def columns_count(self, obj):
+        count = obj.columns.count()
+        if count > 0:
+            return format_html(
+                '<a href="/admin/tickets/ticketcolumn/?board__id__exact={}">{} columns</a>',
+                obj.id, count
+            )
+        return '0 columns'
+    columns_count.short_description = 'Columns'
+    
+    def tickets_count(self, obj):
+        count = sum(column.tickets.count() for column in obj.columns.all())
+        if count > 0:
+            return format_html(
+                '<a href="/admin/tickets/ticket/?column__board__id__exact={}">{} tickets</a>',
+                obj.id, count
+            )
+        return '0 tickets'
+    tickets_count.short_description = 'Tickets'
+    
+    def order_users_count(self, obj):
+        count = obj.order_users.count()
+        if count > 0:
+            return f'{count} users'
+        return '0 users'
+    order_users_count.short_description = 'Order Users'
+    
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related('created_by').prefetch_related('columns', 'order_users')
+    
+    def save_model(self, request, obj, form, change):
+        if not change and not obj.created_by_id:
+            obj.created_by = request.user
+        super().save_model(request, obj, form, change)
 
 
 @admin.register(TicketColumn)
 class TicketColumnAdmin(admin.ModelAdmin):
     """Admin configuration for TicketColumn model."""
-    list_display = ('name', 'color_badge', 'position', 'is_default', 'is_closed_status', 'tickets_count', 'created_at')
-    list_filter = ('is_default', 'is_closed_status', 'created_at')
-    search_fields = ('name', 'description')
-    ordering = ('position', 'name')
+    list_display = ('name', 'board', 'color_badge', 'position', 'is_default', 'is_closed_status', 'track_time', 'tickets_count', 'created_at')
+    list_filter = ('board', 'is_default', 'is_closed_status', 'track_time', 'created_at')
+    search_fields = ('name', 'description', 'board__name')
+    ordering = ('board', 'position', 'name')
     readonly_fields = ('created_at', 'updated_at', 'created_by')
+    raw_id_fields = ('board',)
     
     fieldsets = (
         ('Basic Information', {
-            'fields': ('name', 'description', 'color', 'position')
+            'fields': ('board', 'name', 'description', 'color', 'position')
         }),
         ('Status Settings', {
-            'fields': ('is_default', 'is_closed_status')
+            'fields': ('is_default', 'is_closed_status', 'track_time')
         }),
         ('Metadata', {
             'fields': ('created_by', 'created_at', 'updated_at'),
@@ -112,11 +172,11 @@ class SubTicketInline(admin.TabularInline):
 class TicketAdmin(admin.ModelAdmin):
     """Admin configuration for Ticket model."""
     list_display = (
-        'title', 'status_badge', 'priority_badge', 'created_by', 
-        'assigned_to', 'comments_count', 'created_at', 'updated_at'
+        'title', 'board_name', 'status_badge', 'priority_badge', 'is_order', 
+        'created_by', 'assigned_to', 'comments_count', 'created_at', 'updated_at'
     )
     list_filter = (
-        'column', 'priority', 'created_at', 'updated_at', 
+        'column__board', 'column', 'priority', 'is_order', 'created_at', 'updated_at', 
         'assigned_to', 'tags'
     )
     search_fields = (
@@ -133,7 +193,7 @@ class TicketAdmin(admin.ModelAdmin):
     
     fieldsets = (
         ('Basic Information', {
-            'fields': ('title', 'description', 'rich_description', 'description_format', 'column', 'priority', 'position_in_column')
+            'fields': ('title', 'description', 'rich_description', 'description_format', 'column', 'priority', 'position_in_column', 'is_order')
         }),
         ('Assignment', {
             'fields': ('created_by', 'assigned_to', 'tags')
@@ -145,6 +205,16 @@ class TicketAdmin(admin.ModelAdmin):
     )
     
     inlines = [TicketCommentInline, SubTicketInline, ChecklistItemInline]
+
+    def board_name(self, obj):
+        """Display board name with link."""
+        if obj.column and obj.column.board:
+            return format_html(
+                '<a href="/admin/tickets/board/{}/change/">{}</a>',
+                obj.column.board.id, obj.column.board.name
+            )
+        return format_html('<span style="color: #6c757d; font-style: italic;">No Board</span>')
+    board_name.short_description = 'Board'
 
     def status_badge(self, obj):
         """Display status with color coding."""
@@ -187,7 +257,7 @@ class TicketAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         """Optimize queries by prefetching related objects."""
         return super().get_queryset(request).select_related(
-            'created_by', 'assigned_to'
+            'created_by', 'assigned_to', 'column', 'column__board'
         ).prefetch_related('tags', 'comments')
 
     def save_model(self, request, obj, form, change):
@@ -392,3 +462,71 @@ class ChecklistItemAdmin(admin.ModelAdmin):
         if not change and not obj.created_by_id:
             obj.created_by = request.user
         super().save_model(request, obj, form, change)
+
+
+@admin.register(TicketTimeLog)
+class TicketTimeLogAdmin(admin.ModelAdmin):
+    """Admin configuration for TicketTimeLog model."""
+    list_display = (
+        'ticket_title', 'board_name', 'column_name', 'user', 
+        'duration_display_formatted', 'entered_at', 'exited_at'
+    )
+    list_filter = (
+        'column__board', 'column', 'entered_at', 'exited_at', 
+        'user', 'ticket__priority'
+    )
+    search_fields = (
+        'ticket__title', 'column__name', 'column__board__name',
+        'user__email', 'user__first_name', 'user__last_name'
+    )
+    raw_id_fields = ('ticket', 'user')
+    date_hierarchy = 'entered_at'
+    ordering = ('-entered_at',)
+    readonly_fields = ('duration_display', 'entered_at', 'exited_at', 'duration_seconds')
+    
+    fieldsets = (
+        ('Time Log Information', {
+            'fields': ('ticket', 'column', 'user')
+        }),
+        ('Time Tracking', {
+            'fields': ('entered_at', 'exited_at', 'duration_seconds', 'duration_display'),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    def ticket_title(self, obj):
+        """Display ticket title with link."""
+        return format_html(
+            '<a href="/admin/tickets/ticket/{}/change/">{}</a>',
+            obj.ticket.id, obj.ticket.title
+        )
+    ticket_title.short_description = 'Ticket'
+    
+    def board_name(self, obj):
+        """Display board name."""
+        if obj.column and obj.column.board:
+            return format_html(
+                '<a href="/admin/tickets/board/{}/change/">{}</a>',
+                obj.column.board.id, obj.column.board.name
+            )
+        return 'No Board'
+    board_name.short_description = 'Board'
+    
+    def column_name(self, obj):
+        """Display column name with color badge."""
+        return format_html(
+            '<span style="background-color: {}; color: white; padding: 2px 6px; border-radius: 3px; font-size: 11px;">{}</span>',
+            obj.column.color, obj.column.name
+        )
+    column_name.short_description = 'Column'
+    
+    def duration_display_formatted(self, obj):
+        """Display formatted duration."""
+        return obj.duration_display
+    duration_display_formatted.short_description = 'Duration'
+    
+    def get_queryset(self, request):
+        """Optimize queries by selecting related objects."""
+        return super().get_queryset(request).select_related(
+            'ticket', 'column', 'column__board', 'user'
+        )
