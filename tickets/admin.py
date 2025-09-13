@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.utils.html import format_html
-from .models import Ticket, Tag, TicketComment, TicketColumn, SubTicket, ChecklistItem, Board, TicketTimeLog
+from .models import Ticket, Tag, TicketComment, TicketColumn, SubTicket, ChecklistItem, Board, TicketTimeLog, TicketPayment
 
 
 @admin.register(Board)
@@ -168,16 +168,30 @@ class SubTicketInline(admin.TabularInline):
     raw_id_fields = ('assigned_to',)
 
 
+class TicketPaymentInline(admin.TabularInline):
+    """Inline admin for ticket payments."""
+    model = TicketPayment
+    extra = 0
+    readonly_fields = ('processed_at', 'processed_by')
+    fields = ('amount', 'currency', 'payment_method', 'payment_reference', 'processed_by', 'processed_at')
+    
+    def get_readonly_fields(self, request, obj=None):
+        """Make processed_by field readonly if editing existing payment."""
+        if obj and obj.pk:
+            return self.readonly_fields + ('processed_by',)
+        return self.readonly_fields
+
+
 @admin.register(Ticket)
 class TicketAdmin(admin.ModelAdmin):
     """Admin configuration for Ticket model."""
     list_display = (
-        'title', 'board_name', 'status_badge', 'priority_badge', 'is_order', 
+        'title', 'board_name', 'status_badge', 'priority_badge', 'payment_badge', 'is_order', 
         'created_by', 'assigned_to', 'comments_count', 'created_at', 'updated_at'
     )
     list_filter = (
-        'column__board', 'column', 'priority', 'is_order', 'created_at', 'updated_at', 
-        'assigned_to', 'tags'
+        'column__board', 'column', 'priority', 'is_order', 'is_paid', 'currency', 
+        'created_at', 'updated_at', 'assigned_to', 'tags'
     )
     search_fields = (
         'title', 'description', 'created_by__email', 
@@ -195,6 +209,10 @@ class TicketAdmin(admin.ModelAdmin):
         ('Basic Information', {
             'fields': ('title', 'description', 'rich_description', 'description_format', 'column', 'priority', 'position_in_column', 'is_order')
         }),
+        ('Payment Information', {
+            'fields': ('price', 'currency', 'is_paid', 'amount_paid', 'payment_due_date'),
+            'classes': ('collapse',)
+        }),
         ('Assignment', {
             'fields': ('created_by', 'assigned_to', 'tags')
         }),
@@ -204,7 +222,7 @@ class TicketAdmin(admin.ModelAdmin):
         }),
     )
     
-    inlines = [TicketCommentInline, SubTicketInline, ChecklistItemInline]
+    inlines = [TicketCommentInline, SubTicketInline, ChecklistItemInline, TicketPaymentInline]
 
     def board_name(self, obj):
         """Display board name with link."""
@@ -242,6 +260,43 @@ class TicketAdmin(admin.ModelAdmin):
             color, obj.get_priority_display()
         )
     priority_badge.short_description = 'Priority'
+
+    def payment_badge(self, obj):
+        """Display payment status with color coding."""
+        if not obj.price:
+            return format_html('<span style="color: #6c757d;">N/A</span>')
+        
+        status_colors = {
+            'paid': '#28a745',           # Green
+            'partially_paid': '#ffc107', # Yellow
+            'unpaid': '#dc3545',         # Red
+            'overpaid': '#17a2b8',       # Blue
+            'no_payment_required': '#6c757d'  # Gray
+        }
+        
+        status = obj.payment_status
+        color = status_colors.get(status, '#6c757d')
+        
+        # Add overdue indication
+        badge_text = status.replace('_', ' ').title()
+        if obj.is_overdue and status != 'paid':
+            badge_text += ' (OVERDUE)'
+            color = '#dc3545'  # Force red for overdue
+        
+        # Show amount info
+        if obj.price:
+            amount_info = f'{obj.amount_paid}/{obj.price} {obj.currency}'
+            return format_html(
+                '<span style="color: {}; font-weight: bold;">{}</span><br>'
+                '<small style="color: #6c757d;">{}</small>',
+                color, badge_text, amount_info
+            )
+        
+        return format_html(
+            '<span style="color: {}; font-weight: bold;">{}</span>',
+            color, badge_text
+        )
+    payment_badge.short_description = 'Payment Status'
 
     def comments_count(self, obj):
         """Display the number of comments."""
@@ -530,3 +585,78 @@ class TicketTimeLogAdmin(admin.ModelAdmin):
         return super().get_queryset(request).select_related(
             'ticket', 'column', 'column__board', 'user'
         )
+
+
+@admin.register(TicketPayment)
+class TicketPaymentAdmin(admin.ModelAdmin):
+    """Admin configuration for TicketPayment model."""
+    list_display = (
+        'ticket_title', 'amount_display', 'payment_method', 'payment_status_display',
+        'processed_by', 'processed_at'
+    )
+    list_filter = (
+        'payment_method', 'currency', 'processed_at', 
+        'ticket__column__board', 'ticket__is_paid'
+    )
+    search_fields = (
+        'ticket__title', 'payment_reference', 'notes',
+        'processed_by__email', 'processed_by__first_name', 'processed_by__last_name'
+    )
+    raw_id_fields = ('ticket', 'processed_by')
+    date_hierarchy = 'processed_at'
+    ordering = ('-processed_at',)
+    readonly_fields = ('processed_at',)
+    
+    fieldsets = (
+        ('Payment Information', {
+            'fields': ('ticket', 'amount', 'currency', 'payment_method', 'payment_reference')
+        }),
+        ('Additional Information', {
+            'fields': ('notes',),
+            'classes': ('collapse',)
+        }),
+        ('Processing Information', {
+            'fields': ('processed_by', 'processed_at'),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    def ticket_title(self, obj):
+        """Display ticket title with link."""
+        return format_html(
+            '<a href="/admin/tickets/ticket/{}/change/">{}</a>',
+            obj.ticket.id, obj.ticket.title
+        )
+    ticket_title.short_description = 'Ticket'
+    
+    def amount_display(self, obj):
+        """Display amount with currency."""
+        return f'{obj.amount} {obj.currency}'
+    amount_display.short_description = 'Amount'
+    
+    def payment_status_display(self, obj):
+        """Display ticket's payment status."""
+        if obj.ticket.is_paid:
+            return format_html('<span style="color: #28a745; font-weight: bold;">Paid</span>')
+        else:
+            remaining = obj.ticket.remaining_balance
+            if remaining:
+                return format_html(
+                    '<span style="color: #ffc107; font-weight: bold;">Partial</span><br>'
+                    '<small style="color: #6c757d;">Remaining: {} {}</small>',
+                    remaining, obj.ticket.currency
+                )
+            return format_html('<span style="color: #dc3545; font-weight: bold;">Unpaid</span>')
+    payment_status_display.short_description = 'Status'
+    
+    def get_queryset(self, request):
+        """Optimize queries by selecting related objects."""
+        return super().get_queryset(request).select_related(
+            'ticket', 'ticket__column', 'ticket__column__board', 'processed_by'
+        )
+    
+    def save_model(self, request, obj, form, change):
+        """Set processed_by to current user if creating new payment."""
+        if not change and not obj.processed_by_id:
+            obj.processed_by = request.user
+        super().save_model(request, obj, form, change)

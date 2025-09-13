@@ -2,7 +2,7 @@ from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from .models import (
     Ticket, Tag, TicketComment, TicketColumn, SubTicket, ChecklistItem,
-    TicketAssignment, SubTicketAssignment, TicketTimeLog, Board
+    TicketAssignment, SubTicketAssignment, TicketTimeLog, Board, TicketPayment
 )
 
 User = get_user_model()
@@ -29,18 +29,23 @@ class BoardSerializer(serializers.ModelSerializer):
         allow_empty=True,
         help_text='List of user IDs who can create orders on this board'
     )
+    payment_summary = serializers.SerializerMethodField(read_only=True)
     
     class Meta:
         model = Board
         fields = [
             'id', 'name', 'description', 'is_default',
             'created_at', 'updated_at', 'created_by', 'columns_count',
-            'order_users', 'order_user_ids'
+            'order_users', 'order_user_ids', 'payment_summary'
         ]
         read_only_fields = ['created_at', 'updated_at', 'created_by']
     
     def get_columns_count(self, obj):
         return obj.columns.count()
+    
+    def get_payment_summary(self, obj):
+        """Get payment summary for this board."""
+        return obj.get_payment_summary()
     
     def create(self, validated_data):
         order_user_ids = validated_data.pop('order_user_ids', [])
@@ -121,6 +126,24 @@ class TagSerializer(serializers.ModelSerializer):
         model = Tag
         fields = ['id', 'name', 'created_at']
         read_only_fields = ['created_at']
+
+
+class TicketPaymentSerializer(serializers.ModelSerializer):
+    """Serializer for TicketPayment model."""
+    processed_by = UserMinimalSerializer(read_only=True)
+    
+    class Meta:
+        model = TicketPayment
+        fields = [
+            'id', 'ticket', 'amount', 'currency', 'payment_method',
+            'payment_reference', 'notes', 'processed_by', 'processed_at'
+        ]
+        read_only_fields = ['id', 'processed_at', 'processed_by']
+    
+    def create(self, validated_data):
+        # Set processed_by from request context
+        validated_data['processed_by'] = self.context['request'].user
+        return super().create(validated_data)
 
 
 
@@ -343,6 +366,12 @@ class TicketSerializer(serializers.ModelSerializer):
     status = serializers.ReadOnlyField()  # Dynamic status from column
     is_closed = serializers.ReadOnlyField()  # Dynamic closed status from column
     
+    # Payment fields
+    payments = TicketPaymentSerializer(many=True, read_only=True)
+    remaining_balance = serializers.ReadOnlyField()
+    payment_status = serializers.ReadOnlyField()
+    is_overdue = serializers.ReadOnlyField()
+    
     class Meta:
         model = Ticket
         fields = [
@@ -352,7 +381,9 @@ class TicketSerializer(serializers.ModelSerializer):
             'assigned_users', 'assignments', 'assigned_user_ids', 'assignment_roles',
             'tags', 'tag_ids', 'comments', 'comments_count',
             'sub_tickets', 'sub_tickets_count', 'completed_sub_tickets_count',
-            'checklist_items', 'checklist_items_count', 'completed_checklist_items_count'
+            'checklist_items', 'checklist_items_count', 'completed_checklist_items_count',
+            'price', 'currency', 'is_paid', 'amount_paid', 'payment_due_date',
+            'payments', 'remaining_balance', 'payment_status', 'is_overdue'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'created_by', 'status', 'is_closed']
 

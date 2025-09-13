@@ -3,7 +3,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     TicketViewSet, TagViewSet, TicketCommentViewSet, TicketColumnViewSet, 
     SubTicketViewSet, ChecklistItemViewSet, TicketAssignmentViewSet, SubTicketAssignmentViewSet,
-    TicketTimeLogViewSet, BoardViewSet
+    TicketTimeLogViewSet, BoardViewSet, TicketPaymentViewSet
 )
 
 # Create router and register viewsets
@@ -16,6 +16,7 @@ router.register(r'comments', TicketCommentViewSet, basename='ticketcomment')
 router.register(r'sub-tickets', SubTicketViewSet, basename='subticket')
 router.register(r'checklist-items', ChecklistItemViewSet, basename='checklistitem')
 router.register(r'time-logs', TicketTimeLogViewSet, basename='tickettimelog')
+router.register(r'payments', TicketPaymentViewSet, basename='ticketpayment')
 
 app_name = 'tickets'
 

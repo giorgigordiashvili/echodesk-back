@@ -4,11 +4,12 @@ from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Q, F, Max, Count
 from django.db import transaction
+from django.utils import timezone
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse
 from drf_spectacular.openapi import OpenApiTypes
 from .models import (
     Ticket, Tag, TicketComment, TicketColumn, SubTicket, ChecklistItem,
-    TicketAssignment, SubTicketAssignment, TicketTimeLog, Board
+    TicketAssignment, SubTicketAssignment, TicketTimeLog, Board, TicketPayment
 )
 from .serializers import (
     TicketSerializer, TicketListSerializer, TagSerializer, 
@@ -16,7 +17,7 @@ from .serializers import (
     TicketColumnCreateSerializer, TicketColumnUpdateSerializer,
     KanbanBoardSerializer, SubTicketSerializer, ChecklistItemSerializer,
     TicketAssignmentSerializer, SubTicketAssignmentSerializer, TicketTimeLogSerializer,
-    TimeTrackingSummarySerializer, BoardSerializer
+    TimeTrackingSummarySerializer, BoardSerializer, TicketPaymentSerializer
 )
 
 
@@ -1060,3 +1061,121 @@ class BoardViewSet(viewsets.ModelViewSet):
         if default_board:
             return Response(BoardSerializer(default_board, context={'request': request}).data)
         return Response({'error': 'No boards found'}, status=404)
+
+
+class TicketPaymentViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing ticket payments.
+    """
+    queryset = TicketPayment.objects.all()
+    serializer_class = TicketPaymentSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['ticket', 'payment_method', 'currency']
+    ordering = ['-processed_at']
+
+    def get_queryset(self):
+        """Filter payments based on user permissions."""
+        queryset = super().get_queryset()
+        
+        # If user has ticket permissions or is superuser, return all
+        if (self.request.user.is_superuser or 
+            self.request.user.has_permission('view_tickets')):
+            return queryset
+        
+        # Otherwise, filter to tickets the user can access
+        accessible_tickets = Ticket.objects.filter(
+            Q(created_by=self.request.user) |
+            Q(assigned_to=self.request.user) |
+            Q(assigned_users=self.request.user)
+        ).distinct()
+        
+        return queryset.filter(ticket__in=accessible_tickets)
+
+    @action(detail=False, methods=['post'])
+    def process_payment(self, request):
+        """Process a payment for a ticket."""
+        ticket_id = request.data.get('ticket_id')
+        amount = request.data.get('amount')
+        
+        if not ticket_id or not amount:
+            return Response(
+                {'error': 'ticket_id and amount are required'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            ticket = Ticket.objects.get(id=ticket_id)
+            amount = float(amount)
+        except (Ticket.DoesNotExist, ValueError):
+            return Response(
+                {'error': 'Invalid ticket or amount'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Check if user can modify this ticket
+        if not (request.user.is_superuser or 
+                request.user.has_permission('edit_tickets') or
+                ticket.created_by == request.user):
+            return Response(
+                {'error': 'Permission denied'}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        try:
+            remaining_balance = ticket.add_payment(amount, request.user)
+            
+            # Get updated ticket data
+            updated_ticket = Ticket.objects.get(id=ticket_id)
+            ticket_serializer = TicketSerializer(updated_ticket, context={'request': request})
+            
+            return Response({
+                'message': 'Payment processed successfully',
+                'remaining_balance': remaining_balance,
+                'ticket': ticket_serializer.data
+            })
+        except ValueError as e:
+            return Response(
+                {'error': str(e)}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+    @action(detail=False, methods=['get'])
+    def payment_summary(self, request):
+        """Get payment summary across all accessible tickets."""
+        from django.db.models import Sum, Count, Q
+        from decimal import Decimal
+        
+        # Get accessible tickets
+        accessible_tickets = Ticket.objects.all()
+        if not (request.user.is_superuser or request.user.has_permission('view_tickets')):
+            accessible_tickets = accessible_tickets.filter(
+                Q(created_by=request.user) |
+                Q(assigned_to=request.user) |
+                Q(assigned_users=request.user)
+            ).distinct()
+        
+        # Filter by board if provided
+        board_id = request.query_params.get('board_id')
+        if board_id:
+            accessible_tickets = accessible_tickets.filter(column__board_id=board_id)
+        
+        summary = accessible_tickets.aggregate(
+            total_tickets=Count('id'),
+            billable_tickets=Count('id', filter=Q(price__gt=0)),
+            total_value=Sum('price'),
+            total_paid=Sum('amount_paid'),
+            paid_tickets=Count('id', filter=Q(is_paid=True)),
+            unpaid_tickets=Count('id', filter=Q(is_paid=False, price__gt=0)),
+            overdue_tickets=Count('id', filter=Q(
+                is_paid=False, 
+                payment_due_date__lt=timezone.now().date()
+            ))
+        )
+        
+        # Calculate remaining balance
+        total_value = summary['total_value'] or Decimal('0.00')
+        total_paid = summary['total_paid'] or Decimal('0.00')
+        summary['remaining_balance'] = total_value - total_paid
+        
+        return Response(summary)

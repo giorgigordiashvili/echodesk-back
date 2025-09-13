@@ -1,5 +1,6 @@
 from django.db import models
 from django.conf import settings
+from django.utils import timezone
 import json
 
 
@@ -174,6 +175,35 @@ class Ticket(models.Model):
         default=False,
         help_text='Whether this is an order (created by order users) or a regular ticket'
     )
+    
+    # Pricing and payment fields
+    price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text='Price for this ticket (for billable work or orders)'
+    )
+    currency = models.CharField(
+        max_length=3,
+        default='USD',
+        help_text='Currency code (e.g., USD, EUR, GEL)'
+    )
+    is_paid = models.BooleanField(
+        default=False,
+        help_text='Whether this ticket has been fully paid'
+    )
+    amount_paid = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0.00,
+        help_text='Amount that has been paid for this ticket'
+    )
+    payment_due_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text='Due date for payment'
+    )
 
     class Meta:
         ordering = ['column__position', 'position_in_column', '-created_at']
@@ -190,6 +220,59 @@ class Ticket(models.Model):
     def is_closed(self):
         """Check if ticket is in a closed status column."""
         return self.column.is_closed_status if self.column else False
+    
+    @property
+    def remaining_balance(self):
+        """Calculate remaining balance to be paid."""
+        if self.price is None:
+            return None
+        return self.price - self.amount_paid
+    
+    @property
+    def payment_status(self):
+        """Get payment status as a string."""
+        if self.price is None or self.price == 0:
+            return 'no_payment_required'
+        elif self.is_paid:
+            return 'paid'
+        elif self.amount_paid == 0:
+            return 'unpaid'
+        elif self.amount_paid < self.price:
+            return 'partially_paid'
+        else:
+            return 'overpaid'
+    
+    @property
+    def is_overdue(self):
+        """Check if payment is overdue."""
+        if not self.payment_due_date or self.is_paid:
+            return False
+        from django.utils import timezone
+        return timezone.now().date() > self.payment_due_date
+
+    def add_payment(self, amount, user=None):
+        """Add a payment to this ticket."""
+        if amount <= 0:
+            raise ValueError("Payment amount must be positive")
+        
+        self.amount_paid += amount
+        
+        # Auto-mark as paid if full amount is reached
+        if self.price and self.amount_paid >= self.price:
+            self.is_paid = True
+        
+        self.save()
+        
+        # Create payment record
+        TicketPayment.objects.create(
+            ticket=self,
+            amount=amount,
+            currency=self.currency,
+            payment_method='manual',
+            processed_by=user
+        )
+        
+        return self.remaining_balance
 
     def save(self, *args, **kwargs):
         # Auto-assign to default column if no column is set
@@ -204,6 +287,12 @@ class Ticket(models.Model):
                 models.Max('position_in_column')
             )['position_in_column__max'] or 0
             self.position_in_column = max_position + 1
+        
+        # Auto-update payment status
+        if self.price and self.amount_paid >= self.price:
+            self.is_paid = True
+        elif self.price and self.amount_paid < self.price:
+            self.is_paid = False
             
         super().save(*args, **kwargs)
 
@@ -483,6 +572,71 @@ class TicketTimeLog(models.Model):
             self.save()
 
 
+class TicketPayment(models.Model):
+    """Model to track individual payments for tickets."""
+    PAYMENT_METHOD_CHOICES = [
+        ('cash', 'Cash'),
+        ('card', 'Card'),
+        ('bank_transfer', 'Bank Transfer'),
+        ('paypal', 'PayPal'),
+        ('stripe', 'Stripe'),
+        ('manual', 'Manual'),
+        ('other', 'Other'),
+    ]
+    
+    ticket = models.ForeignKey(
+        Ticket,
+        related_name='payments',
+        on_delete=models.CASCADE,
+        help_text='Ticket this payment is for'
+    )
+    amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        help_text='Payment amount'
+    )
+    currency = models.CharField(
+        max_length=3,
+        default='USD',
+        help_text='Currency code (e.g., USD, EUR, GEL)'
+    )
+    payment_method = models.CharField(
+        max_length=20,
+        choices=PAYMENT_METHOD_CHOICES,
+        default='manual',
+        help_text='How the payment was made'
+    )
+    payment_reference = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text='Reference number or transaction ID'
+    )
+    notes = models.TextField(
+        blank=True,
+        help_text='Additional notes about the payment'
+    )
+    processed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='processed_payments',
+        help_text='User who processed this payment'
+    )
+    processed_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text='When this payment was processed'
+    )
+    
+    class Meta:
+        ordering = ['-processed_at']
+        verbose_name = 'Ticket Payment'
+        verbose_name_plural = 'Ticket Payments'
+    
+    def __str__(self):
+        return f'{self.amount} {self.currency} for {self.ticket.title}'
+
+
 class Board(models.Model):
     """Kanban board model to group columns and tickets."""
     name = models.CharField(max_length=255)
@@ -524,3 +678,35 @@ class Board(models.Model):
         if self.is_default:
             Board.objects.filter(is_default=True).update(is_default=False)
         super().save(*args, **kwargs)
+    
+    def get_payment_summary(self):
+        """Get payment summary for all tickets in this board."""
+        from django.db.models import Sum, Count, Q
+        
+        tickets = Ticket.objects.filter(column__board=self)
+        
+        summary = tickets.aggregate(
+            total_tickets=Count('id'),
+            total_orders=Count('id', filter=Q(is_order=True)),
+            total_price=Sum('price'),
+            total_paid=Sum('amount_paid'),
+            paid_tickets=Count('id', filter=Q(is_paid=True)),
+            unpaid_tickets=Count('id', filter=Q(is_paid=False, price__gt=0)),
+            overdue_tickets=Count('id', filter=Q(
+                is_paid=False, 
+                payment_due_date__lt=timezone.now().date()
+            ))
+        )
+        
+        summary['remaining_balance'] = (summary['total_price'] or 0) - (summary['total_paid'] or 0)
+        
+        return summary
+    
+    def get_overdue_payments(self):
+        """Get tickets with overdue payments."""
+        from django.utils import timezone
+        return Ticket.objects.filter(
+            column__board=self,
+            is_paid=False,
+            payment_due_date__lt=timezone.now().date()
+        ).order_by('payment_due_date')
