@@ -1,20 +1,32 @@
 from django.contrib import admin
 from django.utils.html import format_html
+from django.shortcuts import redirect
+from django.contrib import messages
+from django.http import HttpResponse
+from django.urls import path
+from django.utils.safestring import mark_safe
+from django.db.models import Sum, Q
+import csv
+from decimal import Decimal
 from .models import Ticket, Tag, TicketComment, TicketColumn, SubTicket, ChecklistItem, Board, TicketTimeLog, TicketPayment
 
 
 @admin.register(Board)
 class BoardAdmin(admin.ModelAdmin):
-    list_display = ('name', 'is_default', 'columns_count', 'tickets_count', 'order_users_count', 'created_by', 'created_at')
+    list_display = ('name', 'is_default', 'columns_count', 'tickets_count', 'payment_summary', 'order_users_count', 'created_by', 'created_at')
     list_filter = ('is_default', 'created_at', 'updated_at')
     search_fields = ('name', 'description')
     filter_horizontal = ('order_users',)
-    readonly_fields = ('created_at', 'updated_at')
+    readonly_fields = ('created_at', 'updated_at', 'payment_summary_detailed')
     ordering = ('-is_default', 'name')
     
     fieldsets = (
         ('Basic Information', {
             'fields': ('name', 'description', 'is_default')
+        }),
+        ('Payment Summary', {
+            'fields': ('payment_summary_detailed',),
+            'classes': ('collapse',)
         }),
         ('Order Users', {
             'fields': ('order_users',),
@@ -52,6 +64,53 @@ class BoardAdmin(admin.ModelAdmin):
             return f'{count} users'
         return '0 users'
     order_users_count.short_description = 'Order Users'
+
+    def payment_summary(self, obj):
+        """Display payment summary for the board."""
+        summary = obj.get_payment_summary()
+        total_price = summary.get('total_price') or 0
+        total_paid = summary.get('total_paid') or 0
+        remaining = summary.get('remaining_balance') or 0
+        overdue = summary.get('overdue_tickets') or 0
+
+        if total_price > 0:
+            payment_rate = (total_paid / total_price) * 100 if total_price > 0 else 0
+            status_color = '#28a745' if payment_rate >= 90 else '#ffc107' if payment_rate >= 50 else '#dc3545'
+
+            result = format_html(
+                '<span style="color: {}; font-weight: bold;">{:.1f}% paid</span><br>'
+                '<small>{:.2f} / {:.2f}</small>',
+                status_color, payment_rate, total_paid, total_price
+            )
+
+            if overdue > 0:
+                result += format_html('<br><span style="color: #dc3545; font-size: 10px;">{} overdue</span>', overdue)
+
+            return result
+        return format_html('<span style="color: #6c757d;">No payments</span>')
+    payment_summary.short_description = 'Payment Status'
+
+    def payment_summary_detailed(self, obj):
+        """Display detailed payment summary in the form view."""
+        summary = obj.get_payment_summary()
+
+        html = '<div style="background: #f8f9fa; padding: 15px; border-radius: 5px; margin: 10px 0;">'
+        html += '<h4 style="margin-top: 0;">Payment Summary</h4>'
+        html += f'<p><strong>Total Tickets:</strong> {summary.get("total_tickets", 0)}</p>'
+        html += f'<p><strong>Orders:</strong> {summary.get("total_orders", 0)}</p>'
+        html += f'<p><strong>Total Value:</strong> {summary.get("total_price", 0):.2f}</p>'
+        html += f'<p><strong>Total Paid:</strong> {summary.get("total_paid", 0):.2f}</p>'
+        html += f'<p><strong>Remaining Balance:</strong> {summary.get("remaining_balance", 0):.2f}</p>'
+        html += f'<p><strong>Paid Tickets:</strong> {summary.get("paid_tickets", 0)}</p>'
+        html += f'<p><strong>Unpaid Tickets:</strong> {summary.get("unpaid_tickets", 0)}</p>'
+
+        overdue = summary.get("overdue_tickets", 0)
+        if overdue > 0:
+            html += f'<p style="color: #dc3545;"><strong>Overdue Tickets:</strong> {overdue}</p>'
+
+        html += '</div>'
+        return mark_safe(html)
+    payment_summary_detailed.short_description = 'Payment Summary'
     
     def get_queryset(self, request):
         return super().get_queryset(request).select_related('created_by').prefetch_related('columns', 'order_users')
@@ -186,17 +245,17 @@ class TicketPaymentInline(admin.TabularInline):
 class TicketAdmin(admin.ModelAdmin):
     """Admin configuration for Ticket model."""
     list_display = (
-        'title', 'board_name', 'status_badge', 'priority_badge', 'payment_badge', 'is_order', 
+        'title', 'board_name', 'status_badge', 'priority_badge', 'payment_badge', 'is_order',
         'created_by', 'assigned_to', 'comments_count', 'created_at', 'updated_at'
     )
     list_filter = (
-        'column__board', 'column', 'priority', 'is_order', 'is_paid', 'currency', 
+        'column__board', 'column', 'priority', 'is_order', 'is_paid', 'currency',
         'created_at', 'updated_at', 'assigned_to', 'tags'
     )
     search_fields = (
-        'title', 'description', 'created_by__email', 
+        'title', 'description', 'created_by__email',
         'created_by__first_name', 'created_by__last_name',
-        'assigned_to__email', 'assigned_to__first_name', 
+        'assigned_to__email', 'assigned_to__first_name',
         'assigned_to__last_name'
     )
     raw_id_fields = ('created_by', 'assigned_to')
@@ -204,7 +263,8 @@ class TicketAdmin(admin.ModelAdmin):
     date_hierarchy = 'created_at'
     ordering = ('-created_at',)
     readonly_fields = ('created_at', 'updated_at')
-    
+    actions = ['mark_as_paid', 'mark_as_unpaid', 'export_payment_report']
+
     fieldsets = (
         ('Basic Information', {
             'fields': ('title', 'description', 'rich_description', 'description_format', 'column', 'priority', 'position_in_column', 'is_order')
@@ -221,8 +281,71 @@ class TicketAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         }),
     )
-    
+
     inlines = [TicketCommentInline, SubTicketInline, ChecklistItemInline, TicketPaymentInline]
+
+    def mark_as_paid(self, request, queryset):
+        """Mark selected tickets as paid."""
+        updated = 0
+        for ticket in queryset:
+            if ticket.price and not ticket.is_paid:
+                ticket.amount_paid = ticket.price
+                ticket.is_paid = True
+                ticket.save()
+
+                TicketPayment.objects.create(
+                    ticket=ticket,
+                    amount=ticket.price - (ticket.payments.aggregate(Sum('amount'))['amount__sum'] or 0),
+                    currency=ticket.currency,
+                    payment_method='manual',
+                    payment_reference=f'Admin bulk action - {request.user.email}',
+                    notes='Marked as paid through admin bulk action',
+                    processed_by=request.user
+                )
+                updated += 1
+
+        self.message_user(request, f'{updated} tickets marked as paid.')
+    mark_as_paid.short_description = "Mark selected tickets as paid"
+
+    def mark_as_unpaid(self, request, queryset):
+        """Mark selected tickets as unpaid."""
+        updated = queryset.filter(is_paid=True).update(is_paid=False)
+        self.message_user(request, f'{updated} tickets marked as unpaid.')
+    mark_as_unpaid.short_description = "Mark selected tickets as unpaid"
+
+    def export_payment_report(self, request, queryset):
+        """Export payment report for selected tickets."""
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = 'attachment; filename="payment_report.csv"'
+
+        writer = csv.writer(response)
+        writer.writerow([
+            'Ticket ID', 'Title', 'Board', 'Status', 'Priority', 'Price', 'Currency',
+            'Amount Paid', 'Remaining Balance', 'Payment Status', 'Is Paid',
+            'Payment Due Date', 'Is Overdue', 'Created By', 'Created At'
+        ])
+
+        for ticket in queryset:
+            writer.writerow([
+                ticket.id,
+                ticket.title,
+                ticket.column.board.name if ticket.column and ticket.column.board else 'No Board',
+                ticket.column.name if ticket.column else 'No Status',
+                ticket.get_priority_display(),
+                ticket.price or 0,
+                ticket.currency,
+                ticket.amount_paid,
+                ticket.remaining_balance or 0,
+                ticket.payment_status,
+                ticket.is_paid,
+                ticket.payment_due_date,
+                ticket.is_overdue,
+                ticket.created_by.email if ticket.created_by else '',
+                ticket.created_at.strftime('%Y-%m-%d %H:%M:%S')
+            ])
+
+        return response
+    export_payment_report.short_description = "Export payment report for selected tickets"
 
     def board_name(self, obj):
         """Display board name with link."""
@@ -595,7 +718,7 @@ class TicketPaymentAdmin(admin.ModelAdmin):
         'processed_by', 'processed_at'
     )
     list_filter = (
-        'payment_method', 'currency', 'processed_at', 
+        'payment_method', 'currency', 'processed_at',
         'ticket__column__board', 'ticket__is_paid'
     )
     search_fields = (
@@ -606,6 +729,7 @@ class TicketPaymentAdmin(admin.ModelAdmin):
     date_hierarchy = 'processed_at'
     ordering = ('-processed_at',)
     readonly_fields = ('processed_at',)
+    actions = ['export_payment_details', 'mark_tickets_as_paid']
     
     fieldsets = (
         ('Payment Information', {
@@ -655,6 +779,55 @@ class TicketPaymentAdmin(admin.ModelAdmin):
             'ticket', 'ticket__column', 'ticket__column__board', 'processed_by'
         )
     
+    def export_payment_details(self, request, queryset):
+        """Export detailed payment information."""
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = 'attachment; filename="payment_details.csv"'
+
+        writer = csv.writer(response)
+        writer.writerow([
+            'Payment ID', 'Ticket ID', 'Ticket Title', 'Board', 'Amount', 'Currency',
+            'Payment Method', 'Payment Reference', 'Notes', 'Processed By',
+            'Processed At', 'Ticket Price', 'Ticket Total Paid', 'Ticket Remaining',
+            'Ticket Payment Status'
+        ])
+
+        for payment in queryset:
+            writer.writerow([
+                payment.id,
+                payment.ticket.id,
+                payment.ticket.title,
+                payment.ticket.column.board.name if payment.ticket.column and payment.ticket.column.board else 'No Board',
+                payment.amount,
+                payment.currency,
+                payment.get_payment_method_display(),
+                payment.payment_reference,
+                payment.notes,
+                payment.processed_by.email if payment.processed_by else '',
+                payment.processed_at.strftime('%Y-%m-%d %H:%M:%S'),
+                payment.ticket.price or 0,
+                payment.ticket.amount_paid,
+                payment.ticket.remaining_balance or 0,
+                payment.ticket.payment_status
+            ])
+
+        return response
+    export_payment_details.short_description = "Export payment details"
+
+    def mark_tickets_as_paid(self, request, queryset):
+        """Mark tickets of selected payments as fully paid."""
+        updated = 0
+        for payment in queryset:
+            ticket = payment.ticket
+            if ticket.price and not ticket.is_paid:
+                if ticket.amount_paid >= ticket.price:
+                    ticket.is_paid = True
+                    ticket.save()
+                    updated += 1
+
+        self.message_user(request, f'{updated} tickets marked as paid.')
+    mark_tickets_as_paid.short_description = "Mark tickets as paid if fully funded"
+
     def save_model(self, request, obj, form, change):
         """Set processed_by to current user if creating new payment."""
         if not change and not obj.processed_by_id:
