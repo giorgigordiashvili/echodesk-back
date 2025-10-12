@@ -730,6 +730,18 @@ class ItemList(models.Model):
         help_text='Whether this list is currently active'
     )
 
+    # Custom fields schema - defines what additional fields items in this list should have
+    # Example: [
+    #   {"name": "client_name", "label": "Client Name", "type": "string", "required": true},
+    #   {"name": "address", "label": "Address", "type": "text", "required": false},
+    #   {"name": "id_number", "label": "ID Number", "type": "number", "required": true}
+    # ]
+    custom_fields_schema = models.JSONField(
+        default=list,
+        blank=True,
+        help_text='Schema for custom fields that items in this list should have. Array of field definitions.'
+    )
+
     # Metadata
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -789,6 +801,14 @@ class ListItem(models.Model):
     is_active = models.BooleanField(
         default=True,
         help_text='Whether this item is currently active'
+    )
+
+    # Custom field values - stores the actual data for custom fields defined in ItemList
+    # Example: {"client_name": "John Doe", "address": "123 Main St", "id_number": 12345}
+    custom_data = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text='Custom field values for this item based on the list schema'
     )
 
     # Metadata

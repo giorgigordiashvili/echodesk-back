@@ -843,7 +843,7 @@ class ListItemInline(admin.TabularInline):
     model = ListItem
     extra = 0
     readonly_fields = ('created_at', 'updated_at', 'created_by')
-    fields = ('label', 'custom_id', 'parent', 'position', 'is_active', 'created_by', 'created_at')
+    fields = ('label', 'custom_id', 'parent', 'position', 'is_active', 'custom_data', 'created_by', 'created_at')
     ordering = ('position',)
 
     def get_readonly_fields(self, request, obj=None):
