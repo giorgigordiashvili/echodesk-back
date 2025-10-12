@@ -121,12 +121,25 @@ class TicketColumnUpdateSerializer(serializers.ModelSerializer):
 
 
 class TagSerializer(serializers.ModelSerializer):
-    """Serializer for Tag model."""
-    
+    """Serializer for Tag/Label model."""
+    created_by = UserMinimalSerializer(read_only=True)
+
     class Meta:
         model = Tag
-        fields = ['id', 'name', 'created_at']
-        read_only_fields = ['created_at']
+        fields = ['id', 'name', 'color', 'description', 'created_at', 'created_by']
+        read_only_fields = ['id', 'created_at', 'created_by']
+
+    def create(self, validated_data):
+        # Set created_by from request context
+        validated_data['created_by'] = self.context['request'].user
+        return super().create(validated_data)
+
+    def validate_color(self, value):
+        """Validate that color is a valid hex color code."""
+        import re
+        if not re.match(r'^#[0-9A-Fa-f]{6}$', value):
+            raise serializers.ValidationError('Color must be a valid hex color code (e.g., #3B82F6)')
+        return value
 
 
 class TicketPaymentSerializer(serializers.ModelSerializer):

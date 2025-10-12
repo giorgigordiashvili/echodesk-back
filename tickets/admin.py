@@ -175,11 +175,39 @@ class TicketColumnAdmin(admin.ModelAdmin):
 
 @admin.register(Tag)
 class TagAdmin(admin.ModelAdmin):
-    """Admin configuration for Tag model."""
-    list_display = ('name', 'created_at', 'tickets_count')
-    search_fields = ('name',)
+    """Admin configuration for Tag/Label model."""
+    list_display = ('name', 'color_badge', 'description_preview', 'created_by', 'created_at', 'tickets_count')
+    search_fields = ('name', 'description')
+    list_filter = ('created_at',)
     ordering = ('name',)
-    readonly_fields = ('created_at',)
+    readonly_fields = ('created_at', 'created_by')
+
+    fieldsets = (
+        ('Basic Information', {
+            'fields': ('name', 'color', 'description')
+        }),
+        ('Metadata', {
+            'fields': ('created_by', 'created_at'),
+            'classes': ('collapse',)
+        }),
+    )
+
+    def color_badge(self, obj):
+        """Display color as a badge."""
+        return format_html(
+            '<span style="background-color: {}; color: white; padding: 4px 12px; border-radius: 4px; font-size: 11px; font-weight: bold;">{}</span>',
+            obj.color, obj.name
+        )
+    color_badge.short_description = 'Preview'
+
+    def description_preview(self, obj):
+        """Display a preview of the description."""
+        if obj.description:
+            if len(obj.description) > 50:
+                return obj.description[:47] + '...'
+            return obj.description
+        return '-'
+    description_preview.short_description = 'Description'
 
     def tickets_count(self, obj):
         """Display the number of tickets with this tag."""
@@ -191,6 +219,12 @@ class TagAdmin(admin.ModelAdmin):
             )
         return '0 tickets'
     tickets_count.short_description = 'Tickets Count'
+
+    def save_model(self, request, obj, form, change):
+        """Set created_by to current user if creating new tag."""
+        if not change and not obj.created_by_id:
+            obj.created_by = request.user
+        super().save_model(request, obj, form, change)
 
 
 class TicketCommentInline(admin.TabularInline):

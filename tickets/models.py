@@ -61,9 +61,25 @@ class TicketColumn(models.Model):
 
 
 class Tag(models.Model):
-    """Tag model for categorizing tickets."""
+    """Tag/Label model for categorizing tickets (like Trello labels)."""
     name = models.CharField(max_length=50, unique=True)
+    color = models.CharField(
+        max_length=7,
+        default='#6B7280',
+        help_text='Hex color code for the tag (e.g., #3B82F6)'
+    )
+    description = models.TextField(
+        blank=True,
+        help_text='Optional description of what this tag represents'
+    )
     created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='created_tags',
+        null=True,  # Allow null for existing tags
+        blank=True
+    )
 
     class Meta:
         ordering = ['name']
