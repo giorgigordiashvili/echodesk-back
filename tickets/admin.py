@@ -8,7 +8,10 @@ from django.utils.safestring import mark_safe
 from django.db.models import Sum, Q
 import csv
 from decimal import Decimal
-from .models import Ticket, Tag, TicketComment, TicketColumn, SubTicket, ChecklistItem, Board, TicketTimeLog, TicketPayment
+from .models import (
+    Ticket, Tag, TicketComment, TicketColumn, SubTicket, ChecklistItem, Board, TicketTimeLog, TicketPayment,
+    ItemList, ListItem, TicketForm, TicketFormSubmission
+)
 
 
 @admin.register(Board)
@@ -833,3 +836,239 @@ class TicketPaymentAdmin(admin.ModelAdmin):
         if not change and not obj.processed_by_id:
             obj.processed_by = request.user
         super().save_model(request, obj, form, change)
+
+
+class ListItemInline(admin.TabularInline):
+    """Inline admin for list items."""
+    model = ListItem
+    extra = 0
+    readonly_fields = ('created_at', 'updated_at', 'created_by')
+    fields = ('label', 'custom_id', 'parent', 'position', 'is_active', 'created_by', 'created_at')
+    ordering = ('position',)
+
+    def get_readonly_fields(self, request, obj=None):
+        """Make created_by field readonly if editing existing item."""
+        if obj and obj.pk:
+            return self.readonly_fields + ('created_by',)
+        return self.readonly_fields
+
+    def save_model(self, request, obj, form, change):
+        """Set created_by to current user if creating new list item."""
+        if not change and not obj.created_by_id:
+            obj.created_by = request.user
+        super().save_model(request, obj, form, change)
+
+
+@admin.register(ItemList)
+class ItemListAdmin(admin.ModelAdmin):
+    """Admin configuration for ItemList model."""
+    list_display = ('title', 'is_active', 'items_count', 'root_items_count', 'created_by', 'created_at')
+    list_filter = ('is_active', 'created_at', 'updated_at')
+    search_fields = ('title', 'description', 'created_by__email', 'created_by__first_name', 'created_by__last_name')
+    raw_id_fields = ('created_by',)
+    date_hierarchy = 'created_at'
+    ordering = ('-created_at',)
+    readonly_fields = ('created_at', 'updated_at')
+
+    fieldsets = (
+        ('Basic Information', {
+            'fields': ('title', 'description', 'is_active')
+        }),
+        ('Metadata', {
+            'fields': ('created_by', 'created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+
+    inlines = [ListItemInline]
+
+    def items_count(self, obj):
+        """Display the total number of items in this list."""
+        count = obj.items.filter(is_active=True).count()
+        if count > 0:
+            return format_html(
+                '<a href="/admin/tickets/listitem/?item_list__id__exact={}">{} items</a>',
+                obj.id, count
+            )
+        return '0 items'
+    items_count.short_description = 'Total Items'
+
+    def root_items_count(self, obj):
+        """Display the number of root-level items (without parents)."""
+        count = obj.items.filter(parent__isnull=True, is_active=True).count()
+        return f'{count} root items'
+    root_items_count.short_description = 'Root Items'
+
+    def get_queryset(self, request):
+        """Optimize queries by selecting related objects."""
+        return super().get_queryset(request).select_related('created_by').prefetch_related('items')
+
+    def save_model(self, request, obj, form, change):
+        """Set created_by to current user if creating new item list."""
+        if not change and not obj.created_by_id:
+            obj.created_by = request.user
+        super().save_model(request, obj, form, change)
+
+
+@admin.register(ListItem)
+class ListItemAdmin(admin.ModelAdmin):
+    """Admin configuration for ListItem model."""
+    list_display = ('label', 'custom_id', 'item_list', 'parent', 'full_path_display', 'position', 'is_active', 'children_count', 'created_at')
+    list_filter = ('is_active', 'item_list', 'created_at', 'updated_at')
+    search_fields = ('label', 'custom_id', 'item_list__title')
+    raw_id_fields = ('item_list', 'parent')
+    date_hierarchy = 'created_at'
+    ordering = ('item_list', 'parent', 'position', 'label')
+    readonly_fields = ('created_at', 'updated_at', 'full_path_display')
+
+    fieldsets = (
+        ('Basic Information', {
+            'fields': ('item_list', 'label', 'custom_id', 'parent', 'position', 'is_active')
+        }),
+        ('Hierarchy', {
+            'fields': ('full_path_display',),
+            'classes': ('collapse',)
+        }),
+        ('Metadata', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+
+    def full_path_display(self, obj):
+        """Display the full hierarchical path."""
+        return obj.get_full_path()
+    full_path_display.short_description = 'Full Path'
+
+    def children_count(self, obj):
+        """Display the number of direct children."""
+        count = obj.children.filter(is_active=True).count()
+        if count > 0:
+            return format_html(
+                '<a href="/admin/tickets/listitem/?parent__id__exact={}">{} children</a>',
+                obj.id, count
+            )
+        return '0 children'
+    children_count.short_description = 'Children'
+
+    def get_queryset(self, request):
+        """Optimize queries by selecting related objects."""
+        return super().get_queryset(request).select_related('item_list', 'parent').prefetch_related('children')
+
+    def save_model(self, request, obj, form, change):
+        """Set created_by to current user if creating new list item."""
+        if not change and not obj.created_by_id:
+            obj.created_by = request.user
+        super().save_model(request, obj, form, change)
+
+
+@admin.register(TicketForm)
+class TicketFormAdmin(admin.ModelAdmin):
+    """Admin configuration for TicketForm model."""
+    list_display = ('title', 'is_default', 'is_active', 'item_lists_count', 'submissions_count', 'created_by', 'created_at')
+    list_filter = ('is_default', 'is_active', 'created_at', 'updated_at')
+    search_fields = ('title', 'description', 'created_by__email', 'created_by__first_name', 'created_by__last_name')
+    filter_horizontal = ('item_lists',)
+    raw_id_fields = ('created_by',)
+    date_hierarchy = 'created_at'
+    ordering = ('-is_default', '-created_at')
+    readonly_fields = ('created_at', 'updated_at')
+
+    fieldsets = (
+        ('Basic Information', {
+            'fields': ('title', 'description', 'is_default', 'is_active')
+        }),
+        ('Form Configuration', {
+            'fields': ('form_config',),
+            'description': 'JSON configuration for form fields and layout'
+        }),
+        ('Attached Lists', {
+            'fields': ('item_lists',),
+            'description': 'Lists that will be available in this form'
+        }),
+        ('Metadata', {
+            'fields': ('created_by', 'created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+
+    def item_lists_count(self, obj):
+        """Display the number of attached item lists."""
+        count = obj.item_lists.filter(is_active=True).count()
+        if count > 0:
+            return f'{count} lists'
+        return '0 lists'
+    item_lists_count.short_description = 'Item Lists'
+
+    def submissions_count(self, obj):
+        """Display the number of form submissions."""
+        count = obj.submissions.count()
+        if count > 0:
+            return format_html(
+                '<a href="/admin/tickets/ticketformsubmission/?form__id__exact={}">{} submissions</a>',
+                obj.id, count
+            )
+        return '0 submissions'
+    submissions_count.short_description = 'Submissions'
+
+    def get_queryset(self, request):
+        """Optimize queries by selecting related objects."""
+        return super().get_queryset(request).select_related('created_by').prefetch_related('item_lists', 'submissions')
+
+    def save_model(self, request, obj, form, change):
+        """Set created_by to current user if creating new ticket form."""
+        if not change and not obj.created_by_id:
+            obj.created_by = request.user
+        super().save_model(request, obj, form, change)
+
+
+@admin.register(TicketFormSubmission)
+class TicketFormSubmissionAdmin(admin.ModelAdmin):
+    """Admin configuration for TicketFormSubmission model."""
+    list_display = ('ticket_title', 'form', 'selected_items_count', 'submitted_by', 'submitted_at')
+    list_filter = ('form', 'submitted_at', 'ticket__column', 'ticket__priority')
+    search_fields = ('ticket__title', 'form__title', 'submitted_by__email')
+    filter_horizontal = ('selected_items',)
+    raw_id_fields = ('ticket', 'form', 'submitted_by')
+    date_hierarchy = 'submitted_at'
+    ordering = ('-submitted_at',)
+    readonly_fields = ('submitted_at', 'submitted_by')
+
+    fieldsets = (
+        ('Basic Information', {
+            'fields': ('ticket', 'form', 'submitted_by')
+        }),
+        ('Form Data', {
+            'fields': ('form_data',),
+            'description': 'JSON data submitted with this form',
+            'classes': ('collapse',)
+        }),
+        ('Selected Items', {
+            'fields': ('selected_items',),
+            'description': 'Items selected from the attached lists'
+        }),
+        ('Metadata', {
+            'fields': ('submitted_at',),
+            'classes': ('collapse',)
+        }),
+    )
+
+    def ticket_title(self, obj):
+        """Display ticket title with link."""
+        return format_html(
+            '<a href="/admin/tickets/ticket/{}/change/">{}</a>',
+            obj.ticket.id, obj.ticket.title
+        )
+    ticket_title.short_description = 'Ticket'
+
+    def selected_items_count(self, obj):
+        """Display the number of selected items."""
+        count = obj.selected_items.count()
+        if count > 0:
+            return f'{count} items'
+        return '0 items'
+    selected_items_count.short_description = 'Selected Items'
+
+    def get_queryset(self, request):
+        """Optimize queries by selecting related objects."""
+        return super().get_queryset(request).select_related('ticket', 'form').prefetch_related('selected_items')

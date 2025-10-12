@@ -1,9 +1,10 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
-    TicketViewSet, TagViewSet, TicketCommentViewSet, TicketColumnViewSet, 
+    TicketViewSet, TagViewSet, TicketCommentViewSet, TicketColumnViewSet,
     SubTicketViewSet, ChecklistItemViewSet, TicketAssignmentViewSet, SubTicketAssignmentViewSet,
-    TicketTimeLogViewSet, BoardViewSet, TicketPaymentViewSet
+    TicketTimeLogViewSet, BoardViewSet, TicketPaymentViewSet,
+    ItemListViewSet, ListItemViewSet, TicketFormViewSet, TicketFormSubmissionViewSet
 )
 
 # Create router and register viewsets
@@ -17,6 +18,12 @@ router.register(r'sub-tickets', SubTicketViewSet, basename='subticket')
 router.register(r'checklist-items', ChecklistItemViewSet, basename='checklistitem')
 router.register(r'time-logs', TicketTimeLogViewSet, basename='tickettimelog')
 router.register(r'payments', TicketPaymentViewSet, basename='ticketpayment')
+
+# New registrations for dynamic lists and forms
+router.register(r'item-lists', ItemListViewSet, basename='itemlist')
+router.register(r'list-items', ListItemViewSet, basename='listitem')
+router.register(r'ticket-forms', TicketFormViewSet, basename='ticketform')
+router.register(r'form-submissions', TicketFormSubmissionViewSet, basename='formsubmission')
 
 app_name = 'tickets'
 

@@ -642,7 +642,7 @@ class Board(models.Model):
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True, null=True)
     is_default = models.BooleanField(default=False)
-    
+
     # Users who can create orders on this board
     order_users = models.ManyToManyField(
         settings.AUTH_USER_MODEL,
@@ -650,7 +650,7 @@ class Board(models.Model):
         blank=True,
         help_text='Users who can create orders on this board'
     )
-    
+
     # Metadata
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -658,7 +658,7 @@ class Board(models.Model):
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE
     )
-    
+
     class Meta:
         ordering = ['name']
         constraints = [
@@ -669,22 +669,22 @@ class Board(models.Model):
                 name='unique_default_board'
             )
         ]
-    
+
     def __str__(self):
         return self.name
-    
+
     def save(self, *args, **kwargs):
         # If this is set as default, remove default from others
         if self.is_default:
             Board.objects.filter(is_default=True).update(is_default=False)
         super().save(*args, **kwargs)
-    
+
     def get_payment_summary(self):
         """Get payment summary for all tickets in this board."""
         from django.db.models import Sum, Count, Q
-        
+
         tickets = Ticket.objects.filter(column__board=self)
-        
+
         summary = tickets.aggregate(
             total_tickets=Count('id'),
             total_orders=Count('id', filter=Q(is_order=True)),
@@ -693,15 +693,15 @@ class Board(models.Model):
             paid_tickets=Count('id', filter=Q(is_paid=True)),
             unpaid_tickets=Count('id', filter=Q(is_paid=False, price__gt=0)),
             overdue_tickets=Count('id', filter=Q(
-                is_paid=False, 
+                is_paid=False,
                 payment_due_date__lt=timezone.now().date()
             ))
         )
-        
+
         summary['remaining_balance'] = (summary['total_price'] or 0) - (summary['total_paid'] or 0)
-        
+
         return summary
-    
+
     def get_overdue_payments(self):
         """Get tickets with overdue payments."""
         from django.utils import timezone
@@ -710,3 +710,247 @@ class Board(models.Model):
             is_paid=False,
             payment_due_date__lt=timezone.now().date()
         ).order_by('payment_due_date')
+
+
+class ItemList(models.Model):
+    """
+    Dynamic list model that tenants can create.
+    These lists contain hierarchical items that can be attached to tickets.
+    """
+    title = models.CharField(
+        max_length=255,
+        help_text='Title of the list (e.g., "Product Categories", "Service Types")'
+    )
+    description = models.TextField(
+        blank=True,
+        help_text='Optional description of what this list is for'
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text='Whether this list is currently active'
+    )
+
+    # Metadata
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='created_item_lists'
+    )
+
+    class Meta:
+        ordering = ['title', '-created_at']
+        verbose_name = 'Item List'
+        verbose_name_plural = 'Item Lists'
+
+    def __str__(self):
+        return self.title
+
+
+class ListItem(models.Model):
+    """
+    Item model with recursive self-referencing for hierarchical structure.
+    Each item has a label and id, and can have children.
+    """
+    item_list = models.ForeignKey(
+        ItemList,
+        on_delete=models.CASCADE,
+        related_name='items',
+        help_text='The list this item belongs to'
+    )
+    label = models.CharField(
+        max_length=255,
+        help_text='Display label for this item'
+    )
+    # custom_id is optional - can be used by tenants for their own reference
+    custom_id = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text='Optional custom identifier for this item'
+    )
+
+    # Recursive relationship for hierarchical structure
+    parent = models.ForeignKey(
+        'self',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='children',
+        help_text='Parent item for hierarchical structure'
+    )
+
+    # Position for ordering items at the same level
+    position = models.PositiveIntegerField(
+        default=0,
+        help_text='Position of item within its parent or list'
+    )
+
+    is_active = models.BooleanField(
+        default=True,
+        help_text='Whether this item is currently active'
+    )
+
+    # Metadata
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='created_list_items'
+    )
+
+    class Meta:
+        ordering = ['position', 'created_at']
+        verbose_name = 'List Item'
+        verbose_name_plural = 'List Items'
+
+    def __str__(self):
+        if self.parent:
+            return f'{self.parent.label} -> {self.label}'
+        return self.label
+
+    def save(self, *args, **kwargs):
+        # Auto-assign position if not set
+        if not self.position:
+            if self.parent:
+                max_position = ListItem.objects.filter(
+                    item_list=self.item_list,
+                    parent=self.parent
+                ).aggregate(models.Max('position'))['position__max'] or 0
+            else:
+                max_position = ListItem.objects.filter(
+                    item_list=self.item_list,
+                    parent__isnull=True
+                ).aggregate(models.Max('position'))['position__max'] or 0
+            self.position = max_position + 1
+        super().save(*args, **kwargs)
+
+    def get_full_path(self):
+        """Get the full hierarchical path of this item."""
+        path = [self.label]
+        current = self.parent
+        while current:
+            path.insert(0, current.label)
+            current = current.parent
+        return ' > '.join(path)
+
+    def get_all_children(self):
+        """Recursively get all children of this item."""
+        children = list(self.children.all())
+        for child in list(children):
+            children.extend(child.get_all_children())
+        return children
+
+
+class TicketForm(models.Model):
+    """
+    Custom ticket form that tenants can create.
+    Forms can have attached ItemLists for structured data entry.
+    """
+    title = models.CharField(
+        max_length=255,
+        help_text='Title of the form (e.g., "Product Order Form", "Service Request Form")'
+    )
+    description = models.TextField(
+        blank=True,
+        help_text='Description of when to use this form'
+    )
+
+    # Associated lists that should be used in this form
+    item_lists = models.ManyToManyField(
+        ItemList,
+        related_name='ticket_forms',
+        blank=True,
+        help_text='Lists that should be available in this form'
+    )
+
+    # Form configuration stored as JSON
+    # This can include field configurations, validation rules, etc.
+    form_config = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text='JSON configuration for form fields and behavior'
+    )
+
+    is_default = models.BooleanField(
+        default=False,
+        help_text='Whether this is the default form for ticket creation'
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text='Whether this form is currently active'
+    )
+
+    # Metadata
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='created_ticket_forms'
+    )
+
+    class Meta:
+        ordering = ['title', '-created_at']
+        verbose_name = 'Ticket Form'
+        verbose_name_plural = 'Ticket Forms'
+
+    def __str__(self):
+        return self.title
+
+    def save(self, *args, **kwargs):
+        # Ensure only one default form exists
+        if self.is_default:
+            TicketForm.objects.filter(is_default=True).exclude(id=self.id).update(is_default=False)
+        super().save(*args, **kwargs)
+
+
+class TicketFormSubmission(models.Model):
+    """
+    Stores the data submitted when a ticket is created using a custom form.
+    Links tickets to forms and stores the selected list items.
+    """
+    ticket = models.OneToOneField(
+        Ticket,
+        on_delete=models.CASCADE,
+        related_name='form_submission',
+        help_text='The ticket created from this form submission'
+    )
+    form = models.ForeignKey(
+        TicketForm,
+        on_delete=models.CASCADE,
+        related_name='submissions',
+        help_text='The form that was used'
+    )
+
+    # Selected items from the lists
+    selected_items = models.ManyToManyField(
+        ListItem,
+        related_name='ticket_submissions',
+        blank=True,
+        help_text='Items selected from lists when creating this ticket'
+    )
+
+    # Store the complete form data as JSON for flexibility
+    form_data = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text='Complete form submission data including all field values'
+    )
+
+    # Metadata
+    submitted_at = models.DateTimeField(auto_now_add=True)
+    submitted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='form_submissions'
+    )
+
+    class Meta:
+        ordering = ['-submitted_at']
+        verbose_name = 'Ticket Form Submission'
+        verbose_name_plural = 'Ticket Form Submissions'
+
+    def __str__(self):
+        return f'{self.form.title} - {self.ticket.title}'

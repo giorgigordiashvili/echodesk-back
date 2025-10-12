@@ -2,7 +2,8 @@ from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from .models import (
     Ticket, Tag, TicketComment, TicketColumn, SubTicket, ChecklistItem,
-    TicketAssignment, SubTicketAssignment, TicketTimeLog, Board, TicketPayment
+    TicketAssignment, SubTicketAssignment, TicketTimeLog, Board, TicketPayment,
+    ItemList, ListItem, TicketForm, TicketFormSubmission
 )
 
 User = get_user_model()
@@ -572,3 +573,215 @@ class TimeTrackingSummarySerializer(serializers.Serializer):
     daily_breakdown = serializers.ListField()
     recent_activity = TicketTimeLogSerializer(many=True)
     active_sessions = TicketTimeLogSerializer(many=True)
+
+
+# ============================================================================
+# New Serializers for ItemList, ListItem, TicketForm, and TicketFormSubmission
+# ============================================================================
+
+class ListItemSerializer(serializers.ModelSerializer):
+    """Serializer for ListItem model with recursive children support."""
+    created_by = UserMinimalSerializer(read_only=True)
+    children = serializers.SerializerMethodField()
+    full_path = serializers.ReadOnlyField(source='get_full_path')
+
+    class Meta:
+        model = ListItem
+        fields = [
+            'id', 'item_list', 'label', 'custom_id', 'parent', 'position',
+            'is_active', 'created_at', 'updated_at', 'created_by',
+            'children', 'full_path'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at', 'created_by']
+
+    def get_children(self, obj):
+        """Recursively get all children of this item."""
+        children = obj.children.filter(is_active=True)
+        return ListItemSerializer(children, many=True, context=self.context).data
+
+    def create(self, validated_data):
+        # Set created_by from request context
+        validated_data['created_by'] = self.context['request'].user
+        return super().create(validated_data)
+
+
+class ListItemMinimalSerializer(serializers.ModelSerializer):
+    """Minimal serializer for ListItem without children (to avoid deep recursion)."""
+    full_path = serializers.ReadOnlyField(source='get_full_path')
+
+    class Meta:
+        model = ListItem
+        fields = ['id', 'label', 'custom_id', 'parent', 'position', 'is_active', 'full_path']
+        read_only_fields = fields
+
+
+class ItemListSerializer(serializers.ModelSerializer):
+    """Serializer for ItemList model."""
+    created_by = UserMinimalSerializer(read_only=True)
+    items = ListItemSerializer(many=True, read_only=True)
+    items_count = serializers.SerializerMethodField()
+    root_items = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ItemList
+        fields = [
+            'id', 'title', 'description', 'is_active',
+            'created_at', 'updated_at', 'created_by',
+            'items', 'items_count', 'root_items'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at', 'created_by']
+
+    def get_items_count(self, obj):
+        """Get the number of items in this list."""
+        return obj.items.filter(is_active=True).count()
+
+    def get_root_items(self, obj):
+        """Get only root-level items (items without parents)."""
+        root_items = obj.items.filter(parent__isnull=True, is_active=True)
+        return ListItemSerializer(root_items, many=True, context=self.context).data
+
+    def create(self, validated_data):
+        # Set created_by from request context
+        validated_data['created_by'] = self.context['request'].user
+        return super().create(validated_data)
+
+
+class ItemListMinimalSerializer(serializers.ModelSerializer):
+    """Minimal serializer for ItemList without nested items."""
+    created_by = UserMinimalSerializer(read_only=True)
+    items_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ItemList
+        fields = [
+            'id', 'title', 'description', 'is_active',
+            'created_at', 'updated_at', 'created_by', 'items_count'
+        ]
+        read_only_fields = fields
+
+    def get_items_count(self, obj):
+        """Get the number of items in this list."""
+        return obj.items.filter(is_active=True).count()
+
+
+class TicketFormSerializer(serializers.ModelSerializer):
+    """Serializer for TicketForm model."""
+    created_by = UserMinimalSerializer(read_only=True)
+    item_lists = ItemListMinimalSerializer(many=True, read_only=True)
+    item_list_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        write_only=True,
+        required=False,
+        allow_empty=True,
+        help_text='List of ItemList IDs to attach to this form'
+    )
+    submissions_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TicketForm
+        fields = [
+            'id', 'title', 'description', 'item_lists', 'item_list_ids',
+            'form_config', 'is_default', 'is_active',
+            'created_at', 'updated_at', 'created_by', 'submissions_count'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at', 'created_by']
+
+    def get_submissions_count(self, obj):
+        """Get the number of submissions for this form."""
+        return obj.submissions.count()
+
+    def create(self, validated_data):
+        item_list_ids = validated_data.pop('item_list_ids', [])
+        validated_data['created_by'] = self.context['request'].user
+        form = super().create(validated_data)
+
+        if item_list_ids:
+            form.item_lists.set(item_list_ids)
+
+        return form
+
+    def update(self, instance, validated_data):
+        item_list_ids = validated_data.pop('item_list_ids', None)
+        form = super().update(instance, validated_data)
+
+        if item_list_ids is not None:
+            form.item_lists.set(item_list_ids)
+
+        return form
+
+
+class TicketFormMinimalSerializer(serializers.ModelSerializer):
+    """Minimal serializer for TicketForm."""
+    created_by = UserMinimalSerializer(read_only=True)
+
+    class Meta:
+        model = TicketForm
+        fields = [
+            'id', 'title', 'description', 'is_default', 'is_active',
+            'created_at', 'created_by'
+        ]
+        read_only_fields = fields
+
+
+class TicketFormSubmissionSerializer(serializers.ModelSerializer):
+    """Serializer for TicketFormSubmission model."""
+    submitted_by = UserMinimalSerializer(read_only=True)
+    form = TicketFormMinimalSerializer(read_only=True)
+    form_id = serializers.IntegerField(write_only=True)
+    selected_items = ListItemMinimalSerializer(many=True, read_only=True)
+    selected_item_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        write_only=True,
+        required=False,
+        allow_empty=True,
+        help_text='List of ListItem IDs selected in this submission'
+    )
+    ticket_data = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = TicketFormSubmission
+        fields = [
+            'id', 'ticket', 'form', 'form_id', 'selected_items',
+            'selected_item_ids', 'form_data', 'submitted_at', 'submitted_by',
+            'ticket_data'
+        ]
+        read_only_fields = ['id', 'submitted_at', 'submitted_by']
+
+    def get_ticket_data(self, obj):
+        """Get minimal ticket data."""
+        from .models import Ticket
+        if obj.ticket:
+            return {
+                'id': obj.ticket.id,
+                'title': obj.ticket.title,
+                'status': obj.ticket.status
+            }
+        return None
+
+    def create(self, validated_data):
+        selected_item_ids = validated_data.pop('selected_item_ids', [])
+        form_id = validated_data.pop('form_id')
+
+        validated_data['submitted_by'] = self.context['request'].user
+        validated_data['form_id'] = form_id
+
+        submission = super().create(validated_data)
+
+        if selected_item_ids:
+            submission.selected_items.set(selected_item_ids)
+
+        return submission
+
+    def update(self, instance, validated_data):
+        selected_item_ids = validated_data.pop('selected_item_ids', None)
+        form_id = validated_data.pop('form_id', None)
+
+        if form_id:
+            validated_data['form_id'] = form_id
+
+        submission = super().update(instance, validated_data)
+
+        if selected_item_ids is not None:
+            submission.selected_items.set(selected_item_ids)
+
+        return submission

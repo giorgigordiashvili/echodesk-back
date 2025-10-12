@@ -9,15 +9,18 @@ from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiRespon
 from drf_spectacular.openapi import OpenApiTypes
 from .models import (
     Ticket, Tag, TicketComment, TicketColumn, SubTicket, ChecklistItem,
-    TicketAssignment, SubTicketAssignment, TicketTimeLog, Board, TicketPayment
+    TicketAssignment, SubTicketAssignment, TicketTimeLog, Board, TicketPayment,
+    ItemList, ListItem, TicketForm, TicketFormSubmission
 )
 from .serializers import (
-    TicketSerializer, TicketListSerializer, TagSerializer, 
-    TicketCommentSerializer, TicketColumnSerializer, 
+    TicketSerializer, TicketListSerializer, TagSerializer,
+    TicketCommentSerializer, TicketColumnSerializer,
     TicketColumnCreateSerializer, TicketColumnUpdateSerializer,
     KanbanBoardSerializer, SubTicketSerializer, ChecklistItemSerializer,
     TicketAssignmentSerializer, SubTicketAssignmentSerializer, TicketTimeLogSerializer,
-    TimeTrackingSummarySerializer, BoardSerializer, TicketPaymentSerializer
+    TimeTrackingSummarySerializer, BoardSerializer, TicketPaymentSerializer,
+    ItemListSerializer, ItemListMinimalSerializer, ListItemSerializer, ListItemMinimalSerializer,
+    TicketFormSerializer, TicketFormMinimalSerializer, TicketFormSubmissionSerializer
 )
 
 
@@ -1179,3 +1182,266 @@ class TicketPaymentViewSet(viewsets.ModelViewSet):
         summary['remaining_balance'] = total_value - total_paid
         
         return Response(summary)
+
+
+# ============================================================================
+# New ViewSets for ItemList, ListItem, TicketForm, and TicketFormSubmission
+# ============================================================================
+
+class ItemListViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing item lists."""
+    queryset = ItemList.objects.all()
+    serializer_class = ItemListSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['title', 'description']
+    ordering = ['-created_at']
+
+    def get_queryset(self):
+        """Filter lists based on user permissions."""
+        queryset = super().get_queryset()
+        
+        # Filter by is_active if specified
+        is_active = self.request.query_params.get('is_active')
+        if is_active is not None:
+            queryset = queryset.filter(is_active=is_active.lower() == 'true')
+        
+        return queryset
+
+    def get_serializer_class(self):
+        """Use minimal serializer for list action."""
+        if self.action == 'list':
+            return ItemListMinimalSerializer
+        return ItemListSerializer
+
+    @action(detail=True, methods=['get'])
+    def root_items(self, request, pk=None):
+        """Get only root-level items for this list."""
+        item_list = self.get_object()
+        root_items = item_list.items.filter(parent__isnull=True, is_active=True)
+        serializer = ListItemSerializer(root_items, many=True, context={'request': request})
+        return Response(serializer.data)
+
+
+class ListItemViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing list items."""
+    queryset = ListItem.objects.all()
+    serializer_class = ListItemSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['item_list', 'parent', 'is_active']
+    search_fields = ['label', 'custom_id']
+    ordering = ['position', 'created_at']
+
+    def get_queryset(self):
+        """Filter items based on user permissions."""
+        queryset = super().get_queryset()
+        
+        # Filter by list if specified
+        item_list_id = self.request.query_params.get('item_list_id')
+        if item_list_id:
+            queryset = queryset.filter(item_list_id=item_list_id)
+        
+        # Filter by is_active if specified
+        is_active = self.request.query_params.get('is_active')
+        if is_active is not None:
+            queryset = queryset.filter(is_active=is_active.lower() == 'true')
+        
+        # Filter only root items if specified
+        root_only = self.request.query_params.get('root_only')
+        if root_only and root_only.lower() == 'true':
+            queryset = queryset.filter(parent__isnull=True)
+        
+        return queryset
+
+    def get_serializer_class(self):
+        """Use minimal serializer for list action to avoid deep nesting."""
+        if self.action == 'list':
+            return ListItemMinimalSerializer
+        return ListItemSerializer
+
+    @action(detail=True, methods=['get'])
+    def children(self, request, pk=None):
+        """Get direct children of this item."""
+        item = self.get_object()
+        children = item.children.filter(is_active=True)
+        serializer = ListItemSerializer(children, many=True, context={'request': request})
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['get'])
+    def all_descendants(self, request, pk=None):
+        """Get all descendants of this item recursively."""
+        item = self.get_object()
+        descendants = item.get_all_children()
+        serializer = ListItemMinimalSerializer(descendants, many=True, context={'request': request})
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['patch'])
+    def reorder(self, request, pk=None):
+        """Reorder item within its parent or list."""
+        item = self.get_object()
+        new_position = request.data.get('position')
+        
+        if new_position is None:
+            return Response(
+                {'error': 'Position is required'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            new_position = int(new_position)
+        except ValueError:
+            return Response(
+                {'error': 'Position must be a number'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        with transaction.atomic():
+            # Determine the siblings
+            if item.parent:
+                siblings = ListItem.objects.filter(
+                    item_list=item.item_list,
+                    parent=item.parent
+                )
+            else:
+                siblings = ListItem.objects.filter(
+                    item_list=item.item_list,
+                    parent__isnull=True
+                )
+            
+            # Update positions
+            if new_position > item.position:
+                # Moving down
+                siblings.filter(
+                    position__gt=item.position,
+                    position__lte=new_position
+                ).update(position=F('position') - 1)
+            else:
+                # Moving up
+                siblings.filter(
+                    position__gte=new_position,
+                    position__lt=item.position
+                ).update(position=F('position') + 1)
+            
+            # Update the item's position
+            item.position = new_position
+            item.save()
+        
+        serializer = self.get_serializer(item)
+        return Response(serializer.data)
+
+
+class TicketFormViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing ticket forms."""
+    queryset = TicketForm.objects.all()
+    serializer_class = TicketFormSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['title', 'description']
+    ordering = ['-created_at']
+
+    def get_queryset(self):
+        """Filter forms based on user permissions."""
+        queryset = super().get_queryset()
+        
+        # Filter by is_active if specified
+        is_active = self.request.query_params.get('is_active')
+        if is_active is not None:
+            queryset = queryset.filter(is_active=is_active.lower() == 'true')
+        
+        # Filter by is_default if specified
+        is_default = self.request.query_params.get('is_default')
+        if is_default is not None:
+            queryset = queryset.filter(is_default=is_default.lower() == 'true')
+        
+        return queryset
+
+    def get_serializer_class(self):
+        """Use minimal serializer for list action."""
+        if self.action == 'list':
+            return TicketFormMinimalSerializer
+        return TicketFormSerializer
+
+    @action(detail=False, methods=['get'])
+    def default(self, request):
+        """Get the default form."""
+        default_form = TicketForm.objects.filter(is_default=True, is_active=True).first()
+        if not default_form:
+            # If no default, use the first active form
+            default_form = TicketForm.objects.filter(is_active=True).first()
+        
+        if default_form:
+            serializer = TicketFormSerializer(default_form, context={'request': request})
+            return Response(serializer.data)
+        return Response({'error': 'No forms found'}, status=status.HTTP_404_NOT_FOUND)
+
+    @action(detail=True, methods=['post'])
+    def set_default(self, request, pk=None):
+        """Set this form as the default form."""
+        form = self.get_object()
+        form.is_default = True
+        form.save()
+        return Response({'status': 'default set'})
+
+    @action(detail=True, methods=['get'])
+    def with_lists(self, request, pk=None):
+        """Get form with full list details (including items)."""
+        form = self.get_object()
+        serializer = TicketFormSerializer(form, context={'request': request})
+        return Response(serializer.data)
+
+
+class TicketFormSubmissionViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing ticket form submissions."""
+    queryset = TicketFormSubmission.objects.all()
+    serializer_class = TicketFormSubmissionSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['form', 'ticket', 'submitted_by']
+    ordering = ['-submitted_at']
+
+    def get_queryset(self):
+        """Filter submissions based on user permissions."""
+        queryset = super().get_queryset()
+        
+        # Non-staff users can only see submissions for tickets they have access to
+        if not self.request.user.is_staff:
+            queryset = queryset.filter(
+                Q(ticket__created_by=self.request.user) | 
+                Q(ticket__assigned_to=self.request.user) |
+                Q(ticket__assigned_users=self.request.user) |
+                Q(submitted_by=self.request.user)
+            )
+        
+        return queryset
+
+    @action(detail=False, methods=['get'])
+    def by_form(self, request):
+        """Get submissions grouped by form."""
+        form_id = request.query_params.get('form_id')
+        if not form_id:
+            return Response(
+                {'error': 'form_id is required'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        queryset = self.get_queryset().filter(form_id=form_id)
+        serializer = TicketFormSubmissionSerializer(queryset, many=True, context={'request': request})
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'])
+    def by_ticket(self, request):
+        """Get submission for a specific ticket."""
+        ticket_id = request.query_params.get('ticket_id')
+        if not ticket_id:
+            return Response(
+                {'error': 'ticket_id is required'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            submission = self.get_queryset().get(ticket_id=ticket_id)
+            serializer = TicketFormSubmissionSerializer(submission, context={'request': request})
+            return Response(serializer.data)
+        except TicketFormSubmission.DoesNotExist:
+            return Response({'error': 'Submission not found'}, status=status.HTTP_404_NOT_FOUND)
