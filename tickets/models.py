@@ -730,6 +730,16 @@ class ItemList(models.Model):
         help_text='Whether this list is currently active'
     )
 
+    # Parent list relationship - allows creating child lists
+    parent_list = models.ForeignKey(
+        'self',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='child_lists',
+        help_text='Parent list if this is a child list (e.g., Products list can be parent of Orders list)'
+    )
+
     # Custom fields schema - defines what additional fields items in this list should have
     # Example: [
     #   {"name": "client_name", "label": "Client Name", "type": "string", "required": true},
@@ -764,6 +774,7 @@ class ListItem(models.Model):
     """
     Item model with recursive self-referencing for hierarchical structure.
     Each item has a label and id, and can have children.
+    Can also link to parent items from other lists.
     """
     item_list = models.ForeignKey(
         ItemList,
@@ -782,14 +793,24 @@ class ListItem(models.Model):
         help_text='Optional custom identifier for this item'
     )
 
-    # Recursive relationship for hierarchical structure
+    # Recursive relationship for hierarchical structure (within same list)
     parent = models.ForeignKey(
         'self',
         on_delete=models.CASCADE,
         null=True,
         blank=True,
         related_name='children',
-        help_text='Parent item for hierarchical structure'
+        help_text='Parent item for hierarchical structure within the same list'
+    )
+
+    # Cross-list parent relationship (from parent list if this list is a child list)
+    parent_list_item = models.ForeignKey(
+        'self',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='child_list_items',
+        help_text='Parent item from parent list (e.g., if this is an Order item, link to the Product item)'
     )
 
     # Position for ordering items at the same level

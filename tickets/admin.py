@@ -843,7 +843,8 @@ class ListItemInline(admin.TabularInline):
     model = ListItem
     extra = 0
     readonly_fields = ('created_at', 'updated_at', 'created_by')
-    fields = ('label', 'custom_id', 'parent', 'position', 'is_active', 'custom_data', 'created_by', 'created_at')
+    fields = ('label', 'custom_id', 'parent', 'parent_list_item', 'position', 'is_active', 'custom_data', 'created_by', 'created_at')
+    raw_id_fields = ('parent', 'parent_list_item')
     ordering = ('position',)
 
     def get_readonly_fields(self, request, obj=None):
@@ -862,17 +863,17 @@ class ListItemInline(admin.TabularInline):
 @admin.register(ItemList)
 class ItemListAdmin(admin.ModelAdmin):
     """Admin configuration for ItemList model."""
-    list_display = ('title', 'is_active', 'items_count', 'root_items_count', 'created_by', 'created_at')
-    list_filter = ('is_active', 'created_at', 'updated_at')
+    list_display = ('title', 'parent_list', 'is_active', 'items_count', 'root_items_count', 'created_by', 'created_at')
+    list_filter = ('is_active', 'parent_list', 'created_at', 'updated_at')
     search_fields = ('title', 'description', 'created_by__email', 'created_by__first_name', 'created_by__last_name')
-    raw_id_fields = ('created_by',)
+    raw_id_fields = ('created_by', 'parent_list')
     date_hierarchy = 'created_at'
     ordering = ('-created_at',)
     readonly_fields = ('created_at', 'updated_at')
 
     fieldsets = (
         ('Basic Information', {
-            'fields': ('title', 'description', 'is_active')
+            'fields': ('title', 'description', 'parent_list', 'is_active')
         }),
         ('Metadata', {
             'fields': ('created_by', 'created_at', 'updated_at'),
@@ -913,17 +914,17 @@ class ItemListAdmin(admin.ModelAdmin):
 @admin.register(ListItem)
 class ListItemAdmin(admin.ModelAdmin):
     """Admin configuration for ListItem model."""
-    list_display = ('label', 'custom_id', 'item_list', 'parent', 'full_path_display', 'position', 'is_active', 'children_count', 'created_at')
+    list_display = ('label', 'custom_id', 'item_list', 'parent', 'parent_list_item', 'full_path_display', 'position', 'is_active', 'children_count', 'created_at')
     list_filter = ('is_active', 'item_list', 'created_at', 'updated_at')
     search_fields = ('label', 'custom_id', 'item_list__title')
-    raw_id_fields = ('item_list', 'parent')
+    raw_id_fields = ('item_list', 'parent', 'parent_list_item')
     date_hierarchy = 'created_at'
     ordering = ('item_list', 'parent', 'position', 'label')
     readonly_fields = ('created_at', 'updated_at', 'full_path_display')
 
     fieldsets = (
         ('Basic Information', {
-            'fields': ('item_list', 'label', 'custom_id', 'parent', 'position', 'is_active')
+            'fields': ('item_list', 'label', 'custom_id', 'parent', 'parent_list_item', 'position', 'is_active')
         }),
         ('Hierarchy', {
             'fields': ('full_path_display',),
