@@ -126,7 +126,7 @@ class Ticket(models.Model):
     ]
 
     title = models.CharField(max_length=255)
-    description = models.TextField()  # Keep for backward compatibility
+    description = models.TextField(blank=True)  # Keep for backward compatibility
     rich_description = models.JSONField(
         null=True, 
         blank=True,
