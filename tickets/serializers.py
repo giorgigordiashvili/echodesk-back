@@ -5,17 +5,27 @@ from .models import (
     TicketAssignment, SubTicketAssignment, TicketTimeLog, Board, TicketPayment,
     ItemList, ListItem, TicketForm, TicketFormSubmission
 )
+from users.models import TenantGroup
 
 User = get_user_model()
 
 
 class UserMinimalSerializer(serializers.ModelSerializer):
     """Minimal user serializer for ticket relationships."""
-    
+
     class Meta:
         model = User
         fields = ['id', 'email', 'first_name', 'last_name']
         read_only_fields = ['id', 'email', 'first_name', 'last_name']
+
+
+class TenantGroupMinimalSerializer(serializers.ModelSerializer):
+    """Minimal tenant group serializer for ticket relationships."""
+
+    class Meta:
+        model = TenantGroup
+        fields = ['id', 'name', 'description']
+        read_only_fields = ['id', 'name', 'description']
 
 
 class BoardSerializer(serializers.ModelSerializer):
@@ -359,6 +369,14 @@ class TicketSerializer(serializers.ModelSerializer):
         required=False,
         help_text='Dictionary mapping user IDs to roles (e.g., {"1": "primary", "2": "collaborator"})'
     )
+    assigned_groups = TenantGroupMinimalSerializer(many=True, read_only=True)
+    assigned_group_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        write_only=True,
+        required=False,
+        allow_empty=True,
+        help_text='List of group IDs to assign to this ticket'
+    )
     column = TicketColumnSerializer(read_only=True)
     column_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
     tags = TagSerializer(many=True, read_only=True)
@@ -393,6 +411,7 @@ class TicketSerializer(serializers.ModelSerializer):
             'status', 'priority', 'is_closed', 'is_order', 'column', 'column_id', 'position_in_column',
             'created_at', 'updated_at', 'created_by', 'assigned_to', 'assigned_to_id',
             'assigned_users', 'assignments', 'assigned_user_ids', 'assignment_roles',
+            'assigned_groups', 'assigned_group_ids',
             'tags', 'tag_ids', 'comments', 'comments_count',
             'sub_tickets', 'sub_tickets_count', 'completed_sub_tickets_count',
             'checklist_items', 'checklist_items_count', 'completed_checklist_items_count',
@@ -425,18 +444,19 @@ class TicketSerializer(serializers.ModelSerializer):
         tag_ids = validated_data.pop('tag_ids', [])
         assigned_to_id = validated_data.pop('assigned_to_id', None)
         assigned_user_ids = validated_data.pop('assigned_user_ids', [])
+        assigned_group_ids = validated_data.pop('assigned_group_ids', [])
         assignment_roles = validated_data.pop('assignment_roles', {})
         column_id = validated_data.pop('column_id', None)
         is_order = validated_data.get('is_order', False)
-        
+
         # Set created_by from request context
         validated_data['created_by'] = self.context['request'].user
         current_user = self.context['request'].user
-        
+
         # Set assigned_to if provided
         if assigned_to_id:
             validated_data['assigned_to'] = User.objects.get(id=assigned_to_id)
-        
+
         # Handle order-specific logic
         if is_order and column_id:
             # For orders, automatically assign to the first column of the board
@@ -450,13 +470,17 @@ class TicketSerializer(serializers.ModelSerializer):
         elif column_id:
             # Set column if provided (regular tickets)
             validated_data['column'] = TicketColumn.objects.get(id=column_id)
-        
+
         ticket = Ticket.objects.create(**validated_data)
-        
+
         # Set tags
         if tag_ids:
             ticket.tags.set(tag_ids)
-        
+
+        # Set assigned groups
+        if assigned_group_ids:
+            ticket.assigned_groups.set(assigned_group_ids)
+
         # Handle multiple user assignments
         if assigned_user_ids:
             for user_id in assigned_user_ids:
@@ -467,43 +491,48 @@ class TicketSerializer(serializers.ModelSerializer):
                     role=role,
                     assigned_by=current_user
                 )
-        
+
         return ticket
 
     def update(self, instance, validated_data):
         tag_ids = validated_data.pop('tag_ids', None)
         assigned_to_id = validated_data.pop('assigned_to_id', None)
         assigned_user_ids = validated_data.pop('assigned_user_ids', None)
+        assigned_group_ids = validated_data.pop('assigned_group_ids', None)
         assignment_roles = validated_data.pop('assignment_roles', {})
         column_id = validated_data.pop('column_id', None)
-        
+
         current_user = self.context['request'].user
-        
+
         # Handle assigned_to field
         if assigned_to_id is not None:
             if assigned_to_id:
                 validated_data['assigned_to'] = User.objects.get(id=assigned_to_id)
             else:
                 validated_data['assigned_to'] = None
-        
+
         # Handle column field
         if column_id is not None:
             if column_id:
                 validated_data['column'] = TicketColumn.objects.get(id=column_id)
             else:
                 validated_data['column'] = None
-        
+
         ticket = super().update(instance, validated_data)
-        
+
         # Update tags if provided
         if tag_ids is not None:
             ticket.tags.set(tag_ids)
-        
+
+        # Update assigned groups if provided
+        if assigned_group_ids is not None:
+            ticket.assigned_groups.set(assigned_group_ids)
+
         # Handle multiple user assignments update
         if assigned_user_ids is not None:
             # Clear existing assignments
             TicketAssignment.objects.filter(ticket=ticket).delete()
-            
+
             # Add new assignments
             for user_id in assigned_user_ids:
                 role = assignment_roles.get(str(user_id), 'collaborator')
@@ -513,7 +542,7 @@ class TicketSerializer(serializers.ModelSerializer):
                     role=role,
                     assigned_by=current_user
                 )
-        
+
         return ticket
 
 
@@ -522,19 +551,20 @@ class TicketListSerializer(serializers.ModelSerializer):
     created_by = UserMinimalSerializer(read_only=True)
     assigned_to = UserMinimalSerializer(read_only=True)
     assigned_users = UserMinimalSerializer(many=True, read_only=True)
+    assigned_groups = TenantGroupMinimalSerializer(many=True, read_only=True)
     assignments = TicketAssignmentSerializer(source='ticketassignment_set', many=True, read_only=True)
     column = TicketColumnSerializer(read_only=True)
     tags = TagSerializer(many=True, read_only=True)
     comments_count = serializers.SerializerMethodField()
     status = serializers.ReadOnlyField()  # Dynamic status from column
     is_closed = serializers.ReadOnlyField()  # Dynamic closed status from column
-    
+
     class Meta:
         model = Ticket
         fields = [
             'id', 'title', 'status', 'priority', 'is_closed', 'column', 'position_in_column',
-            'created_at', 'updated_at', 'created_by', 'assigned_to', 'assigned_users', 
-            'assignments', 'tags', 'comments_count'
+            'created_at', 'updated_at', 'created_by', 'assigned_to', 'assigned_users',
+            'assigned_groups', 'assignments', 'tags', 'comments_count'
         ]
         read_only_fields = fields
 

@@ -208,17 +208,22 @@ class TicketPermission(permissions.BasePermission):
         # Staff users have full access
         if request.user.is_staff:
             return True
-        
-        # Users can view tickets they created or are assigned to
+
+        # Check if user belongs to any group assigned to the ticket
+        user_groups = request.user.tenant_groups.all()
+        is_in_assigned_group = obj.assigned_groups.filter(id__in=user_groups).exists()
+
+        # Users can view tickets they created, are assigned to, or belong to an assigned group
         if request.method in permissions.SAFE_METHODS:
-            return (obj.created_by == request.user or 
+            return (obj.created_by == request.user or
                    obj.assigned_to == request.user or
-                   obj.assigned_users.filter(id=request.user.id).exists())
-        
+                   obj.assigned_users.filter(id=request.user.id).exists() or
+                   is_in_assigned_group)
+
         # Only staff can assign tickets or move to closed columns
         if request.method in ['PUT', 'PATCH']:
             # Check if trying to assign ticket or move to closed column
-            if 'assigned_to_id' in request.data:
+            if 'assigned_to_id' in request.data or 'assigned_group_ids' in request.data:
                 return request.user.is_staff
             # Check if trying to move to a closed status column
             if 'column_id' in request.data:
@@ -228,15 +233,16 @@ class TicketPermission(permissions.BasePermission):
                         return request.user.is_staff
                 except TicketColumn.DoesNotExist:
                     pass
-            # Users can edit tickets they created or are assigned to (but not assign or close)
-            return (obj.created_by == request.user or 
+            # Users can edit tickets they created, are assigned to, or belong to an assigned group (but not assign or close)
+            return (obj.created_by == request.user or
                    obj.assigned_to == request.user or
-                   obj.assigned_users.filter(id=request.user.id).exists())
-        
+                   obj.assigned_users.filter(id=request.user.id).exists() or
+                   is_in_assigned_group)
+
         # Only staff can delete tickets
         if request.method == 'DELETE':
             return request.user.is_staff
-        
+
         return False
 
 
@@ -246,11 +252,11 @@ class TicketViewSet(viewsets.ModelViewSet):
     """
     queryset = Ticket.objects.all().select_related(
         'created_by', 'assigned_to'
-    ).prefetch_related('tags', 'comments')
+    ).prefetch_related('tags', 'comments', 'assigned_groups')
     serializer_class = TicketSerializer
     permission_classes = [TicketPermission]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['priority', 'assigned_to', 'created_by', 'tags', 'column']
+    filterset_fields = ['priority', 'assigned_to', 'created_by', 'tags', 'column', 'assigned_groups']
     search_fields = ['title', 'description']
     ordering_fields = ['created_at', 'updated_at', 'priority']
     ordering = ['-created_at']
@@ -266,28 +272,34 @@ class TicketViewSet(viewsets.ModelViewSet):
         Filter queryset based on user permissions and query parameters.
         """
         queryset = super().get_queryset()
-        
+
         # Non-staff users can only see their tickets
         if not self.request.user.is_staff:
+            user_groups = self.request.user.tenant_groups.all()
             queryset = queryset.filter(
-                Q(created_by=self.request.user) | 
+                Q(created_by=self.request.user) |
                 Q(assigned_to=self.request.user) |
-                Q(assigned_users=self.request.user)
-            )
-        
-        # Additional filtering by query parameters  
+                Q(assigned_users=self.request.user) |
+                Q(assigned_groups__in=user_groups)
+            ).distinct()
+
+        # Additional filtering by query parameters
         priority_filter = self.request.query_params.get('priority')
         if priority_filter:
             queryset = queryset.filter(priority=priority_filter)
-        
+
         assigned_to_filter = self.request.query_params.get('assigned_to')
         if assigned_to_filter:
             queryset = queryset.filter(assigned_to_id=assigned_to_filter)
-        
+
         created_by_filter = self.request.query_params.get('created_by')
         if created_by_filter:
             queryset = queryset.filter(created_by_id=created_by_filter)
-        
+
+        assigned_group_filter = self.request.query_params.get('assigned_group')
+        if assigned_group_filter:
+            queryset = queryset.filter(assigned_groups__id=assigned_group_filter)
+
         return queryset
 
     def perform_create(self, serializer):

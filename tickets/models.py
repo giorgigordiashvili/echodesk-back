@@ -184,6 +184,12 @@ class Ticket(models.Model):
         blank=True,
         help_text='All users assigned to this ticket'
     )
+    assigned_groups = models.ManyToManyField(
+        'users.TenantGroup',
+        related_name='tickets_assigned',
+        blank=True,
+        help_text='Groups assigned to this ticket'
+    )
     tags = models.ManyToManyField(Tag, blank=True, related_name='tickets')
     
     # Field to distinguish orders from regular tickets
