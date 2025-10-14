@@ -707,6 +707,19 @@ class ItemListMinimalSerializer(serializers.ModelSerializer):
         return obj.items.filter(is_active=True).count()
 
 
+class TicketFormMinimalSerializer(serializers.ModelSerializer):
+    """Minimal serializer for TicketForm (to avoid circular references)."""
+    created_by = UserMinimalSerializer(read_only=True)
+
+    class Meta:
+        model = TicketForm
+        fields = [
+            'id', 'title', 'description', 'is_default', 'is_active',
+            'created_at', 'created_by'
+        ]
+        read_only_fields = fields
+
+
 class TicketFormSerializer(serializers.ModelSerializer):
     """Serializer for TicketForm model."""
     created_by = UserMinimalSerializer(read_only=True)
@@ -718,16 +731,25 @@ class TicketFormSerializer(serializers.ModelSerializer):
         allow_empty=True,
         help_text='List of ItemList IDs to attach to this form'
     )
+    parent_form = TicketFormMinimalSerializer(read_only=True)
+    parent_form_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
+    child_forms = TicketFormMinimalSerializer(many=True, read_only=True)
+    child_forms_count = serializers.SerializerMethodField()
     submissions_count = serializers.SerializerMethodField()
 
     class Meta:
         model = TicketForm
         fields = [
-            'id', 'title', 'description', 'item_lists', 'item_list_ids',
+            'id', 'title', 'description', 'parent_form', 'parent_form_id',
+            'child_forms', 'child_forms_count', 'item_lists', 'item_list_ids',
             'form_config', 'custom_fields', 'is_default', 'is_active',
             'created_at', 'updated_at', 'created_by', 'submissions_count'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'created_by']
+
+    def get_child_forms_count(self, obj):
+        """Get the number of child forms."""
+        return obj.child_forms.count()
 
     def get_submissions_count(self, obj):
         """Get the number of submissions for this form."""
@@ -735,7 +757,13 @@ class TicketFormSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         item_list_ids = validated_data.pop('item_list_ids', [])
+        parent_form_id = validated_data.pop('parent_form_id', None)
         validated_data['created_by'] = self.context['request'].user
+
+        # Set parent_form if provided
+        if parent_form_id:
+            validated_data['parent_form_id'] = parent_form_id
+
         form = super().create(validated_data)
 
         if item_list_ids:
@@ -745,25 +773,21 @@ class TicketFormSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         item_list_ids = validated_data.pop('item_list_ids', None)
+        parent_form_id = validated_data.pop('parent_form_id', None)
+
+        # Handle parent_form field
+        if parent_form_id is not None:
+            if parent_form_id:
+                validated_data['parent_form_id'] = parent_form_id
+            else:
+                validated_data['parent_form'] = None
+
         form = super().update(instance, validated_data)
 
         if item_list_ids is not None:
             form.item_lists.set(item_list_ids)
 
         return form
-
-
-class TicketFormMinimalSerializer(serializers.ModelSerializer):
-    """Minimal serializer for TicketForm."""
-    created_by = UserMinimalSerializer(read_only=True)
-
-    class Meta:
-        model = TicketForm
-        fields = [
-            'id', 'title', 'description', 'is_default', 'is_active',
-            'created_at', 'created_by'
-        ]
-        read_only_fields = fields
 
 
 class TicketFormSubmissionSerializer(serializers.ModelSerializer):

@@ -910,6 +910,7 @@ class TicketForm(models.Model):
     """
     Custom ticket form that tenants can create.
     Forms can have attached ItemLists for structured data entry.
+    Supports recursive child forms for multi-step workflows.
     """
     title = models.CharField(
         max_length=255,
@@ -918,6 +919,16 @@ class TicketForm(models.Model):
     description = models.TextField(
         blank=True,
         help_text='Description of when to use this form'
+    )
+
+    # Parent form relationship - allows creating child forms recursively
+    parent_form = models.ForeignKey(
+        'self',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='child_forms',
+        help_text='Parent form if this is a child form (e.g., main order form -> engineer resolution form)'
     )
 
     # Associated lists that should be used in this form
