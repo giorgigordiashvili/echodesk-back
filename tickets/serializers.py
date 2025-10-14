@@ -661,10 +661,11 @@ class ListItemSerializer(serializers.ModelSerializer):
 class ListItemMinimalSerializer(serializers.ModelSerializer):
     """Minimal serializer for ListItem without children (to avoid deep recursion)."""
     full_path = serializers.ReadOnlyField(source='get_full_path')
+    item_list = serializers.PrimaryKeyRelatedField(read_only=True)
 
     class Meta:
         model = ListItem
-        fields = ['id', 'label', 'custom_id', 'parent', 'position', 'is_active', 'full_path']
+        fields = ['id', 'item_list', 'label', 'custom_id', 'parent', 'position', 'is_active', 'full_path']
         read_only_fields = fields
 
 
