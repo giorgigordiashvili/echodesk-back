@@ -727,12 +727,17 @@ class TicketFormMinimalSerializer(serializers.ModelSerializer):
     # Add child_forms as a self-reference to show child forms that need to be filled
     # We use the same minimal serializer to avoid deep nesting
     child_forms = serializers.SerializerMethodField()
+    # Add parent_form as a simple dict to avoid recursion
+    parent_form = serializers.SerializerMethodField()
+    item_lists = ItemListMinimalSerializer(many=True, read_only=True)
+    submissions_count = serializers.SerializerMethodField()
 
     class Meta:
         model = TicketForm
         fields = [
             'id', 'title', 'description', 'is_default', 'is_active',
-            'created_at', 'created_by', 'child_forms'
+            'created_at', 'created_by', 'child_forms', 'parent_form',
+            'item_lists', 'submissions_count', 'custom_fields'
         ]
         read_only_fields = fields
 
@@ -749,6 +754,21 @@ class TicketFormMinimalSerializer(serializers.ModelSerializer):
             }
             for child in child_forms
         ]
+
+    def get_parent_form(self, obj):
+        """Get parent form without deep nesting."""
+        if obj.parent_form:
+            return {
+                'id': obj.parent_form.id,
+                'title': obj.parent_form.title,
+                'description': obj.parent_form.description,
+                'is_active': obj.parent_form.is_active,
+            }
+        return None
+
+    def get_submissions_count(self, obj):
+        """Get the number of submissions for this form."""
+        return obj.submissions.count()
 
 
 class TicketFormSerializer(serializers.ModelSerializer):
