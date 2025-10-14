@@ -1000,11 +1000,11 @@ class TicketFormSubmission(models.Model):
     Stores the data submitted when a ticket is created using a custom form.
     Links tickets to forms and stores the selected list items.
     """
-    ticket = models.OneToOneField(
+    ticket = models.ForeignKey(
         Ticket,
         on_delete=models.CASCADE,
-        related_name='form_submission',
-        help_text='The ticket created from this form submission'
+        related_name='form_submissions',
+        help_text='The ticket this form submission is for'
     )
     form = models.ForeignKey(
         TicketForm,
