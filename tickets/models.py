@@ -936,6 +936,21 @@ class TicketForm(models.Model):
         help_text='JSON configuration for form fields and behavior'
     )
 
+    # Custom fields schema - defines additional input fields for this form
+    # Example: [
+    #   {"name": "delivery_address", "label": "Delivery Address", "type": "string", "required": true},
+    #   {"name": "notes", "label": "Additional Notes", "type": "text", "required": false},
+    #   {"name": "quantity", "label": "Quantity", "type": "number", "required": true},
+    #   {"name": "delivery_date", "label": "Delivery Date", "type": "date", "required": true},
+    #   {"name": "customer_signature", "label": "Customer Signature", "type": "signature", "required": false}
+    # ]
+    # Supported types: string, text, number, date, signature (image upload)
+    custom_fields = models.JSONField(
+        default=list,
+        blank=True,
+        help_text='Schema for custom input fields in this form. Array of field definitions.'
+    )
+
     is_default = models.BooleanField(
         default=False,
         help_text='Whether this is the default form for ticket creation'

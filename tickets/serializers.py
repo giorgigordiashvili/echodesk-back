@@ -724,7 +724,7 @@ class TicketFormSerializer(serializers.ModelSerializer):
         model = TicketForm
         fields = [
             'id', 'title', 'description', 'item_lists', 'item_list_ids',
-            'form_config', 'is_default', 'is_active',
+            'form_config', 'custom_fields', 'is_default', 'is_active',
             'created_at', 'updated_at', 'created_by', 'submissions_count'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'created_by']
