@@ -1345,7 +1345,9 @@ class ListItemViewSet(viewsets.ModelViewSet):
 
 class TicketFormViewSet(viewsets.ModelViewSet):
     """ViewSet for managing ticket forms."""
-    queryset = TicketForm.objects.all()
+    queryset = TicketForm.objects.all().select_related(
+        'created_by', 'parent_form'
+    ).prefetch_related('item_lists', 'child_forms')
     serializer_class = TicketFormSerializer
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
@@ -1355,17 +1357,17 @@ class TicketFormViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         """Filter forms based on user permissions."""
         queryset = super().get_queryset()
-        
+
         # Filter by is_active if specified
         is_active = self.request.query_params.get('is_active')
         if is_active is not None:
             queryset = queryset.filter(is_active=is_active.lower() == 'true')
-        
+
         # Filter by is_default if specified
         is_default = self.request.query_params.get('is_default')
         if is_default is not None:
             queryset = queryset.filter(is_default=is_default.lower() == 'true')
-        
+
         return queryset
 
     def get_serializer_class(self):
