@@ -724,14 +724,31 @@ class ItemListMinimalSerializer(serializers.ModelSerializer):
 class TicketFormMinimalSerializer(serializers.ModelSerializer):
     """Minimal serializer for TicketForm (to avoid circular references)."""
     created_by = UserMinimalSerializer(read_only=True)
+    # Add child_forms as a self-reference to show child forms that need to be filled
+    # We use the same minimal serializer to avoid deep nesting
+    child_forms = serializers.SerializerMethodField()
 
     class Meta:
         model = TicketForm
         fields = [
             'id', 'title', 'description', 'is_default', 'is_active',
-            'created_at', 'created_by'
+            'created_at', 'created_by', 'child_forms'
         ]
         read_only_fields = fields
+
+    def get_child_forms(self, obj):
+        """Get child forms without deep nesting."""
+        child_forms = obj.child_forms.filter(is_active=True)
+        # Return simple dict to avoid recursion
+        return [
+            {
+                'id': child.id,
+                'title': child.title,
+                'description': child.description,
+                'is_active': child.is_active,
+            }
+            for child in child_forms
+        ]
 
 
 class TicketFormSerializer(serializers.ModelSerializer):
