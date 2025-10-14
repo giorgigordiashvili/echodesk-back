@@ -403,7 +403,11 @@ class TicketSerializer(serializers.ModelSerializer):
     remaining_balance = serializers.ReadOnlyField()
     payment_status = serializers.ReadOnlyField()
     is_overdue = serializers.ReadOnlyField()
-    
+
+    # Form submission field - need to use PrimaryKeyRelatedField to avoid circular import
+    # This will be later resolved to use TicketFormSubmissionSerializer in get_form_submission
+    form_submission = serializers.SerializerMethodField(read_only=True)
+
     class Meta:
         model = Ticket
         fields = [
@@ -416,7 +420,7 @@ class TicketSerializer(serializers.ModelSerializer):
             'sub_tickets', 'sub_tickets_count', 'completed_sub_tickets_count',
             'checklist_items', 'checklist_items_count', 'completed_checklist_items_count',
             'price', 'currency', 'is_paid', 'amount_paid', 'payment_due_date',
-            'payments', 'remaining_balance', 'payment_status', 'is_overdue'
+            'payments', 'remaining_balance', 'payment_status', 'is_overdue', 'form_submission'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'created_by', 'status', 'is_closed']
 
@@ -439,6 +443,16 @@ class TicketSerializer(serializers.ModelSerializer):
     def get_completed_checklist_items_count(self, obj):
         """Get the number of completed checklist items."""
         return obj.checklist_items.filter(is_checked=True).count()
+
+    def get_form_submission(self, obj):
+        """Get form submission for this ticket if it exists."""
+        try:
+            if hasattr(obj, 'form_submission') and obj.form_submission:
+                # Import here to avoid circular dependency
+                return TicketFormSubmissionSerializer(obj.form_submission, context=self.context).data
+        except TicketFormSubmission.DoesNotExist:
+            pass
+        return None
 
     def create(self, validated_data):
         tag_ids = validated_data.pop('tag_ids', [])
