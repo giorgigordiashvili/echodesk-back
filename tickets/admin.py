@@ -16,10 +16,10 @@ from .models import (
 
 @admin.register(Board)
 class BoardAdmin(admin.ModelAdmin):
-    list_display = ('name', 'is_default', 'columns_count', 'tickets_count', 'payment_summary', 'order_users_count', 'created_by', 'created_at')
+    list_display = ('name', 'is_default', 'columns_count', 'tickets_count', 'payment_summary', 'order_users_count', 'board_groups_count', 'created_by', 'created_at')
     list_filter = ('is_default', 'created_at', 'updated_at')
     search_fields = ('name', 'description')
-    filter_horizontal = ('order_users',)
+    filter_horizontal = ('order_users', 'board_groups')
     readonly_fields = ('created_at', 'updated_at', 'payment_summary_detailed')
     ordering = ('-is_default', 'name')
     
@@ -31,9 +31,9 @@ class BoardAdmin(admin.ModelAdmin):
             'fields': ('payment_summary_detailed',),
             'classes': ('collapse',)
         }),
-        ('Order Users', {
-            'fields': ('order_users',),
-            'description': 'Users who can create orders on this board'
+        ('Access Control', {
+            'fields': ('order_users', 'board_groups'),
+            'description': 'Control which users and groups can access this board. Users who can create orders on this board, and groups that can access this board.'
         }),
         ('Metadata', {
             'fields': ('created_by', 'created_at', 'updated_at'),
@@ -67,6 +67,13 @@ class BoardAdmin(admin.ModelAdmin):
             return f'{count} users'
         return '0 users'
     order_users_count.short_description = 'Order Users'
+
+    def board_groups_count(self, obj):
+        count = obj.board_groups.count()
+        if count > 0:
+            return f'{count} groups'
+        return '0 groups'
+    board_groups_count.short_description = 'Board Groups'
 
     def payment_summary(self, obj):
         """Display payment summary for the board."""

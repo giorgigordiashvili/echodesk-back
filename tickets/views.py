@@ -542,6 +542,7 @@ class TicketViewSet(viewsets.ModelViewSet):
 class TagViewSet(viewsets.ModelViewSet):
     """
     ViewSet for managing tags.
+    All authenticated users can create, view, update, and delete tags.
     """
     queryset = Tag.objects.all()
     serializer_class = TagSerializer
@@ -549,18 +550,6 @@ class TagViewSet(viewsets.ModelViewSet):
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['name']
     ordering = ['name']
-
-    def get_permissions(self):
-        """
-        Only staff can create, update, or delete tags.
-        Anyone authenticated can view tags.
-        """
-        if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            permission_classes = [permissions.IsAdminUser]
-        else:
-            permission_classes = [permissions.IsAuthenticated]
-        
-        return [permission() for permission in permission_classes]
 
 
 class TicketCommentViewSet(viewsets.ModelViewSet):
@@ -996,31 +985,30 @@ class BoardViewSet(viewsets.ModelViewSet):
     permission_classes = [BoardPermission]
     
     def get_queryset(self):
-        """Return boards the user can access."""
+        """Return boards the user can access based on direct attachment or group membership."""
         user = self.request.user
-        
-        # Check if user has full board access permissions
-        if user.has_permission('view_boards'):
-            # Full board access - show all boards
-            return Board.objects.all()
-        
-        # Check if user has order permissions but not full board permissions (for order users)
-        if user.has_permission('access_orders'):
-            # User only has order permissions - filter to boards they're attached to
-            user_attached_boards = Board.objects.filter(order_users=user)
-            
-            if user_attached_boards.exists():
-                # User is attached to specific boards - show only those
-                return user_attached_boards
-            else:
-                # User is not attached to specific boards - show boards that have no order users assigned
-                # (meaning they are open to all order users)
-                return Board.objects.annotate(
-                    order_users_count=Count('order_users')
-                ).filter(order_users_count=0)
-        
-        # User has no relevant permissions - return empty queryset
-        return Board.objects.none()
+
+        # Check if user has view_boards or access_orders permissions
+        if not (user.has_permission('view_boards') or user.has_permission('access_orders')):
+            return Board.objects.none()
+
+        # Get user's groups
+        user_groups = user.tenant_groups.filter(is_active=True)
+
+        # Filter boards where:
+        # 1. User is directly attached via order_users, OR
+        # 2. User's group is attached via board_groups, OR
+        # 3. Board has no groups AND no users assigned (open to all with permissions)
+        from django.db.models import Q, Count
+
+        return Board.objects.annotate(
+            order_users_count=Count('order_users'),
+            board_groups_count=Count('board_groups')
+        ).filter(
+            Q(order_users=user) |  # User is directly attached
+            Q(board_groups__in=user_groups) |  # User's group is attached
+            Q(order_users_count=0, board_groups_count=0)  # Open board (no attachments)
+        ).distinct()
     
     def perform_create(self, serializer):
         """Set the created_by field when creating a board."""

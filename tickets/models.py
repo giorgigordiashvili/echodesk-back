@@ -673,6 +673,14 @@ class Board(models.Model):
         help_text='Users who can create orders on this board'
     )
 
+    # Groups that can access this board
+    board_groups = models.ManyToManyField(
+        'users.TenantGroup',
+        related_name='accessible_boards',
+        blank=True,
+        help_text='Groups that can access this board'
+    )
+
     # Metadata
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

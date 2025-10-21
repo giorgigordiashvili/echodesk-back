@@ -40,14 +40,23 @@ class BoardSerializer(serializers.ModelSerializer):
         allow_empty=True,
         help_text='List of user IDs who can create orders on this board'
     )
+    board_groups = TenantGroupMinimalSerializer(many=True, read_only=True)
+    board_group_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        write_only=True,
+        required=False,
+        allow_empty=True,
+        help_text='List of group IDs that can access this board'
+    )
     payment_summary = serializers.SerializerMethodField(read_only=True)
-    
+
     class Meta:
         model = Board
         fields = [
             'id', 'name', 'description', 'is_default',
             'created_at', 'updated_at', 'created_by', 'columns_count',
-            'order_users', 'order_user_ids', 'payment_summary'
+            'order_users', 'order_user_ids', 'board_groups', 'board_group_ids',
+            'payment_summary'
         ]
         read_only_fields = ['created_at', 'updated_at', 'created_by']
     
@@ -60,21 +69,29 @@ class BoardSerializer(serializers.ModelSerializer):
     
     def create(self, validated_data):
         order_user_ids = validated_data.pop('order_user_ids', [])
+        board_group_ids = validated_data.pop('board_group_ids', [])
         validated_data['created_by'] = self.context['request'].user
         board = super().create(validated_data)
-        
+
         if order_user_ids:
             board.order_users.set(order_user_ids)
-        
+
+        if board_group_ids:
+            board.board_groups.set(board_group_ids)
+
         return board
-    
+
     def update(self, instance, validated_data):
         order_user_ids = validated_data.pop('order_user_ids', None)
+        board_group_ids = validated_data.pop('board_group_ids', None)
         board = super().update(instance, validated_data)
-        
+
         if order_user_ids is not None:
             board.order_users.set(order_user_ids)
-        
+
+        if board_group_ids is not None:
+            board.board_groups.set(board_group_ids)
+
         return board
 
 
