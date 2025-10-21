@@ -1059,3 +1059,44 @@ class TicketFormSubmission(models.Model):
 
     def __str__(self):
         return f'{self.form.title} - {self.ticket.title}'
+
+
+class TicketAttachment(models.Model):
+    """File attachments for tickets."""
+    ticket = models.ForeignKey(
+        'Ticket',
+        on_delete=models.CASCADE,
+        related_name='attachments',
+        help_text='Ticket this file is attached to'
+    )
+    file = models.FileField(
+        upload_to='ticket_attachments/%Y/%m/%d/',
+        help_text='Uploaded file'
+    )
+    filename = models.CharField(
+        max_length=255,
+        help_text='Original filename'
+    )
+    file_size = models.PositiveIntegerField(
+        help_text='File size in bytes'
+    )
+    content_type = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text='MIME type of the file'
+    )
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='ticket_attachments',
+        help_text='User who uploaded this file'
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-uploaded_at']
+        verbose_name = 'Ticket Attachment'
+        verbose_name_plural = 'Ticket Attachments'
+
+    def __str__(self):
+        return f'{self.filename} - {self.ticket.title}'

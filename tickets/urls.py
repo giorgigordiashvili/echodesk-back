@@ -4,7 +4,8 @@ from .views import (
     TicketViewSet, TagViewSet, TicketCommentViewSet, TicketColumnViewSet,
     SubTicketViewSet, ChecklistItemViewSet, TicketAssignmentViewSet, SubTicketAssignmentViewSet,
     TicketTimeLogViewSet, BoardViewSet, TicketPaymentViewSet,
-    ItemListViewSet, ListItemViewSet, TicketFormViewSet, TicketFormSubmissionViewSet
+    ItemListViewSet, ListItemViewSet, TicketFormViewSet, TicketFormSubmissionViewSet,
+    TicketAttachmentViewSet
 )
 
 # Create router and register viewsets
@@ -24,6 +25,7 @@ router.register(r'item-lists', ItemListViewSet, basename='itemlist')
 router.register(r'list-items', ListItemViewSet, basename='listitem')
 router.register(r'ticket-forms', TicketFormViewSet, basename='ticketform')
 router.register(r'form-submissions', TicketFormSubmissionViewSet, basename='formsubmission')
+router.register(r'attachments', TicketAttachmentViewSet, basename='ticketattachment')
 
 app_name = 'tickets'
 

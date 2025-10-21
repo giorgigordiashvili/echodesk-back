@@ -10,7 +10,7 @@ from drf_spectacular.openapi import OpenApiTypes
 from .models import (
     Ticket, Tag, TicketComment, TicketColumn, SubTicket, ChecklistItem,
     TicketAssignment, SubTicketAssignment, TicketTimeLog, Board, TicketPayment,
-    ItemList, ListItem, TicketForm, TicketFormSubmission
+    ItemList, ListItem, TicketForm, TicketFormSubmission, TicketAttachment
 )
 from .serializers import (
     TicketSerializer, TicketListSerializer, TagSerializer,
@@ -20,7 +20,8 @@ from .serializers import (
     TicketAssignmentSerializer, SubTicketAssignmentSerializer, TicketTimeLogSerializer,
     TimeTrackingSummarySerializer, BoardSerializer, TicketPaymentSerializer,
     ItemListSerializer, ItemListMinimalSerializer, ListItemSerializer, ListItemMinimalSerializer,
-    TicketFormSerializer, TicketFormMinimalSerializer, TicketFormSubmissionSerializer
+    TicketFormSerializer, TicketFormMinimalSerializer, TicketFormSubmissionSerializer,
+    TicketAttachmentSerializer
 )
 
 
@@ -1474,3 +1475,34 @@ class TicketFormSubmissionViewSet(viewsets.ModelViewSet):
             return Response(serializer.data)
         except TicketFormSubmission.DoesNotExist:
             return Response({'error': 'Submission not found'}, status=status.HTTP_404_NOT_FOUND)
+
+
+class TicketAttachmentViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing ticket file attachments."""
+    queryset = TicketAttachment.objects.all()
+    serializer_class = TicketAttachmentSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['ticket']
+
+    def get_queryset(self):
+        """Filter attachments based on user permissions."""
+        user = self.request.user
+        if user.is_staff:
+            return TicketAttachment.objects.all()
+
+        # Users can see attachments for tickets they have access to
+        user_groups = user.tenant_groups.all()
+        return TicketAttachment.objects.filter(
+            Q(ticket__created_by=user) |
+            Q(ticket__assigned_to=user) |
+            Q(ticket__assigned_users=user) |
+            Q(ticket__assigned_groups__in=user_groups) |
+            Q(ticket__column__board__order_users=user) |
+            Q(ticket__column__board__board_users=user) |
+            Q(ticket__column__board__board_groups__in=user_groups)
+        ).distinct()
+
+    def perform_create(self, serializer):
+        """Save attachment with uploaded_by set to current user."""
+        serializer.save(uploaded_by=self.request.user)

@@ -3,7 +3,7 @@ from django.contrib.auth import get_user_model
 from .models import (
     Ticket, Tag, TicketComment, TicketColumn, SubTicket, ChecklistItem,
     TicketAssignment, SubTicketAssignment, TicketTimeLog, Board, TicketPayment,
-    ItemList, ListItem, TicketForm, TicketFormSubmission
+    ItemList, ListItem, TicketForm, TicketFormSubmission, TicketAttachment
 )
 from users.models import TenantGroup
 
@@ -933,3 +933,30 @@ class TicketFormSubmissionSerializer(serializers.ModelSerializer):
             submission.selected_items.set(selected_item_ids)
 
         return submission
+
+
+class TicketAttachmentSerializer(serializers.ModelSerializer):
+    """Serializer for ticket file attachments."""
+    uploaded_by = UserMinimalSerializer(read_only=True)
+    file_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TicketAttachment
+        fields = ['id', 'ticket', 'file', 'file_url', 'filename', 'file_size', 'content_type', 'uploaded_by', 'uploaded_at']
+        read_only_fields = ['id', 'file_url', 'filename', 'file_size', 'content_type', 'uploaded_by', 'uploaded_at']
+
+    def get_file_url(self, obj):
+        """Get the full URL of the uploaded file."""
+        if obj.file:
+            return obj.file.url
+        return None
+
+    def create(self, validated_data):
+        """Handle file upload and metadata extraction."""
+        file = validated_data.get('file')
+        if file:
+            validated_data['filename'] = file.name
+            validated_data['file_size'] = file.size
+            validated_data['content_type'] = file.content_type or ''
+        validated_data['uploaded_by'] = self.context['request'].user
+        return super().create(validated_data)

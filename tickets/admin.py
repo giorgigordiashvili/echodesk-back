@@ -10,7 +10,7 @@ import csv
 from decimal import Decimal
 from .models import (
     Ticket, Tag, TicketComment, TicketColumn, SubTicket, ChecklistItem, Board, TicketTimeLog, TicketPayment,
-    ItemList, ListItem, TicketForm, TicketFormSubmission
+    ItemList, ListItem, TicketForm, TicketFormSubmission, TicketAttachment
 )
 
 
@@ -1121,3 +1121,39 @@ class TicketFormSubmissionAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         """Optimize queries by selecting related objects."""
         return super().get_queryset(request).select_related('ticket', 'form').prefetch_related('selected_items')
+
+
+@admin.register(TicketAttachment)
+class TicketAttachmentAdmin(admin.ModelAdmin):
+    """Admin for ticket file attachments."""
+    list_display = ('filename', 'ticket_link', 'file_size_display', 'content_type', 'uploaded_by', 'uploaded_at')
+    list_filter = ('uploaded_at', 'content_type')
+    search_fields = ('filename', 'ticket__title', 'uploaded_by__email')
+    readonly_fields = ('uploaded_at', 'file_size', 'content_type', 'uploaded_by')
+    ordering = ('-uploaded_at',)
+
+    def ticket_link(self, obj):
+        """Display clickable link to ticket."""
+        if obj.ticket:
+            return format_html(
+                '<a href="/admin/tickets/ticket/{}/change/">{}</a>',
+                obj.ticket.id, obj.ticket.title
+            )
+        return '-'
+    ticket_link.short_description = 'Ticket'
+
+    def file_size_display(self, obj):
+        """Display file size in human-readable format."""
+        size = obj.file_size
+        for unit in ['B', 'KB', 'MB', 'GB']:
+            if size < 1024.0:
+                return f'{size:.1f} {unit}'
+            size /= 1024.0
+        return f'{size:.1f} TB'
+    file_size_display.short_description = 'File Size'
+
+    def save_model(self, request, obj, form, change):
+        """Set uploaded_by to current user if creating."""
+        if not change:
+            obj.uploaded_by = request.user
+        super().save_model(request, obj, form, change)

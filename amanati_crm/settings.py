@@ -44,7 +44,8 @@ SHARED_APPS = [
     'drf_spectacular',
     'corsheaders',
     'channels',  # Add channels for WebSocket support
-    
+    'storages',  # For DigitalOcean Spaces file storage
+
     # Shared apps
     'tenants',  # This must be in SHARED_APPS
     'users',    # Add users to shared apps so public schema gets the table
@@ -167,8 +168,22 @@ STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
-# Tenant-aware file storage
-DEFAULT_FILE_STORAGE = 'tenant_schemas.storage.TenantFileSystemStorage'
+# DigitalOcean Spaces Configuration
+AWS_ACCESS_KEY_ID = 'DO00JYDU7GMKPUKQ3DDL'
+AWS_SECRET_ACCESS_KEY = 'oQOuPQPpjeCJLleMs9sH3mTPdJcp34vTsk1hxJSoG9E'
+AWS_STORAGE_BUCKET_NAME = 'echodesk-spaces'
+AWS_S3_ENDPOINT_URL = 'https://fra1.digitaloceanspaces.com'
+AWS_S3_REGION_NAME = 'fra1'
+AWS_S3_OBJECT_PARAMETERS = {
+    'CacheControl': 'max-age=86400',
+}
+AWS_LOCATION = 'media'
+AWS_DEFAULT_ACL = 'public-read'
+AWS_S3_CUSTOM_DOMAIN = f'{AWS_STORAGE_BUCKET_NAME}.fra1.digitaloceanspaces.com'
+
+# Use DigitalOcean Spaces for media file storage
+DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
+MEDIA_URL = f'https://{AWS_S3_CUSTOM_DOMAIN}/{AWS_LOCATION}/'
 
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
