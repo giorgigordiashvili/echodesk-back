@@ -30,16 +30,28 @@ class EchoDeskTenantMiddleware(TenantMiddleware):
             request: The HTTP request object
         """
         main_domain = getattr(settings, 'MAIN_DOMAIN', 'echodesk.ge')
+        api_domain = getattr(settings, 'API_DOMAIN', 'api.echodesk.ge')
 
-        # If accessing main domain, use public schema
-        if hostname == main_domain:
+        # If accessing main domain or API domain, use public schema
+        if hostname == main_domain or hostname == api_domain:
             # Create a fake tenant object for public schema
             public_tenant = model()
             public_tenant.schema_name = get_public_schema_name()
-            public_tenant.domain_url = main_domain
+            public_tenant.domain_url = hostname
             return public_tenant
 
-        # For subdomains, extract the subdomain and look up the tenant
+        # For subdomains (e.g., groot.api.echodesk.ge), extract subdomain and look up tenant
+        # Check if it's a tenant subdomain of API domain
+        if hostname.endswith(f'.{api_domain}'):
+            # Extract subdomain (e.g., "groot" from "groot.api.echodesk.ge")
+            subdomain = hostname.replace(f'.{api_domain}', '')
+            try:
+                tenant = model.objects.get(schema_name=subdomain)
+                return tenant
+            except model.DoesNotExist:
+                raise Exception(f"No tenant found for subdomain: {subdomain}")
+
+        # For main domain subdomains, look up by domain_url
         try:
             # Look up tenant by domain_url
             tenant = model.objects.get(domain_url=hostname)
