@@ -988,6 +988,10 @@ class BoardViewSet(viewsets.ModelViewSet):
         """Return boards the user can access based on direct attachment or group membership."""
         user = self.request.user
 
+        # Superusers and staff can see all boards
+        if user.is_superuser or user.is_staff:
+            return Board.objects.all()
+
         # Check if user has view_boards or access_orders permissions
         if not (user.has_permission('view_boards') or user.has_permission('access_orders')):
             return Board.objects.none()
