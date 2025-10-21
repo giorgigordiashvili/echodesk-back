@@ -21,30 +21,32 @@ class EchoDeskTenantMiddleware(TenantMiddleware):
     - Subdomains (*.echodesk.ge) -> Tenant schemas
     """
     
-    def get_tenant(self, domain_url, path):
+    def get_tenant(self, model, hostname, request):
         """
         Override to handle main domain routing
+        Args:
+            model: The Tenant model class
+            hostname: The hostname from the request
+            request: The HTTP request object
         """
         main_domain = getattr(settings, 'MAIN_DOMAIN', 'echodesk.ge')
-        
+
         # If accessing main domain, use public schema
-        if domain_url == main_domain:
-            from tenants.models import Tenant
+        if hostname == main_domain:
             # Create a fake tenant object for public schema
-            public_tenant = Tenant()
+            public_tenant = model()
             public_tenant.schema_name = get_public_schema_name()
             public_tenant.domain_url = main_domain
             return public_tenant
-        
+
         # For subdomains, extract the subdomain and look up the tenant
         try:
-            from tenants.models import Tenant
             # Look up tenant by domain_url
-            tenant = Tenant.objects.get(domain_url=domain_url)
+            tenant = model.objects.get(domain_url=hostname)
             return tenant
-        except Tenant.DoesNotExist:
+        except model.DoesNotExist:
             # If tenant not found, raise exception to trigger fallback
-            raise Exception(f"No tenant found for domain: {domain_url}")
+            raise Exception(f"No tenant found for domain: {hostname}")
     
     def process_request(self, request):
         """
