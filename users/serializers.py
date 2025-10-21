@@ -4,7 +4,7 @@ from django.contrib.auth.models import Group, Permission
 from django.contrib.auth.password_validation import validate_password
 from django.contrib.contenttypes.models import ContentType
 from django.utils import timezone
-from .models import Department, TenantGroup
+from .models import Department, TenantGroup, Notification
 
 User = get_user_model()
 
@@ -378,3 +378,27 @@ class UserLoginSerializer(serializers.Serializer):
             return attrs
         else:
             raise serializers.ValidationError('Must include email and password.')
+
+
+class NotificationSerializer(serializers.ModelSerializer):
+    """Serializer for user notifications"""
+    user_name = serializers.SerializerMethodField()
+    time_ago = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Notification
+        fields = [
+            'id', 'user', 'user_name', 'notification_type', 'title',
+            'message', 'ticket_id', 'metadata', 'is_read', 'read_at',
+            'created_at', 'time_ago'
+        ]
+        read_only_fields = ['user', 'created_at', 'read_at']
+
+    def get_user_name(self, obj):
+        """Get the full name of the user"""
+        return obj.user.get_full_name() if obj.user else None
+
+    def get_time_ago(self, obj):
+        """Get human-readable time ago"""
+        from django.utils.timesince import timesince
+        return timesince(obj.created_at)

@@ -323,9 +323,90 @@ class User(AbstractBaseUser, PermissionsMixin):
         """Get all permissions as a dictionary with categories"""
         individual_permissions = self.get_user_permissions_list()
         group_permissions = self.get_group_permissions()
-        
+
         return {
             'individual': individual_permissions,
             'group': group_permissions,
             'all': list(set(individual_permissions + group_permissions))
         }
+
+
+class Notification(models.Model):
+    """
+    Notification model for user notifications about ticket events
+    """
+    NOTIFICATION_TYPES = [
+        ('ticket_assigned', 'Ticket Assigned'),
+        ('ticket_mentioned', 'Mentioned in Ticket'),
+        ('ticket_commented', 'Ticket Commented'),
+        ('ticket_status_changed', 'Ticket Status Changed'),
+        ('ticket_updated', 'Ticket Updated'),
+        ('sub_ticket_created', 'Sub-ticket Created'),
+        ('ticket_due_soon', 'Ticket Due Soon'),
+    ]
+
+    user = models.ForeignKey(
+        'User',
+        on_delete=models.CASCADE,
+        related_name='notifications',
+        help_text='User who will receive this notification'
+    )
+    notification_type = models.CharField(
+        max_length=50,
+        choices=NOTIFICATION_TYPES,
+        help_text='Type of notification'
+    )
+    title = models.CharField(
+        max_length=255,
+        help_text='Notification title/summary'
+    )
+    message = models.TextField(
+        help_text='Detailed notification message'
+    )
+
+    # Link to related ticket
+    ticket_id = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text='ID of related ticket'
+    )
+
+    # Additional metadata
+    metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text='Additional notification metadata (e.g., actor_name, old_value, new_value)'
+    )
+
+    # Notification state
+    is_read = models.BooleanField(
+        default=False,
+        help_text='Whether the notification has been read'
+    )
+    read_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text='When the notification was read'
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text='When the notification was created'
+    )
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', '-created_at']),
+            models.Index(fields=['user', 'is_read']),
+        ]
+
+    def __str__(self):
+        return f"{self.get_notification_type_display()} for {self.user.email}"
+
+    def mark_as_read(self):
+        """Mark this notification as read"""
+        if not self.is_read:
+            self.is_read = True
+            self.read_at = timezone.now()
+            self.save(update_fields=['is_read', 'read_at'])

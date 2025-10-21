@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin, GroupAdmin as BaseGroupAdmin
 from django.contrib.auth.models import Group
-from .models import User, Department
+from .models import User, Department, Notification
 
 
 # Unregister the default Group admin and register our custom one
@@ -65,6 +65,29 @@ class UserAdmin(BaseUserAdmin):
     ordering = ('email',)
     filter_horizontal = ('groups', 'user_permissions')
     readonly_fields = ('date_joined', 'last_login')
+
+
+@admin.register(Notification)
+class NotificationAdmin(admin.ModelAdmin):
+    """Notification admin interface"""
+    list_display = ('user', 'notification_type', 'title', 'is_read', 'created_at')
+    list_filter = ('notification_type', 'is_read', 'created_at')
+    search_fields = ('user__email', 'title', 'message')
+    ordering = ('-created_at',)
+    readonly_fields = ('created_at', 'read_at')
+    list_select_related = ('user',)
+
+    fieldsets = (
+        (None, {
+            'fields': ('user', 'notification_type', 'title', 'message')
+        }),
+        ('Ticket Info', {
+            'fields': ('ticket_id', 'metadata')
+        }),
+        ('Status', {
+            'fields': ('is_read', 'read_at', 'created_at')
+        }),
+    )
 
 
 # Register models
