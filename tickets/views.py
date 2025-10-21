@@ -273,14 +273,21 @@ class TicketViewSet(viewsets.ModelViewSet):
         """
         queryset = super().get_queryset()
 
-        # Non-staff users can only see their tickets
+        # Non-staff users can only see their tickets or tickets on boards they have access to
         if not self.request.user.is_staff:
             user_groups = self.request.user.tenant_groups.all()
+
+            # Users can see tickets if:
+            # 1. They created it, are assigned to it, or in assigned groups
+            # 2. They have access to the board (via order_users, board_users, or board_groups)
             queryset = queryset.filter(
                 Q(created_by=self.request.user) |
                 Q(assigned_to=self.request.user) |
                 Q(assigned_users=self.request.user) |
-                Q(assigned_groups__in=user_groups)
+                Q(assigned_groups__in=user_groups) |
+                Q(column__board__order_users=self.request.user) |  # Board order users
+                Q(column__board__board_users=self.request.user) |  # Board users
+                Q(column__board__board_groups__in=user_groups)     # Board groups
             ).distinct()
 
         # Additional filtering by query parameters
