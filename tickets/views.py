@@ -986,6 +986,8 @@ class BoardViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         """Return boards the user can access based on direct attachment or group membership."""
+        from django.db.models import Q, Count, Exists, OuterRef
+
         user = self.request.user
 
         # Superusers and staff can see all boards
@@ -999,19 +1001,27 @@ class BoardViewSet(viewsets.ModelViewSet):
         # Get user's groups
         user_groups = user.tenant_groups.filter(is_active=True)
 
-        # Filter boards where:
-        # 1. User is directly attached via order_users, OR
-        # 2. User's group is attached via board_groups, OR
-        # 3. Board has no groups AND no users assigned (open to all with permissions)
-        from django.db.models import Q, Count
+        # Build filter conditions:
+        # 1. User is directly attached via order_users
+        user_attached = Q(order_users=user)
 
-        return Board.objects.annotate(
-            order_users_count=Count('order_users'),
-            board_groups_count=Count('board_groups')
-        ).filter(
-            Q(order_users=user) |  # User is directly attached
-            Q(board_groups__in=user_groups) |  # User's group is attached
-            Q(order_users_count=0, board_groups_count=0)  # Open board (no attachments)
+        # 2. User's group is attached via board_groups
+        group_attached = Q(board_groups__in=user_groups) if user_groups.exists() else Q(pk__in=[])
+
+        # 3. Board has no order_users AND no board_groups (open to all with permissions)
+        # Use subqueries to avoid annotation conflicts
+        has_order_users = Board.order_users.through.objects.filter(
+            board_id=OuterRef('pk')
+        )
+        has_board_groups = Board.board_groups.through.objects.filter(
+            board_id=OuterRef('pk')
+        )
+
+        open_board = ~Exists(has_order_users) & ~Exists(has_board_groups)
+
+        # Combine all conditions
+        return Board.objects.filter(
+            user_attached | group_attached | open_board
         ).distinct()
     
     def perform_create(self, serializer):
