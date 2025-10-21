@@ -681,6 +681,14 @@ class Board(models.Model):
         help_text='Groups that can access this board'
     )
 
+    # Users who can access this board
+    board_users = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        related_name='accessible_boards',
+        blank=True,
+        help_text='Users who can access/view this board'
+    )
+
     # Metadata
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

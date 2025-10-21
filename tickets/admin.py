@@ -16,13 +16,13 @@ from .models import (
 
 @admin.register(Board)
 class BoardAdmin(admin.ModelAdmin):
-    list_display = ('name', 'is_default', 'columns_count', 'tickets_count', 'payment_summary', 'order_users_count', 'board_groups_count', 'created_by', 'created_at')
+    list_display = ('name', 'is_default', 'columns_count', 'tickets_count', 'payment_summary', 'order_users_count', 'board_users_count', 'board_groups_count', 'created_by', 'created_at')
     list_filter = ('is_default', 'created_at', 'updated_at')
     search_fields = ('name', 'description')
-    filter_horizontal = ('order_users', 'board_groups')
+    filter_horizontal = ('order_users', 'board_users', 'board_groups')
     readonly_fields = ('created_at', 'updated_at', 'payment_summary_detailed')
     ordering = ('-is_default', 'name')
-    
+
     fieldsets = (
         ('Basic Information', {
             'fields': ('name', 'description', 'is_default')
@@ -32,8 +32,8 @@ class BoardAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         }),
         ('Access Control', {
-            'fields': ('order_users', 'board_groups'),
-            'description': 'Control which users and groups can access this board. Users who can create orders on this board, and groups that can access this board.'
+            'fields': ('order_users', 'board_users', 'board_groups'),
+            'description': 'Control which users and groups can access this board. Order Users can create orders, Board Users can view/access the board, and Board Groups provide group-based access.'
         }),
         ('Metadata', {
             'fields': ('created_by', 'created_at', 'updated_at'),
@@ -67,6 +67,13 @@ class BoardAdmin(admin.ModelAdmin):
             return f'{count} users'
         return '0 users'
     order_users_count.short_description = 'Order Users'
+
+    def board_users_count(self, obj):
+        count = obj.board_users.count()
+        if count > 0:
+            return f'{count} users'
+        return '0 users'
+    board_users_count.short_description = 'Board Users'
 
     def board_groups_count(self, obj):
         count = obj.board_groups.count()

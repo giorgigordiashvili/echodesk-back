@@ -1002,26 +1002,32 @@ class BoardViewSet(viewsets.ModelViewSet):
         user_groups = user.tenant_groups.filter(is_active=True)
 
         # Build filter conditions:
-        # 1. User is directly attached via order_users
-        user_attached = Q(order_users=user)
+        # 1. User is directly attached via order_users (for order creation)
+        order_user_attached = Q(order_users=user)
 
-        # 2. User's group is attached via board_groups
+        # 2. User is directly attached via board_users (for board visibility)
+        board_user_attached = Q(board_users=user)
+
+        # 3. User's group is attached via board_groups
         group_attached = Q(board_groups__in=user_groups) if user_groups.exists() else Q(pk__in=[])
 
-        # 3. Board has no order_users AND no board_groups (open to all with permissions)
+        # 4. Board has no attachments (open to all with permissions)
         # Use subqueries to avoid annotation conflicts
         has_order_users = Board.order_users.through.objects.filter(
+            board_id=OuterRef('pk')
+        )
+        has_board_users = Board.board_users.through.objects.filter(
             board_id=OuterRef('pk')
         )
         has_board_groups = Board.board_groups.through.objects.filter(
             board_id=OuterRef('pk')
         )
 
-        open_board = ~Exists(has_order_users) & ~Exists(has_board_groups)
+        open_board = ~Exists(has_order_users) & ~Exists(has_board_users) & ~Exists(has_board_groups)
 
         # Combine all conditions
         return Board.objects.filter(
-            user_attached | group_attached | open_board
+            order_user_attached | board_user_attached | group_attached | open_board
         ).distinct()
     
     def perform_create(self, serializer):
