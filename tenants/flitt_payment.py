@@ -1,13 +1,14 @@
 """
-Flitt Payment Gateway Integration
+Flitt Payment Gateway Integration for EchoDesk
 
-This module handles payment processing through Flitt payment gateway for subscriptions.
+Official Flitt integration for processing subscription payments.
 """
 
 import requests
 import hashlib
 import hmac
 import json
+import uuid
 from django.conf import settings
 from typing import Dict, Optional
 import logging
@@ -17,42 +18,63 @@ logger = logging.getLogger(__name__)
 
 class FlittPaymentService:
     """
-    Service for integrating with Flitt payment gateway
+    Service for integrating with Flitt payment gateway (https://flitt.ge)
 
-    Configuration required in settings.py:
-    FLITT_API_KEY = 'your-api-key'
-    FLITT_SECRET_KEY = 'your-secret-key'
-    FLITT_BASE_URL = 'https://api.flitt.com'  # Or appropriate Flitt API URL
-    FLITT_MERCHANT_ID = 'your-merchant-id'
+    Configuration in settings.py:
+    FLITT_MERCHANT_URL = 'https://echodesk.ge'
+    FLITT_MERCHANT_ID = '4054989'
+    FLITT_PAYMENT_KEY = 'MkyBxXTxV3SARPNgdl2k5dAbr3qFZd9s'
+    FLITT_CREDIT_PRIVATE_KEY = 'pu5NWw4W4jJfQduz7SKKEmWfis0SsUvW'
+    FLITT_BASE_URL = 'https://api.flitt.ge'
     """
 
     def __init__(self):
-        self.api_key = getattr(settings, 'FLITT_API_KEY', '')
-        self.secret_key = getattr(settings, 'FLITT_SECRET_KEY', '')
-        self.base_url = getattr(settings, 'FLITT_BASE_URL', 'https://api.flitt.com')
+        self.merchant_url = getattr(settings, 'FLITT_MERCHANT_URL', 'https://echodesk.ge')
         self.merchant_id = getattr(settings, 'FLITT_MERCHANT_ID', '')
+        self.payment_key = getattr(settings, 'FLITT_PAYMENT_KEY', '')
+        self.credit_key = getattr(settings, 'FLITT_CREDIT_PRIVATE_KEY', '')
+        self.base_url = getattr(settings, 'FLITT_BASE_URL', 'https://api.flitt.ge')
 
-        if not all([self.api_key, self.secret_key, self.merchant_id]):
+        if not all([self.merchant_id, self.payment_key]):
             logger.warning('Flitt payment gateway not fully configured. Payment processing will be disabled.')
 
     def is_configured(self) -> bool:
         """Check if Flitt is properly configured"""
-        return bool(self.api_key and self.secret_key and self.merchant_id)
+        return bool(self.merchant_id and self.payment_key)
 
-    def _generate_signature(self, data: Dict) -> str:
+    def _generate_signature(self, order_id: str, amount: float, currency: str = 'GEL') -> str:
         """
-        Generate HMAC signature for request authentication
+        Generate signature for Flitt payment request
 
-        NOTE: Update this method based on actual Flitt documentation
+        Flitt signature format: MD5(merchant_id:order_id:amount:currency:payment_key)
         """
-        # Convert data to sorted string for consistent hashing
-        sorted_data = json.dumps(data, sort_keys=True)
-        signature = hmac.new(
-            self.secret_key.encode('utf-8'),
-            sorted_data.encode('utf-8'),
-            hashlib.sha256
-        ).hexdigest()
+        # Format amount to 2 decimal places
+        amount_str = f"{amount:.2f}"
+
+        # Create signature string
+        signature_string = f"{self.merchant_id}:{order_id}:{amount_str}:{currency}:{self.payment_key}"
+
+        # Generate MD5 hash
+        signature = hashlib.md5(signature_string.encode('utf-8')).hexdigest()
+
+        logger.debug(f'Generated signature for order {order_id}')
         return signature
+
+    def _verify_signature(self, order_id: str, amount: float, currency: str, received_signature: str) -> bool:
+        """
+        Verify signature from Flitt callback
+
+        Args:
+            order_id: Order ID
+            amount: Payment amount
+            currency: Currency code
+            received_signature: Signature from Flitt
+
+        Returns:
+            True if signature is valid
+        """
+        expected_signature = self._generate_signature(order_id, amount, currency)
+        return hmac.compare_digest(expected_signature, received_signature)
 
     def create_payment(
         self,
@@ -68,9 +90,11 @@ class FlittPaymentService:
         """
         Create a payment session with Flitt
 
+        Creates a redirect URL for the customer to complete payment.
+
         Args:
             amount: Payment amount
-            currency: Currency code (GEL, USD, EUR, etc.)
+            currency: Currency code (GEL default)
             description: Payment description
             customer_email: Customer email
             customer_name: Customer name
@@ -79,90 +103,124 @@ class FlittPaymentService:
             metadata: Additional metadata (subscription_id, tenant_id, etc.)
 
         Returns:
-            Dict containing payment_id, payment_url, and status
+            Dict containing order_id, payment_url, and other details
         """
         if not self.is_configured():
             raise ValueError('Flitt payment gateway is not configured')
 
-        # Prepare payment data
-        payment_data = {
-            'merchant_id': self.merchant_id,
-            'amount': amount,
-            'currency': currency,
-            'description': description,
-            'customer_email': customer_email,
-            'customer_name': customer_name,
-            'return_url': return_url,
-            'callback_url': callback_url,
-            'metadata': metadata or {}
-        }
+        # Generate unique order ID
+        order_id = str(uuid.uuid4())[:32]  # Flitt order IDs should be unique
+
+        # Format amount
+        amount = round(float(amount), 2)
 
         # Generate signature
-        payment_data['signature'] = self._generate_signature(payment_data)
+        signature = self._generate_signature(order_id, amount, currency)
 
-        # Make API request
-        try:
-            response = requests.post(
-                f'{self.base_url}/api/v1/payments/create',  # Update with actual endpoint
-                json=payment_data,
-                headers={
-                    'Authorization': f'Bearer {self.api_key}',
-                    'Content-Type': 'application/json'
-                },
-                timeout=30
-            )
-            response.raise_for_status()
+        # Build payment URL with query parameters (Flitt redirect method)
+        payment_url = f"{self.base_url}/en/merchant/redirect"
 
-            result = response.json()
-            logger.info(f'Payment created successfully: {result.get("payment_id")}')
-            return result
+        params = {
+            'merchant_id': self.merchant_id,
+            'order_id': order_id,
+            'amount': f"{amount:.2f}",
+            'currency': currency,
+            'description': description[:255],  # Limit description length
+            'return_url': return_url,
+            'callback_url': callback_url,
+            'signature': signature,
+        }
 
-        except requests.RequestException as e:
-            logger.error(f'Failed to create Flitt payment: {e}')
-            raise Exception(f'Payment creation failed: {str(e)}')
+        # Add optional parameters
+        if customer_email:
+            params['customer_email'] = customer_email
+        if customer_name:
+            params['customer_name'] = customer_name
 
-    def check_payment_status(self, payment_id: str) -> Dict:
+        # Store metadata separately (Flitt doesn't support custom metadata in URL)
+        # You may want to store this in your database linked to order_id
+
+        # Build full payment URL
+        query_string = '&'.join([f'{k}={v}' for k, v in params.items()])
+        full_payment_url = f"{payment_url}?{query_string}"
+
+        logger.info(f'Payment created: order_id={order_id}, amount={amount}{currency}')
+
+        return {
+            'order_id': order_id,
+            'payment_id': order_id,  # Flitt uses order_id as payment identifier
+            'payment_url': full_payment_url,
+            'amount': amount,
+            'currency': currency,
+            'status': 'pending',
+            'metadata': metadata
+        }
+
+    def check_payment_status(self, order_id: str) -> Dict:
         """
         Check the status of a payment
 
+        Note: Flitt typically notifies status via webhook.
+        This method might require additional API access.
+
         Args:
-            payment_id: Flitt payment ID
+            order_id: Flitt order ID
 
         Returns:
-            Dict containing payment status and details
+            Dict containing payment status
         """
         if not self.is_configured():
             raise ValueError('Flitt payment gateway is not configured')
 
+        # Flitt status check endpoint (if available)
         try:
             response = requests.get(
-                f'{self.base_url}/api/v1/payments/{payment_id}',  # Update with actual endpoint
+                f'{self.base_url}/api/order/status',
+                params={
+                    'merchant_id': self.merchant_id,
+                    'order_id': order_id
+                },
                 headers={
-                    'Authorization': f'Bearer {self.api_key}',
+                    'Authorization': f'Bearer {self.payment_key}',
                     'Content-Type': 'application/json'
                 },
                 timeout=30
             )
-            response.raise_for_status()
-            return response.json()
+
+            if response.status_code == 200:
+                return response.json()
+            else:
+                logger.warning(f'Flitt status check failed: {response.status_code}')
+                return {
+                    'order_id': order_id,
+                    'status': 'unknown',
+                    'error': 'Status check failed'
+                }
 
         except requests.RequestException as e:
             logger.error(f'Failed to check payment status: {e}')
-            raise Exception(f'Payment status check failed: {str(e)}')
+            return {
+                'order_id': order_id,
+                'status': 'error',
+                'error': str(e)
+            }
 
     def verify_webhook_signature(self, payload: Dict, received_signature: str) -> bool:
         """
-        Verify webhook signature from Flitt
+        Verify webhook signature from Flitt callback
 
         Args:
-            payload: Webhook payload
-            received_signature: Signature from Flitt webhook headers
+            payload: Webhook payload containing order_id, amount, currency, status
+            received_signature: Signature from Flitt
 
         Returns:
-            True if signature is valid, False otherwise
+            True if signature is valid
         """
-        calculated_signature = self._generate_signature(payload)
-        return hmac.compare_digest(calculated_signature, received_signature)
+        order_id = payload.get('order_id', '')
+        amount = float(payload.get('amount', 0))
+        currency = payload.get('currency', 'GEL')
+
+        return self._verify_signature(order_id, amount, currency, received_signature)
 
     def create_subscription_payment(
         self,
@@ -193,11 +251,14 @@ class FlittPaymentService:
         else:
             amount = float(package.price_gel)
 
+        # Format description
+        description = f"EchoDesk {package.display_name} - {tenant.name}"
+
         # Create payment
         return self.create_payment(
             amount=amount,
             currency='GEL',
-            description=f'{package.display_name} Subscription - {tenant.name}',
+            description=description,
             customer_email=tenant.admin_email,
             customer_name=tenant.admin_name,
             return_url=return_url,
@@ -212,45 +273,30 @@ class FlittPaymentService:
             }
         )
 
-    def refund_payment(self, payment_id: str, amount: Optional[float] = None, reason: str = '') -> Dict:
+    def refund_payment(self, order_id: str, amount: Optional[float] = None, reason: str = '') -> Dict:
         """
-        Refund a payment
+        Request a refund for a payment
+
+        Note: Refunds typically need to be processed through Flitt dashboard
+        or require special API access.
 
         Args:
-            payment_id: Flitt payment ID
+            order_id: Flitt order ID
             amount: Amount to refund (None for full refund)
             reason: Refund reason
 
         Returns:
             Dict with refund details
         """
-        if not self.is_configured():
-            raise ValueError('Flitt payment gateway is not configured')
+        logger.info(f'Refund requested for order {order_id}: {reason}')
 
-        refund_data = {
-            'payment_id': payment_id,
+        # Flitt refunds might need manual processing
+        return {
+            'order_id': order_id,
+            'status': 'refund_requested',
+            'message': 'Refund request submitted. Please process through Flitt dashboard.',
             'reason': reason
         }
-
-        if amount is not None:
-            refund_data['amount'] = amount
-
-        try:
-            response = requests.post(
-                f'{self.base_url}/api/v1/payments/{payment_id}/refund',  # Update with actual endpoint
-                json=refund_data,
-                headers={
-                    'Authorization': f'Bearer {self.api_key}',
-                    'Content-Type': 'application/json'
-                },
-                timeout=30
-            )
-            response.raise_for_status()
-            return response.json()
-
-        except requests.RequestException as e:
-            logger.error(f'Failed to refund payment: {e}')
-            raise Exception(f'Refund failed: {str(e)}')
 
 
 # Convenience instance

@@ -10,7 +10,7 @@ from drf_spectacular.utils import extend_schema, OpenApiResponse
 from django.conf import settings
 from django.utils import timezone
 from datetime import timedelta
-from .models import Tenant, Package, TenantSubscription, UsageLog
+from .models import Tenant, Package, TenantSubscription, UsageLog, PaymentOrder
 from .flitt_payment import flitt_service
 import logging
 
@@ -114,6 +114,21 @@ def create_subscription_payment(request):
             return_url=return_url,
             callback_url=callback_url
         )
+
+        # Store payment order in database
+        payment_order = PaymentOrder.objects.create(
+            order_id=payment_result['order_id'],
+            tenant=request.tenant,
+            package=package,
+            amount=payment_result['amount'],
+            currency=payment_result['currency'],
+            agent_count=agent_count,
+            payment_url=payment_result['payment_url'],
+            status='pending',
+            metadata=payment_result.get('metadata', {})
+        )
+
+        logger.info(f'Payment order created: {payment_order.order_id} for tenant {request.tenant.schema_name}')
 
         return Response({
             'payment_id': payment_result.get('payment_id'),
@@ -225,21 +240,27 @@ def flitt_webhook(request):
     # Handle successful payment
     if event_type == 'payment.succeeded' or payment_status == 'paid':
         try:
-            # Extract metadata
-            tenant_id = metadata.get('tenant_id')
-            package_id = metadata.get('package_id')
-            agent_count = metadata.get('agent_count', 1)
+            # Get payment order from database using order_id
+            order_id = payment_data.get('order_id')
+            if not order_id:
+                logger.error('Missing order_id in webhook payload')
+                return Response({'error': 'Invalid payload'}, status=status.HTTP_400_BAD_REQUEST)
 
-            if not all([tenant_id, package_id]):
-                logger.error('Missing tenant_id or package_id in webhook metadata')
-                return Response(
-                    {'error': 'Invalid metadata'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+            try:
+                payment_order = PaymentOrder.objects.get(order_id=order_id)
+            except PaymentOrder.DoesNotExist:
+                logger.error(f'Payment order not found: {order_id}')
+                return Response({'error': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
 
-            # Get tenant and package
-            tenant = Tenant.objects.get(id=tenant_id)
-            package = Package.objects.get(id=package_id)
+            # Update payment order status
+            payment_order.status = 'paid'
+            payment_order.paid_at = timezone.now()
+            payment_order.save()
+
+            # Get tenant and package from payment order
+            tenant = payment_order.tenant
+            package = payment_order.package
+            agent_count = payment_order.agent_count
 
             # Create or update subscription
             subscription, created = TenantSubscription.objects.update_or_create(

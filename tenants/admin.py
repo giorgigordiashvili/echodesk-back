@@ -4,7 +4,7 @@ from django.utils.html import format_html
 from django.urls import reverse
 from django.contrib import messages
 from tenant_schemas.utils import get_public_schema_name
-from .models import Tenant, Package, TenantSubscription, UsageLog
+from .models import Tenant, Package, TenantSubscription, UsageLog, PaymentOrder
 
 
 @admin.register(Package)
@@ -237,9 +237,57 @@ class UsageLogAdmin(admin.ModelAdmin):
     search_fields = ['subscription__tenant__name', 'event_type']
     ordering = ['-created_at']
     readonly_fields = ['created_at']
-    
+
     def get_queryset(self, request):
         return super().get_queryset(request).select_related('subscription__tenant')
+
+
+@admin.register(PaymentOrder)
+class PaymentOrderAdmin(admin.ModelAdmin):
+    """Admin interface for PaymentOrder model"""
+    list_display = [
+        'order_id', 'tenant', 'package', 'amount', 'currency',
+        'status_badge', 'created_at', 'paid_at'
+    ]
+    list_filter = ['status', 'currency', 'created_at']
+    search_fields = ['order_id', 'tenant__name', 'tenant__schema_name']
+    ordering = ['-created_at']
+    readonly_fields = ['order_id', 'created_at', 'updated_at', 'paid_at']
+
+    fieldsets = (
+        ('Order Information', {
+            'fields': ('order_id', 'tenant', 'package', 'status')
+        }),
+        ('Payment Details', {
+            'fields': ('amount', 'currency', 'agent_count', 'payment_url')
+        }),
+        ('Metadata', {
+            'fields': ('metadata',),
+            'classes': ['collapse']
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at', 'paid_at'),
+            'classes': ['collapse']
+        })
+    )
+
+    @admin.display(description='Status')
+    def status_badge(self, obj):
+        """Display status with color badge"""
+        colors = {
+            'pending': 'orange',
+            'paid': 'green',
+            'failed': 'red',
+            'cancelled': 'gray'
+        }
+        color = colors.get(obj.status, 'gray')
+        return format_html(
+            '<span style="background-color: {}; color: white; padding: 3px 10px; border-radius: 3px;">{}</span>',
+            color, obj.get_status_display()
+        )
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related('tenant', 'package')
 
 
 # Inline admin for better UX

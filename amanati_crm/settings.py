@@ -363,3 +363,10 @@ SOCIAL_INTEGRATIONS = {
 # ASGI Application for WebSocket support
 # Removed ASGI and WebSocket support for simplicity
 # Using simple polling instead of real-time WebSocket connections
+
+# Flitt Payment Gateway Configuration
+FLITT_MERCHANT_URL = config('FLITT_MERCHANT_URL', default='https://echodesk.ge')
+FLITT_MERCHANT_ID = config('FLITT_MERCHANT_ID', default='')
+FLITT_PAYMENT_KEY = config('FLITT_PAYMENT_KEY', default='')
+FLITT_CREDIT_PRIVATE_KEY = config('FLITT_CREDIT_PRIVATE_KEY', default='')
+FLITT_BASE_URL = config('FLITT_BASE_URL', default='https://api.flitt.ge')

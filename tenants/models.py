@@ -275,7 +275,7 @@ class UsageLog(models.Model):
     Track usage events for billing and analytics
     """
     subscription = models.ForeignKey(TenantSubscription, on_delete=models.CASCADE, related_name='usage_logs')
-    
+
     event_type = models.CharField(
         max_length=50,
         choices=[
@@ -286,15 +286,53 @@ class UsageLog(models.Model):
             ('feature_used', 'Feature Used'),
         ]
     )
-    
+
     quantity = models.IntegerField(default=1)
     metadata = models.JSONField(default=dict, blank=True)
-    
+
     created_at = models.DateTimeField(auto_now_add=True)
-    
+
     class Meta:
         db_table = 'tenants_usage_log'
         ordering = ['-created_at']
-    
+
     def __str__(self):
         return f"{self.subscription.tenant.name} - {self.event_type} ({self.quantity})"
+
+
+class PaymentOrder(models.Model):
+    """
+    Track payment orders and metadata for subscription payments
+    """
+    order_id = models.CharField(max_length=100, unique=True, db_index=True)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE)
+    package = models.ForeignKey(Package, on_delete=models.CASCADE)
+
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    currency = models.CharField(max_length=3, default='GEL')
+    agent_count = models.IntegerField(default=1)
+
+    status = models.CharField(
+        max_length=20,
+        choices=[
+            ('pending', 'Pending'),
+            ('paid', 'Paid'),
+            ('failed', 'Failed'),
+            ('cancelled', 'Cancelled'),
+        ],
+        default='pending'
+    )
+
+    payment_url = models.URLField(blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    paid_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'tenants_payment_order'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.order_id} - {self.tenant.name} - {self.status}"
