@@ -131,16 +131,20 @@ class TenantSubscriptionAdmin(admin.ModelAdmin):
         """Display detailed usage summary"""
         package = obj.package
 
-        html = '<table style="width: 100%; border-collapse: collapse;">'
-        html += '<tr style="background-color: #f0f0f0;"><th>Resource</th><th>Used</th><th>Limit</th><th>%</th></tr>'
+        html = '<table style="width: 100%; border-collapse: collapse; margin-bottom: 10px;">'
+        html += '<tr style="background-color: #f0f0f0;"><th>Resource</th><th>Current</th><th>Limit</th><th>Status</th></tr>'
 
-        # Users
+        # Subscription Info (Agents)
+        if package.pricing_model == 'Agent-based':
+            html += f'<tr style="background-color: #e8f4f8;"><td><strong>Agents (Paid For)</strong></td><td colspan="3"><strong>{obj.agent_count} agents</strong> @ {package.price_gel}₾/agent/month</td></tr>'
+
+        # Users (Actual)
         if package.max_users:
             users_pct = (obj.current_users / package.max_users * 100) if package.max_users else 0
             users_color = 'red' if obj.is_over_user_limit else ('orange' if users_pct > 80 else 'green')
-            html += f'<tr><td>Users</td><td>{obj.current_users}</td><td>{package.max_users}</td><td style="color: {users_color};">{users_pct:.0f}%</td></tr>'
+            html += f'<tr><td>Active Users</td><td>{obj.current_users}</td><td>{package.max_users}</td><td style="color: {users_color};">{users_pct:.0f}%</td></tr>'
         else:
-            html += f'<tr><td>Users</td><td>{obj.current_users}</td><td>Unlimited</td><td>-</td></tr>'
+            html += f'<tr><td>Active Users</td><td>{obj.current_users}</td><td>Unlimited</td><td style="color: green;">✓</td></tr>'
 
         # WhatsApp
         wa_pct = (obj.whatsapp_messages_used / package.max_whatsapp_messages * 100) if package.max_whatsapp_messages else 0
@@ -150,9 +154,17 @@ class TenantSubscriptionAdmin(admin.ModelAdmin):
         # Storage
         storage_pct = (float(obj.storage_used_gb) / package.max_storage_gb * 100) if package.max_storage_gb else 0
         storage_color = 'red' if obj.is_over_storage_limit else ('orange' if storage_pct > 80 else 'green')
-        html += f'<tr><td>Storage</td><td>{obj.storage_used_gb} GB</td><td>{package.max_storage_gb} GB</td><td style="color: {storage_color};">{storage_pct:.0f}%</td></tr>'
+        html += f'<tr><td>Storage (Manual)</td><td>{obj.storage_used_gb} GB</td><td>{package.max_storage_gb} GB</td><td style="color: {storage_color};">{storage_pct:.0f}%</td></tr>'
 
         html += '</table>'
+
+        # Add explanation
+        html += '<div style="padding: 8px; background-color: #f9f9f9; border-left: 3px solid #2196F3; margin-top: 10px;">'
+        html += '<small><strong>💡 Note:</strong></small><br>'
+        html += '<small>• <strong>Agents (Paid For)</strong>: Number of agents in subscription plan (billing basis)</small><br>'
+        html += '<small>• <strong>Active Users</strong>: Actual users created in the system</small><br>'
+        html += '<small>• <strong>Storage</strong>: Must be manually updated (not auto-calculated)</small>'
+        html += '</div>'
 
         return format_html(html)
 
