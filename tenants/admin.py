@@ -344,11 +344,6 @@ class TenantAdmin(admin.ModelAdmin):
             'fields': ('current_package_name', 'subscription_details'),
             'description': 'Current package information (manage via inline below or Tenant Subscriptions)'
         }),
-        ('Legacy Settings', {
-            'fields': ('plan', 'max_users', 'max_storage'),
-            'classes': ['collapse'],
-            'description': 'Legacy fields kept for backward compatibility'
-        }),
         ('Preferences', {
             'fields': ('preferred_language',)
         }),
