@@ -325,7 +325,7 @@ class PaymentOrder(models.Model):
         default='pending'
     )
 
-    payment_url = models.URLField(blank=True)
+    payment_url = models.URLField(max_length=500, blank=True)
     metadata = models.JSONField(default=dict, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
