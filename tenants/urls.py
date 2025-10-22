@@ -10,6 +10,9 @@ from .package_views import (
     PackageViewSet, list_packages_by_model, calculate_pricing, get_package_features,
     get_my_subscription
 )
+from .payment_views import (
+    create_subscription_payment, check_payment_status, flitt_webhook, cancel_subscription
+)
 from .cors_test_views import cors_test, preflight_test
 from .cors_views import simple_cors_test
 
@@ -31,6 +34,12 @@ urlpatterns = [
 
     # Subscription endpoints (authenticated access)
     path('api/subscription/me/', get_my_subscription, name='get_my_subscription'),
+
+    # Payment endpoints
+    path('api/payments/create/', create_subscription_payment, name='create_subscription_payment'),
+    path('api/payments/status/<str:payment_id>/', check_payment_status, name='check_payment_status'),
+    path('api/payments/webhook/', flitt_webhook, name='flitt_webhook'),
+    path('api/payments/cancel/', cancel_subscription, name='cancel_subscription'),
     
     # Authentication endpoints
     path('api/auth/login/', tenant_login, name='tenant_login'),
