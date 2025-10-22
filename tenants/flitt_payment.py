@@ -85,7 +85,8 @@ class FlittPaymentService:
         customer_name: str = '',
         return_url: str = '',
         callback_url: str = '',
-        metadata: Optional[Dict] = None
+        metadata: Optional[Dict] = None,
+        order_id: Optional[str] = None
     ) -> Dict:
         """
         Create a payment session with Flitt
@@ -101,6 +102,7 @@ class FlittPaymentService:
             return_url: URL to redirect after payment
             callback_url: Webhook URL for payment status updates
             metadata: Additional metadata (subscription_id, tenant_id, etc.)
+            order_id: Optional custom order ID (generated if not provided)
 
         Returns:
             Dict containing order_id, payment_url, and other details
@@ -108,8 +110,9 @@ class FlittPaymentService:
         if not self.is_configured():
             raise ValueError('Flitt payment gateway is not configured')
 
-        # Generate unique order ID
-        order_id = str(uuid.uuid4())[:32]  # Flitt order IDs should be unique
+        # Generate unique order ID if not provided
+        if not order_id:
+            order_id = str(uuid.uuid4())[:32]  # Flitt order IDs should be unique
 
         # Format amount
         amount = round(float(amount), 2)
