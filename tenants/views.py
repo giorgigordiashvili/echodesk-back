@@ -11,13 +11,16 @@ from tenant_schemas.utils import get_public_schema_name, schema_context
 from django.contrib.auth import get_user_model
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse
 from drf_spectacular.openapi import OpenApiTypes
-from .models import Tenant
+from .models import Tenant, Package, PendingRegistration, PaymentOrder
 from .serializers import (
     TenantSerializer, TenantCreateSerializer, TenantRegistrationSerializer,
     TenantLoginSerializer, TenantDashboardDataSerializer
 )
 from .services import SingleFrontendDeploymentService, TenantConfigAPI
+from .flitt_payment import flitt_service
+from django.contrib.auth.hashers import make_password
 import logging
+import uuid
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -483,6 +486,150 @@ def register_tenant_form(request):
         )
     
     return render(request, 'tenants/register.html')
+
+
+@extend_schema(
+    operation_id='register_tenant_with_payment',
+    summary='Register Tenant with Payment',
+    description='Initiate tenant registration with payment. Creates a pending registration and returns Flitt payment URL.',
+    request=TenantRegistrationSerializer,
+    responses={
+        200: OpenApiResponse(
+            description='Payment initiated successfully',
+            response={
+                'type': 'object',
+                'properties': {
+                    'payment_url': {'type': 'string'},
+                    'order_id': {'type': 'string'},
+                    'amount': {'type': 'number'},
+                    'currency': {'type': 'string'}
+                }
+            }
+        ),
+        400: OpenApiResponse(description='Validation errors'),
+        403: OpenApiResponse(description='Only available from main domain')
+    },
+    tags=['Tenant Management']
+)
+@api_view(['POST'])
+@permission_classes([])
+def register_tenant_with_payment(request):
+    """
+    Register a new tenant with payment requirement.
+    Creates a pending registration and initiates Flitt payment.
+    """
+    # Only allow access from public schema
+    if hasattr(request, 'tenant') and request.tenant.schema_name != get_public_schema_name():
+        return Response(
+            {'error': 'This endpoint is only available from the main domain'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    serializer = TenantRegistrationSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    validated_data = serializer.validated_data
+
+    try:
+        with transaction.atomic():
+            # Get selected package
+            package = Package.objects.get(id=validated_data['package_id'], is_active=True)
+
+            # Generate schema name
+            domain_name = validated_data['domain']
+            schema_name = domain_name.lower().replace('-', '_')
+
+            # Check if schema name already exists
+            if Tenant.objects.filter(schema_name=schema_name).exists():
+                return Response(
+                    {'error': 'A tenant with this domain already exists'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # Check if pending registration exists
+            if PendingRegistration.objects.filter(schema_name=schema_name, is_processed=False).exists():
+                return Response(
+                    {'error': 'A registration for this domain is already pending'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # Calculate payment amount
+            agent_count = validated_data.get('agent_count', 1)
+            from .models import PricingModel
+            if package.pricing_model == PricingModel.AGENT_BASED:
+                amount = float(package.price_gel) * agent_count
+            else:
+                amount = float(package.price_gel)
+
+            # Generate unique order ID
+            order_id = f"REG-{uuid.uuid4().hex[:12].upper()}"
+
+            # Create pending registration
+            pending_registration = PendingRegistration.objects.create(
+                schema_name=schema_name,
+                name=validated_data['company_name'],
+                admin_email=validated_data['admin_email'],
+                admin_password=make_password(validated_data['admin_password']),
+                admin_first_name=validated_data['admin_first_name'],
+                admin_last_name=validated_data['admin_last_name'],
+                package=package,
+                agent_count=agent_count,
+                order_id=order_id
+            )
+
+            # Create payment order (without tenant)
+            payment_order = PaymentOrder.objects.create(
+                order_id=order_id,
+                tenant=None,  # No tenant yet
+                package=package,
+                amount=amount,
+                currency='GEL',
+                agent_count=agent_count,
+                status='pending',
+                metadata={
+                    'registration': True,
+                    'schema_name': schema_name,
+                    'company_name': validated_data['company_name'],
+                    'admin_email': validated_data['admin_email']
+                }
+            )
+
+            # Create payment URL using Flitt
+            payment_result = flitt_service.create_payment(
+                amount=amount,
+                currency='GEL',
+                order_id=order_id,
+                description=f"EchoDesk Registration - {validated_data['company_name']}",
+                return_url=f"https://echodesk.ge/registration/success",
+                callback_url=f"https://api.echodesk.ge/api/payments/webhook/"
+            )
+
+            # Update payment order with payment URL
+            payment_order.payment_url = payment_result['payment_url']
+            payment_order.save()
+
+            logger.info(f"Registration payment initiated for {schema_name}: {order_id}")
+
+            return Response({
+                'payment_url': payment_result['payment_url'],
+                'order_id': order_id,
+                'amount': amount,
+                'currency': 'GEL',
+                'message': 'Payment initiated successfully'
+            }, status=status.HTTP_200_OK)
+
+    except Package.DoesNotExist:
+        return Response(
+            {'error': 'Selected package not found or inactive'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    except Exception as e:
+        logger.error(f"Error initiating registration payment: {str(e)}")
+        return Response(
+            {'error': f'Failed to initiate payment: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
 
 
 @extend_schema(

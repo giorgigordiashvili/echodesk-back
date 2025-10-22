@@ -1,8 +1,8 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
-    TenantViewSet, public_homepage, register_tenant, register_tenant_form, 
-    get_tenant_language, update_tenant_language, get_tenant_config,
+    TenantViewSet, public_homepage, register_tenant, register_tenant_with_payment,
+    register_tenant_form, get_tenant_language, update_tenant_language, get_tenant_config,
     get_all_tenants, check_deployment_status, tenant_login, tenant_logout,
     tenant_dashboard, tenant_profile, update_tenant_profile, change_tenant_password
 )
@@ -24,6 +24,7 @@ urlpatterns = [
     path('', public_homepage, name='public_homepage'),
     path('register-tenant/', register_tenant_form, name='register_tenant_form'),
     path('api/register/', register_tenant, name='register_tenant'),
+    path('api/register-with-payment/', register_tenant_with_payment, name='register_tenant_with_payment'),
     
     # Package endpoints (public access for registration)
     path('api/packages/', include([

@@ -1,5 +1,7 @@
 from django.db import models
 from django.core.exceptions import ValidationError
+from django.utils import timezone
+from datetime import timedelta
 from tenant_schemas.models import TenantMixin
 
 
@@ -305,7 +307,7 @@ class PaymentOrder(models.Model):
     Track payment orders and metadata for subscription payments
     """
     order_id = models.CharField(max_length=100, unique=True, db_index=True)
-    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, null=True, blank=True)
     package = models.ForeignKey(Package, on_delete=models.CASCADE)
 
     amount = models.DecimalField(max_digits=10, decimal_places=2)
@@ -335,4 +337,48 @@ class PaymentOrder(models.Model):
         ordering = ['-created_at']
 
     def __str__(self):
-        return f"{self.order_id} - {self.tenant.name} - {self.status}"
+        tenant_name = self.tenant.name if self.tenant else "Registration"
+        return f"{self.order_id} - {tenant_name} - {self.status}"
+
+
+class PendingRegistration(models.Model):
+    """
+    Stores tenant registration data temporarily until payment is completed
+    """
+    schema_name = models.CharField(max_length=63, unique=True, db_index=True)
+    name = models.CharField(max_length=100)
+    admin_email = models.EmailField()
+    admin_password = models.CharField(max_length=255)  # Will be hashed
+    admin_first_name = models.CharField(max_length=100)
+    admin_last_name = models.CharField(max_length=100)
+
+    package = models.ForeignKey(Package, on_delete=models.CASCADE)
+    agent_count = models.IntegerField(default=1)
+    order_id = models.CharField(max_length=100, unique=True, db_index=True, blank=True, default='')
+
+    # Status tracking
+    is_processed = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+
+    class Meta:
+        db_table = 'tenants_pending_registration'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.schema_name} - {self.name} - {'Processed' if self.is_processed else 'Pending'}"
+
+    def save(self, *args, **kwargs):
+        # Set expiration to 1 hour from now if not set
+        if not self.expires_at:
+            self.expires_at = timezone.now() + timedelta(hours=1)
+        super().save(*args, **kwargs)
+
+    @property
+    def is_expired(self):
+        """Check if registration has expired"""
+        return timezone.now() > self.expires_at
+
+    def can_process(self):
+        """Check if this registration can be processed"""
+        return not self.is_processed and not self.is_expired

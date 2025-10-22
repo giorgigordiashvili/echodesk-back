@@ -10,9 +10,15 @@ from drf_spectacular.utils import extend_schema, OpenApiResponse
 from django.conf import settings
 from django.utils import timezone
 from datetime import timedelta
-from .models import Tenant, Package, TenantSubscription, UsageLog, PaymentOrder
+from .models import Tenant, Package, TenantSubscription, UsageLog, PaymentOrder, PendingRegistration
 from .flitt_payment import flitt_service
+from .services import SingleFrontendDeploymentService
+from tenant_schemas.utils import schema_context
+from django.contrib.auth import get_user_model
+from django.db import transaction
 import logging
+
+User = get_user_model()
 
 logger = logging.getLogger(__name__)
 
@@ -257,7 +263,91 @@ def flitt_webhook(request):
             payment_order.paid_at = timezone.now()
             payment_order.save()
 
-            # Get tenant and package from payment order
+            # Check if this is a registration payment (no tenant yet)
+            if payment_order.tenant is None:
+                # This is a registration payment - create tenant from pending registration
+                try:
+                    pending_registration = PendingRegistration.objects.get(
+                        order_id=order_id,
+                        is_processed=False
+                    )
+                except PendingRegistration.DoesNotExist:
+                    logger.error(f'Pending registration not found for order: {order_id}')
+                    return Response({'error': 'Registration not found'}, status=status.HTTP_404_NOT_FOUND)
+
+                # Check if expired
+                if pending_registration.is_expired:
+                    logger.error(f'Registration expired for order: {order_id}')
+                    return Response({'error': 'Registration expired'}, status=status.HTTP_400_BAD_REQUEST)
+
+                # Create tenant in a transaction
+                with transaction.atomic():
+                    # Create tenant
+                    tenant = Tenant.objects.create(
+                        schema_name=pending_registration.schema_name,
+                        domain_url=f"{pending_registration.schema_name}.api.echodesk.ge",
+                        name=pending_registration.name,
+                        admin_email=pending_registration.admin_email,
+                        admin_name=f"{pending_registration.admin_first_name} {pending_registration.admin_last_name}",
+                        plan='paid',
+                        max_users=pending_registration.package.max_users or 1000,
+                        max_storage=pending_registration.package.max_storage_gb * 1024,
+                        deployment_status='deploying',
+                        is_active=True
+                    )
+
+                    # Update payment order with tenant
+                    payment_order.tenant = tenant
+                    payment_order.save()
+
+                    # Create subscription
+                    subscription = TenantSubscription.objects.create(
+                        tenant=tenant,
+                        package=pending_registration.package,
+                        is_active=True,
+                        starts_at=timezone.now(),
+                        expires_at=timezone.now() + timedelta(days=30),
+                        agent_count=pending_registration.agent_count,
+                        current_users=1,
+                        whatsapp_messages_used=0,
+                        storage_used_gb=0,
+                        last_billed_at=timezone.now(),
+                        next_billing_date=timezone.now() + timedelta(days=30)
+                    )
+
+                    # Create admin user in tenant schema
+                    with schema_context(tenant.schema_name):
+                        # Create user without password first
+                        admin_user = User.objects.create(
+                            email=pending_registration.admin_email,
+                            first_name=pending_registration.admin_first_name,
+                            last_name=pending_registration.admin_last_name,
+                            is_staff=True,
+                            is_superuser=True,
+                            is_active=True
+                        )
+                        # Set the already-hashed password directly
+                        admin_user.password = pending_registration.admin_password
+                        admin_user.save()
+
+                    # Setup frontend access
+                    deployment_service = SingleFrontendDeploymentService()
+                    deployment_result = deployment_service.setup_tenant_frontend(tenant)
+
+                    # Mark registration as processed
+                    pending_registration.is_processed = True
+                    pending_registration.save()
+
+                    logger.info(f'Tenant created from registration payment: {tenant.schema_name}')
+
+                    return Response({
+                        'status': 'success',
+                        'action': 'tenant_created',
+                        'tenant_id': tenant.id,
+                        'schema_name': tenant.schema_name
+                    })
+
+            # Regular subscription payment for existing tenant
             tenant = payment_order.tenant
             package = payment_order.package
             agent_count = payment_order.agent_count

@@ -4,7 +4,7 @@ from django.utils.html import format_html
 from django.urls import reverse
 from django.contrib import messages
 from tenant_schemas.utils import get_public_schema_name
-from .models import Tenant, Package, TenantSubscription, UsageLog, PaymentOrder
+from .models import Tenant, Package, TenantSubscription, UsageLog, PaymentOrder, PendingRegistration
 
 
 @admin.register(Package)
@@ -458,6 +458,44 @@ class TenantAdmin(admin.ModelAdmin):
         """Deactivate selected tenants"""
         count = queryset.update(is_active=False)
         self.message_user(request, f'{count} tenant(s) deactivated successfully.', messages.SUCCESS)
+
+
+@admin.register(PendingRegistration)
+class PendingRegistrationAdmin(admin.ModelAdmin):
+    """Admin interface for PendingRegistration model"""
+    list_display = [
+        'schema_name', 'name', 'admin_email', 'package',
+        'agent_count', 'status_badge', 'created_at', 'expires_at'
+    ]
+    list_filter = ['is_processed', 'package', 'created_at']
+    search_fields = ['schema_name', 'name', 'admin_email', 'order_id']
+    readonly_fields = ['created_at', 'expires_at', 'admin_password']
+    ordering = ['-created_at']
+
+    @admin.display(description='Status')
+    def status_badge(self, obj):
+        """Display status with color badge"""
+        if obj.is_processed:
+            color = 'green'
+            status = 'Processed'
+        elif obj.is_expired:
+            color = 'red'
+            status = 'Expired'
+        else:
+            color = 'orange'
+            status = 'Pending'
+
+        return format_html(
+            '<span style="background-color: {}; color: white; padding: 3px 10px; border-radius: 3px; font-size: 11px; font-weight: bold;">{}</span>',
+            color,
+            status
+        )
+
+    def get_readonly_fields(self, request, obj=None):
+        """Make all fields readonly for processed registrations"""
+        if obj and obj.is_processed:
+            return [f.name for f in self.model._meta.fields]
+        return self.readonly_fields
 
 
 # Only register if we're in the public schema context
