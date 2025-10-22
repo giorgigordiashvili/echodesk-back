@@ -7,7 +7,8 @@ from .views import (
     tenant_dashboard, tenant_profile, update_tenant_profile, change_tenant_password
 )
 from .package_views import (
-    PackageViewSet, list_packages_by_model, calculate_pricing, get_package_features
+    PackageViewSet, list_packages_by_model, calculate_pricing, get_package_features,
+    get_my_subscription
 )
 from .cors_test_views import cors_test, preflight_test
 from .cors_views import simple_cors_test
@@ -27,6 +28,9 @@ urlpatterns = [
         path('calculate-pricing/', calculate_pricing, name='calculate_pricing'),
         path('<int:package_id>/features/', get_package_features, name='get_package_features'),
     ])),
+
+    # Subscription endpoints (authenticated access)
+    path('api/subscription/me/', get_my_subscription, name='get_my_subscription'),
     
     # Authentication endpoints
     path('api/auth/login/', tenant_login, name='tenant_login'),

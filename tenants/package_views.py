@@ -1,10 +1,11 @@
 from rest_framework import viewsets, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from drf_spectacular.utils import extend_schema, OpenApiResponse
 from .models import Package, TenantSubscription, PricingModel
 from .package_serializers import PackageSerializer, PackageListSerializer, TenantSubscriptionSerializer
+from .permissions import get_subscription_info
 
 
 class PackageViewSet(viewsets.ReadOnlyModelViewSet):
@@ -218,3 +219,62 @@ def get_package_features(request, package_id):
             'dedicated_account_manager': package.dedicated_account_manager
         }
     })
+
+
+@extend_schema(
+    operation_id='get_my_subscription',
+    summary='Get Current Tenant Subscription',
+    description='Get complete subscription information for the current tenant including features, limits, and usage',
+    responses={
+        200: OpenApiResponse(
+            description='Subscription information',
+            response={
+                'type': 'object',
+                'properties': {
+                    'has_subscription': {'type': 'boolean'},
+                    'package': {
+                        'type': 'object',
+                        'properties': {
+                            'id': {'type': 'integer'},
+                            'name': {'type': 'string'},
+                            'pricing_model': {'type': 'string'}
+                        }
+                    },
+                    'subscription': {
+                        'type': 'object',
+                        'properties': {
+                            'is_active': {'type': 'boolean'},
+                            'starts_at': {'type': 'string', 'format': 'date-time'},
+                            'expires_at': {'type': 'string', 'format': 'date-time'},
+                            'monthly_cost': {'type': 'number'},
+                            'agent_count': {'type': 'integer'}
+                        }
+                    },
+                    'features': {'type': 'object'},
+                    'limits': {'type': 'object'},
+                    'usage': {'type': 'object'},
+                    'usage_limits': {'type': 'object'}
+                }
+            }
+        ),
+        403: OpenApiResponse(description='Access from public schema not allowed'),
+        404: OpenApiResponse(description='No active subscription found')
+    },
+    tags=['Subscriptions']
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_my_subscription(request):
+    """
+    Get subscription information for the current tenant
+    Includes package details, features, limits, and current usage
+    """
+    subscription_info = get_subscription_info(request)
+
+    if not subscription_info.get('has_subscription'):
+        return Response(
+            {'error': subscription_info.get('error', 'No active subscription found')},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    return Response(subscription_info)
