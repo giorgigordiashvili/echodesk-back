@@ -369,5 +369,5 @@ SOCIAL_INTEGRATIONS = {
 # Get credentials from BOG merchant portal
 BOG_CLIENT_ID = config('BOG_CLIENT_ID', default='')
 BOG_CLIENT_SECRET = config('BOG_CLIENT_SECRET', default='')
-BOG_AUTH_URL = config('BOG_AUTH_URL', default='https://oauth2.bog.ge/auth/realms/bog/protocol/openid-connect/token')
-BOG_API_BASE_URL = config('BOG_API_BASE_URL', default='https://api.bog.ge/payments/v1')
+BOG_AUTH_URL = config('BOG_AUTH_URL', default='https://account-ob-test.bog.ge/auth/realms/bog-test/protocol/openid-connect/token')
+BOG_API_BASE_URL = config('BOG_API_BASE_URL', default='https://api-test.bog.ge/payments/v1')
