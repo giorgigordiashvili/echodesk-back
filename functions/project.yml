@@ -6,8 +6,10 @@ packages:
   - name: scheduled-tasks
     environment:
       # API endpoint and authentication
-      API_URL: https://api.echodesk.ge
-      CRON_SECRET_TOKEN: eff93aae58ee40df9df29237d8c3e416
+      # Note: Set CRON_SECRET_TOKEN via: doctl serverless namespace update <namespace> --env CRON_SECRET_TOKEN:<value>
+      # Or manually in DigitalOcean Functions dashboard
+      API_URL: ${API_URL}
+      CRON_SECRET_TOKEN: ${CRON_SECRET_TOKEN}
 
     functions:
       # Recurring payment processing - charges saved cards daily

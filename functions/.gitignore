@@ -3,6 +3,9 @@
 .build
 __deployer__.zip
 
+# Environment variables (contains secrets)
+.env
+
 # Virtual environments
 virtualenv/
 venv/
