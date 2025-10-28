@@ -11,7 +11,7 @@ from django.conf import settings
 from django.utils import timezone
 from datetime import timedelta
 from .models import Tenant, Package, TenantSubscription, UsageLog, PaymentOrder, PendingRegistration
-from .flitt_payment import flitt_service
+from .bog_payment import bog_service
 from .services import SingleFrontendDeploymentService
 from tenant_schemas.utils import schema_context
 from django.contrib.auth import get_user_model
@@ -96,8 +96,8 @@ def create_subscription_payment(request):
     else:
         agent_count = 1  # Not applicable for CRM-based
 
-    # Check if Flitt is configured
-    if not flitt_service.is_configured():
+    # Check if BOG is configured
+    if not bog_service.is_configured():
         return Response(
             {
                 'error': 'Payment gateway not configured',
@@ -112,13 +112,19 @@ def create_subscription_payment(request):
     callback_url = f"{settings.API_DOMAIN}/api/payments/webhook/"
 
     try:
+        # Generate external order ID
+        import uuid
+        external_order_id = f"SUB-{uuid.uuid4().hex[:12].upper()}"
+
         # Create payment session
-        payment_result = flitt_service.create_subscription_payment(
+        payment_result = bog_service.create_subscription_payment(
             tenant=request.tenant,
             package=package,
             agent_count=agent_count,
-            return_url=return_url,
-            callback_url=callback_url
+            return_url_success=return_url,
+            return_url_fail=f"{base_url}/settings/subscription/failed",
+            callback_url=callback_url,
+            external_order_id=external_order_id
         )
 
         # Store payment order in database
@@ -182,14 +188,14 @@ def check_payment_status(request, payment_id):
     """
     Check the status of a payment
     """
-    if not flitt_service.is_configured():
+    if not bog_service.is_configured():
         return Response(
             {'error': 'Payment gateway not configured'},
             status=status.HTTP_503_SERVICE_UNAVAILABLE
         )
 
     try:
-        payment_status = flitt_service.check_payment_status(payment_id)
+        payment_status = bog_service.check_payment_status(payment_id)
         return Response(payment_status)
 
     except Exception as e:
@@ -201,9 +207,9 @@ def check_payment_status(request, payment_id):
 
 
 @extend_schema(
-    operation_id='flitt_webhook',
-    summary='Flitt Payment Webhook',
-    description='Webhook endpoint for receiving payment status updates from Flitt',
+    operation_id='bog_webhook',
+    summary='BOG Payment Webhook',
+    description='Webhook endpoint for receiving payment status updates from Bank of Georgia',
     responses={
         200: OpenApiResponse(description='Webhook processed successfully'),
         400: OpenApiResponse(description='Invalid signature or payload')
@@ -211,43 +217,51 @@ def check_payment_status(request, payment_id):
     tags=['Payments']
 )
 @api_view(['POST'])
-@permission_classes([AllowAny])  # Webhook from Flitt, no auth
-def flitt_webhook(request):
+@permission_classes([AllowAny])  # Webhook from BOG, no auth
+def bog_webhook(request):
     """
-    Handle webhook notifications from Flitt payment gateway
+    Handle webhook notifications from Bank of Georgia payment gateway
 
     This endpoint processes payment status updates and creates/updates subscriptions
-    """
-    # Verify webhook signature
-    signature = request.headers.get('X-Flitt-Signature', '')
-    if not signature:
-        logger.warning('Webhook received without signature')
-        return Response(
-            {'error': 'Missing signature'},
-            status=status.HTTP_400_BAD_REQUEST
-        )
 
-    if not flitt_service.verify_webhook_signature(request.data, signature):
-        logger.warning('Invalid webhook signature')
-        return Response(
-            {'error': 'Invalid signature'},
-            status=status.HTTP_403_FORBIDDEN
-        )
+    BOG Callback format:
+    {
+        "event": "order_payment",
+        "zoned_request_time": "2024-01-01T12:00:00.000000Z",
+        "body": {
+            "order_id": "...",
+            "order_status": {"key": "completed", ...},
+            ...
+        }
+    }
+    """
+    # Optional: Verify webhook signature
+    signature = request.headers.get('Callback-Signature', '')
+    if signature:
+        # TODO: Implement signature verification when BOG provides public key
+        # bog_service.verify_webhook_signature(request.body, signature)
+        logger.info('Webhook signature received (verification not implemented)')
 
     # Process payment event
     event_type = request.data.get('event')
-    payment_data = request.data.get('payment', {})
-    payment_id = payment_data.get('id')
-    payment_status = payment_data.get('status')
-    metadata = payment_data.get('metadata', {})
+    body = request.data.get('body', {})
 
-    logger.info(f'Webhook received: event={event_type}, payment={payment_id}, status={payment_status}')
+    if event_type != 'order_payment':
+        logger.warning(f'Unexpected webhook event type: {event_type}')
+        return Response({'error': 'Unexpected event type'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Handle successful payment
-    if event_type == 'payment.succeeded' or payment_status == 'paid':
+    order_id = body.get('order_id') or body.get('id')
+    order_status_obj = body.get('order_status', {})
+    bog_status = order_status_obj.get('key', '')
+    response_code = body.get('code', '')
+    transaction_id = body.get('transaction_id', '')
+
+    logger.info(f'BOG webhook received: order_id={order_id}, status={bog_status}, code={response_code}')
+
+    # Handle successful payment (BOG status: 'completed' with response code '100')
+    if bog_status == 'completed' and response_code == '100':
         try:
             # Get payment order from database using order_id
-            order_id = payment_data.get('order_id')
             if not order_id:
                 logger.error('Missing order_id in webhook payload')
                 return Response({'error': 'Invalid payload'}, status=status.HTTP_400_BAD_REQUEST)
@@ -373,8 +387,9 @@ def flitt_webhook(request):
                 quantity=1,
                 metadata={
                     'event': 'subscription_payment',
-                    'payment_id': payment_id,
-                    'amount': payment_data.get('amount'),
+                    'order_id': order_id,
+                    'transaction_id': transaction_id,
+                    'amount': body.get('transfer_amount'),
                     'action': 'created' if created else 'renewed'
                 }
             )
@@ -395,11 +410,23 @@ def flitt_webhook(request):
             logger.error(f'Error processing webhook: {e}')
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    # Handle failed payment
-    elif event_type == 'payment.failed' or payment_status == 'failed':
-        logger.warning(f'Payment failed: {payment_id}')
-        # Optionally notify tenant admin
-        # send_payment_failed_notification(metadata.get('tenant_id'))
+    # Handle failed payment (BOG status: 'rejected')
+    elif bog_status == 'rejected':
+        logger.warning(f'Payment failed: order_id={order_id}, code={response_code}')
+
+        # Update payment order status if exists
+        try:
+            payment_order = PaymentOrder.objects.get(order_id=order_id)
+            payment_order.status = 'failed'
+            payment_order.metadata['bog_status'] = bog_status
+            payment_order.metadata['response_code'] = response_code
+            payment_order.save()
+        except PaymentOrder.DoesNotExist:
+            logger.error(f'Payment order not found for failed payment: {order_id}')
+
+    # Handle other statuses
+    else:
+        logger.info(f'Webhook received with status: {bog_status}, code: {response_code}')
 
     return Response({'status': 'received'})
 

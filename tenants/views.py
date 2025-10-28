@@ -17,7 +17,7 @@ from .serializers import (
     TenantLoginSerializer, TenantDashboardDataSerializer
 )
 from .services import SingleFrontendDeploymentService, TenantConfigAPI
-from .flitt_payment import flitt_service
+from .bog_payment import bog_service
 from django.contrib.auth.hashers import make_password
 import logging
 import uuid
@@ -491,7 +491,7 @@ def register_tenant_form(request):
 @extend_schema(
     operation_id='register_tenant_with_payment',
     summary='Register Tenant with Payment',
-    description='Initiate tenant registration with payment. Creates a pending registration and returns Flitt payment URL.',
+    description='Initiate tenant registration with payment. Creates a pending registration and returns BOG payment URL.',
     request=TenantRegistrationSerializer,
     responses={
         200: OpenApiResponse(
@@ -516,7 +516,7 @@ def register_tenant_form(request):
 def register_tenant_with_payment(request):
     """
     Register a new tenant with payment requirement.
-    Creates a pending registration and initiates Flitt payment.
+    Creates a pending registration and initiates BOG payment.
     """
     # Only allow access from public schema
     if hasattr(request, 'tenant') and request.tenant.schema_name != get_public_schema_name():
@@ -595,13 +595,16 @@ def register_tenant_with_payment(request):
                 }
             )
 
-            # Create payment URL using Flitt
-            payment_result = flitt_service.create_payment(
+            # Create payment URL using BOG
+            payment_result = bog_service.create_payment(
                 amount=amount,
                 currency='GEL',
-                order_id=order_id,
+                external_order_id=order_id,
                 description=f"EchoDesk Registration - {validated_data['company_name']}",
-                return_url=f"https://echodesk.ge/registration/success",
+                customer_email=validated_data['admin_email'],
+                customer_name=f"{validated_data['admin_first_name']} {validated_data['admin_last_name']}",
+                return_url_success=f"https://echodesk.ge/registration/success",
+                return_url_fail=f"https://echodesk.ge/registration/failed",
                 callback_url=f"https://api.echodesk.ge/api/payments/webhook/"
             )
 

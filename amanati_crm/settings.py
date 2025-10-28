@@ -364,9 +364,10 @@ SOCIAL_INTEGRATIONS = {
 # Removed ASGI and WebSocket support for simplicity
 # Using simple polling instead of real-time WebSocket connections
 
-# Flitt Payment Gateway Configuration
-FLITT_MERCHANT_URL = config('FLITT_MERCHANT_URL', default='https://echodesk.ge')
-FLITT_MERCHANT_ID = config('FLITT_MERCHANT_ID', default='')
-FLITT_PAYMENT_KEY = config('FLITT_PAYMENT_KEY', default='')
-FLITT_CREDIT_PRIVATE_KEY = config('FLITT_CREDIT_PRIVATE_KEY', default='')
-FLITT_BASE_URL = config('FLITT_BASE_URL', default='https://api.flitt.ge')
+# Bank of Georgia (BOG) Payment Gateway Configuration
+# Documentation: https://api.bog.ge/docs/en/payments/introduction
+# Get credentials from BOG merchant portal
+BOG_CLIENT_ID = config('BOG_CLIENT_ID', default='')
+BOG_CLIENT_SECRET = config('BOG_CLIENT_SECRET', default='')
+BOG_AUTH_URL = config('BOG_AUTH_URL', default='https://oauth2.bog.ge/auth/realms/bog/protocol/openid-connect/token')
+BOG_API_BASE_URL = config('BOG_API_BASE_URL', default='https://api.bog.ge/payments/v1')
