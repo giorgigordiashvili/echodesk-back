@@ -1,19 +1,18 @@
 # DigitalOcean Functions Project Configuration
 # This file defines scheduled functions for EchoDesk backend tasks
 
-targetNamespace: echodesk
+targetNamespace: fn-e7d213d7-1b21-442c-ad32-99a307f59240
 packages:
   - name: scheduled-tasks
     environment:
-      # Django settings
-      DJANGO_SETTINGS_MODULE: amanati_crm.settings
-      # Database connection will be inherited from environment
+      # API endpoint and authentication
+      API_URL: https://api.echodesk.ge
+      CRON_SECRET_TOKEN: eff93aae58ee40df9df29237d8c3e416
 
     functions:
       # Recurring payment processing - charges saved cards daily
       - name: recurring-payments
         runtime: python:3.11
-        main: __main__.py
         triggers:
           - name: daily-recurring-payments
             sourceType: scheduler
@@ -24,7 +23,6 @@ packages:
       # Subscription status check - monitors and suspends overdue accounts
       - name: subscription-check
         runtime: python:3.11
-        main: __main__.py
         triggers:
           - name: daily-subscription-check
             sourceType: scheduler

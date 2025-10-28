@@ -2,22 +2,11 @@
 DigitalOcean Function: Recurring Payments Processor
 
 This function runs daily at 2 AM UTC to charge saved cards for expiring subscriptions.
-It's a serverless wrapper around the Django management command.
+It calls the Django HTTP endpoint that runs the management command.
 """
 
+import requests
 import os
-import sys
-import django
-from io import StringIO
-
-# Setup Django environment
-sys.path.insert(0, '/opt/virtualenv/lib/python3.11/site-packages')
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
-
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'amanati_crm.settings')
-django.setup()
-
-from django.core.management import call_command
 
 
 def main(event, context):
@@ -32,21 +21,36 @@ def main(event, context):
         dict: Execution result with status and output
     """
     try:
-        # Capture command output
-        output = StringIO()
+        # Get credentials from environment
+        cron_token = os.environ.get('CRON_SECRET_TOKEN')
+        api_url = os.environ.get('API_URL', 'https://api.echodesk.ge')
 
-        # Run the Django management command
-        call_command('process_recurring_payments', stdout=output)
+        if not cron_token:
+            return {
+                'statusCode': 500,
+                'body': {
+                    'status': 'error',
+                    'error': 'CRON_SECRET_TOKEN not configured'
+                }
+            }
 
-        output_text = output.getvalue()
+        # Call the Django HTTP endpoint
+        response = requests.get(
+            f'{api_url}/api/cron/recurring-payments/',
+            headers={'X-Cron-Token': cron_token},
+            timeout=300
+        )
+
+        response.raise_for_status()
+        result = response.json()
 
         return {
             'statusCode': 200,
             'body': {
                 'status': 'success',
                 'message': 'Recurring payments processed successfully',
-                'output': output_text,
-                'triggered_by': 'digitalocean-scheduler'
+                'output': result,
+                'triggered_by': 'digitalocean-functions'
             }
         }
 

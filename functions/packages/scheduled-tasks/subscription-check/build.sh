@@ -9,6 +9,6 @@ echo "Building subscription-check function..."
 virtualenv --without-pip virtualenv
 
 # Install dependencies
-pip install -r requirements.txt --target virtualenv/lib/python3.11/site-packages
+pip3 install -r requirements.txt --target virtualenv/lib/python3.9/site-packages
 
 echo "Build complete!"

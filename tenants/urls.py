@@ -14,6 +14,9 @@ from .payment_views import (
     create_subscription_payment, check_payment_status, bog_webhook, cancel_subscription,
     get_saved_card_info, delete_saved_card, manual_payment
 )
+from .cron_views import (
+    cron_recurring_payments, cron_subscription_check, cron_health_check
+)
 from .cors_test_views import cors_test, preflight_test
 from .cors_views import simple_cors_test
 
@@ -45,7 +48,12 @@ urlpatterns = [
     path('api/payments/saved-card/', get_saved_card_info, name='get_saved_card_info'),
     path('api/payments/saved-card/delete/', delete_saved_card, name='delete_saved_card'),
     path('api/payments/manual/', manual_payment, name='manual_payment'),
-    
+
+    # Cron job endpoints (called by DigitalOcean Functions)
+    path('api/cron/recurring-payments/', cron_recurring_payments, name='cron_recurring_payments'),
+    path('api/cron/subscription-check/', cron_subscription_check, name='cron_subscription_check'),
+    path('api/cron/health/', cron_health_check, name='cron_health_check'),
+
     # Authentication endpoints
     path('api/auth/login/', tenant_login, name='tenant_login'),
     path('api/auth/logout/', tenant_logout, name='tenant_logout'),
