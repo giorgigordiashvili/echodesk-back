@@ -277,6 +277,14 @@ def bog_webhook(request):
                 logger.error(f'Payment order not found: {external_order_id}')
                 return Response({'error': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
 
+            # Check if already processed (idempotency - handle duplicate webhooks)
+            if payment_order.status == 'paid' and payment_order.tenant is not None:
+                logger.info(f'Webhook already processed for order: {external_order_id}, returning success')
+                return Response({
+                    'status': 'success',
+                    'message': 'Payment already processed'
+                }, status=status.HTTP_200_OK)
+
             # Update payment order status
             payment_order.status = 'paid'
             payment_order.paid_at = timezone.now()
@@ -291,6 +299,19 @@ def bog_webhook(request):
                         is_processed=False
                     )
                 except PendingRegistration.DoesNotExist:
+                    # Check if it was already processed (duplicate webhook)
+                    processed_registration = PendingRegistration.objects.filter(
+                        order_id=external_order_id,
+                        is_processed=True
+                    ).first()
+
+                    if processed_registration:
+                        logger.info(f'Registration already processed for order: {external_order_id}')
+                        return Response({
+                            'status': 'success',
+                            'message': 'Registration already processed'
+                        }, status=status.HTTP_200_OK)
+
                     logger.error(f'Pending registration not found for order: {external_order_id}')
                     return Response({'error': 'Registration not found'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -336,18 +357,25 @@ def bog_webhook(request):
 
                     # Create admin user in tenant schema
                     with schema_context(tenant.schema_name):
-                        # Create user without password first
-                        admin_user = User.objects.create(
-                            email=pending_registration.admin_email,
-                            first_name=pending_registration.admin_first_name,
-                            last_name=pending_registration.admin_last_name,
-                            is_staff=True,
-                            is_superuser=True,
-                            is_active=True
-                        )
-                        # Set the already-hashed password directly
-                        admin_user.password = pending_registration.admin_password
-                        admin_user.save()
+                        try:
+                            # Create user without password first
+                            admin_user = User.objects.create(
+                                email=pending_registration.admin_email,
+                                first_name=pending_registration.admin_first_name,
+                                last_name=pending_registration.admin_last_name,
+                                is_staff=True,
+                                is_superuser=True,
+                                is_active=True
+                            )
+                            # Set the already-hashed password directly
+                            admin_user.password = pending_registration.admin_password
+                            admin_user.save()
+                        except Exception as user_error:
+                            # If user already exists, retrieve it instead
+                            logger.warning(f'User creation failed (may already exist): {user_error}')
+                            admin_user = User.objects.filter(email=pending_registration.admin_email).first()
+                            if not admin_user:
+                                raise  # Re-raise if it's not a duplicate error
 
                     # Setup frontend access
                     deployment_service = SingleFrontendDeploymentService()
