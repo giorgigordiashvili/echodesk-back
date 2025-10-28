@@ -367,6 +367,14 @@ SOCIAL_INTEGRATIONS = {
 # Bank of Georgia (BOG) Payment Gateway Configuration
 # Documentation: https://api.bog.ge/docs/en/payments/introduction
 # Get credentials from BOG merchant portal
+#
+# TEST ENVIRONMENT (current default):
+#   Auth: https://account-ob-test.bog.ge/auth/realms/bog-test/protocol/openid-connect/token
+#   API: https://api-test.bog.ge/payments/v1
+#
+# PRODUCTION ENVIRONMENT (change when ready to go live):
+#   Auth: https://oauth2.bog.ge/auth/realms/bog/protocol/openid-connect/token
+#   API: https://api.bog.ge/payments/v1
 BOG_CLIENT_ID = config('BOG_CLIENT_ID', default='')
 BOG_CLIENT_SECRET = config('BOG_CLIENT_SECRET', default='')
 BOG_AUTH_URL = config('BOG_AUTH_URL', default='https://account-ob-test.bog.ge/auth/realms/bog-test/protocol/openid-connect/token')
