@@ -250,26 +250,31 @@ def bog_webhook(request):
         logger.warning(f'Unexpected webhook event type: {event_type}')
         return Response({'error': 'Unexpected event type'}, status=status.HTTP_400_BAD_REQUEST)
 
-    order_id = body.get('order_id') or body.get('id')
+    # BOG sends their internal order_id and our external_order_id
+    bog_order_id = body.get('order_id') or body.get('id')
+    external_order_id = body.get('external_order_id')
     order_status_obj = body.get('order_status', {})
     bog_status = order_status_obj.get('key', '')
-    response_code = body.get('code', '')
-    transaction_id = body.get('transaction_id', '')
 
-    logger.info(f'BOG webhook received: order_id={order_id}, status={bog_status}, code={response_code}')
+    # Get response code from payment_detail
+    payment_detail = body.get('payment_detail', {})
+    response_code = payment_detail.get('code', '')
+    transaction_id = payment_detail.get('transaction_id', '')
+
+    logger.info(f'BOG webhook received: bog_order_id={bog_order_id}, external_order_id={external_order_id}, status={bog_status}, code={response_code}')
 
     # Handle successful payment (BOG status: 'completed' with response code '100')
     if bog_status == 'completed' and response_code == '100':
         try:
-            # Get payment order from database using order_id
-            if not order_id:
-                logger.error('Missing order_id in webhook payload')
+            # Get payment order from database using external_order_id (we store this as order_id)
+            if not external_order_id:
+                logger.error('Missing external_order_id in webhook payload')
                 return Response({'error': 'Invalid payload'}, status=status.HTTP_400_BAD_REQUEST)
 
             try:
-                payment_order = PaymentOrder.objects.get(order_id=order_id)
+                payment_order = PaymentOrder.objects.get(order_id=external_order_id)
             except PaymentOrder.DoesNotExist:
-                logger.error(f'Payment order not found: {order_id}')
+                logger.error(f'Payment order not found: {external_order_id}')
                 return Response({'error': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
 
             # Update payment order status
@@ -282,16 +287,16 @@ def bog_webhook(request):
                 # This is a registration payment - create tenant from pending registration
                 try:
                     pending_registration = PendingRegistration.objects.get(
-                        order_id=order_id,
+                        order_id=external_order_id,
                         is_processed=False
                     )
                 except PendingRegistration.DoesNotExist:
-                    logger.error(f'Pending registration not found for order: {order_id}')
+                    logger.error(f'Pending registration not found for order: {external_order_id}')
                     return Response({'error': 'Registration not found'}, status=status.HTTP_404_NOT_FOUND)
 
                 # Check if expired
                 if pending_registration.is_expired:
-                    logger.error(f'Registration expired for order: {order_id}')
+                    logger.error(f'Registration expired for order: {external_order_id}')
                     return Response({'error': 'Registration expired'}, status=status.HTTP_400_BAD_REQUEST)
 
                 # Create tenant in a transaction
@@ -387,9 +392,10 @@ def bog_webhook(request):
                 quantity=1,
                 metadata={
                     'event': 'subscription_payment',
-                    'order_id': order_id,
+                    'order_id': external_order_id,
+                    'bog_order_id': bog_order_id,
                     'transaction_id': transaction_id,
-                    'amount': body.get('transfer_amount'),
+                    'amount': payment_detail.get('transfer_amount'),
                     'action': 'created' if created else 'renewed'
                 }
             )
@@ -412,17 +418,17 @@ def bog_webhook(request):
 
     # Handle failed payment (BOG status: 'rejected')
     elif bog_status == 'rejected':
-        logger.warning(f'Payment failed: order_id={order_id}, code={response_code}')
+        logger.warning(f'Payment failed: external_order_id={external_order_id}, code={response_code}')
 
         # Update payment order status if exists
         try:
-            payment_order = PaymentOrder.objects.get(order_id=order_id)
+            payment_order = PaymentOrder.objects.get(order_id=external_order_id)
             payment_order.status = 'failed'
             payment_order.metadata['bog_status'] = bog_status
             payment_order.metadata['response_code'] = response_code
             payment_order.save()
         except PaymentOrder.DoesNotExist:
-            logger.error(f'Payment order not found for failed payment: {order_id}')
+            logger.error(f'Payment order not found for failed payment: {external_order_id}')
 
     # Handle other statuses
     else:
