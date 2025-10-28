@@ -189,7 +189,7 @@ class BOGPaymentService:
                 timeout=30
             )
 
-            if response.status_code == 200:
+            if response.status_code in [200, 201]:  # Accept both 200 OK and 201 Created
                 data = response.json()
                 order_id = data['id']
                 payment_url = data['_links']['redirect']['href']
