@@ -11,7 +11,8 @@ from .package_views import (
     get_my_subscription
 )
 from .payment_views import (
-    create_subscription_payment, check_payment_status, bog_webhook, cancel_subscription
+    create_subscription_payment, check_payment_status, bog_webhook, cancel_subscription,
+    get_saved_card_info, delete_saved_card, manual_payment
 )
 from .cors_test_views import cors_test, preflight_test
 from .cors_views import simple_cors_test
@@ -41,6 +42,9 @@ urlpatterns = [
     path('api/payments/status/<str:payment_id>/', check_payment_status, name='check_payment_status'),
     path('api/payments/webhook/', bog_webhook, name='bog_webhook'),
     path('api/payments/cancel/', cancel_subscription, name='cancel_subscription'),
+    path('api/payments/saved-card/', get_saved_card_info, name='get_saved_card_info'),
+    path('api/payments/saved-card/delete/', delete_saved_card, name='delete_saved_card'),
+    path('api/payments/manual/', manual_payment, name='manual_payment'),
     
     # Authentication endpoints
     path('api/auth/login/', tenant_login, name='tenant_login'),

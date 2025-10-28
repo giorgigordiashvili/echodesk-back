@@ -479,3 +479,234 @@ def cancel_subscription(request):
             {'error': 'No active subscription found'},
             status=status.HTTP_404_NOT_FOUND
         )
+
+
+@extend_schema(
+    operation_id='get_saved_card_info',
+    summary='Get Saved Card Information',
+    description='Get information about the saved card for recurring payments',
+    responses={
+        200: OpenApiResponse(
+            description='Saved card information',
+            response={
+                'type': 'object',
+                'properties': {
+                    'has_saved_card': {'type': 'boolean'},
+                    'last_payment_date': {'type': 'string'},
+                    'card_saved_date': {'type': 'string'},
+                    'auto_renew_enabled': {'type': 'boolean'}
+                }
+            }
+        ),
+        404: OpenApiResponse(description='No subscription found')
+    },
+    tags=['Payments']
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_saved_card_info(request):
+    """
+    Get information about saved card
+    """
+    if not hasattr(request, 'tenant'):
+        return Response(
+            {'error': 'This endpoint is only available from tenant subdomains'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    try:
+        # Find the payment order with saved card
+        payment_order = PaymentOrder.objects.filter(
+            tenant=request.tenant,
+            card_saved=True,
+            bog_order_id__isnull=False,
+            status='paid'
+        ).order_by('-paid_at').first()
+
+        if payment_order:
+            return Response({
+                'has_saved_card': True,
+                'last_payment_date': payment_order.paid_at.isoformat() if payment_order.paid_at else None,
+                'card_saved_date': payment_order.paid_at.isoformat() if payment_order.paid_at else None,
+                'auto_renew_enabled': True,
+                'order_id': payment_order.order_id
+            })
+        else:
+            return Response({
+                'has_saved_card': False,
+                'auto_renew_enabled': False
+            })
+
+    except Exception as e:
+        logger.error(f'Error getting saved card info for {request.tenant.schema_name}: {e}')
+        return Response(
+            {'error': 'Failed to get saved card information'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@extend_schema(
+    operation_id='delete_saved_card',
+    summary='Delete Saved Card',
+    description='Delete the saved card from BOG payment gateway',
+    responses={
+        200: OpenApiResponse(description='Card deleted successfully'),
+        404: OpenApiResponse(description='No saved card found'),
+        500: OpenApiResponse(description='Failed to delete card')
+    },
+    tags=['Payments']
+)
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def delete_saved_card(request):
+    """
+    Delete the saved card from BOG
+    """
+    if not hasattr(request, 'tenant'):
+        return Response(
+            {'error': 'This endpoint is only available from tenant subdomains'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    try:
+        # Find the payment order with saved card
+        payment_order = PaymentOrder.objects.filter(
+            tenant=request.tenant,
+            card_saved=True,
+            bog_order_id__isnull=False,
+            status='paid'
+        ).order_by('-paid_at').first()
+
+        if not payment_order:
+            return Response(
+                {'error': 'No saved card found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Delete card from BOG
+        success = bog_service.delete_saved_card(payment_order.bog_order_id)
+
+        if success:
+            # Update payment order
+            payment_order.card_saved = False
+            payment_order.save()
+
+            logger.info(f'Saved card deleted for tenant {request.tenant.schema_name}')
+
+            return Response({
+                'status': 'success',
+                'message': 'Saved card has been deleted. You will need to manually pay for future renewals.'
+            })
+        else:
+            return Response(
+                {'error': 'Failed to delete card from payment gateway'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    except Exception as e:
+        logger.error(f'Error deleting saved card for {request.tenant.schema_name}: {e}')
+        return Response(
+            {'error': 'Failed to delete saved card'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@extend_schema(
+    operation_id='manual_payment',
+    summary='Create Manual Payment',
+    description='Create a manual payment for subscription renewal (when no saved card)',
+    responses={
+        200: OpenApiResponse(
+            description='Payment created',
+            response={
+                'type': 'object',
+                'properties': {
+                    'payment_url': {'type': 'string'},
+                    'order_id': {'type': 'string'},
+                    'amount': {'type': 'number'}
+                }
+            }
+        ),
+        404: OpenApiResponse(description='No active subscription found')
+    },
+    tags=['Payments']
+)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def manual_payment(request):
+    """
+    Create a manual payment for subscription renewal
+    Used when user doesn't have saved card or wants to pay manually
+    """
+    if not hasattr(request, 'tenant'):
+        return Response(
+            {'error': 'This endpoint is only available from tenant subdomains'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    try:
+        subscription = TenantSubscription.objects.get(tenant=request.tenant, is_active=True)
+        package = subscription.package
+
+        # Calculate amount
+        from .models import PricingModel
+        if package.pricing_model == PricingModel.AGENT_BASED:
+            amount = float(package.price_gel) * subscription.agent_count
+        else:
+            amount = float(package.price_gel)
+
+        # Generate order ID
+        import uuid
+        external_order_id = f"MAN-{uuid.uuid4().hex[:12].upper()}"
+
+        # Create payment
+        payment_result = bog_service.create_payment(
+            amount=amount,
+            currency='GEL',
+            external_order_id=external_order_id,
+            description=f"EchoDesk Subscription Renewal - {request.tenant.name}",
+            customer_email=request.tenant.admin_email,
+            customer_name=request.tenant.admin_name,
+            return_url_success=f"https://{request.get_host()}/settings/subscription/success",
+            return_url_fail=f"https://{request.get_host()}/settings/subscription/failed",
+            callback_url=f"https://api.echodesk.ge/api/payments/webhook/"
+        )
+
+        # Create payment order
+        payment_order = PaymentOrder.objects.create(
+            order_id=external_order_id,
+            bog_order_id=payment_result.get('order_id'),
+            tenant=request.tenant,
+            package=package,
+            amount=amount,
+            currency='GEL',
+            agent_count=subscription.agent_count,
+            payment_url=payment_result['payment_url'],
+            status='pending',
+            card_saved=False,
+            metadata={
+                'type': 'manual_renewal',
+                'subscription_id': subscription.id
+            }
+        )
+
+        logger.info(f'Manual payment created for tenant {request.tenant.schema_name}: {external_order_id}')
+
+        return Response({
+            'payment_url': payment_result['payment_url'],
+            'order_id': external_order_id,
+            'amount': amount,
+            'currency': 'GEL'
+        })
+
+    except TenantSubscription.DoesNotExist:
+        return Response(
+            {'error': 'No active subscription found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        logger.error(f'Error creating manual payment for {request.tenant.schema_name}: {e}')
+        return Response(
+            {'error': f'Failed to create payment: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
