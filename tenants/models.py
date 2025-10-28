@@ -307,6 +307,7 @@ class PaymentOrder(models.Model):
     Track payment orders and metadata for subscription payments
     """
     order_id = models.CharField(max_length=100, unique=True, db_index=True)
+    bog_order_id = models.CharField(max_length=100, blank=True, null=True, help_text='BOG internal order ID for saved card charging')
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, null=True, blank=True)
     package = models.ForeignKey(Package, on_delete=models.CASCADE)
 
@@ -326,6 +327,7 @@ class PaymentOrder(models.Model):
     )
 
     payment_url = models.URLField(max_length=500, blank=True)
+    card_saved = models.BooleanField(default=False, help_text='Whether card was saved for recurring payments')
     metadata = models.JSONField(default=dict, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)

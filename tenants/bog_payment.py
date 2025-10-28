@@ -319,6 +319,151 @@ class BOGPaymentService:
             logger.error(f'Webhook signature verification error: {e}')
             return False
 
+    def enable_card_saving(self, order_id: str) -> bool:
+        """
+        Enable card saving for recurring payments on an order
+        Must be called BEFORE redirecting user to payment page
+
+        Args:
+            order_id: BOG order ID (their internal ID, not our external_order_id)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.is_configured():
+            raise ValueError('BOG payment gateway is not configured')
+
+        try:
+            access_token = self._get_access_token()
+
+            headers = {
+                'Authorization': f'Bearer {access_token}',
+                'Content-Type': 'application/json'
+            }
+
+            response = requests.put(
+                f'{self.base_url}/orders/{order_id}/subscriptions',
+                headers=headers,
+                timeout=30
+            )
+
+            if response.status_code == 202:  # 202 Accepted
+                logger.info(f'Card saving enabled for order: {order_id}')
+                return True
+            else:
+                logger.error(f'Failed to enable card saving: {response.status_code} - {response.text}')
+                return False
+
+        except requests.RequestException as e:
+            logger.error(f'Error enabling card saving: {e}')
+            return False
+
+    def charge_saved_card(
+        self,
+        parent_order_id: str,
+        amount: float,
+        currency: str = 'GEL',
+        callback_url: str = '',
+        external_order_id: str = None
+    ) -> Dict:
+        """
+        Charge a saved card using parent_order_id
+
+        Args:
+            parent_order_id: The original order ID where card was saved
+            amount: Amount to charge
+            currency: Currency code
+            callback_url: Webhook URL for payment updates
+            external_order_id: Optional custom order ID
+
+        Returns:
+            Dict with order_id and details_url
+        """
+        if not self.is_configured():
+            raise ValueError('BOG payment gateway is not configured')
+
+        try:
+            access_token = self._get_access_token()
+
+            payload = {}
+            if callback_url:
+                payload['callback_url'] = callback_url
+            if external_order_id:
+                payload['external_order_id'] = external_order_id
+
+            headers = {
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {access_token}'
+            }
+
+            response = requests.post(
+                f'{self.base_url}/ecommerce/orders/{parent_order_id}/subscribe',
+                json=payload if payload else None,
+                headers=headers,
+                timeout=30
+            )
+
+            if response.status_code in [200, 201]:
+                data = response.json()
+                order_id = data['id']
+                details_url = data['_links']['details']['href']
+
+                logger.info(f'Saved card charged: new_order_id={order_id}, parent={parent_order_id}')
+
+                return {
+                    'order_id': order_id,
+                    'parent_order_id': parent_order_id,
+                    'details_url': details_url,
+                    'amount': amount,
+                    'currency': currency,
+                    'status': 'processing'
+                }
+            else:
+                error_msg = f'Saved card charge failed: {response.status_code} - {response.text}'
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+
+        except requests.RequestException as e:
+            logger.error(f'Error charging saved card: {e}')
+            raise ValueError(f'Saved card charge error: {str(e)}')
+
+    def delete_saved_card(self, parent_order_id: str) -> bool:
+        """
+        Delete a saved card
+
+        Args:
+            parent_order_id: The original order ID where card was saved
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.is_configured():
+            raise ValueError('BOG payment gateway is not configured')
+
+        try:
+            access_token = self._get_access_token()
+
+            headers = {
+                'Authorization': f'Bearer {access_token}'
+            }
+
+            response = requests.delete(
+                f'{self.base_url}/orders/{parent_order_id}/subscriptions',
+                headers=headers,
+                timeout=30
+            )
+
+            if response.status_code == 202:  # 202 Accepted
+                logger.info(f'Saved card deleted for order: {parent_order_id}')
+                return True
+            else:
+                logger.error(f'Failed to delete saved card: {response.status_code} - {response.text}')
+                return False
+
+        except requests.RequestException as e:
+            logger.error(f'Error deleting saved card: {e}')
+            return False
+
     def create_subscription_payment(
         self,
         tenant,

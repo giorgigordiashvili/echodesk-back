@@ -608,8 +608,19 @@ def register_tenant_with_payment(request):
                 callback_url=f"https://api.echodesk.ge/api/payments/webhook/"
             )
 
-            # Update payment order with payment URL
+            # Enable card saving for recurring payments
+            bog_order_id = payment_result.get('order_id')
+            if bog_order_id:
+                card_saving_enabled = bog_service.enable_card_saving(bog_order_id)
+                if card_saving_enabled:
+                    logger.info(f"Card saving enabled for order: {bog_order_id}")
+                else:
+                    logger.warning(f"Failed to enable card saving for order: {bog_order_id}")
+
+            # Update payment order with payment URL and BOG order ID
             payment_order.payment_url = payment_result['payment_url']
+            payment_order.bog_order_id = bog_order_id
+            payment_order.card_saved = card_saving_enabled if bog_order_id else False
             payment_order.save()
 
             logger.info(f"Registration payment initiated for {schema_name}: {order_id}")
