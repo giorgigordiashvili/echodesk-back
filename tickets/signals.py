@@ -185,6 +185,12 @@ def track_ticket_status_change(sender, instance, **kwargs):
                 instance._column_changed = True
                 instance._old_column_name = old_ticket.column.name if old_ticket.column else 'None'
                 instance._new_column_name = instance.column.name if instance.column else 'None'
+
+            # Check if department changed
+            if old_ticket.assigned_department_id != instance.assigned_department_id:
+                instance._department_changed = True
+                instance._old_department = old_ticket.assigned_department
+                instance._new_department = instance.assigned_department
         except Ticket.DoesNotExist:
             pass
 
@@ -220,6 +226,33 @@ def notify_on_ticket_status_change(sender, instance, created, **kwargs):
         delattr(instance, '_column_changed')
         delattr(instance, '_old_column_name')
         delattr(instance, '_new_column_name')
+
+    # Check if department was changed (set in pre_save)
+    if getattr(instance, '_department_changed', False):
+        new_department = getattr(instance, '_new_department', None)
+        old_department = getattr(instance, '_old_department', None)
+
+        # Notify all users in the newly assigned department
+        if new_department:
+            department_users = new_department.employees.all()
+            for user in department_users:
+                create_notification(
+                    user=user,
+                    notification_type='ticket_assigned',
+                    title=f'Department assigned: {instance.title}',
+                    message=f'Ticket assigned to your department "{new_department.name}"',
+                    ticket_id=instance.id,
+                    metadata={
+                        'department_id': new_department.id,
+                        'department_name': new_department.name,
+                        'old_department': old_department.name if old_department else None,
+                    }
+                )
+
+        # Clean up temporary attributes
+        delattr(instance, '_department_changed')
+        delattr(instance, '_new_department')
+        delattr(instance, '_old_department')
 
 
 @receiver(post_save, sender=SubTicket)

@@ -5,7 +5,7 @@ from .models import (
     TicketAssignment, SubTicketAssignment, TicketTimeLog, Board, TicketPayment,
     ItemList, ListItem, TicketForm, TicketFormSubmission, TicketAttachment
 )
-from users.models import TenantGroup
+from users.models import TenantGroup, Department
 
 User = get_user_model()
 
@@ -24,6 +24,15 @@ class TenantGroupMinimalSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = TenantGroup
+        fields = ['id', 'name', 'description']
+        read_only_fields = ['id', 'name', 'description']
+
+
+class DepartmentMinimalSerializer(serializers.ModelSerializer):
+    """Minimal department serializer for ticket relationships."""
+
+    class Meta:
+        model = Department
         fields = ['id', 'name', 'description']
         read_only_fields = ['id', 'name', 'description']
 
@@ -410,6 +419,8 @@ class TicketSerializer(serializers.ModelSerializer):
         allow_empty=True,
         help_text='List of group IDs to assign to this ticket'
     )
+    assigned_department = DepartmentMinimalSerializer(read_only=True)
+    assigned_department_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
     column = TicketColumnSerializer(read_only=True)
     column_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
     tags = TagSerializer(many=True, read_only=True)
@@ -448,6 +459,7 @@ class TicketSerializer(serializers.ModelSerializer):
             'created_at', 'updated_at', 'created_by', 'assigned_to', 'assigned_to_id',
             'assigned_users', 'assignments', 'assigned_user_ids', 'assignment_roles',
             'assigned_groups', 'assigned_group_ids',
+            'assigned_department', 'assigned_department_id',
             'tags', 'tag_ids', 'comments', 'comments_count',
             'sub_tickets', 'sub_tickets_count', 'completed_sub_tickets_count',
             'checklist_items', 'checklist_items_count', 'completed_checklist_items_count',
@@ -488,6 +500,7 @@ class TicketSerializer(serializers.ModelSerializer):
         assigned_to_id = validated_data.pop('assigned_to_id', None)
         assigned_user_ids = validated_data.pop('assigned_user_ids', [])
         assigned_group_ids = validated_data.pop('assigned_group_ids', [])
+        assigned_department_id = validated_data.pop('assigned_department_id', None)
         assignment_roles = validated_data.pop('assignment_roles', {})
         column_id = validated_data.pop('column_id', None)
         is_order = validated_data.get('is_order', False)
@@ -499,6 +512,10 @@ class TicketSerializer(serializers.ModelSerializer):
         # Set assigned_to if provided
         if assigned_to_id:
             validated_data['assigned_to'] = User.objects.get(id=assigned_to_id)
+
+        # Set assigned_department if provided
+        if assigned_department_id:
+            validated_data['assigned_department'] = Department.objects.get(id=assigned_department_id)
 
         # Handle order-specific logic
         if is_order and column_id:
@@ -542,6 +559,7 @@ class TicketSerializer(serializers.ModelSerializer):
         assigned_to_id = validated_data.pop('assigned_to_id', None)
         assigned_user_ids = validated_data.pop('assigned_user_ids', None)
         assigned_group_ids = validated_data.pop('assigned_group_ids', None)
+        assigned_department_id = validated_data.pop('assigned_department_id', None)
         assignment_roles = validated_data.pop('assignment_roles', {})
         column_id = validated_data.pop('column_id', None)
 
@@ -553,6 +571,13 @@ class TicketSerializer(serializers.ModelSerializer):
                 validated_data['assigned_to'] = User.objects.get(id=assigned_to_id)
             else:
                 validated_data['assigned_to'] = None
+
+        # Handle assigned_department field
+        if assigned_department_id is not None:
+            if assigned_department_id:
+                validated_data['assigned_department'] = Department.objects.get(id=assigned_department_id)
+            else:
+                validated_data['assigned_department'] = None
 
         # Handle column field
         if column_id is not None:

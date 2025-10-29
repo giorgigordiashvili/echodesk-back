@@ -190,6 +190,14 @@ class Ticket(models.Model):
         blank=True,
         help_text='Groups assigned to this ticket'
     )
+    assigned_department = models.ForeignKey(
+        'users.Department',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='tickets_assigned',
+        help_text='Department assigned to this ticket'
+    )
     tags = models.ManyToManyField(Tag, blank=True, related_name='tickets')
     
     # Field to distinguish orders from regular tickets
