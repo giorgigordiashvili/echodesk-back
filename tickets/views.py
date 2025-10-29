@@ -32,12 +32,40 @@ class BoardPermission(permissions.BasePermission):
     def has_permission(self, request, view):
         if not request.user.is_authenticated:
             return False
-        
+
+        user = request.user
+
+        # Staff and superusers always have access
+        if user.is_staff or user.is_superuser:
+            return True
+
         # Check permissions based on action
         if view.action == 'list' or view.action == 'retrieve' or view.action == 'kanban_board':
-            # Allow access if user has full board permissions OR order access permissions
-            return (request.user.has_permission('view_boards') or 
-                   request.user.has_permission('access_orders'))
+            # Allow access if:
+            # 1. User has full board permissions OR order access permissions
+            # 2. User is assigned to at least one board (directly or via group)
+            has_permission = (user.has_permission('view_boards') or
+                            user.has_permission('access_orders'))
+
+            if has_permission:
+                return True
+
+            # Check if user is assigned to any board via group
+            user_groups = user.tenant_groups.filter(is_active=True)
+            if user_groups.exists():
+                from tickets.models import Board
+                has_board_access = Board.objects.filter(board_groups__in=user_groups).exists()
+                if has_board_access:
+                    return True
+
+            # Check if user is directly assigned to any board
+            from tickets.models import Board
+            has_direct_board = Board.objects.filter(board_users=user).exists()
+            if has_direct_board:
+                return True
+
+            return False
+
         elif view.action == 'create':
             return request.user.has_permission('create_boards')
         elif view.action in ['update', 'partial_update']:
@@ -46,9 +74,9 @@ class BoardPermission(permissions.BasePermission):
             return request.user.has_permission('delete_boards')
         else:
             # Default to view permission for unknown actions
-            return (request.user.has_permission('view_boards') or 
+            return (request.user.has_permission('view_boards') or
                    request.user.has_permission('access_orders'))
-    
+
     def has_object_permission(self, request, view, obj):
         # For object-level permissions, we can add additional checks
         # For now, rely on the general permission check
@@ -1001,10 +1029,6 @@ class BoardViewSet(viewsets.ModelViewSet):
         # Superusers and staff can see all boards
         if user.is_superuser or user.is_staff:
             return Board.objects.all()
-
-        # Check if user has view_boards or access_orders permissions
-        if not (user.has_permission('view_boards') or user.has_permission('access_orders')):
-            return Board.objects.none()
 
         # Get user's groups
         user_groups = user.tenant_groups.filter(is_active=True)
