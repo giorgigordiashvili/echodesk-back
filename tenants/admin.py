@@ -50,11 +50,13 @@ class PackageAdminForm(forms.ModelForm):
             )
 
     def save(self, commit=True):
+        from decimal import Decimal
+
         package = super().save(commit=False)
 
         # For custom packages, auto-calculate price based on selected features
         if package.is_custom and self.cleaned_data.get('features'):
-            total = 0
+            total = Decimal('0')
             for feature in self.cleaned_data['features']:
                 if package.pricing_model == 'agent':
                     # For agent-based, use base per-user price (will be multiplied by user count at runtime)
@@ -64,7 +66,7 @@ class PackageAdminForm(forms.ModelForm):
 
             # Apply 10% discount for CRM-based packages
             if package.pricing_model == 'crm':
-                total = total * 0.9
+                total = total * Decimal('0.9')
 
             package.price_gel = total
 
