@@ -250,13 +250,13 @@ class User(AbstractBaseUser, PermissionsMixin):
         return list(permissions)
     
     def get_group_permissions(self):
-        """Get permissions inherited from groups"""
-        group_permissions = set()
-        
+        """Get feature keys inherited from groups"""
+        group_features = set()
+
         for group in self.tenant_groups.filter(is_active=True):
-            group_permissions.update(group.get_permissions_list())
-        
-        return list(group_permissions)
+            group_features.update(group.get_feature_keys())
+
+        return list(group_features)
 
     def get_user_permissions_list(self):
         """Get user's direct individual permissions (not from groups)"""
