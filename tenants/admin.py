@@ -601,9 +601,42 @@ class FeaturePermissionInline(admin.TabularInline):
     autocomplete_fields = ['permission']
 
 
+class FeatureAdminForm(forms.ModelForm):
+    """Custom form for Feature admin with permissions selector"""
+    permissions = forms.ModelMultipleChoiceField(
+        queryset=Permission.objects.filter(is_active=True).order_by('module', 'name'),
+        required=False,
+        widget=admin.widgets.FilteredSelectMultiple('Permissions', False),
+        help_text='Select permissions that this feature will grant'
+    )
+
+    class Meta:
+        model = Feature
+        fields = '__all__'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance.pk:
+            # Load existing permissions for this feature
+            self.initial['permissions'] = self.instance.permissions.all()
+
+    def save(self, commit=True):
+        feature = super().save(commit=False)
+        if commit:
+            feature.save()
+        if feature.pk:
+            # Clear existing permissions
+            FeaturePermission.objects.filter(feature=feature).delete()
+            # Add new permissions
+            for permission in self.cleaned_data['permissions']:
+                FeaturePermission.objects.create(feature=feature, permission=permission)
+        return feature
+
+
 @admin.register(Feature)
 class FeatureAdmin(admin.ModelAdmin):
     """Admin interface for Feature model"""
+    form = FeatureAdminForm
     list_display = [
         'name', 'key', 'category', 'price_per_user_gel', 'price_unlimited_gel',
         'icon_display', 'permission_count', 'sort_order', 'is_active', 'created_at'
@@ -611,11 +644,14 @@ class FeatureAdmin(admin.ModelAdmin):
     list_filter = ['category', 'is_active', 'created_at']
     search_fields = ['key', 'name', 'description']
     ordering = ['category', 'sort_order', 'name']
-    inlines = [FeaturePermissionInline]
 
     fieldsets = (
         ('Basic Information', {
             'fields': ('key', 'name', 'description')
+        }),
+        ('Permissions', {
+            'fields': ('permissions',),
+            'description': 'Select permissions that will be granted when this feature is enabled'
         }),
         ('Pricing for Custom Packages', {
             'fields': ('price_per_user_gel', 'price_unlimited_gel'),
