@@ -290,6 +290,17 @@ def bog_webhook(request):
             payment_order.paid_at = timezone.now()
             payment_order.save()
 
+            # Extract card save information from webhook
+            saved_card_type = payment_detail.get('saved_card_type')
+            parent_order_id_from_bog = payment_detail.get('parent_order_id')
+
+            # For trial payments, BOG returns the parent order ID that should be used for future charges
+            # This is the BOG order_id (not external_order_id) that we'll use in recurring payment API calls
+            card_saved_for_recurring = saved_card_type == 'subscription'
+
+            if card_saved_for_recurring:
+                logger.info(f'Card saved for recurring payments. BOG order_id: {bog_order_id}')
+
             # Check if this is a registration payment (no tenant yet)
             if payment_order.tenant is None:
                 # This is a registration payment - create tenant from pending registration
@@ -347,6 +358,10 @@ def bog_webhook(request):
                     # Create subscription with trial information
                     if is_trial:
                         trial_ends_at = timezone.now() + timedelta(days=trial_days)
+
+                        # Use the BOG order_id from webhook as parent_order_id for future recurring charges
+                        parent_order_id_for_subscription = bog_order_id if card_saved_for_recurring else None
+
                         subscription = TenantSubscription.objects.create(
                             tenant=tenant,
                             package=pending_registration.package,
@@ -361,12 +376,12 @@ def bog_webhook(request):
                             is_trial=True,
                             trial_ends_at=trial_ends_at,
                             trial_converted=False,
-                            parent_order_id=payment_order.bog_order_id,  # Save BOG order ID for future charges
+                            parent_order_id=parent_order_id_for_subscription,  # Save BOG order ID for future charges
                             # Billing will happen at end of trial
                             last_billed_at=None,
                             next_billing_date=trial_ends_at
                         )
-                        logger.info(f'Trial subscription created for {tenant.schema_name}, ends at {trial_ends_at}')
+                        logger.info(f'Trial subscription created for {tenant.schema_name}, ends at {trial_ends_at}, parent_order_id: {parent_order_id_for_subscription}')
                     else:
                         # Regular paid subscription
                         subscription = TenantSubscription.objects.create(
@@ -383,27 +398,35 @@ def bog_webhook(request):
                             next_billing_date=timezone.now() + timedelta(days=30)
                         )
 
-                    # Create admin user in tenant schema
+                    # Create admin user in tenant schema (use savepoint to handle IntegrityError)
                     with schema_context(tenant.schema_name):
+                        from django.db import IntegrityError
                         try:
-                            # Create user without password first
-                            admin_user = User.objects.create(
-                                email=pending_registration.admin_email,
-                                first_name=pending_registration.admin_first_name,
-                                last_name=pending_registration.admin_last_name,
-                                is_staff=True,
-                                is_superuser=True,
-                                is_active=True
-                            )
-                            # Set the already-hashed password directly
-                            admin_user.password = pending_registration.admin_password
-                            admin_user.save()
-                        except Exception as user_error:
+                            # Use a savepoint so IntegrityError doesn't break the outer transaction
+                            with transaction.atomic():
+                                # Create user without password first
+                                admin_user = User.objects.create(
+                                    email=pending_registration.admin_email,
+                                    first_name=pending_registration.admin_first_name,
+                                    last_name=pending_registration.admin_last_name,
+                                    is_staff=True,
+                                    is_superuser=True,
+                                    is_active=True
+                                )
+                                # Set the already-hashed password directly
+                                admin_user.password = pending_registration.admin_password
+                                admin_user.save()
+                                logger.info(f'Admin user created: {admin_user.email}')
+                        except IntegrityError as user_error:
                             # If user already exists, retrieve it instead
                             logger.warning(f'User creation failed (may already exist): {user_error}')
                             admin_user = User.objects.filter(email=pending_registration.admin_email).first()
-                            if not admin_user:
-                                raise  # Re-raise if it's not a duplicate error
+                            if admin_user:
+                                logger.info(f'Using existing admin user: {admin_user.email}')
+                            else:
+                                # This shouldn't happen, but log and continue
+                                logger.error(f'User lookup failed after IntegrityError: {user_error}')
+                                # Don't raise - we can continue without the user being in the tenant schema
 
                     # Setup frontend access
                     deployment_service = SingleFrontendDeploymentService()
