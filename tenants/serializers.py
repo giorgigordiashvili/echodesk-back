@@ -12,9 +12,10 @@ class TenantSerializer(serializers.ModelSerializer):
     class Meta:
         model = Tenant
         fields = (
-            'id', 'schema_name', 'domain_url', 'name', 'description', 'admin_email', 
+            'id', 'schema_name', 'domain_url', 'name', 'description', 'admin_email',
             'admin_name', 'plan', 'max_users', 'max_storage', 'preferred_language',
-            'frontend_url', 'deployment_status', 'is_active', 'created_on'
+            'frontend_url', 'deployment_status', 'is_active', 'created_on',
+            'min_users_per_ticket', 'only_superadmin_can_delete_tickets'
         )
         read_only_fields = ('id', 'schema_name', 'created_on')
 
