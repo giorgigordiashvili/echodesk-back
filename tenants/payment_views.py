@@ -13,6 +13,7 @@ from datetime import timedelta
 from .models import Tenant, Package, TenantSubscription, UsageLog, PaymentOrder, PendingRegistration
 from .bog_payment import bog_service
 from .services import SingleFrontendDeploymentService
+from .email_service import email_service
 from tenant_schemas.utils import schema_context
 from django.contrib.auth import get_user_model
 from django.db import transaction
@@ -437,6 +438,23 @@ def bog_webhook(request):
                     pending_registration.save()
 
                     logger.info(f'Tenant created from registration payment: {tenant.schema_name}')
+
+                    # Send welcome email to tenant admin
+                    try:
+                        frontend_url = tenant.frontend_url or f"https://{tenant.schema_name}.echodesk.ge"
+                        email_sent = email_service.send_tenant_created_email(
+                            tenant_email=pending_registration.admin_email,
+                            tenant_name=pending_registration.name,
+                            admin_name=f"{pending_registration.admin_first_name} {pending_registration.admin_last_name}",
+                            frontend_url=frontend_url,
+                            schema_name=tenant.schema_name
+                        )
+                        if email_sent:
+                            logger.info(f'Welcome email sent to {pending_registration.admin_email}')
+                        else:
+                            logger.warning(f'Failed to send welcome email to {pending_registration.admin_email}')
+                    except Exception as e:
+                        logger.error(f'Error sending welcome email: {str(e)}')
 
                     return Response({
                         'status': 'success',

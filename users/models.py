@@ -107,7 +107,11 @@ class User(AbstractBaseUser, PermissionsMixin):
     # Permission flags
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
-    
+
+    # Password management
+    password_change_required = models.BooleanField(default=False, help_text='Force user to change password on next login')
+    temporary_password = models.CharField(max_length=255, blank=True, null=True, help_text='Temporary password for first login')
+
     # Tenant-specific permissions (individual user permissions)
     can_view_all_tickets = models.BooleanField(default=False)
     can_manage_users = models.BooleanField(default=False)

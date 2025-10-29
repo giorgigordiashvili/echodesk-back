@@ -63,19 +63,28 @@ def tenant_login(request):
     serializer = TenantLoginSerializer(data=request.data, context={'request': request})
     if serializer.is_valid():
         user = serializer.validated_data['user']
-        
+
+        # Check if user must change password
+        if user.password_change_required:
+            return Response({
+                'message': 'Password change required',
+                'password_change_required': True,
+                'user_id': user.id,
+                'email': user.email
+            }, status=status.HTTP_403_FORBIDDEN)
+
         # Get or create token for the user
         token, created = Token.objects.get_or_create(user=user)
-        
+
         # Get dashboard data
         dashboard_serializer = TenantDashboardDataSerializer(user, context={'request': request})
-        
+
         return Response({
             'message': 'Login successful',
             'token': token.key,
             'dashboard_data': dashboard_serializer.data
         }, status=status.HTTP_200_OK)
-    
+
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -1088,5 +1097,112 @@ def remove_logo(request):
         logger.error(f'Failed to remove logo: {str(e)}')
         return Response(
             {'error': 'Failed to remove logo'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@extend_schema(
+    operation_id='forced_password_change',
+    summary='Forced Password Change',
+    description='Change password for user with temporary password (first login)',
+    request={
+        'application/json': {
+            'type': 'object',
+            'properties': {
+                'email': {'type': 'string', 'format': 'email'},
+                'current_password': {'type': 'string'},
+                'new_password': {'type': 'string'}
+            },
+            'required': ['email', 'current_password', 'new_password']
+        }
+    },
+    responses={
+        200: OpenApiResponse(
+            description='Password changed successfully',
+            response={
+                'type': 'object',
+                'properties': {
+                    'message': {'type': 'string'},
+                    'token': {'type': 'string'}
+                }
+            }
+        ),
+        400: OpenApiResponse(description='Invalid credentials or validation error'),
+        403: OpenApiResponse(description='Not available from main domain')
+    },
+    tags=['Authentication']
+)
+@api_view(['POST'])
+@permission_classes([])  # No authentication required
+def forced_password_change(request):
+    """
+    Endpoint for users to change their password on first login
+    """
+    if not hasattr(request, 'tenant') or request.tenant.schema_name == get_public_schema_name():
+        return Response(
+            {'error': 'This endpoint is only available from tenant subdomains'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    email = request.data.get('email')
+    current_password = request.data.get('current_password')
+    new_password = request.data.get('new_password')
+
+    if not email or not current_password or not new_password:
+        return Response(
+            {'error': 'Email, current password, and new password are required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # Password validation
+    if len(new_password) < 8:
+        return Response(
+            {'error': 'New password must be at least 8 characters long'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        # Get user from tenant schema
+        user = User.objects.get(email=email)
+
+        # Verify current password
+        if not user.check_password(current_password):
+            return Response(
+                {'error': 'Current password is incorrect'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Check if password change is required
+        if not user.password_change_required:
+            return Response(
+                {'error': 'Password change is not required for this user'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Update password
+        user.set_password(new_password)
+        user.password_change_required = False
+        user.temporary_password = None
+        user.save()
+
+        # Generate token for immediate login
+        token, created = Token.objects.get_or_create(user=user)
+
+        logger.info(f'Password changed successfully for user: {email}')
+
+        return Response({
+            'message': 'Password changed successfully',
+            'token': token.key
+        }, status=status.HTTP_200_OK)
+
+    except User.DoesNotExist:
+        return Response(
+            {'error': 'User not found'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    except Exception as e:
+        logger.error(f'Error changing password for {email}: {str(e)}')
+        return Response(
+            {'error': 'Failed to change password'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )

@@ -6,6 +6,11 @@ from django.contrib.auth.models import Group, Permission
 from django.contrib.contenttypes.models import ContentType
 from django.db import transaction
 from django.utils import timezone
+from django.conf import settings
+import secrets
+import string
+import logging
+from tenants.email_service import email_service
 from .models import Department, TenantGroup, Notification
 from .serializers import (
     UserSerializer, UserCreateSerializer, UserUpdateSerializer,
@@ -13,6 +18,8 @@ from .serializers import (
     BulkUserActionSerializer, PasswordChangeSerializer, DepartmentSerializer,
     TenantGroupSerializer, TenantGroupCreateSerializer, NotificationSerializer
 )
+
+logger = logging.getLogger(__name__)
 
 User = get_user_model()
 
@@ -172,9 +179,45 @@ class UserViewSet(viewsets.ModelViewSet):
         # Check if user has permission to manage users
         if not self.request.user.has_permission('can_manage_users') and not self.request.user.is_staff:
             raise permissions.PermissionDenied("You don't have permission to manage users")
-        
-        # Set invited_by to current user
-        serializer.save(invited_by=self.request.user, invitation_sent_at=timezone.now())
+
+        # Generate temporary password (12 characters: letters, digits, special chars)
+        alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
+        temporary_password = ''.join(secrets.choice(alphabet) for _ in range(12))
+
+        # Save user with temporary password and password change required flag
+        user = serializer.save(
+            invited_by=self.request.user,
+            invitation_sent_at=timezone.now(),
+            password_change_required=True,
+            temporary_password=temporary_password
+        )
+
+        # Set the password (hashed)
+        user.set_password(temporary_password)
+        user.save()
+
+        # Send invitation email
+        try:
+            # Get tenant info
+            tenant = self.request.tenant if hasattr(self.request, 'tenant') else None
+            tenant_name = tenant.name if tenant else "EchoDesk"
+            frontend_url = tenant.frontend_url if tenant else settings.MAIN_DOMAIN
+
+            email_sent = email_service.send_user_invitation_email(
+                user_email=user.email,
+                user_name=user.get_full_name(),
+                tenant_name=tenant_name,
+                temporary_password=temporary_password,
+                frontend_url=frontend_url,
+                invited_by=self.request.user.get_full_name()
+            )
+
+            if email_sent:
+                logger.info(f'Invitation email sent to {user.email}')
+            else:
+                logger.warning(f'Failed to send invitation email to {user.email}')
+        except Exception as e:
+            logger.error(f'Error sending invitation email to {user.email}: {str(e)}')
     
     def perform_update(self, serializer):
         # Check if user has permission to manage users or is updating their own profile

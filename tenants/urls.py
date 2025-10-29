@@ -5,7 +5,7 @@ from .views import (
     register_tenant_form, get_tenant_language, update_tenant_language, get_tenant_config,
     get_all_tenants, check_deployment_status, tenant_login, tenant_logout,
     tenant_dashboard, tenant_profile, update_tenant_profile, change_tenant_password,
-    tenant_settings, upload_logo, remove_logo
+    tenant_settings, upload_logo, remove_logo, forced_password_change
 )
 from .package_views import (
     PackageViewSet, list_packages_by_model, calculate_pricing, get_package_features,
@@ -74,6 +74,7 @@ urlpatterns = [
     path('api/auth/profile/', tenant_profile, name='tenant_profile'),
     path('api/auth/profile/update/', update_tenant_profile, name='update_tenant_profile'),
     path('api/auth/change-password/', change_tenant_password, name='change_tenant_password'),
+    path('api/auth/forced-password-change/', forced_password_change, name='forced_password_change'),
     
     # Tenant configuration endpoints
     path('api/tenant/language/', get_tenant_language, name='get_tenant_language'),
