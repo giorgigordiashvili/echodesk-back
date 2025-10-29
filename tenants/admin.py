@@ -28,9 +28,49 @@ class PackageFeatureInline(admin.TabularInline):
         return field
 
 
+class PackageAdminForm(forms.ModelForm):
+    """Custom form for Package admin with features selector"""
+    features = forms.ModelMultipleChoiceField(
+        queryset=Feature.objects.filter(is_active=True).order_by('category', 'sort_order', 'name'),
+        required=False,
+        widget=admin.widgets.FilteredSelectMultiple('Features', False),
+        help_text='Select features that this package will include'
+    )
+
+    class Meta:
+        model = Package
+        fields = '__all__'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance.pk:
+            # Load existing features for this package
+            self.initial['features'] = Feature.objects.filter(
+                package_features__package=self.instance
+            )
+
+    def save(self, commit=True):
+        package = super().save(commit=False)
+        if commit:
+            package.save()
+        if package.pk:
+            # Clear existing features
+            PackageFeature.objects.filter(package=package).delete()
+            # Add new features
+            for feature in self.cleaned_data['features']:
+                PackageFeature.objects.create(
+                    package=package,
+                    feature=feature,
+                    is_highlighted=False,
+                    sort_order=feature.sort_order
+                )
+        return package
+
+
 @admin.register(Package)
 class PackageAdmin(admin.ModelAdmin):
     """Admin interface for Package model"""
+    form = PackageAdminForm
     list_display = [
         'display_name', 'pricing_model', 'price_gel', 'max_users',
         'max_whatsapp_messages', 'feature_count', 'is_highlighted', 'is_active', 'sort_order'
@@ -39,36 +79,34 @@ class PackageAdmin(admin.ModelAdmin):
     search_fields = ['name', 'display_name', 'description']
     ordering = ['pricing_model', 'sort_order', 'price_gel']
 
-    def get_fieldsets(self, request, obj=None):
-        """Dynamic fieldsets to include features field"""
-        return (
-            ('Basic Information', {
-                'fields': ('name', 'display_name', 'description', 'pricing_model', 'is_custom')
-            }),
-            ('Features', {
-                'fields': ('package_features_list',),
-                'description': 'Select features that this package includes'
-            }),
-            ('Pricing', {
-                'fields': ('price_gel', 'billing_period')
-            }),
-            ('Limits', {
-                'fields': ('max_users', 'max_whatsapp_messages', 'max_storage_gb')
-            }),
-            ('Legacy Features (deprecated - use Dynamic Features above)', {
-                'fields': (
-                    'ticket_management', 'email_integration', 'sip_calling',
-                    'facebook_integration', 'instagram_integration', 'whatsapp_integration',
-                    'advanced_analytics', 'api_access', 'custom_integrations',
-                    'priority_support', 'dedicated_account_manager'
-                ),
-                'classes': ['collapse'],
-                'description': 'Legacy boolean features - use Dynamic Features system instead'
-            }),
-            ('Display Settings', {
-                'fields': ('is_highlighted', 'is_active', 'sort_order')
-            })
-        )
+    fieldsets = (
+        ('Basic Information', {
+            'fields': ('name', 'display_name', 'description', 'pricing_model', 'is_custom')
+        }),
+        ('Features', {
+            'fields': ('features',),
+            'description': 'Select features that this package includes'
+        }),
+        ('Pricing', {
+            'fields': ('price_gel', 'billing_period')
+        }),
+        ('Limits', {
+            'fields': ('max_users', 'max_whatsapp_messages', 'max_storage_gb')
+        }),
+        ('Legacy Features (deprecated - use Dynamic Features above)', {
+            'fields': (
+                'ticket_management', 'email_integration', 'sip_calling',
+                'facebook_integration', 'instagram_integration', 'whatsapp_integration',
+                'advanced_analytics', 'api_access', 'custom_integrations',
+                'priority_support', 'dedicated_account_manager'
+            ),
+            'classes': ['collapse'],
+            'description': 'Legacy boolean features - use Dynamic Features system instead'
+        }),
+        ('Display Settings', {
+            'fields': ('is_highlighted', 'is_active', 'sort_order')
+        })
+    )
 
     def get_queryset(self, request):
         return super().get_queryset(request).select_related()
@@ -78,54 +116,6 @@ class PackageAdmin(admin.ModelAdmin):
         """Display count of features"""
         count = obj.package_features.count()
         return f"{count} feature{'s' if count != 1 else ''}"
-
-    def save_model(self, request, obj, form, change):
-        """Save the package and update features"""
-        super().save_model(request, obj, form, change)
-
-        # Get the selected features from the form
-        if 'package_features_list' in form.cleaned_data:
-            selected_features = form.cleaned_data['package_features_list']
-
-            # Remove existing PackageFeature links
-            obj.package_features.all().delete()
-
-            # Create new PackageFeature links
-            for feature in selected_features:
-                PackageFeature.objects.create(
-                    package=obj,
-                    feature=feature,
-                    is_highlighted=False,
-                    sort_order=feature.sort_order
-                )
-
-    def get_form(self, request, obj=None, **kwargs):
-        """Customize the form"""
-        # Prepare the fields list - exclude package_features_list since we'll add it manually
-        if 'fields' not in kwargs:
-            kwargs['fields'] = None
-
-        # Get the form
-        form = super().get_form(request, obj, **kwargs)
-
-        # Add a custom field for features AFTER form is created
-        initial_features = []
-        if obj:
-            # Get currently linked features
-            initial_features = list(Feature.objects.filter(
-                package_features__package=obj
-            ).values_list('id', flat=True))
-
-        # Add the field to the form
-        form.base_fields['package_features_list'] = forms.ModelMultipleChoiceField(
-            queryset=Feature.objects.filter(is_active=True).order_by('category', 'sort_order', 'name'),
-            required=False,
-            initial=initial_features,
-            widget=admin.widgets.FilteredSelectMultiple('Features', False),
-            help_text='Select features that this package will include'
-        )
-
-        return form
 
 
 @admin.register(TenantSubscription)
