@@ -64,10 +64,6 @@ class PackageAdminForm(forms.ModelForm):
                 else:  # CRM-based
                     total += feature.price_unlimited_gel
 
-            # Apply 10% discount for CRM-based packages
-            if package.pricing_model == 'crm':
-                total = total * Decimal('0.9')
-
             package.price_gel = total
 
         if commit:
