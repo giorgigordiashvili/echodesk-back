@@ -3,6 +3,7 @@ from django.utils import timezone
 from django.utils.html import format_html
 from django.urls import reverse
 from django.contrib import messages
+from django import forms
 from tenant_schemas.utils import get_public_schema_name
 from .models import (
     Tenant, Package, TenantSubscription, UsageLog, PaymentOrder, PendingRegistration,
@@ -31,16 +32,20 @@ class PackageAdmin(admin.ModelAdmin):
     """Admin interface for Package model"""
     list_display = [
         'display_name', 'pricing_model', 'price_gel', 'max_users',
-        'max_whatsapp_messages', 'is_highlighted', 'is_active', 'sort_order'
+        'max_whatsapp_messages', 'feature_count', 'is_highlighted', 'is_active', 'sort_order'
     ]
-    list_filter = ['pricing_model', 'is_active', 'is_highlighted']
+    list_filter = ['pricing_model', 'is_active', 'is_highlighted', 'is_custom']
     search_fields = ['name', 'display_name', 'description']
     ordering = ['pricing_model', 'sort_order', 'price_gel']
-    inlines = [PackageFeatureInline]
+    filter_horizontal = ['package_features_list']
 
     fieldsets = (
         ('Basic Information', {
-            'fields': ('name', 'display_name', 'description', 'pricing_model')
+            'fields': ('name', 'display_name', 'description', 'pricing_model', 'is_custom')
+        }),
+        ('Features', {
+            'fields': ('package_features_list',),
+            'description': 'Select features that this package includes'
         }),
         ('Pricing', {
             'fields': ('price_gel', 'billing_period')
@@ -48,7 +53,7 @@ class PackageAdmin(admin.ModelAdmin):
         ('Limits', {
             'fields': ('max_users', 'max_whatsapp_messages', 'max_storage_gb')
         }),
-        ('Legacy Features (deprecated - use Dynamic Features below)', {
+        ('Legacy Features (deprecated - use Dynamic Features above)', {
             'fields': (
                 'ticket_management', 'email_integration', 'sip_calling',
                 'facebook_integration', 'instagram_integration', 'whatsapp_integration',
@@ -65,6 +70,54 @@ class PackageAdmin(admin.ModelAdmin):
 
     def get_queryset(self, request):
         return super().get_queryset(request).select_related()
+
+    @admin.display(description='Features')
+    def feature_count(self, obj):
+        """Display count of features"""
+        count = obj.package_features.count()
+        return f"{count} feature{'s' if count != 1 else ''}"
+
+    def save_model(self, request, obj, form, change):
+        """Save the package and update features"""
+        super().save_model(request, obj, form, change)
+
+        # Get the selected features from the form
+        if 'package_features_list' in form.cleaned_data:
+            selected_features = form.cleaned_data['package_features_list']
+
+            # Remove existing PackageFeature links
+            obj.package_features.all().delete()
+
+            # Create new PackageFeature links
+            for feature in selected_features:
+                PackageFeature.objects.create(
+                    package=obj,
+                    feature=feature,
+                    is_highlighted=False,
+                    sort_order=feature.sort_order
+                )
+
+    def get_form(self, request, obj=None, **kwargs):
+        """Customize the form"""
+        form = super().get_form(request, obj, **kwargs)
+
+        # Add a custom field for features
+        if obj:
+            # Get currently linked features
+            current_features = Feature.objects.filter(
+                package_features__package=obj
+            )
+            form.base_fields['package_features_list'].initial = current_features
+
+        # Make the queryset for features
+        form.base_fields['package_features_list'] = forms.ModelMultipleChoiceField(
+            queryset=Feature.objects.filter(is_active=True).order_by('category', 'sort_order', 'name'),
+            required=False,
+            widget=admin.widgets.FilteredSelectMultiple('Features', False),
+            help_text='Select features that this package will include'
+        )
+
+        return form
 
 
 @admin.register(TenantSubscription)
@@ -546,16 +599,20 @@ class FeatureAdmin(admin.ModelAdmin):
     """Admin interface for Feature model"""
     list_display = [
         'name', 'key', 'category', 'price_per_user_gel', 'price_unlimited_gel',
-        'icon_display', 'sort_order', 'is_active', 'created_at'
+        'icon_display', 'permission_count', 'sort_order', 'is_active', 'created_at'
     ]
     list_filter = ['category', 'is_active', 'created_at']
     search_fields = ['key', 'name', 'description']
     ordering = ['category', 'sort_order', 'name']
-    inlines = [FeaturePermissionInline]
+    filter_horizontal = ['feature_permissions']
 
     fieldsets = (
         ('Basic Information', {
             'fields': ('key', 'name', 'description')
+        }),
+        ('Permissions', {
+            'fields': ('feature_permissions',),
+            'description': 'Select permissions that will be granted when this feature is enabled'
         }),
         ('Pricing for Custom Packages', {
             'fields': ('price_per_user_gel', 'price_unlimited_gel'),
@@ -581,6 +638,53 @@ class FeatureAdmin(admin.ModelAdmin):
         if obj.icon:
             return format_html('{} {}', obj.icon, obj.icon)
         return '-'
+
+    @admin.display(description='Permissions')
+    def permission_count(self, obj):
+        """Display count of permissions"""
+        count = obj.permissions.count()
+        return f"{count} permission{'s' if count != 1 else ''}"
+
+    def save_model(self, request, obj, form, change):
+        """Save the feature and update permissions"""
+        super().save_model(request, obj, form, change)
+
+        # Get the selected permissions from the form
+        if 'feature_permissions' in form.cleaned_data:
+            selected_permissions = form.cleaned_data['feature_permissions']
+
+            # Remove existing FeaturePermission links
+            obj.permissions.all().delete()
+
+            # Create new FeaturePermission links
+            for permission in selected_permissions:
+                FeaturePermission.objects.create(
+                    feature=obj,
+                    permission=permission,
+                    is_required=True
+                )
+
+    def get_form(self, request, obj=None, **kwargs):
+        """Customize the form"""
+        form = super().get_form(request, obj, **kwargs)
+
+        # Add a custom field for permissions
+        if obj:
+            # Get currently linked permissions
+            current_permissions = Permission.objects.filter(
+                features__feature=obj
+            )
+            form.base_fields['feature_permissions'].initial = current_permissions
+
+        # Make the queryset for permissions
+        form.base_fields['feature_permissions'] = forms.ModelMultipleChoiceField(
+            queryset=Permission.objects.filter(is_active=True).order_by('module', 'name'),
+            required=False,
+            widget=admin.widgets.FilteredSelectMultiple('Permissions', False),
+            help_text='Select permissions that this feature will grant'
+        )
+
+        return form
 
 
 class FeaturePermissionInlineForPermission(admin.TabularInline):
