@@ -31,3 +31,13 @@ packages:
             sourceDetails:
               # Run daily at 3:00 AM UTC
               cron: "0 3 * * *"
+
+      # Trial expiration processing - charges saved cards when trials end
+      - name: trial-expirations
+        runtime: python:3.11
+        triggers:
+          - name: daily-trial-expirations
+            sourceType: scheduler
+            sourceDetails:
+              # Run daily at 9:00 AM UTC (12:00 PM Georgian time)
+              cron: "0 9 * * *"

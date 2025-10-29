@@ -1,0 +1,2 @@
+# HTTP requests only - calls Django API endpoint
+requests>=2.31.0
