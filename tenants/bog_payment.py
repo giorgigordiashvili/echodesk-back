@@ -464,6 +464,90 @@ class BOGPaymentService:
             logger.error(f'Error deleting saved card: {e}')
             return False
 
+    def create_trial_payment_with_card_save(
+        self,
+        package,
+        agent_count: int = 1,
+        customer_email: str = '',
+        customer_name: str = '',
+        company_name: str = '',
+        return_url_success: str = '',
+        return_url_fail: str = '',
+        callback_url: str = '',
+        external_order_id: str = None
+    ) -> Dict:
+        """
+        Create a 0 GEL trial payment that saves the card for future recurring charges
+
+        For 14-day free trial:
+        1. Create 0 GEL payment (card verification)
+        2. Enable card saving for future recurring payments
+        3. After trial ends, use charge_saved_card() to charge actual amount
+
+        Args:
+            package: Package instance
+            agent_count: Number of agents (for agent-based pricing)
+            customer_email: Customer email
+            customer_name: Customer name
+            company_name: Company name
+            return_url_success: URL to redirect after successful payment
+            return_url_fail: URL to redirect after failed payment
+            callback_url: Webhook URL for payment updates
+            external_order_id: Optional custom order ID
+
+        Returns:
+            Dict with payment details including payment_url and order_id
+        """
+        from .models import PricingModel
+
+        # Calculate full subscription amount (for metadata only, not charged yet)
+        if package.pricing_model == PricingModel.AGENT_BASED:
+            subscription_amount = float(package.price_gel) * agent_count
+        else:
+            subscription_amount = float(package.price_gel)
+
+        # For trial, we charge 0 GEL to save the card
+        # BOG requires at least 0.01 GEL, so we use that as card verification
+        trial_amount = 0.0
+
+        # Format description
+        description = f"EchoDesk 14-Day Free Trial - {package.display_name} - {company_name}"
+
+        # Create payment with 0 GEL
+        payment_result = self.create_payment(
+            amount=trial_amount,
+            currency='GEL',
+            description=description,
+            customer_email=customer_email,
+            customer_name=customer_name,
+            return_url_success=return_url_success,
+            return_url_fail=return_url_fail,
+            callback_url=callback_url,
+            external_order_id=external_order_id,
+            metadata={
+                'package_id': package.id,
+                'package_name': package.name,
+                'agent_count': agent_count,
+                'subscription_amount': subscription_amount,
+                'payment_type': 'trial',
+                'trial_days': 14,
+                'company_name': company_name
+            }
+        )
+
+        # Enable card saving on this order (MUST be called before user pays)
+        bog_order_id = payment_result['order_id']
+        card_saving_enabled = self.enable_card_saving(bog_order_id)
+
+        if not card_saving_enabled:
+            logger.warning(f'Failed to enable card saving for trial payment: {bog_order_id}')
+
+        payment_result['card_saving_enabled'] = card_saving_enabled
+        payment_result['subscription_amount'] = subscription_amount
+        payment_result['trial_days'] = 14
+
+        return payment_result
+
     def create_subscription_payment(
         self,
         tenant,

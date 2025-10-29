@@ -340,20 +340,48 @@ def bog_webhook(request):
                     payment_order.tenant = tenant
                     payment_order.save()
 
-                    # Create subscription
-                    subscription = TenantSubscription.objects.create(
-                        tenant=tenant,
-                        package=pending_registration.package,
-                        is_active=True,
-                        starts_at=timezone.now(),
-                        expires_at=timezone.now() + timedelta(days=30),
-                        agent_count=pending_registration.agent_count,
-                        current_users=1,
-                        whatsapp_messages_used=0,
-                        storage_used_gb=0,
-                        last_billed_at=timezone.now(),
-                        next_billing_date=timezone.now() + timedelta(days=30)
-                    )
+                    # Check if this is a trial payment
+                    is_trial = payment_order.is_trial_payment
+                    trial_days = payment_order.metadata.get('trial_days', 14)
+
+                    # Create subscription with trial information
+                    if is_trial:
+                        trial_ends_at = timezone.now() + timedelta(days=trial_days)
+                        subscription = TenantSubscription.objects.create(
+                            tenant=tenant,
+                            package=pending_registration.package,
+                            is_active=True,
+                            starts_at=timezone.now(),
+                            expires_at=trial_ends_at,
+                            agent_count=pending_registration.agent_count,
+                            current_users=1,
+                            whatsapp_messages_used=0,
+                            storage_used_gb=0,
+                            # Trial subscription fields
+                            is_trial=True,
+                            trial_ends_at=trial_ends_at,
+                            trial_converted=False,
+                            parent_order_id=payment_order.bog_order_id,  # Save BOG order ID for future charges
+                            # Billing will happen at end of trial
+                            last_billed_at=None,
+                            next_billing_date=trial_ends_at
+                        )
+                        logger.info(f'Trial subscription created for {tenant.schema_name}, ends at {trial_ends_at}')
+                    else:
+                        # Regular paid subscription
+                        subscription = TenantSubscription.objects.create(
+                            tenant=tenant,
+                            package=pending_registration.package,
+                            is_active=True,
+                            starts_at=timezone.now(),
+                            expires_at=timezone.now() + timedelta(days=30),
+                            agent_count=pending_registration.agent_count,
+                            current_users=1,
+                            whatsapp_messages_used=0,
+                            storage_used_gb=0,
+                            last_billed_at=timezone.now(),
+                            next_billing_date=timezone.now() + timedelta(days=30)
+                        )
 
                     # Create admin user in tenant schema
                     with schema_context(tenant.schema_name):

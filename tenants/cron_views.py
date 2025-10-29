@@ -122,6 +122,57 @@ def cron_subscription_check(request):
         }, status=500)
 
 
+@api_view(['GET', 'POST'])
+@permission_classes([AllowAny])
+def cron_process_trial_expirations(request):
+    """
+    HTTP endpoint to process trial subscription expirations
+
+    Checks for trials ending today and charges saved cards automatically
+
+    Security: Requires CRON_SECRET_TOKEN in header or query param
+
+    Usage:
+    curl -X GET "https://api.echodesk.ge/api/cron/process-trial-expirations/" \
+         -H "X-Cron-Token: your-secret-token"
+    """
+    # Verify token
+    token = request.headers.get('X-Cron-Token') or request.GET.get('token')
+    expected_token = getattr(settings, 'CRON_SECRET_TOKEN', None)
+
+    if not expected_token:
+        logger.error('CRON_SECRET_TOKEN not configured in settings')
+        return Response({
+            'error': 'Cron service not configured'
+        }, status=500)
+
+    if not token or token != expected_token:
+        logger.warning(f'Unauthorized cron access attempt from {request.META.get("REMOTE_ADDR")}')
+        return Response({
+            'error': 'Unauthorized'
+        }, status=401)
+
+    # Run command
+    try:
+        output = StringIO()
+        call_command('process_trial_expirations', stdout=output)
+
+        output_text = output.getvalue()
+        logger.info(f'Trial expirations cron executed successfully')
+
+        return Response({
+            'status': 'success',
+            'message': 'Trial expirations processed',
+            'output': output_text
+        })
+    except Exception as e:
+        logger.error(f'Trial expirations cron failed: {e}')
+        return Response({
+            'status': 'error',
+            'error': str(e)
+        }, status=500)
+
+
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def cron_health_check(request):
@@ -135,6 +186,7 @@ def cron_health_check(request):
         'service': 'echodesk-cron',
         'endpoints': {
             'recurring_payments': '/api/cron/recurring-payments/',
-            'subscription_check': '/api/cron/subscription-check/'
+            'subscription_check': '/api/cron/subscription-check/',
+            'trial_expirations': '/api/cron/process-trial-expirations/'
         }
     })

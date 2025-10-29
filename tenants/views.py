@@ -554,16 +554,16 @@ def register_tenant_with_payment(request):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            # Calculate payment amount
+            # Calculate full subscription amount (for metadata)
             agent_count = validated_data.get('agent_count', 1)
             from .models import PricingModel
             if package.pricing_model == PricingModel.AGENT_BASED:
-                amount = float(package.price_gel) * agent_count
+                subscription_amount = float(package.price_gel) * agent_count
             else:
-                amount = float(package.price_gel)
+                subscription_amount = float(package.price_gel)
 
             # Generate unique order ID
-            order_id = f"REG-{uuid.uuid4().hex[:12].upper()}"
+            order_id = f"TRIAL-{uuid.uuid4().hex[:12].upper()}"
 
             # Create pending registration
             pending_registration = PendingRegistration.objects.create(
@@ -578,59 +578,58 @@ def register_tenant_with_payment(request):
                 order_id=order_id
             )
 
-            # Create payment order (without tenant)
+            # Create payment order for 0 GEL trial (without tenant)
             payment_order = PaymentOrder.objects.create(
                 order_id=order_id,
                 tenant=None,  # No tenant yet
                 package=package,
-                amount=amount,
+                amount=0.0,  # 0 GEL for trial
                 currency='GEL',
                 agent_count=agent_count,
                 status='pending',
+                is_trial_payment=True,
                 metadata={
                     'registration': True,
                     'schema_name': schema_name,
                     'company_name': validated_data['company_name'],
-                    'admin_email': validated_data['admin_email']
+                    'admin_email': validated_data['admin_email'],
+                    'subscription_amount': subscription_amount,
+                    'trial_days': 14
                 }
             )
 
-            # Create payment URL using BOG
-            payment_result = bog_service.create_payment(
-                amount=amount,
-                currency='GEL',
-                external_order_id=order_id,
-                description=f"EchoDesk Registration - {validated_data['company_name']}",
+            # Create trial payment with card saving using BOG
+            payment_result = bog_service.create_trial_payment_with_card_save(
+                package=package,
+                agent_count=agent_count,
                 customer_email=validated_data['admin_email'],
                 customer_name=f"{validated_data['admin_first_name']} {validated_data['admin_last_name']}",
+                company_name=validated_data['company_name'],
                 return_url_success=f"https://echodesk.ge/registration/success",
                 return_url_fail=f"https://echodesk.ge/registration/failed",
-                callback_url=f"https://api.echodesk.ge/api/payments/webhook/"
+                callback_url=f"https://api.echodesk.ge/api/payments/webhook/",
+                external_order_id=order_id
             )
 
-            # Enable card saving for recurring payments
+            # Update payment order with payment details
             bog_order_id = payment_result.get('order_id')
-            if bog_order_id:
-                card_saving_enabled = bog_service.enable_card_saving(bog_order_id)
-                if card_saving_enabled:
-                    logger.info(f"Card saving enabled for order: {bog_order_id}")
-                else:
-                    logger.warning(f"Failed to enable card saving for order: {bog_order_id}")
+            card_saving_enabled = payment_result.get('card_saving_enabled', False)
 
-            # Update payment order with payment URL and BOG order ID
             payment_order.payment_url = payment_result['payment_url']
             payment_order.bog_order_id = bog_order_id
-            payment_order.card_saved = card_saving_enabled if bog_order_id else False
+            payment_order.card_saved = card_saving_enabled
             payment_order.save()
 
-            logger.info(f"Registration payment initiated for {schema_name}: {order_id}")
+            logger.info(f"Trial registration initiated for {schema_name}: {order_id}, card_saving={card_saving_enabled}")
 
             return Response({
                 'payment_url': payment_result['payment_url'],
                 'order_id': order_id,
-                'amount': amount,
+                'amount': 0.0,
+                'subscription_amount': subscription_amount,
+                'trial_days': 14,
                 'currency': 'GEL',
-                'message': 'Payment initiated successfully'
+                'message': '14-day free trial initiated - card will be saved for automatic billing'
             }, status=status.HTTP_200_OK)
 
     except Package.DoesNotExist:

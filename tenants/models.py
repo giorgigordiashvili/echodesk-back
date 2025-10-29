@@ -283,7 +283,15 @@ class TenantSubscription(models.Model):
     # Billing
     last_billed_at = models.DateTimeField(null=True, blank=True)
     next_billing_date = models.DateTimeField(null=True, blank=True)
-    
+
+    # Trial information
+    is_trial = models.BooleanField(default=False, help_text='Whether this is a trial subscription')
+    trial_ends_at = models.DateTimeField(null=True, blank=True, help_text='When the trial period ends')
+    trial_converted = models.BooleanField(default=False, help_text='Whether trial was converted to paid subscription')
+
+    # Saved card for recurring payments
+    parent_order_id = models.CharField(max_length=100, blank=True, null=True, help_text='BOG order ID with saved card')
+
     # Metadata
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -385,6 +393,7 @@ class PaymentOrder(models.Model):
 
     payment_url = models.URLField(max_length=500, blank=True)
     card_saved = models.BooleanField(default=False, help_text='Whether card was saved for recurring payments')
+    is_trial_payment = models.BooleanField(default=False, help_text='Whether this is a 0 GEL trial payment')
     metadata = models.JSONField(default=dict, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
