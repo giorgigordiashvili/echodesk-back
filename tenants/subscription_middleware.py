@@ -8,9 +8,11 @@ Usage:
     # In your views, you can access:
     request.subscription  # TenantSubscription object
     request.subscription_features  # Dict of all features (legacy + dynamic)
-    request.has_feature(feature_name)  # Helper method
-    request.has_permission(permission_key)  # Check user permission
-    request.tenant_has_feature(feature_key)  # Check dynamic feature
+    request.has_feature(feature_name)  # Helper method for legacy features
+    request.tenant_has_feature(feature_key)  # Check if tenant has dynamic feature enabled
+    request.tenant_has_permission_available(key)  # Check if permission is available to grant
+
+    # User permissions are checked via user.has_permission() method (existing system)
 """
 
 from tenant_schemas.utils import get_public_schema_name
@@ -109,8 +111,8 @@ class SubscriptionMiddleware:
             if hasattr(request, 'tenant') else False
         )
 
-        # Check user permission
-        request.has_permission = lambda permission_key: (
-            SubscriptionService.check_user_permission(request.user, permission_key)
-            if hasattr(request, 'user') and request.user.is_authenticated else False
+        # Check if tenant has a permission available (for admin UI to show/hide permission toggles)
+        request.tenant_has_permission_available = lambda permission_key: (
+            SubscriptionService.check_tenant_has_permission_available(request.tenant, permission_key)
+            if hasattr(request, 'tenant') else False
         )

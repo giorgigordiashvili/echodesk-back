@@ -19,7 +19,7 @@ from .cron_views import (
 )
 from .feature_views import (
     FeatureViewSet, PermissionViewSet, TenantFeatureViewSet,
-    TenantPermissionViewSet, UserPermissionViewSet
+    TenantPermissionViewSet
 )
 from .cors_test_views import cors_test, preflight_test
 from .cors_views import simple_cors_test
@@ -31,7 +31,6 @@ router.register(r'features', FeatureViewSet, basename='features')
 router.register(r'permissions', PermissionViewSet, basename='permissions')
 router.register(r'tenant-features', TenantFeatureViewSet, basename='tenant-features')
 router.register(r'tenant-permissions', TenantPermissionViewSet, basename='tenant-permissions')
-router.register(r'user-permissions', UserPermissionViewSet, basename='user-permissions')
 
 urlpatterns = [
     path('', public_homepage, name='public_homepage'),

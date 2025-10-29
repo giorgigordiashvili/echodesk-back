@@ -9,14 +9,12 @@ from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
 
 from .models import (
-    Feature, Permission, TenantFeature, TenantPermission,
-    UserPermission
+    Feature, Permission, TenantFeature, TenantPermission
 )
 from .feature_serializers import (
     FeatureSerializer, PermissionSerializer,
     TenantFeatureSerializer, TenantPermissionSerializer,
-    UserPermissionSerializer, FeatureCheckSerializer,
-    PermissionCheckSerializer
+    FeatureCheckSerializer
 )
 from .subscription_service import SubscriptionService
 
@@ -125,75 +123,7 @@ class TenantPermissionViewSet(viewsets.ReadOnlyModelViewSet):
         ).select_related('permission', 'granted_by_feature')
 
 
-class UserPermissionViewSet(viewsets.ReadOnlyModelViewSet):
-    """
-    ViewSet for viewing and checking user permissions
-
-    list: Get all permissions for current user
-    retrieve: Get details of a specific user permission
-    check: Check if user has a specific permission
-    my_permissions: Get all permission keys for current user
-    """
-    serializer_class = UserPermissionSerializer
-    permission_classes = [IsAuthenticated]
-
-    def get_queryset(self):
-        """Get permissions for current user"""
-        return UserPermission.objects.filter(
-            user=self.request.user,
-            is_active=True
-        ).select_related('permission', 'granted_by')
-
-    @action(detail=False, methods=['post'])
-    def check(self, request):
-        """
-        Check if user has a specific permission
-
-        POST /api/user-permissions/check/
-        Body: {"permission_key": "tickets.create"}
-        """
-        serializer = PermissionCheckSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-
-        permission_key = serializer.validated_data['permission_key']
-        has_permission = SubscriptionService.check_user_permission(
-            request.user, permission_key
-        )
-
-        return Response({
-            'permission_key': permission_key,
-            'has_permission': has_permission
-        })
-
-    @action(detail=False, methods=['get'])
-    def my_permissions(self, request):
-        """
-        Get all permission keys for current user
-
-        GET /api/user-permissions/my-permissions/
-
-        Returns:
-        {
-            "permissions": ["tickets.create", "tickets.view", ...]
-        }
-        """
-        # Get user's direct permissions
-        user_permissions = UserPermission.objects.filter(
-            user=request.user,
-            is_active=True
-        ).select_related('permission').values_list('permission__key', flat=True)
-
-        # Get tenant's available permissions
-        tenant_permissions = []
-        if hasattr(request, 'tenant'):
-            tenant_permissions = TenantPermission.objects.filter(
-                tenant=request.tenant,
-                is_active=True
-            ).values_list('permission__key', flat=True)
-
-        # Combine and deduplicate
-        all_permissions = list(set(list(user_permissions) + list(tenant_permissions)))
-
-        return Response({
-            'permissions': sorted(all_permissions)
-        })
+# UserPermission ViewSet removed
+# User permissions are managed via the existing User model fields (can_view_all_tickets, etc.)
+# Tenant admins grant these permissions through the users app
+# TenantPermission (above) shows which permissions are available to grant based on package features

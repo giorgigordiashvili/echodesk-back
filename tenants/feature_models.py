@@ -235,10 +235,21 @@ class TenantFeature(models.Model):
 
 class TenantPermission(models.Model):
     """
-    Track which permissions are available to a tenant
+    Track which permissions are AVAILABLE to a tenant for granting to users
 
-    Populated based on enabled features - defines what permissions
-    are available for users within this tenant to be granted
+    This model defines the "permission pool" that tenant admins can grant to users.
+    Based on the tenant's package features, certain permissions become available.
+
+    Flow:
+    1. EchoDesk admin creates Features with Permissions
+    2. Package includes Features → Tenant gets TenantPermission records created
+    3. Tenant admin can grant these permissions to users via User model fields
+       (e.g., can_view_all_tickets, can_manage_users, etc.)
+
+    Example:
+    - If tenant has "Advanced Analytics" feature, they get TenantPermission for "view_reports"
+    - Tenant admin can then enable user.can_view_reports = True for specific users
+    - The User.has_permission() method checks the boolean fields
     """
     tenant = models.ForeignKey(
         'Tenant',
@@ -274,45 +285,6 @@ class TenantPermission(models.Model):
         return f"{self.tenant.schema_name} → {self.permission.name}"
 
 
-class UserPermission(models.Model):
-    """
-    Grant specific permissions to individual users
-
-    This allows fine-grained access control where different users
-    within the same tenant can have different permissions
-    """
-    user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name='user_permissions_custom'
-    )
-    permission = models.ForeignKey(
-        Permission,
-        on_delete=models.CASCADE,
-        related_name='user_permissions'
-    )
-
-    # Track who granted this permission
-    granted_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='permissions_granted'
-    )
-
-    # Track when permission was granted/revoked
-    granted_at = models.DateTimeField(auto_now_add=True)
-    revoked_at = models.DateTimeField(null=True, blank=True)
-    is_active = models.BooleanField(default=True)
-
-    class Meta:
-        unique_together = ['user', 'permission']
-        verbose_name = 'User Permission'
-        verbose_name_plural = 'User Permissions'
-        indexes = [
-            models.Index(fields=['user', 'is_active']),
-        ]
-
-    def __str__(self):
-        return f"{self.user.email} → {self.permission.name}"
+# UserPermission removed - using existing User model boolean fields instead
+# Tenant admins grant permissions to users via the User model's can_* fields
+# TenantPermission controls which permissions are available to grant based on package features

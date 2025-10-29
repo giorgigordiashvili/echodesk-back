@@ -199,55 +199,40 @@ class SubscriptionService:
         )
 
     @staticmethod
-    def check_user_permission(user, permission_key):
+    def check_tenant_has_permission_available(tenant, permission_key):
         """
-        Check if a user has a specific permission
+        Check if a tenant has a permission available to grant to users
 
-        Checks:
-        1. User's direct permissions (UserPermission)
-        2. Tenant's available permissions (TenantPermission)
+        This checks if the tenant's package includes features that grant this permission.
+        The tenant admin can then grant this permission to users via the User model fields.
 
         Args:
-            user: User instance
-            permission_key: Permission key (e.g., 'tickets.create')
+            tenant: Tenant instance
+            permission_key: Permission key (e.g., 'view_all_tickets')
 
         Returns:
-            bool: True if user has permission
+            bool: True if permission is available to the tenant
         """
-        from .models import UserPermission, TenantPermission, Permission
+        from .models import TenantPermission, Permission
 
         try:
             # Get the permission object
             permission = Permission.objects.get(key=permission_key, is_active=True)
 
-            # Check if user has direct permission
-            has_user_permission = UserPermission.objects.filter(
-                user=user,
+            # Check if tenant has this permission available
+            has_tenant_permission = TenantPermission.objects.filter(
+                tenant=tenant,
                 permission=permission,
                 is_active=True
             ).exists()
 
-            if has_user_permission:
-                return True
-
-            # Check if tenant has this permission available
-            # (Assuming user has a tenant relationship)
-            if hasattr(user, 'tenant'):
-                has_tenant_permission = TenantPermission.objects.filter(
-                    tenant=user.tenant,
-                    permission=permission,
-                    is_active=True
-                ).exists()
-
-                return has_tenant_permission
-
-            return False
+            return has_tenant_permission
 
         except Permission.DoesNotExist:
             logger.warning(f"Permission '{permission_key}' not found")
             return False
         except Exception as e:
-            logger.error(f"Error checking permission '{permission_key}' for user {user.id}: {e}")
+            logger.error(f"Error checking permission '{permission_key}' for tenant {tenant.schema_name}: {e}")
             return False
 
     @staticmethod

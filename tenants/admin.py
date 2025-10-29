@@ -7,7 +7,7 @@ from tenant_schemas.utils import get_public_schema_name
 from .models import (
     Tenant, Package, TenantSubscription, UsageLog, PaymentOrder, PendingRegistration,
     Feature, Permission, FeaturePermission, PackageFeature,
-    TenantFeature, TenantPermission, UserPermission
+    TenantFeature, TenantPermission
 )
 
 
@@ -740,39 +740,6 @@ class TenantPermissionAdmin(admin.ModelAdmin):
         self.message_user(request, f'{count} permission(s) revoked successfully.', messages.SUCCESS)
 
 
-@admin.register(UserPermission)
-class UserPermissionAdmin(admin.ModelAdmin):
-    """Admin interface for UserPermission model"""
-    list_display = [
-        'user', 'permission', 'granted_by', 'is_active', 'granted_at'
-    ]
-    list_filter = ['is_active', 'permission__module', 'granted_at']
-    search_fields = ['user__email', 'user__first_name', 'user__last_name', 'permission__name']
-    autocomplete_fields = ['user', 'permission', 'granted_by']
-    readonly_fields = ['granted_at']
-
-    fieldsets = (
-        ('Relationship', {
-            'fields': ('user', 'permission')
-        }),
-        ('Audit', {
-            'fields': ('granted_by', 'granted_at', 'revoked_at')
-        }),
-        ('Status', {
-            'fields': ('is_active',)
-        })
-    )
-
-    actions = ['activate_permissions', 'revoke_permissions']
-
-    @admin.action(description='Activate selected user permissions')
-    def activate_permissions(self, request, queryset):
-        """Activate selected user permissions"""
-        count = queryset.update(is_active=True, revoked_at=None)
-        self.message_user(request, f'{count} user permission(s) activated successfully.', messages.SUCCESS)
-
-    @admin.action(description='Revoke selected user permissions')
-    def revoke_permissions(self, request, queryset):
-        """Revoke selected user permissions"""
-        count = queryset.update(is_active=False, revoked_at=timezone.now())
-        self.message_user(request, f'{count} user permission(s) revoked successfully.', messages.SUCCESS)
+# UserPermission admin removed - tenant admins manage user permissions
+# via the existing User model fields (can_view_all_tickets, can_manage_users, etc.)
+# TenantPermission shows which permissions are available to the tenant based on their package

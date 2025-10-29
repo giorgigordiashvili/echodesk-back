@@ -5,7 +5,7 @@ Serializers for Feature and Permission models
 from rest_framework import serializers
 from .models import (
     Feature, Permission, FeaturePermission, PackageFeature,
-    TenantFeature, TenantPermission, UserPermission
+    TenantFeature, TenantPermission
 )
 
 
@@ -89,28 +89,11 @@ class TenantPermissionSerializer(serializers.ModelSerializer):
         read_only_fields = ['granted_at']
 
 
-class UserPermissionSerializer(serializers.ModelSerializer):
-    """Serializer for UserPermission"""
-    permission = PermissionSerializer(read_only=True)
-    user_email = serializers.EmailField(source='user.email', read_only=True)
-    granted_by_email = serializers.EmailField(source='granted_by.email', read_only=True, allow_null=True)
-
-    class Meta:
-        model = UserPermission
-        fields = [
-            'id', 'user', 'user_email', 'permission', 'granted_by',
-            'granted_by_email', 'is_active', 'granted_at', 'revoked_at'
-        ]
-        read_only_fields = ['granted_at', 'granted_by']
-
-
 class FeatureCheckSerializer(serializers.Serializer):
     """Serializer for checking if a feature is available"""
     feature_key = serializers.CharField(required=True)
     is_available = serializers.BooleanField(read_only=True)
 
 
-class PermissionCheckSerializer(serializers.Serializer):
-    """Serializer for checking if a user has a permission"""
-    permission_key = serializers.CharField(required=True)
-    has_permission = serializers.BooleanField(read_only=True)
+# Permission checking moved to users app
+# Use existing user.has_permission() method with the User model's boolean fields

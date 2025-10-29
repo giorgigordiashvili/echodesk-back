@@ -7,7 +7,7 @@ from tenant_schemas.models import TenantMixin
 # Import feature models
 from .feature_models import (
     Feature, Permission, FeaturePermission,
-    PackageFeature, TenantFeature, TenantPermission, UserPermission,
+    PackageFeature, TenantFeature, TenantPermission,
     FeatureCategory
 )
 
