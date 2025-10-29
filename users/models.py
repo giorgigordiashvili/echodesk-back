@@ -20,34 +20,19 @@ class Department(models.Model):
 
 
 class TenantGroup(models.Model):
-    """Custom group model with permissions for tenant-specific access control"""
+    """Custom group model with feature-based access control"""
     name = models.CharField(max_length=150, unique=True)
     description = models.TextField(blank=True)
-    
-    # Group-level permissions
-    can_view_all_tickets = models.BooleanField(default=False, help_text="Members can view all tickets in the tenant")
-    can_manage_users = models.BooleanField(default=False, help_text="Members can manage user accounts")
-    can_make_calls = models.BooleanField(default=False, help_text="Members can make phone calls")
-    can_manage_groups = models.BooleanField(default=False, help_text="Members can manage groups")
-    can_manage_settings = models.BooleanField(default=False, help_text="Members can manage tenant settings")
-    
-    # Additional group permissions
-    can_create_tickets = models.BooleanField(default=True, help_text="Members can create new tickets")
-    can_edit_own_tickets = models.BooleanField(default=True, help_text="Members can edit their own tickets")
-    can_edit_all_tickets = models.BooleanField(default=False, help_text="Members can edit any ticket")
-    can_delete_tickets = models.BooleanField(default=False, help_text="Members can delete tickets")
-    can_assign_tickets = models.BooleanField(default=False, help_text="Members can assign tickets to others")
-    can_view_reports = models.BooleanField(default=False, help_text="Members can view analytics and reports")
-    can_export_data = models.BooleanField(default=False, help_text="Members can export data")
-    can_manage_tags = models.BooleanField(default=False, help_text="Members can manage ticket tags")
-    can_manage_columns = models.BooleanField(default=False, help_text="Members can manage kanban board columns")
-    can_view_boards = models.BooleanField(default=True, help_text="Members can view and access kanban boards")
-    can_create_boards = models.BooleanField(default=False, help_text="Members can create new kanban boards")
-    can_edit_boards = models.BooleanField(default=False, help_text="Members can edit kanban board details")
-    can_delete_boards = models.BooleanField(default=False, help_text="Members can delete kanban boards")
-    can_access_orders = models.BooleanField(default=False, help_text="Members can access order management functionality")
-    
-    # Meta permissions
+
+    # Feature-based permissions - tied to tenant subscription
+    features = models.ManyToManyField(
+        'tenants.Feature',
+        blank=True,
+        related_name='groups',
+        help_text="Features available to members of this group. Controls sidebar visibility and functionality access."
+    )
+
+    # Meta fields
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
@@ -59,25 +44,14 @@ class TenantGroup(models.Model):
     
     def __str__(self):
         return self.name
-    
-    def get_permissions_list(self):
-        """Return a list of permissions this group has"""
-        permissions = []
-        permission_fields = [
-            'can_view_all_tickets', 'can_manage_users', 'can_make_calls', 
-            'can_manage_groups', 'can_manage_settings', 'can_create_tickets',
-            'can_edit_own_tickets', 'can_edit_all_tickets', 'can_delete_tickets',
-            'can_assign_tickets', 'can_view_reports', 'can_export_data',
-            'can_manage_tags', 'can_manage_columns', 'can_view_boards',
-            'can_create_boards', 'can_edit_boards', 'can_delete_boards',
-            'can_access_orders'
-        ]
-        
-        for field in permission_fields:
-            if getattr(self, field, False):
-                permissions.append(field)
-        
-        return permissions
+
+    def get_feature_keys(self):
+        """Return a list of feature keys this group has access to"""
+        return list(self.features.filter(is_active=True).values_list('key', flat=True))
+
+    def has_feature(self, feature_key):
+        """Check if this group has access to a specific feature"""
+        return self.features.filter(key=feature_key, is_active=True).exists()
 
 
 class UserManager(BaseUserManager):
@@ -318,6 +292,50 @@ class User(AbstractBaseUser, PermissionsMixin):
     def get_group_permissions_list(self):
         """Alias for get_group_permissions for consistency"""
         return self.get_group_permissions()
+
+    def has_feature(self, feature_key):
+        """
+        Check if user has access to a specific feature
+
+        Args:
+            feature_key: The feature key string (e.g., 'ticket_management', 'whatsapp_integration')
+
+        Returns:
+            bool: True if user has access to the feature
+
+        Logic:
+            - Superadmins (is_staff=True or is_superuser=True) have access to ALL features
+            - Regular users have access based on their group's features
+        """
+        # Superadmins have access to everything
+        if self.is_staff or self.is_superuser:
+            return True
+
+        # Check if any of the user's groups have this feature
+        return self.tenant_groups.filter(
+            is_active=True,
+            features__key=feature_key,
+            features__is_active=True
+        ).exists()
+
+    def get_feature_keys(self):
+        """
+        Get all feature keys this user has access to
+
+        Returns:
+            list: List of feature keys the user can access
+        """
+        # Superadmins get all active features
+        if self.is_staff or self.is_superuser:
+            from tenants.feature_models import Feature
+            return list(Feature.objects.filter(is_active=True).values_list('key', flat=True))
+
+        # Get unique feature keys from all active groups
+        feature_keys = set()
+        for group in self.tenant_groups.filter(is_active=True):
+            feature_keys.update(group.get_feature_keys())
+
+        return list(feature_keys)
 
     def get_all_permissions_dict(self):
         """Get all permissions as a dictionary with categories"""

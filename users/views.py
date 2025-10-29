@@ -392,16 +392,75 @@ class TenantGroupViewSet(viewsets.ModelViewSet):
         """Get all members of this tenant group"""
         tenant_group = self.get_object()
         members = tenant_group.members.all()
-        
+
         # Use the UserSerializer to return user data
         from .serializers import UserSerializer
         serializer = UserSerializer(members, many=True)
-        
+
         return Response({
             'count': len(members),
             'group': tenant_group.name,
             'members': serializer.data
         })
+
+    @action(detail=False, methods=['get'])
+    def available_features(self, request):
+        """Get all available features that can be assigned to groups based on tenant's subscription"""
+        from tenants.models import Tenant
+        from tenants.feature_models import TenantFeature, Feature
+        from tenants.serializers import FeatureSerializer
+        from django_tenants.utils import schema_context, get_tenant_model
+
+        # Get current tenant's available features
+        try:
+            # Get tenant from request
+            tenant = request.tenant if hasattr(request, 'tenant') else None
+
+            if tenant and hasattr(tenant, 'schema_name') and tenant.schema_name != 'public':
+                # Get features available to this tenant through their subscription
+                tenant_features = TenantFeature.objects.filter(
+                    tenant=tenant,
+                    is_active=True
+                ).select_related('feature').values_list('feature_id', flat=True)
+
+                # Return only the features this tenant has access to
+                features = Feature.objects.filter(id__in=tenant_features, is_active=True)
+            else:
+                # For public schema or no tenant, return all active features
+                features = Feature.objects.filter(is_active=True)
+
+            # Group by category
+            from tenants.feature_models import FeatureCategory
+            categories_dict = {}
+
+            for feature in features:
+                if feature.category not in categories_dict:
+                    categories_dict[feature.category] = {
+                        'category': feature.category,
+                        'category_display': feature.get_category_display(),
+                        'features': []
+                    }
+
+                categories_dict[feature.category]['features'].append({
+                    'id': feature.id,
+                    'key': feature.key,
+                    'name': feature.name,
+                    'description': feature.description,
+                    'icon': feature.icon,
+                    'sort_order': feature.sort_order
+                })
+
+            categories_list = list(categories_dict.values())
+
+            return Response({
+                'categories': categories_list
+            })
+
+        except Exception as e:
+            return Response(
+                {'error': f'Failed to fetch available features: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 class NotificationViewSet(viewsets.ModelViewSet):

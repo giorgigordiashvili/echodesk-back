@@ -5,6 +5,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.contrib.contenttypes.models import ContentType
 from django.utils import timezone
 from .models import Department, TenantGroup, Notification
+from tenants.feature_models import Feature
 
 User = get_user_model()
 
@@ -97,46 +98,74 @@ class GroupCreateSerializer(serializers.ModelSerializer):
         return group
 
 
+class FeatureMinimalSerializer(serializers.ModelSerializer):
+    """Minimal serializer for Feature model"""
+    class Meta:
+        model = Feature
+        fields = ['id', 'key', 'name', 'description', 'category', 'icon']
+
+
 class TenantGroupSerializer(serializers.ModelSerializer):
-    """Serializer for TenantGroup model with custom permissions"""
+    """Serializer for TenantGroup model with feature-based permissions"""
     member_count = serializers.SerializerMethodField()
-    
+    features = FeatureMinimalSerializer(many=True, read_only=True)
+    feature_keys = serializers.SerializerMethodField()
+
     class Meta:
         model = TenantGroup
         fields = [
             'id', 'name', 'description', 'is_active', 'created_at', 'updated_at',
-            'member_count',
-            # Group-level permissions
-            'can_view_all_tickets', 'can_manage_users', 'can_make_calls',
-            'can_manage_groups', 'can_manage_settings', 'can_create_tickets',
-            'can_edit_own_tickets', 'can_edit_all_tickets', 'can_delete_tickets',
-            'can_assign_tickets', 'can_view_reports', 'can_export_data',
-            'can_manage_tags', 'can_manage_columns', 'can_view_boards',
-            'can_create_boards', 'can_edit_boards', 'can_delete_boards',
-            'can_access_orders'
+            'member_count', 'features', 'feature_keys'
         ]
-        read_only_fields = ['created_at', 'updated_at', 'member_count']
-    
+        read_only_fields = ['created_at', 'updated_at', 'member_count', 'feature_keys']
+
     def get_member_count(self, obj):
         return obj.members.count()
+
+    def get_feature_keys(self, obj):
+        """Return list of feature keys for easy checking"""
+        return obj.get_feature_keys()
 
 
 class TenantGroupCreateSerializer(serializers.ModelSerializer):
     """Serializer for creating TenantGroup"""
-    
+    feature_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        write_only=True,
+        required=False,
+        help_text="List of feature IDs to assign to this group"
+    )
+
     class Meta:
         model = TenantGroup
-        fields = [
-            'name', 'description',
-            # Group-level permissions
-            'can_view_all_tickets', 'can_manage_users', 'can_make_calls',
-            'can_manage_groups', 'can_manage_settings', 'can_create_tickets',
-            'can_edit_own_tickets', 'can_edit_all_tickets', 'can_delete_tickets',
-            'can_assign_tickets', 'can_view_reports', 'can_export_data',
-            'can_manage_tags', 'can_manage_columns', 'can_view_boards',
-            'can_create_boards', 'can_edit_boards', 'can_delete_boards',
-            'can_access_orders'
-        ]
+        fields = ['name', 'description', 'feature_ids']
+
+    def create(self, validated_data):
+        feature_ids = validated_data.pop('feature_ids', [])
+        group = TenantGroup.objects.create(**validated_data)
+
+        if feature_ids:
+            from tenants.feature_models import Feature
+            features = Feature.objects.filter(id__in=feature_ids, is_active=True)
+            group.features.set(features)
+
+        return group
+
+    def update(self, instance, validated_data):
+        feature_ids = validated_data.pop('feature_ids', None)
+
+        # Update basic fields
+        instance.name = validated_data.get('name', instance.name)
+        instance.description = validated_data.get('description', instance.description)
+        instance.save()
+
+        # Update features if provided
+        if feature_ids is not None:
+            from tenants.feature_models import Feature
+            features = Feature.objects.filter(id__in=feature_ids, is_active=True)
+            instance.features.set(features)
+
+        return instance
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -145,6 +174,7 @@ class UserSerializer(serializers.ModelSerializer):
     permissions = serializers.SerializerMethodField()
     group_permissions = serializers.SerializerMethodField()
     all_permissions = serializers.SerializerMethodField()
+    feature_keys = serializers.SerializerMethodField()
     groups = GroupSerializer(many=True, read_only=True)
     tenant_groups = TenantGroupSerializer(many=True, read_only=True)
     department = DepartmentSerializer(read_only=True)
@@ -167,26 +197,30 @@ class UserSerializer(serializers.ModelSerializer):
         required=False,
         help_text="List of permission IDs to assign directly to this user"
     )
-    
+
     class Meta:
         model = User
         fields = [
             'id', 'email', 'first_name', 'last_name', 'full_name',
             'role', 'status', 'phone_number', 'job_title', 'department', 'department_id',
             'is_active', 'is_staff', 'date_joined', 'last_login',
-            'permissions', 'group_permissions', 'all_permissions',
+            'permissions', 'group_permissions', 'all_permissions', 'feature_keys',
             'groups', 'group_ids', 'tenant_groups', 'tenant_group_ids', 'user_permission_ids'
         ]
-        read_only_fields = ['id', 'date_joined', 'last_login']
-    
+        read_only_fields = ['id', 'date_joined', 'last_login', 'feature_keys']
+
     def get_permissions(self, obj):
         """Get user's direct permissions"""
         return obj.get_user_permissions_list()
-    
+
     def get_group_permissions(self, obj):
         """Get permissions from groups"""
         return obj.get_group_permissions_list()
-    
+
+    def get_feature_keys(self, obj):
+        """Get all feature keys this user has access to"""
+        return obj.get_feature_keys()
+
     def get_all_permissions(self, obj):
         """Get all permissions (user + group) as a dictionary"""
         return obj.get_all_permissions_dict()
