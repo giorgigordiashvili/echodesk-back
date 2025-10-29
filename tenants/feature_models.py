@@ -23,6 +23,9 @@ class Feature(models.Model):
 
     Features can be enabled/disabled for packages and control what
     functionality tenants have access to.
+
+    For custom packages, features have individual prices that are summed
+    to calculate the total package price.
     """
     # Identification
     key = models.CharField(
@@ -44,6 +47,20 @@ class Feature(models.Model):
         max_length=20,
         choices=FeatureCategory.choices,
         default=FeatureCategory.CORE
+    )
+
+    # Pricing (for custom packages)
+    price_per_user_gel = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        help_text="Price per user in Georgian Lari (for per-user pricing)"
+    )
+    price_unlimited_gel = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        help_text="Price for unlimited users in Georgian Lari (flat rate)"
     )
 
     # Display

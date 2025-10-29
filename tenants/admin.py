@@ -545,7 +545,8 @@ class FeaturePermissionInline(admin.TabularInline):
 class FeatureAdmin(admin.ModelAdmin):
     """Admin interface for Feature model"""
     list_display = [
-        'name', 'key', 'category', 'icon_display', 'sort_order', 'is_active', 'created_at'
+        'name', 'key', 'category', 'price_per_user_gel', 'price_unlimited_gel',
+        'icon_display', 'sort_order', 'is_active', 'created_at'
     ]
     list_filter = ['category', 'is_active', 'created_at']
     search_fields = ['key', 'name', 'description']
@@ -555,6 +556,10 @@ class FeatureAdmin(admin.ModelAdmin):
     fieldsets = (
         ('Basic Information', {
             'fields': ('key', 'name', 'description')
+        }),
+        ('Pricing for Custom Packages', {
+            'fields': ('price_per_user_gel', 'price_unlimited_gel'),
+            'description': 'Agent-based uses per-user price, CRM-based uses unlimited price (with 10% discount)'
         }),
         ('Categorization & Display', {
             'fields': ('category', 'icon', 'sort_order')

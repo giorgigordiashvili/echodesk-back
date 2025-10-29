@@ -8,7 +8,7 @@ from .views import (
 )
 from .package_views import (
     PackageViewSet, list_packages_by_model, calculate_pricing, get_package_features,
-    get_my_subscription
+    get_my_subscription, calculate_custom_package_price, list_available_features
 )
 from .payment_views import (
     create_subscription_payment, check_payment_status, bog_webhook, cancel_subscription,
@@ -42,6 +42,8 @@ urlpatterns = [
     path('api/packages/', include([
         path('by-model/', list_packages_by_model, name='list_packages_by_model'),
         path('calculate-pricing/', calculate_pricing, name='calculate_pricing'),
+        path('calculate-custom-price/', calculate_custom_package_price, name='calculate_custom_package_price'),
+        path('available-features/', list_available_features, name='list_available_features'),
         path('<int:package_id>/features/', get_package_features, name='get_package_features'),
     ])),
 

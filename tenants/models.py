@@ -64,8 +64,9 @@ class Package(models.Model):
     # Display settings
     is_highlighted = models.BooleanField(default=False, help_text="Show as featured/recommended")
     is_active = models.BooleanField(default=True)
+    is_custom = models.BooleanField(default=False, help_text="Custom package created for specific tenant")
     sort_order = models.IntegerField(default=0)
-    
+
     # Metadata
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -133,6 +134,40 @@ class Package(models.Model):
     def has_feature(self, feature_key):
         """Check if package has a specific feature by key"""
         return self.package_features.filter(feature__key=feature_key, feature__is_active=True).exists()
+
+    def calculate_custom_price(self, user_count=None):
+        """
+        Calculate price for custom package based on selected features
+
+        For agent-based (per-user): sum of (feature.price_per_user_gel * user_count)
+        For CRM-based (unlimited): sum of feature.price_unlimited_gel - 10% discount
+
+        Args:
+            user_count: Number of users for agent-based pricing (overrides max_users)
+        """
+        if not self.is_custom:
+            return self.price_gel
+
+        total = 0
+        package_features = self.package_features.filter(feature__is_active=True).select_related('feature')
+
+        for pf in package_features:
+            feature = pf.feature
+
+            # Agent-based: per-user pricing
+            if self.pricing_model == PricingModel.AGENT_BASED:
+                users = user_count if user_count is not None else (self.max_users or 1)
+                total += feature.price_per_user_gel * users
+
+            # CRM-based: unlimited pricing with 10% discount
+            else:
+                total += feature.price_unlimited_gel
+
+        # Apply 10% discount for CRM-based packages
+        if self.pricing_model == PricingModel.CRM_BASED:
+            total = total * 0.9  # 10% discount
+
+        return total
 
 
 class Tenant(TenantMixin):

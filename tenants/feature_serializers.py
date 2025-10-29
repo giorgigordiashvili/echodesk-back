@@ -39,8 +39,8 @@ class FeatureSerializer(serializers.ModelSerializer):
         model = Feature
         fields = [
             'id', 'key', 'name', 'description', 'category', 'category_display',
-            'icon', 'sort_order', 'is_active', 'permissions',
-            'created_at', 'updated_at'
+            'icon', 'price_per_user_gel', 'price_unlimited_gel', 'sort_order',
+            'is_active', 'permissions', 'created_at', 'updated_at'
         ]
         read_only_fields = ['created_at', 'updated_at']
 

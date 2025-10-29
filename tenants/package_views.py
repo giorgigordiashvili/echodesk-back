@@ -1,9 +1,10 @@
 from rest_framework import viewsets, status
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, action
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from drf_spectacular.utils import extend_schema, OpenApiResponse
-from .models import Package, TenantSubscription, PricingModel
+from django.db import transaction
+from .models import Package, TenantSubscription, PricingModel, PackageFeature, Feature
 from .package_serializers import PackageSerializer, PackageListSerializer, TenantSubscriptionSerializer
 from .permissions import get_subscription_info
 
@@ -278,3 +279,223 @@ def get_my_subscription(request):
         )
 
     return Response(subscription_info)
+
+
+@extend_schema(
+    operation_id='calculate_custom_package_price',
+    summary='Calculate Custom Package Price',
+    description='Calculate total price based on selected features',
+    request={
+        'application/json': {
+            'type': 'object',
+            'properties': {
+                'feature_ids': {
+                    'type': 'array',
+                    'items': {'type': 'integer'},
+                    'description': 'Array of feature IDs to include in custom package'
+                }
+            },
+            'required': ['feature_ids']
+        }
+    },
+    responses={
+        200: OpenApiResponse(
+            description='Calculated price',
+            response={
+                'type': 'object',
+                'properties': {
+                    'features': {
+                        'type': 'array',
+                        'items': {
+                            'type': 'object',
+                            'properties': {
+                                'id': {'type': 'integer'},
+                                'name': {'type': 'string'},
+                                'price_gel': {'type': 'string'}
+                            }
+                        }
+                    },
+                    'total_price': {'type': 'string'},
+                    'currency': {'type': 'string'}
+                }
+            }
+        ),
+        400: OpenApiResponse(description='Invalid feature IDs')
+    },
+    tags=['Packages']
+)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def calculate_custom_package_price(request):
+    """
+    Calculate price for a custom package based on selected features
+
+    POST /api/packages/calculate-custom-price/
+    Body: {
+        "feature_ids": [1, 2, 3],
+        "pricing_model": "agent" or "crm",  // Required
+        "user_count": 10,  // Required for agent-based
+        "max_users": 50  // Required for CRM-based (to set limits)
+    }
+    """
+    feature_ids = request.data.get('feature_ids', [])
+    pricing_model = request.data.get('pricing_model')  # 'agent' or 'crm'
+    user_count = request.data.get('user_count')  # For agent-based
+    max_users = request.data.get('max_users')  # For CRM-based limits
+
+    if not feature_ids or not isinstance(feature_ids, list):
+        return Response({
+            'error': 'feature_ids must be a non-empty array'
+        }, status=400)
+
+    if pricing_model not in ['agent', 'crm']:
+        return Response({
+            'error': 'pricing_model must be either "agent" or "crm"'
+        }, status=400)
+
+    # Get features
+    features = Feature.objects.filter(
+        id__in=feature_ids,
+        is_active=True
+    )
+
+    if not features.exists():
+        return Response({
+            'error': 'No valid features found'
+        }, status=400)
+
+    # Calculate total based on pricing model
+    subtotal = 0
+    features_data = []
+
+    for feature in features:
+        # Agent-based: per-user pricing
+        if pricing_model == 'agent':
+            if not user_count:
+                return Response({
+                    'error': 'user_count is required for agent-based pricing'
+                }, status=400)
+            feature_price = feature.price_per_user_gel * user_count
+            pricing_type = 'per_user'
+
+        # CRM-based: unlimited pricing
+        else:
+            feature_price = feature.price_unlimited_gel
+            pricing_type = 'unlimited'
+
+        subtotal += feature_price
+
+        features_data.append({
+            'id': feature.id,
+            'key': feature.key,
+            'name': feature.name,
+            'description': feature.description,
+            'category': feature.category,
+            'category_display': feature.get_category_display(),
+            'icon': feature.icon,
+            'price_per_user_gel': str(feature.price_per_user_gel),
+            'price_unlimited_gel': str(feature.price_unlimited_gel),
+            'calculated_price': str(feature_price),
+            'pricing_type': pricing_type
+        })
+
+    # Apply 10% discount for CRM-based
+    discount = 0
+    if pricing_model == 'crm':
+        discount = subtotal * 0.1
+        total_price = subtotal - discount
+    else:
+        total_price = subtotal
+
+    return Response({
+        'features': features_data,
+        'subtotal': str(subtotal),
+        'discount': str(discount) if discount > 0 else '0',
+        'discount_percentage': '10' if discount > 0 else '0',
+        'total_price': str(total_price),
+        'pricing_model': pricing_model,
+        'user_count': user_count if pricing_model == 'agent' else None,
+        'max_users': max_users if pricing_model == 'crm' else None,
+        'currency': 'GEL'
+    })
+
+
+@extend_schema(
+    operation_id='list_available_features',
+    summary='List Available Features for Custom Package',
+    description='Get all available features with prices for building custom packages',
+    responses={
+        200: OpenApiResponse(
+            description='List of available features grouped by category',
+            response={
+                'type': 'object',
+                'properties': {
+                    'categories': {
+                        'type': 'array',
+                        'items': {
+                            'type': 'object',
+                            'properties': {
+                                'category': {'type': 'string'},
+                                'category_display': {'type': 'string'},
+                                'features': {
+                                    'type': 'array',
+                                    'items': {
+                                        'type': 'object',
+                                        'properties': {
+                                            'id': {'type': 'integer'},
+                                            'key': {'type': 'string'},
+                                            'name': {'type': 'string'},
+                                            'description': {'type': 'string'},
+                                            'icon': {'type': 'string'},
+                                            'price_gel': {'type': 'string'}
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        )
+    },
+    tags=['Packages']
+)
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def list_available_features(request):
+    """
+    List all available features for building custom packages
+
+    Features are grouped by category
+    """
+    from .feature_models import FeatureCategory
+
+    features = Feature.objects.filter(is_active=True).order_by('category', 'sort_order', 'name')
+
+    # Group by category
+    categories_dict = {}
+    for feature in features:
+        if feature.category not in categories_dict:
+            categories_dict[feature.category] = {
+                'category': feature.category,
+                'category_display': feature.get_category_display(),
+                'features': []
+            }
+
+        categories_dict[feature.category]['features'].append({
+            'id': feature.id,
+            'key': feature.key,
+            'name': feature.name,
+            'description': feature.description,
+            'icon': feature.icon,
+            'price_per_user_gel': str(feature.price_per_user_gel),
+            'price_unlimited_gel': str(feature.price_unlimited_gel),
+            'sort_order': feature.sort_order
+        })
+
+    # Convert to list
+    categories_list = list(categories_dict.values())
+
+    return Response({
+        'categories': categories_list
+    })
