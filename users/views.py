@@ -408,7 +408,6 @@ class TenantGroupViewSet(viewsets.ModelViewSet):
         """Get all available features that can be assigned to groups based on tenant's subscription"""
         from tenants.models import Tenant
         from tenants.feature_models import TenantFeature, Feature
-        from django_tenants.utils import schema_context, get_tenant_model
 
         # Get current tenant's available features
         try:
