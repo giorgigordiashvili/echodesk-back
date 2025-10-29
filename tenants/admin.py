@@ -37,36 +37,37 @@ class PackageAdmin(admin.ModelAdmin):
     list_filter = ['pricing_model', 'is_active', 'is_highlighted', 'is_custom']
     search_fields = ['name', 'display_name', 'description']
     ordering = ['pricing_model', 'sort_order', 'price_gel']
-    filter_horizontal = ['package_features_list']
 
-    fieldsets = (
-        ('Basic Information', {
-            'fields': ('name', 'display_name', 'description', 'pricing_model', 'is_custom')
-        }),
-        ('Features', {
-            'fields': ('package_features_list',),
-            'description': 'Select features that this package includes'
-        }),
-        ('Pricing', {
-            'fields': ('price_gel', 'billing_period')
-        }),
-        ('Limits', {
-            'fields': ('max_users', 'max_whatsapp_messages', 'max_storage_gb')
-        }),
-        ('Legacy Features (deprecated - use Dynamic Features above)', {
-            'fields': (
-                'ticket_management', 'email_integration', 'sip_calling',
-                'facebook_integration', 'instagram_integration', 'whatsapp_integration',
-                'advanced_analytics', 'api_access', 'custom_integrations',
-                'priority_support', 'dedicated_account_manager'
-            ),
-            'classes': ['collapse'],
-            'description': 'Legacy boolean features - use Dynamic Features system instead'
-        }),
-        ('Display Settings', {
-            'fields': ('is_highlighted', 'is_active', 'sort_order')
-        })
-    )
+    def get_fieldsets(self, request, obj=None):
+        """Dynamic fieldsets to include features field"""
+        return (
+            ('Basic Information', {
+                'fields': ('name', 'display_name', 'description', 'pricing_model', 'is_custom')
+            }),
+            ('Features', {
+                'fields': ('package_features_list',),
+                'description': 'Select features that this package includes'
+            }),
+            ('Pricing', {
+                'fields': ('price_gel', 'billing_period')
+            }),
+            ('Limits', {
+                'fields': ('max_users', 'max_whatsapp_messages', 'max_storage_gb')
+            }),
+            ('Legacy Features (deprecated - use Dynamic Features above)', {
+                'fields': (
+                    'ticket_management', 'email_integration', 'sip_calling',
+                    'facebook_integration', 'instagram_integration', 'whatsapp_integration',
+                    'advanced_analytics', 'api_access', 'custom_integrations',
+                    'priority_support', 'dedicated_account_manager'
+                ),
+                'classes': ['collapse'],
+                'description': 'Legacy boolean features - use Dynamic Features system instead'
+            }),
+            ('Display Settings', {
+                'fields': ('is_highlighted', 'is_active', 'sort_order')
+            })
+        )
 
     def get_queryset(self, request):
         return super().get_queryset(request).select_related()
@@ -604,33 +605,36 @@ class FeatureAdmin(admin.ModelAdmin):
     list_filter = ['category', 'is_active', 'created_at']
     search_fields = ['key', 'name', 'description']
     ordering = ['category', 'sort_order', 'name']
-    filter_horizontal = ['feature_permissions']
 
-    fieldsets = (
-        ('Basic Information', {
-            'fields': ('key', 'name', 'description')
-        }),
-        ('Permissions', {
-            'fields': ('feature_permissions',),
-            'description': 'Select permissions that will be granted when this feature is enabled'
-        }),
-        ('Pricing for Custom Packages', {
-            'fields': ('price_per_user_gel', 'price_unlimited_gel'),
-            'description': 'Agent-based uses per-user price, CRM-based uses unlimited price (with 10% discount)'
-        }),
-        ('Categorization & Display', {
-            'fields': ('category', 'icon', 'sort_order')
-        }),
-        ('Status', {
-            'fields': ('is_active',)
-        }),
-        ('Metadata', {
-            'fields': ('created_at', 'updated_at'),
-            'classes': ['collapse']
-        })
-    )
+    def get_fieldsets(self, request, obj=None):
+        """Dynamic fieldsets to include permissions field"""
+        return (
+            ('Basic Information', {
+                'fields': ('key', 'name', 'description')
+            }),
+            ('Permissions', {
+                'fields': ('feature_permissions',),
+                'description': 'Select permissions that will be granted when this feature is enabled'
+            }),
+            ('Pricing for Custom Packages', {
+                'fields': ('price_per_user_gel', 'price_unlimited_gel'),
+                'description': 'Agent-based uses per-user price, CRM-based uses unlimited price (with 10% discount)'
+            }),
+            ('Categorization & Display', {
+                'fields': ('category', 'icon', 'sort_order')
+            }),
+            ('Status', {
+                'fields': ('is_active',)
+            }),
+            ('Metadata', {
+                'fields': ('created_at', 'updated_at'),
+                'classes': ['collapse']
+            })
+        )
 
-    readonly_fields = ['created_at', 'updated_at']
+    def get_readonly_fields(self, request, obj=None):
+        """Dynamic readonly fields"""
+        return ['created_at', 'updated_at']
 
     @admin.display(description='Icon')
     def icon_display(self, obj):
