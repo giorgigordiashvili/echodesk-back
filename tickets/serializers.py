@@ -451,6 +451,9 @@ class TicketSerializer(serializers.ModelSerializer):
     # Form submissions field - returns all form submissions for this ticket
     form_submissions = serializers.SerializerMethodField(read_only=True)
 
+    # Attachments field - returns all attachments for this ticket
+    attachments = serializers.SerializerMethodField(read_only=True)
+
     class Meta:
         model = Ticket
         fields = [
@@ -464,7 +467,8 @@ class TicketSerializer(serializers.ModelSerializer):
             'sub_tickets', 'sub_tickets_count', 'completed_sub_tickets_count',
             'checklist_items', 'checklist_items_count', 'completed_checklist_items_count',
             'price', 'currency', 'is_paid', 'amount_paid', 'payment_due_date',
-            'payments', 'remaining_balance', 'payment_status', 'is_overdue', 'form_submissions'
+            'payments', 'remaining_balance', 'payment_status', 'is_overdue', 'form_submissions',
+            'attachments'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'created_by', 'status', 'is_closed']
 
@@ -494,6 +498,11 @@ class TicketSerializer(serializers.ModelSerializer):
         if submissions.exists():
             return TicketFormSubmissionSerializer(submissions, many=True, context=self.context).data
         return []
+
+    def get_attachments(self, obj):
+        """Get all attachments for this ticket."""
+        attachments = obj.attachments.all().order_by('-uploaded_at')
+        return TicketAttachmentSerializer(attachments, many=True, context=self.context).data
 
     def create(self, validated_data):
         tag_ids = validated_data.pop('tag_ids', [])
