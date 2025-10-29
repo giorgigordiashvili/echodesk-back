@@ -68,7 +68,30 @@ class EmailService:
                 return False
 
         except Exception as e:
-            logger.error(f"Error sending email to {to_email}: {str(e)}")
+            error_details = str(e)
+
+            # Extract more details from SendGrid errors
+            if hasattr(e, 'body'):
+                try:
+                    import json
+                    error_body = json.loads(e.body) if isinstance(e.body, (str, bytes)) else e.body
+                    error_details = f"{error_details} - Details: {error_body}"
+                except:
+                    pass
+
+            logger.error(f"Error sending email to {to_email}: {error_details}")
+
+            # Log helpful hints for common errors
+            if '403' in error_details or 'Forbidden' in error_details:
+                logger.error(
+                    "SendGrid 403 Error - Possible causes:\n"
+                    "1. API Key doesn't have 'Mail Send' permission\n"
+                    "2. Sender email not verified in SendGrid\n"
+                    "3. API Key is invalid or expired\n"
+                    f"Current from_email: {self.from_email}\n"
+                    "Fix: Verify sender at https://app.sendgrid.com/settings/sender_auth"
+                )
+
             return False
 
     def send_tenant_created_email(
