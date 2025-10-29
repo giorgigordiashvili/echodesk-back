@@ -211,6 +211,16 @@ class Tenant(TenantMixin):
     # Branding
     logo = models.ImageField(upload_to='tenant_logos/', blank=True, null=True, help_text="Company logo")
 
+    # Ticket settings
+    min_users_per_ticket = models.IntegerField(
+        default=0,
+        help_text="Minimum number of users required on a ticket after initial assignment. 0 = no minimum. Only superadmins can reduce below this number."
+    )
+    only_superadmin_can_delete_tickets = models.BooleanField(
+        default=False,
+        help_text="If True, only superadmins can delete tickets. If False, both ticket owners and superadmins can delete tickets."
+    )
+
     # Frontend deployment fields
     frontend_url = models.URLField(blank=True, null=True, help_text="URL of the deployed frontend")
     deployment_status = models.CharField(

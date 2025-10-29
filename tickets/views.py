@@ -342,7 +342,7 @@ class TicketViewSet(viewsets.ModelViewSet):
         """Create a ticket and start time tracking if applicable."""
         # Set the user who created the ticket
         ticket = serializer.save(created_by=self.request.user)
-        
+
         # If the assigned column has time tracking enabled, create initial time log
         if ticket.column and ticket.column.track_time:
             TicketTimeLog.objects.create(
@@ -350,6 +350,32 @@ class TicketViewSet(viewsets.ModelViewSet):
                 column=ticket.column,
                 user=self.request.user
             )
+
+    def destroy(self, request, *args, **kwargs):
+        """Delete a ticket with permission check based on tenant settings."""
+        from django.db import connection
+        from tenants.models import Tenant
+
+        ticket = self.get_object()
+        tenant = Tenant.objects.get(schema_name=connection.schema_name)
+
+        # Check if only superadmin can delete tickets
+        if tenant.only_superadmin_can_delete_tickets:
+            # Only superadmin can delete
+            if not request.user.is_staff:
+                return Response(
+                    {'error': 'Only superadmins can delete tickets based on tenant settings.'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+        else:
+            # Both ticket owner and superadmin can delete
+            if not request.user.is_staff and ticket.created_by != request.user:
+                return Response(
+                    {'error': 'Only the ticket owner or superadmins can delete this ticket.'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+        return super().destroy(request, *args, **kwargs)
 
     @action(detail=True, methods=['post'])
     def add_comment(self, request, pk=None):

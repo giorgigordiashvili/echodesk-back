@@ -607,6 +607,30 @@ class TicketSerializer(serializers.ModelSerializer):
 
         # Handle multiple user assignments update
         if assigned_user_ids is not None:
+            # Check minimum users requirement
+            from django.db import connection
+            from tenants.models import Tenant
+
+            tenant = Tenant.objects.get(schema_name=connection.schema_name)
+            min_users_required = tenant.min_users_per_ticket
+
+            # Get current assignment count
+            current_assignment_count = ticket.assigned_users.count()
+            new_assignment_count = len(assigned_user_ids)
+
+            # Only enforce minimum if:
+            # 1. There's a minimum set (> 0)
+            # 2. Current count is >= minimum (i.e., we've already reached the threshold)
+            # 3. User is not superadmin
+            # 4. New count would be less than minimum
+            if (min_users_required > 0 and
+                current_assignment_count >= min_users_required and
+                not current_user.is_staff and
+                new_assignment_count < min_users_required):
+                raise serializers.ValidationError({
+                    'assigned_user_ids': f'Cannot reduce assigned users below {min_users_required}. Only superadmins can do this.'
+                })
+
             # Clear existing assignments
             TicketAssignment.objects.filter(ticket=ticket).delete()
 
