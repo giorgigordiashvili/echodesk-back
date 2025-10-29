@@ -1108,3 +1108,74 @@ class TicketAttachment(models.Model):
 
     def __str__(self):
         return f'{self.filename} - {self.ticket.title}'
+
+
+class TicketHistory(models.Model):
+    """Track all changes made to a ticket."""
+    ACTION_CHOICES = [
+        ('created', 'Created'),
+        ('updated', 'Updated'),
+        ('status_changed', 'Status Changed'),
+        ('assigned', 'Assigned'),
+        ('unassigned', 'Unassigned'),
+        ('priority_changed', 'Priority Changed'),
+        ('comment_added', 'Comment Added'),
+        ('tag_added', 'Tag Added'),
+        ('tag_removed', 'Tag Removed'),
+        ('attachment_added', 'Attachment Added'),
+        ('attachment_removed', 'Attachment Removed'),
+        ('checklist_updated', 'Checklist Updated'),
+        ('subticket_added', 'Sub-ticket Added'),
+        ('subticket_removed', 'Sub-ticket Removed'),
+        ('form_submitted', 'Form Submitted'),
+        ('transferred', 'Transferred to Another Board'),
+        ('due_date_changed', 'Due Date Changed'),
+    ]
+
+    ticket = models.ForeignKey(
+        'Ticket',
+        on_delete=models.CASCADE,
+        related_name='history',
+        help_text='Ticket this history entry belongs to'
+    )
+    action = models.CharField(
+        max_length=50,
+        choices=ACTION_CHOICES,
+        help_text='Type of action performed'
+    )
+    field_name = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text='Name of the field that was changed (for updates)'
+    )
+    old_value = models.TextField(
+        blank=True,
+        help_text='Previous value (JSON serialized for complex types)'
+    )
+    new_value = models.TextField(
+        blank=True,
+        help_text='New value (JSON serialized for complex types)'
+    )
+    description = models.TextField(
+        blank=True,
+        help_text='Human-readable description of the change'
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='ticket_history',
+        help_text='User who performed the action'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Ticket History'
+        verbose_name_plural = 'Ticket Histories'
+        indexes = [
+            models.Index(fields=['ticket', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f'{self.ticket.title} - {self.action} - {self.created_at}'

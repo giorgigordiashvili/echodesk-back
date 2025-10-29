@@ -10,7 +10,7 @@ import csv
 from decimal import Decimal
 from .models import (
     Ticket, Tag, TicketComment, TicketColumn, SubTicket, ChecklistItem, Board, TicketTimeLog, TicketPayment,
-    ItemList, ListItem, TicketForm, TicketFormSubmission, TicketAttachment
+    ItemList, ListItem, TicketForm, TicketFormSubmission, TicketAttachment, TicketHistory
 )
 
 
@@ -1157,3 +1157,40 @@ class TicketAttachmentAdmin(admin.ModelAdmin):
         if not change:
             obj.uploaded_by = request.user
         super().save_model(request, obj, form, change)
+
+
+@admin.register(TicketHistory)
+class TicketHistoryAdmin(admin.ModelAdmin):
+    """Admin for ticket history entries."""
+    list_display = ('ticket_link', 'action', 'field_name', 'user', 'created_at')
+    list_filter = ('action', 'created_at')
+    search_fields = ('ticket__title', 'description', 'user__email')
+    readonly_fields = ('ticket', 'action', 'field_name', 'old_value', 'new_value', 'description', 'user', 'created_at')
+    ordering = ('-created_at',)
+
+    fieldsets = (
+        ('History Entry', {
+            'fields': ('ticket', 'action', 'field_name', 'user', 'created_at')
+        }),
+        ('Changes', {
+            'fields': ('old_value', 'new_value', 'description')
+        }),
+    )
+
+    def ticket_link(self, obj):
+        """Display clickable link to ticket."""
+        if obj.ticket:
+            return format_html(
+                '<a href="/admin/tickets/ticket/{}/change/">{}</a>',
+                obj.ticket.id, obj.ticket.title
+            )
+        return '-'
+    ticket_link.short_description = 'Ticket'
+
+    def has_add_permission(self, request):
+        """Don't allow manual creation of history entries."""
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        """Don't allow editing history entries."""
+        return False

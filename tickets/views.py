@@ -21,7 +21,7 @@ from .serializers import (
     TimeTrackingSummarySerializer, BoardSerializer, TicketPaymentSerializer,
     ItemListSerializer, ItemListMinimalSerializer, ListItemSerializer, ListItemMinimalSerializer,
     TicketFormSerializer, TicketFormMinimalSerializer, TicketFormSubmissionSerializer,
-    TicketAttachmentSerializer
+    TicketAttachmentSerializer, TicketHistorySerializer
 )
 
 
@@ -598,6 +598,14 @@ class TicketViewSet(viewsets.ModelViewSet):
             ticket.save()
         
         serializer = self.get_serializer(ticket)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['get'], permission_classes=[permissions.IsAuthenticated])
+    def history(self, request, pk=None):
+        """Get the complete history of changes for a ticket."""
+        ticket = self.get_object()
+        history_entries = ticket.history.all().select_related('user')
+        serializer = TicketHistorySerializer(history_entries, many=True)
         return Response(serializer.data)
 
 

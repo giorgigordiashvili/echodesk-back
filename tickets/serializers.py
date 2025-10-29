@@ -3,7 +3,7 @@ from django.contrib.auth import get_user_model
 from .models import (
     Ticket, Tag, TicketComment, TicketColumn, SubTicket, ChecklistItem,
     TicketAssignment, SubTicketAssignment, TicketTimeLog, Board, TicketPayment,
-    ItemList, ListItem, TicketForm, TicketFormSubmission, TicketAttachment
+    ItemList, ListItem, TicketForm, TicketFormSubmission, TicketAttachment, TicketHistory
 )
 from users.models import TenantGroup, Department
 
@@ -1018,3 +1018,17 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
             validated_data['content_type'] = file.content_type or ''
         validated_data['uploaded_by'] = self.context['request'].user
         return super().create(validated_data)
+
+
+class TicketHistorySerializer(serializers.ModelSerializer):
+    """Serializer for ticket history entries."""
+    user = UserMinimalSerializer(read_only=True)
+
+    class Meta:
+        model = TicketHistory
+        fields = [
+            'id', 'ticket', 'action', 'field_name', 'old_value',
+            'new_value', 'description', 'user', 'created_at'
+        ]
+        read_only_fields = ['id', 'ticket', 'action', 'field_name', 'old_value',
+                           'new_value', 'description', 'user', 'created_at']
