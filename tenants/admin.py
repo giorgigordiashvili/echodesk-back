@@ -611,36 +611,29 @@ class FeatureAdmin(admin.ModelAdmin):
     list_filter = ['category', 'is_active', 'created_at']
     search_fields = ['key', 'name', 'description']
     ordering = ['category', 'sort_order', 'name']
+    inlines = [FeaturePermissionInline]
 
-    def get_fieldsets(self, request, obj=None):
-        """Dynamic fieldsets to include permissions field"""
-        return (
-            ('Basic Information', {
-                'fields': ('key', 'name', 'description')
-            }),
-            ('Permissions', {
-                'fields': ('feature_permissions',),
-                'description': 'Select permissions that will be granted when this feature is enabled'
-            }),
-            ('Pricing for Custom Packages', {
-                'fields': ('price_per_user_gel', 'price_unlimited_gel'),
-                'description': 'Agent-based uses per-user price, CRM-based uses unlimited price (with 10% discount)'
-            }),
-            ('Categorization & Display', {
-                'fields': ('category', 'icon', 'sort_order')
-            }),
-            ('Status', {
-                'fields': ('is_active',)
-            }),
-            ('Metadata', {
-                'fields': ('created_at', 'updated_at'),
-                'classes': ['collapse']
-            })
-        )
+    fieldsets = (
+        ('Basic Information', {
+            'fields': ('key', 'name', 'description')
+        }),
+        ('Pricing for Custom Packages', {
+            'fields': ('price_per_user_gel', 'price_unlimited_gel'),
+            'description': 'Agent-based uses per-user price, CRM-based uses unlimited price (with 10% discount)'
+        }),
+        ('Categorization & Display', {
+            'fields': ('category', 'icon', 'sort_order')
+        }),
+        ('Status', {
+            'fields': ('is_active',)
+        }),
+        ('Metadata', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ['collapse']
+        })
+    )
 
-    def get_readonly_fields(self, request, obj=None):
-        """Dynamic readonly fields"""
-        return ['created_at', 'updated_at']
+    readonly_fields = ['created_at', 'updated_at']
 
     @admin.display(description='Icon')
     def icon_display(self, obj):
@@ -654,53 +647,6 @@ class FeatureAdmin(admin.ModelAdmin):
         """Display count of permissions"""
         count = obj.permissions.count()
         return f"{count} permission{'s' if count != 1 else ''}"
-
-    def save_model(self, request, obj, form, change):
-        """Save the feature and update permissions"""
-        super().save_model(request, obj, form, change)
-
-        # Get the selected permissions from the form
-        if 'feature_permissions' in form.cleaned_data:
-            selected_permissions = form.cleaned_data['feature_permissions']
-
-            # Remove existing FeaturePermission links
-            obj.permissions.all().delete()
-
-            # Create new FeaturePermission links
-            for permission in selected_permissions:
-                FeaturePermission.objects.create(
-                    feature=obj,
-                    permission=permission,
-                    is_required=True
-                )
-
-    def get_form(self, request, obj=None, **kwargs):
-        """Customize the form"""
-        # Prepare the fields list - exclude feature_permissions since we'll add it manually
-        if 'fields' not in kwargs:
-            kwargs['fields'] = None
-
-        # Get the form
-        form = super().get_form(request, obj, **kwargs)
-
-        # Add a custom field for permissions AFTER form is created
-        initial_permissions = []
-        if obj:
-            # Get currently linked permissions
-            initial_permissions = list(Permission.objects.filter(
-                features__feature=obj
-            ).values_list('id', flat=True))
-
-        # Add the field to the form
-        form.base_fields['feature_permissions'] = forms.ModelMultipleChoiceField(
-            queryset=Permission.objects.filter(is_active=True).order_by('module', 'name'),
-            required=False,
-            initial=initial_permissions,
-            widget=admin.widgets.FilteredSelectMultiple('Permissions', False),
-            help_text='Select permissions that this feature will grant'
-        )
-
-        return form
 
 
 class FeaturePermissionInlineForPermission(admin.TabularInline):
