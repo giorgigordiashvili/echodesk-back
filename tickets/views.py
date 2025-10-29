@@ -1043,23 +1043,10 @@ class BoardViewSet(viewsets.ModelViewSet):
         # 3. User's group is attached via board_groups
         group_attached = Q(board_groups__in=user_groups) if user_groups.exists() else Q(pk__in=[])
 
-        # 4. Board has no attachments (open to all with permissions)
-        # Use subqueries to avoid annotation conflicts
-        has_order_users = Board.order_users.through.objects.filter(
-            board_id=OuterRef('pk')
-        )
-        has_board_users = Board.board_users.through.objects.filter(
-            board_id=OuterRef('pk')
-        )
-        has_board_groups = Board.board_groups.through.objects.filter(
-            board_id=OuterRef('pk')
-        )
-
-        open_board = ~Exists(has_order_users) & ~Exists(has_board_users) & ~Exists(has_board_groups)
-
         # Combine all conditions
+        # Users can only see boards they're explicitly attached to or via their groups
         return Board.objects.filter(
-            order_user_attached | board_user_attached | group_attached | open_board
+            order_user_attached | board_user_attached | group_attached
         ).distinct()
     
     def perform_create(self, serializer):
