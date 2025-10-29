@@ -95,7 +95,7 @@ class SingleFrontendDeploymentService:
                 'primary_color': '#667eea',
                 'secondary_color': '#764ba2',
                 'company_name': tenant.name,
-                'logo_url': f'/api/tenant/{tenant.id}/logo/' if hasattr(tenant, 'logo') else None
+                'logo_url': tenant.logo.url if tenant.logo else None
             },
             'features': {
                 'max_users': tenant.max_users,
