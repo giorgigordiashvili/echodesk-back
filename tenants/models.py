@@ -4,6 +4,13 @@ from django.utils import timezone
 from datetime import timedelta
 from tenant_schemas.models import TenantMixin
 
+# Import feature models
+from .feature_models import (
+    Feature, Permission, FeaturePermission,
+    PackageFeature, TenantFeature, TenantPermission, UserPermission,
+    FeatureCategory
+)
+
 
 class PricingModel(models.TextChoices):
     """Pricing model choices"""
@@ -80,8 +87,10 @@ class Package(models.Model):
     
     @property
     def features_list(self):
-        """Return list of enabled features"""
+        """Return list of enabled features (legacy + dynamic)"""
         features = []
+
+        # Legacy boolean features (for backward compatibility)
         if self.ticket_management:
             features.append("Complete Ticket Management System")
         if self.email_integration:
@@ -104,14 +113,26 @@ class Package(models.Model):
             features.append("Priority Support")
         if self.dedicated_account_manager:
             features.append("Dedicated Account Manager")
-        
+
+        # Dynamic features from PackageFeature model
+        for pf in self.package_features.select_related('feature').filter(feature__is_active=True):
+            features.append(pf.feature.name)
+
         # Add limits info
         if self.max_users:
             features.insert(0, f"Up to {self.max_users} Users")
         features.append(f"Up to {self.max_whatsapp_messages:,} WhatsApp messages/month")
         features.append(f"{self.max_storage_gb}GB Storage")
-        
+
         return features
+
+    def get_dynamic_features(self):
+        """Get all dynamic features for this package"""
+        return self.package_features.select_related('feature').filter(feature__is_active=True)
+
+    def has_feature(self, feature_key):
+        """Check if package has a specific feature by key"""
+        return self.package_features.filter(feature__key=feature_key, feature__is_active=True).exists()
 
 
 class Tenant(TenantMixin):

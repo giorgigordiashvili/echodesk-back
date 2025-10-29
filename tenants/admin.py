@@ -4,20 +4,40 @@ from django.utils.html import format_html
 from django.urls import reverse
 from django.contrib import messages
 from tenant_schemas.utils import get_public_schema_name
-from .models import Tenant, Package, TenantSubscription, UsageLog, PaymentOrder, PendingRegistration
+from .models import (
+    Tenant, Package, TenantSubscription, UsageLog, PaymentOrder, PendingRegistration,
+    Feature, Permission, FeaturePermission, PackageFeature,
+    TenantFeature, TenantPermission, UserPermission
+)
+
+
+class PackageFeatureInline(admin.TabularInline):
+    """Inline for managing package features"""
+    model = PackageFeature
+    extra = 1
+    autocomplete_fields = ['feature']
+    fields = ['feature', 'is_highlighted', 'sort_order', 'custom_value']
+
+    def formfield_for_dbfield(self, db_field, request, **kwargs):
+        """Customize JSON field display"""
+        field = super().formfield_for_dbfield(db_field, request, **kwargs)
+        if db_field.name == 'custom_value':
+            field.help_text = 'JSON format: {"max_limit": 1000, "custom_setting": true}'
+        return field
 
 
 @admin.register(Package)
 class PackageAdmin(admin.ModelAdmin):
     """Admin interface for Package model"""
     list_display = [
-        'display_name', 'pricing_model', 'price_gel', 'max_users', 
+        'display_name', 'pricing_model', 'price_gel', 'max_users',
         'max_whatsapp_messages', 'is_highlighted', 'is_active', 'sort_order'
     ]
     list_filter = ['pricing_model', 'is_active', 'is_highlighted']
     search_fields = ['name', 'display_name', 'description']
     ordering = ['pricing_model', 'sort_order', 'price_gel']
-    
+    inlines = [PackageFeatureInline]
+
     fieldsets = (
         ('Basic Information', {
             'fields': ('name', 'display_name', 'description', 'pricing_model')
@@ -28,20 +48,21 @@ class PackageAdmin(admin.ModelAdmin):
         ('Limits', {
             'fields': ('max_users', 'max_whatsapp_messages', 'max_storage_gb')
         }),
-        ('Features', {
+        ('Legacy Features (deprecated - use Dynamic Features below)', {
             'fields': (
                 'ticket_management', 'email_integration', 'sip_calling',
                 'facebook_integration', 'instagram_integration', 'whatsapp_integration',
                 'advanced_analytics', 'api_access', 'custom_integrations',
                 'priority_support', 'dedicated_account_manager'
             ),
-            'classes': ['collapse']
+            'classes': ['collapse'],
+            'description': 'Legacy boolean features - use Dynamic Features system instead'
         }),
         ('Display Settings', {
             'fields': ('is_highlighted', 'is_active', 'sort_order')
         })
     )
-    
+
     def get_queryset(self, request):
         return super().get_queryset(request).select_related()
 
@@ -507,3 +528,251 @@ class PendingRegistrationAdmin(admin.ModelAdmin):
 
 # Only register if we're in the public schema context
 admin.site.register(Tenant, TenantAdmin)
+
+
+# =============================================================================
+# Feature & Permission System Admin
+# =============================================================================
+
+class FeaturePermissionInline(admin.TabularInline):
+    """Inline for managing feature permissions"""
+    model = FeaturePermission
+    extra = 1
+    autocomplete_fields = ['permission']
+
+
+@admin.register(Feature)
+class FeatureAdmin(admin.ModelAdmin):
+    """Admin interface for Feature model"""
+    list_display = [
+        'name', 'key', 'category', 'icon_display', 'sort_order', 'is_active', 'created_at'
+    ]
+    list_filter = ['category', 'is_active', 'created_at']
+    search_fields = ['key', 'name', 'description']
+    ordering = ['category', 'sort_order', 'name']
+    inlines = [FeaturePermissionInline]
+
+    fieldsets = (
+        ('Basic Information', {
+            'fields': ('key', 'name', 'description')
+        }),
+        ('Categorization & Display', {
+            'fields': ('category', 'icon', 'sort_order')
+        }),
+        ('Status', {
+            'fields': ('is_active',)
+        }),
+        ('Metadata', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ['collapse']
+        })
+    )
+
+    readonly_fields = ['created_at', 'updated_at']
+
+    @admin.display(description='Icon')
+    def icon_display(self, obj):
+        """Display the icon"""
+        if obj.icon:
+            return format_html('{} {}', obj.icon, obj.icon)
+        return '-'
+
+
+class FeaturePermissionInlineForPermission(admin.TabularInline):
+    """Inline for viewing which features use this permission"""
+    model = FeaturePermission
+    extra = 0
+    autocomplete_fields = ['feature']
+
+
+@admin.register(Permission)
+class PermissionAdmin(admin.ModelAdmin):
+    """Admin interface for Permission model"""
+    list_display = [
+        'name', 'key', 'module', 'is_active', 'created_at'
+    ]
+    list_filter = ['module', 'is_active', 'created_at']
+    search_fields = ['key', 'name', 'description', 'module']
+    ordering = ['module', 'key']
+    inlines = [FeaturePermissionInlineForPermission]
+
+    fieldsets = (
+        ('Basic Information', {
+            'fields': ('key', 'name', 'description')
+        }),
+        ('Grouping', {
+            'fields': ('module',)
+        }),
+        ('Status', {
+            'fields': ('is_active',)
+        }),
+        ('Metadata', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ['collapse']
+        })
+    )
+
+    readonly_fields = ['created_at', 'updated_at']
+
+
+@admin.register(FeaturePermission)
+class FeaturePermissionAdmin(admin.ModelAdmin):
+    """Admin interface for FeaturePermission model"""
+    list_display = ['feature', 'permission', 'is_required']
+    list_filter = ['is_required', 'feature__category']
+    search_fields = ['feature__name', 'permission__name']
+    autocomplete_fields = ['feature', 'permission']
+
+    fieldsets = (
+        ('Relationship', {
+            'fields': ('feature', 'permission')
+        }),
+        ('Configuration', {
+            'fields': ('is_required',)
+        })
+    )
+
+
+@admin.register(PackageFeature)
+class PackageFeatureAdmin(admin.ModelAdmin):
+    """Admin interface for PackageFeature model"""
+    list_display = [
+        'package', 'feature', 'is_highlighted', 'sort_order', 'has_custom_value'
+    ]
+    list_filter = ['is_highlighted', 'package', 'feature__category']
+    search_fields = ['package__display_name', 'feature__name']
+    autocomplete_fields = ['package', 'feature']
+
+    fieldsets = (
+        ('Relationship', {
+            'fields': ('package', 'feature')
+        }),
+        ('Display Settings', {
+            'fields': ('is_highlighted', 'sort_order')
+        }),
+        ('Custom Configuration', {
+            'fields': ('custom_value',),
+            'description': 'Optional JSON configuration for package-specific limits or settings'
+        })
+    )
+
+    @admin.display(description='Custom Config', boolean=True)
+    def has_custom_value(self, obj):
+        """Show if custom value is set"""
+        return bool(obj.custom_value)
+
+
+@admin.register(TenantFeature)
+class TenantFeatureAdmin(admin.ModelAdmin):
+    """Admin interface for TenantFeature model"""
+    list_display = [
+        'tenant', 'feature', 'is_active', 'enabled_at', 'disabled_at'
+    ]
+    list_filter = ['is_active', 'feature__category', 'enabled_at']
+    search_fields = ['tenant__name', 'tenant__schema_name', 'feature__name']
+    autocomplete_fields = ['tenant', 'feature']
+    readonly_fields = ['enabled_at']
+
+    fieldsets = (
+        ('Relationship', {
+            'fields': ('tenant', 'feature')
+        }),
+        ('Status', {
+            'fields': ('is_active', 'enabled_at', 'disabled_at')
+        }),
+        ('Custom Configuration', {
+            'fields': ('custom_value',),
+            'description': 'Optional tenant-specific overrides',
+            'classes': ['collapse']
+        })
+    )
+
+    actions = ['enable_features', 'disable_features']
+
+    @admin.action(description='Enable selected features')
+    def enable_features(self, request, queryset):
+        """Enable selected tenant features"""
+        count = queryset.update(is_active=True, disabled_at=None)
+        self.message_user(request, f'{count} feature(s) enabled successfully.', messages.SUCCESS)
+
+    @admin.action(description='Disable selected features')
+    def disable_features(self, request, queryset):
+        """Disable selected tenant features"""
+        count = queryset.update(is_active=False, disabled_at=timezone.now())
+        self.message_user(request, f'{count} feature(s) disabled successfully.', messages.SUCCESS)
+
+
+@admin.register(TenantPermission)
+class TenantPermissionAdmin(admin.ModelAdmin):
+    """Admin interface for TenantPermission model"""
+    list_display = [
+        'tenant', 'permission', 'granted_by_feature', 'is_active', 'granted_at'
+    ]
+    list_filter = ['is_active', 'permission__module', 'granted_at']
+    search_fields = ['tenant__name', 'tenant__schema_name', 'permission__name']
+    autocomplete_fields = ['tenant', 'permission', 'granted_by_feature']
+    readonly_fields = ['granted_at']
+
+    fieldsets = (
+        ('Relationship', {
+            'fields': ('tenant', 'permission')
+        }),
+        ('Source', {
+            'fields': ('granted_by_feature',)
+        }),
+        ('Status', {
+            'fields': ('is_active', 'granted_at', 'revoked_at')
+        })
+    )
+
+    actions = ['activate_permissions', 'revoke_permissions']
+
+    @admin.action(description='Activate selected permissions')
+    def activate_permissions(self, request, queryset):
+        """Activate selected permissions"""
+        count = queryset.update(is_active=True, revoked_at=None)
+        self.message_user(request, f'{count} permission(s) activated successfully.', messages.SUCCESS)
+
+    @admin.action(description='Revoke selected permissions')
+    def revoke_permissions(self, request, queryset):
+        """Revoke selected permissions"""
+        count = queryset.update(is_active=False, revoked_at=timezone.now())
+        self.message_user(request, f'{count} permission(s) revoked successfully.', messages.SUCCESS)
+
+
+@admin.register(UserPermission)
+class UserPermissionAdmin(admin.ModelAdmin):
+    """Admin interface for UserPermission model"""
+    list_display = [
+        'user', 'permission', 'granted_by', 'is_active', 'granted_at'
+    ]
+    list_filter = ['is_active', 'permission__module', 'granted_at']
+    search_fields = ['user__email', 'user__first_name', 'user__last_name', 'permission__name']
+    autocomplete_fields = ['user', 'permission', 'granted_by']
+    readonly_fields = ['granted_at']
+
+    fieldsets = (
+        ('Relationship', {
+            'fields': ('user', 'permission')
+        }),
+        ('Audit', {
+            'fields': ('granted_by', 'granted_at', 'revoked_at')
+        }),
+        ('Status', {
+            'fields': ('is_active',)
+        })
+    )
+
+    actions = ['activate_permissions', 'revoke_permissions']
+
+    @admin.action(description='Activate selected user permissions')
+    def activate_permissions(self, request, queryset):
+        """Activate selected user permissions"""
+        count = queryset.update(is_active=True, revoked_at=None)
+        self.message_user(request, f'{count} user permission(s) activated successfully.', messages.SUCCESS)
+
+    @admin.action(description='Revoke selected user permissions')
+    def revoke_permissions(self, request, queryset):
+        """Revoke selected user permissions"""
+        count = queryset.update(is_active=False, revoked_at=timezone.now())
+        self.message_user(request, f'{count} user permission(s) revoked successfully.', messages.SUCCESS)

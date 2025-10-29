@@ -7,12 +7,15 @@ making it easy to check features and limits throughout the application.
 Usage:
     # In your views, you can access:
     request.subscription  # TenantSubscription object
-    request.subscription_features  # Dict of all features
+    request.subscription_features  # Dict of all features (legacy + dynamic)
     request.has_feature(feature_name)  # Helper method
+    request.has_permission(permission_key)  # Check user permission
+    request.tenant_has_feature(feature_key)  # Check dynamic feature
 """
 
 from tenant_schemas.utils import get_public_schema_name
-from .models import TenantSubscription
+from .models import TenantSubscription, TenantFeature
+from .subscription_service import SubscriptionService
 
 
 class SubscriptionMiddleware:
@@ -62,7 +65,7 @@ class SubscriptionMiddleware:
             request.subscription = subscription
             request.subscription_package = subscription.package
 
-            # Create features dict for easy access
+            # Create features dict for easy access (legacy features)
             package = subscription.package
             request.subscription_features = {
                 'ticket_management': package.ticket_management,
@@ -78,6 +81,17 @@ class SubscriptionMiddleware:
                 'dedicated_account_manager': package.dedicated_account_manager,
             }
 
+            # Add dynamic features to the dict
+            tenant_features = TenantFeature.objects.filter(
+                tenant=request.tenant,
+                is_active=True,
+                feature__is_active=True
+            ).select_related('feature')
+
+            for tf in tenant_features:
+                # Use feature key as dict key
+                request.subscription_features[tf.feature.key] = True
+
         except TenantSubscription.DoesNotExist:
             pass
         except Exception as e:
@@ -86,5 +100,17 @@ class SubscriptionMiddleware:
             logger = logging.getLogger(__name__)
             logger.error(f"Error loading subscription for tenant {request.tenant.schema_name}: {e}")
 
-        # Add helper method to request
+        # Add helper methods to request
         request.has_feature = lambda feature_name: request.subscription_features.get(feature_name, False)
+
+        # Check dynamic feature by key
+        request.tenant_has_feature = lambda feature_key: (
+            SubscriptionService.check_tenant_feature(request.tenant, feature_key)
+            if hasattr(request, 'tenant') else False
+        )
+
+        # Check user permission
+        request.has_permission = lambda permission_key: (
+            SubscriptionService.check_user_permission(request.user, permission_key)
+            if hasattr(request, 'user') and request.user.is_authenticated else False
+        )
