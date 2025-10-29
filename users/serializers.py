@@ -263,9 +263,7 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 class UserCreateSerializer(serializers.ModelSerializer):
-    """Serializer for creating users"""
-    password = serializers.CharField(write_only=True, validators=[validate_password])
-    password_confirm = serializers.CharField(write_only=True)
+    """Serializer for creating users - password is auto-generated and sent via email"""
     department_id = serializers.IntegerField(required=False, allow_null=True)
     group_ids = serializers.ListField(
         child=serializers.IntegerField(),
@@ -277,36 +275,34 @@ class UserCreateSerializer(serializers.ModelSerializer):
         required=False,
         help_text="List of permission IDs to assign directly to this user"
     )
-    
+
     class Meta:
         model = User
         fields = [
-            'email', 'first_name', 'last_name', 'password', 'password_confirm',
-            'role', 'status', 'phone_number', 'job_title', 'department_id',
+            'email', 'first_name', 'last_name',
+            'role', 'status', 'phone_number', 'department_id',
             'group_ids', 'user_permission_ids'
         ]
-    
-    def validate(self, attrs):
-        if attrs['password'] != attrs['password_confirm']:
-            raise serializers.ValidationError("Passwords don't match")
-        return attrs
-    
+        extra_kwargs = {
+            'phone_number': {'required': False},
+        }
+
     def create(self, validated_data):
-        validated_data.pop('password_confirm')
         group_ids = validated_data.pop('group_ids', [])
         user_permission_ids = validated_data.pop('user_permission_ids', [])
-        password = validated_data.pop('password')
-        
-        user = User.objects.create_user(password=password, **validated_data)
-        
+
+        # Note: Password will be set in the view's perform_create method
+        # User is created without a password initially
+        user = User.objects.create(**validated_data)
+
         if group_ids:
             groups = Group.objects.filter(id__in=group_ids)
             user.groups.set(groups)
-        
+
         if user_permission_ids:
             permissions = Permission.objects.filter(id__in=user_permission_ids)
             user.user_permissions.set(permissions)
-        
+
         return user
 
 
