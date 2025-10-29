@@ -247,7 +247,10 @@ def tenant_profile(request):
     
     # Get all user permissions (both from groups and direct permissions)
     all_permissions = user.get_all_permissions()
-    
+
+    # Get feature keys from tenant groups
+    feature_keys = user.get_feature_keys()
+
     return Response({
         'id': user.id,
         'email': user.email,
@@ -259,7 +262,8 @@ def tenant_profile(request):
         'last_login': user.last_login,
         'is_active': user.is_active,
         'groups': groups_data,
-        'all_permissions': list(all_permissions)
+        'all_permissions': list(all_permissions),
+        'feature_keys': feature_keys
     }, status=status.HTTP_200_OK)
 
 
