@@ -6,10 +6,11 @@ from tenant_schemas.models import TenantMixin
 
 # Import feature models
 from .feature_models import (
-    Feature, Permission, FeaturePermission,
+    Feature, FeaturePermission,
     PackageFeature, TenantFeature, TenantPermission,
     FeatureCategory
 )
+from django.contrib.auth.models import Permission
 
 
 class PricingModel(models.TextChoices):

@@ -3,22 +3,23 @@ Serializers for Feature and Permission models
 """
 
 from rest_framework import serializers
+from django.contrib.auth.models import Permission
 from .models import (
-    Feature, Permission, FeaturePermission, PackageFeature,
+    Feature, FeaturePermission, PackageFeature,
     TenantFeature, TenantPermission
 )
 
 
 class PermissionSerializer(serializers.ModelSerializer):
-    """Serializer for Permission model"""
+    """Serializer for Django's built-in Permission model"""
+    app_label = serializers.CharField(source='content_type.app_label', read_only=True)
+    model = serializers.CharField(source='content_type.model', read_only=True)
 
     class Meta:
         model = Permission
         fields = [
-            'id', 'key', 'name', 'description', 'module',
-            'is_active', 'created_at', 'updated_at'
+            'id', 'name', 'codename', 'app_label', 'model'
         ]
-        read_only_fields = ['created_at', 'updated_at']
 
 
 class FeaturePermissionSerializer(serializers.ModelSerializer):

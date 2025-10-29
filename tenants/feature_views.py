@@ -41,21 +41,21 @@ class FeatureViewSet(viewsets.ReadOnlyModelViewSet):
 
 class PermissionViewSet(viewsets.ReadOnlyModelViewSet):
     """
-    ViewSet for viewing available permissions
+    ViewSet for viewing Django's built-in permissions
 
-    list: Get all active permissions
+    list: Get all permissions
     retrieve: Get a specific permission
     """
-    queryset = Permission.objects.filter(is_active=True)
+    queryset = Permission.objects.all().select_related('content_type').order_by('content_type__app_label', 'codename')
     serializer_class = PermissionSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        """Filter permissions by module if provided"""
+        """Filter permissions by app_label if provided"""
         queryset = super().get_queryset()
-        module = self.request.query_params.get('module', None)
-        if module:
-            queryset = queryset.filter(module=module)
+        app_label = self.request.query_params.get('app_label', None)
+        if app_label:
+            queryset = queryset.filter(content_type__app_label=app_label)
         return queryset
 
 

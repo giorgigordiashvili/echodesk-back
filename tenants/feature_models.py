@@ -5,6 +5,7 @@ Feature and Permission models for dynamic package features
 from django.db import models
 from django.conf import settings
 from django.core.validators import MinValueValidator
+from django.contrib.auth.models import Permission as DjangoPermission
 
 
 class FeatureCategory(models.TextChoices):
@@ -91,51 +92,13 @@ class Feature(models.Model):
         return f"{self.name} ({self.key})"
 
 
-class Permission(models.Model):
-    """
-    Granular permissions that can be granted with features
-
-    Permissions define specific actions that can be controlled
-    (e.g., 'create', 'read', 'update', 'delete', 'export')
-    """
-    # Identification
-    key = models.CharField(
-        max_length=100,
-        unique=True,
-        help_text="Unique identifier (e.g., 'tickets.create', 'analytics.export')"
-    )
-    name = models.CharField(
-        max_length=100,
-        help_text="Display name (e.g., 'Create Tickets')"
-    )
-    description = models.TextField(
-        blank=True,
-        help_text="What this permission allows"
-    )
-
-    # Grouping
-    module = models.CharField(
-        max_length=50,
-        help_text="Module this permission belongs to (e.g., 'tickets', 'analytics')"
-    )
-
-    # Metadata
-    is_active = models.BooleanField(default=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        ordering = ['module', 'key']
-        verbose_name = 'Permission'
-        verbose_name_plural = 'Permissions'
-
-    def __str__(self):
-        return f"{self.name} ({self.key})"
+# Using Django's built-in Permission model instead of custom Permission
+# No need for a separate Permission model - we use django.contrib.auth.models.Permission
 
 
 class FeaturePermission(models.Model):
     """
-    Link features to permissions
+    Link features to Django's built-in permissions
 
     Defines which permissions are granted when a feature is enabled
     """
@@ -145,9 +108,9 @@ class FeaturePermission(models.Model):
         related_name='permissions'
     )
     permission = models.ForeignKey(
-        Permission,
+        DjangoPermission,
         on_delete=models.CASCADE,
-        related_name='features'
+        related_name='feature_permissions'
     )
 
     # Optional: permission can be required or optional within a feature
@@ -258,7 +221,7 @@ class TenantPermission(models.Model):
     Based on the tenant's package features, certain permissions become available.
 
     Flow:
-    1. EchoDesk admin creates Features with Permissions
+    1. EchoDesk admin creates Features with Django Permissions
     2. Package includes Features → Tenant gets TenantPermission records created
     3. Tenant admin can grant these permissions to users via User model fields
        (e.g., can_view_all_tickets, can_manage_users, etc.)
@@ -274,7 +237,7 @@ class TenantPermission(models.Model):
         related_name='tenant_permissions'
     )
     permission = models.ForeignKey(
-        Permission,
+        DjangoPermission,
         on_delete=models.CASCADE,
         related_name='tenant_permissions'
     )

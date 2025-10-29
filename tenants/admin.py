@@ -4,10 +4,11 @@ from django.utils.html import format_html
 from django.urls import reverse
 from django.contrib import messages
 from django import forms
+from django.contrib.auth.models import Permission
 from tenant_schemas.utils import get_public_schema_name
 from .models import (
     Tenant, Package, TenantSubscription, UsageLog, PaymentOrder, PendingRegistration,
-    Feature, Permission, FeaturePermission, PackageFeature,
+    Feature, FeaturePermission, PackageFeature,
     TenantFeature, TenantPermission
 )
 
@@ -604,10 +605,10 @@ class FeaturePermissionInline(admin.TabularInline):
 class FeatureAdminForm(forms.ModelForm):
     """Custom form for Feature admin with permissions selector"""
     permissions = forms.ModelMultipleChoiceField(
-        queryset=Permission.objects.filter(is_active=True).order_by('module', 'name'),
+        queryset=Permission.objects.all().select_related('content_type').order_by('content_type__app_label', 'codename'),
         required=False,
         widget=admin.widgets.FilteredSelectMultiple('Permissions', False),
-        help_text='Select permissions that this feature will grant'
+        help_text='Select Django permissions that this feature will grant'
     )
 
     class Meta:
@@ -685,41 +686,8 @@ class FeatureAdmin(admin.ModelAdmin):
         return f"{count} permission{'s' if count != 1 else ''}"
 
 
-class FeaturePermissionInlineForPermission(admin.TabularInline):
-    """Inline for viewing which features use this permission"""
-    model = FeaturePermission
-    extra = 0
-    autocomplete_fields = ['feature']
-
-
-@admin.register(Permission)
-class PermissionAdmin(admin.ModelAdmin):
-    """Admin interface for Permission model"""
-    list_display = [
-        'name', 'key', 'module', 'is_active', 'created_at'
-    ]
-    list_filter = ['module', 'is_active', 'created_at']
-    search_fields = ['key', 'name', 'description', 'module']
-    ordering = ['module', 'key']
-    inlines = [FeaturePermissionInlineForPermission]
-
-    fieldsets = (
-        ('Basic Information', {
-            'fields': ('key', 'name', 'description')
-        }),
-        ('Grouping', {
-            'fields': ('module',)
-        }),
-        ('Status', {
-            'fields': ('is_active',)
-        }),
-        ('Metadata', {
-            'fields': ('created_at', 'updated_at'),
-            'classes': ['collapse']
-        })
-    )
-
-    readonly_fields = ['created_at', 'updated_at']
+# Using Django's built-in Permission admin instead of custom Permission model
+# Permissions are managed through Django Admin -> Authentication and Authorization -> Permissions
 
 
 @admin.register(FeaturePermission)
@@ -727,8 +695,9 @@ class FeaturePermissionAdmin(admin.ModelAdmin):
     """Admin interface for FeaturePermission model"""
     list_display = ['feature', 'permission', 'is_required']
     list_filter = ['is_required', 'feature__category']
-    search_fields = ['feature__name', 'permission__name']
-    autocomplete_fields = ['feature', 'permission']
+    search_fields = ['feature__name', 'permission__name', 'permission__codename']
+    autocomplete_fields = ['feature']
+    raw_id_fields = ['permission']
 
     fieldsets = (
         ('Relationship', {
@@ -815,9 +784,10 @@ class TenantPermissionAdmin(admin.ModelAdmin):
     list_display = [
         'tenant', 'permission', 'granted_by_feature', 'is_active', 'granted_at'
     ]
-    list_filter = ['is_active', 'permission__module', 'granted_at']
-    search_fields = ['tenant__name', 'tenant__schema_name', 'permission__name']
-    autocomplete_fields = ['tenant', 'permission', 'granted_by_feature']
+    list_filter = ['is_active', 'permission__content_type__app_label', 'granted_at']
+    search_fields = ['tenant__name', 'tenant__schema_name', 'permission__name', 'permission__codename']
+    autocomplete_fields = ['tenant', 'granted_by_feature']
+    raw_id_fields = ['permission']
     readonly_fields = ['granted_at']
 
     fieldsets = (
