@@ -100,20 +100,26 @@ class PackageAdmin(admin.ModelAdmin):
 
     def get_form(self, request, obj=None, **kwargs):
         """Customize the form"""
+        # Prepare the fields list - exclude package_features_list since we'll add it manually
+        if 'fields' not in kwargs:
+            kwargs['fields'] = None
+
+        # Get the form
         form = super().get_form(request, obj, **kwargs)
 
-        # Add a custom field for features
+        # Add a custom field for features AFTER form is created
+        initial_features = []
         if obj:
             # Get currently linked features
-            current_features = Feature.objects.filter(
+            initial_features = list(Feature.objects.filter(
                 package_features__package=obj
-            )
-            form.base_fields['package_features_list'].initial = current_features
+            ).values_list('id', flat=True))
 
-        # Make the queryset for features
+        # Add the field to the form
         form.base_fields['package_features_list'] = forms.ModelMultipleChoiceField(
             queryset=Feature.objects.filter(is_active=True).order_by('category', 'sort_order', 'name'),
             required=False,
+            initial=initial_features,
             widget=admin.widgets.FilteredSelectMultiple('Features', False),
             help_text='Select features that this package will include'
         )
@@ -670,20 +676,26 @@ class FeatureAdmin(admin.ModelAdmin):
 
     def get_form(self, request, obj=None, **kwargs):
         """Customize the form"""
+        # Prepare the fields list - exclude feature_permissions since we'll add it manually
+        if 'fields' not in kwargs:
+            kwargs['fields'] = None
+
+        # Get the form
         form = super().get_form(request, obj, **kwargs)
 
-        # Add a custom field for permissions
+        # Add a custom field for permissions AFTER form is created
+        initial_permissions = []
         if obj:
             # Get currently linked permissions
-            current_permissions = Permission.objects.filter(
+            initial_permissions = list(Permission.objects.filter(
                 features__feature=obj
-            )
-            form.base_fields['feature_permissions'].initial = current_permissions
+            ).values_list('id', flat=True))
 
-        # Make the queryset for permissions
+        # Add the field to the form
         form.base_fields['feature_permissions'] = forms.ModelMultipleChoiceField(
             queryset=Permission.objects.filter(is_active=True).order_by('module', 'name'),
             required=False,
+            initial=initial_permissions,
             widget=admin.widgets.FilteredSelectMultiple('Permissions', False),
             help_text='Select permissions that this feature will grant'
         )
