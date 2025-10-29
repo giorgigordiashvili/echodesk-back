@@ -268,7 +268,12 @@ class UserCreateSerializer(serializers.ModelSerializer):
     group_ids = serializers.ListField(
         child=serializers.IntegerField(),
         required=False,
-        help_text="List of group IDs to assign to this user"
+        help_text="List of Django group IDs to assign to this user"
+    )
+    tenant_group_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        required=False,
+        help_text="List of tenant group IDs to assign to this user"
     )
     user_permission_ids = serializers.ListField(
         child=serializers.IntegerField(),
@@ -281,7 +286,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
         fields = [
             'email', 'first_name', 'last_name',
             'role', 'status', 'phone_number', 'department_id',
-            'group_ids', 'user_permission_ids'
+            'group_ids', 'tenant_group_ids', 'user_permission_ids'
         ]
         extra_kwargs = {
             'phone_number': {'required': False},
@@ -289,6 +294,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         group_ids = validated_data.pop('group_ids', [])
+        tenant_group_ids = validated_data.pop('tenant_group_ids', [])
         user_permission_ids = validated_data.pop('user_permission_ids', [])
 
         # Note: Password will be set in the view's perform_create method
@@ -298,6 +304,10 @@ class UserCreateSerializer(serializers.ModelSerializer):
         if group_ids:
             groups = Group.objects.filter(id__in=group_ids)
             user.groups.set(groups)
+
+        if tenant_group_ids:
+            tenant_groups = TenantGroup.objects.filter(id__in=tenant_group_ids)
+            user.tenant_groups.set(tenant_groups)
 
         if user_permission_ids:
             permissions = Permission.objects.filter(id__in=user_permission_ids)
