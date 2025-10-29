@@ -913,7 +913,7 @@ class TenantViewSet(viewsets.ModelViewSet):
     def users(self, request, pk=None):
         """Get all users for a specific tenant"""
         tenant = self.get_object()
-        
+
         with schema_context(tenant.schema_name):
             users = User.objects.all()
             user_data = [{
@@ -925,5 +925,168 @@ class TenantViewSet(viewsets.ModelViewSet):
                 'is_staff': user.is_staff,
                 'date_joined': user.date_joined
             } for user in users]
-            
+
         return Response({'users': user_data})
+
+
+# Tenant Settings API
+@extend_schema(
+    operation_id='tenant_settings_get',
+    summary='Get Tenant Settings',
+    description='Get current tenant settings including logo and company name',
+    responses={
+        200: OpenApiResponse(
+            description='Settings retrieved successfully',
+            response={
+                'type': 'object',
+                'properties': {
+                    'logo': {'type': 'string', 'nullable': True},
+                    'company_name': {'type': 'string'}
+                }
+            }
+        ),
+        403: OpenApiResponse(description='Not available from main domain')
+    },
+    tags=['Tenant Settings']
+)
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def tenant_settings(request):
+    """Get tenant settings"""
+    if not hasattr(request, 'tenant') or request.tenant.schema_name == get_public_schema_name():
+        return Response(
+            {'error': 'This endpoint is only available from tenant subdomains'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    tenant = request.tenant
+    return Response({
+        'logo': request.build_absolute_uri(tenant.logo.url) if tenant.logo else None,
+        'company_name': tenant.name
+    })
+
+
+@extend_schema(
+    operation_id='tenant_settings_upload_logo',
+    summary='Upload Tenant Logo',
+    description='Upload a company logo for the tenant',
+    request={
+        'multipart/form-data': {
+            'type': 'object',
+            'properties': {
+                'logo': {
+                    'type': 'string',
+                    'format': 'binary'
+                }
+            }
+        }
+    },
+    responses={
+        200: OpenApiResponse(
+            description='Logo uploaded successfully',
+            response={
+                'type': 'object',
+                'properties': {
+                    'logo_url': {'type': 'string'},
+                    'message': {'type': 'string'}
+                }
+            }
+        ),
+        400: OpenApiResponse(description='Invalid file or upload error'),
+        403: OpenApiResponse(description='Not available from main domain')
+    },
+    tags=['Tenant Settings']
+)
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def upload_logo(request):
+    """Upload tenant logo"""
+    if not hasattr(request, 'tenant') or request.tenant.schema_name == get_public_schema_name():
+        return Response(
+            {'error': 'This endpoint is only available from tenant subdomains'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    if 'logo' not in request.FILES:
+        return Response({'error': 'No file provided'}, status=status.HTTP_400_BAD_REQUEST)
+
+    logo_file = request.FILES['logo']
+
+    # Validate file type
+    allowed_types = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif']
+    if logo_file.content_type not in allowed_types:
+        return Response(
+            {'error': 'Invalid file type. Only JPG, PNG, and GIF are allowed.'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # Validate file size (2MB max)
+    if logo_file.size > 2 * 1024 * 1024:
+        return Response(
+            {'error': 'File size must be less than 2MB'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        # Delete old logo if exists
+        tenant = request.tenant
+        if tenant.logo:
+            tenant.logo.delete(save=False)
+
+        # Save new logo
+        tenant.logo = logo_file
+        tenant.save()
+
+        return Response({
+            'logo_url': request.build_absolute_uri(tenant.logo.url),
+            'message': 'Logo uploaded successfully'
+        })
+    except Exception as e:
+        logger.error(f'Failed to upload logo: {str(e)}')
+        return Response(
+            {'error': 'Failed to upload logo'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@extend_schema(
+    operation_id='tenant_settings_remove_logo',
+    summary='Remove Tenant Logo',
+    description='Remove the current tenant logo',
+    responses={
+        200: OpenApiResponse(
+            description='Logo removed successfully',
+            response={
+                'type': 'object',
+                'properties': {
+                    'message': {'type': 'string'}
+                }
+            }
+        ),
+        403: OpenApiResponse(description='Not available from main domain')
+    },
+    tags=['Tenant Settings']
+)
+@api_view(['DELETE'])
+@permission_classes([permissions.IsAuthenticated])
+def remove_logo(request):
+    """Remove tenant logo"""
+    if not hasattr(request, 'tenant') or request.tenant.schema_name == get_public_schema_name():
+        return Response(
+            {'error': 'This endpoint is only available from tenant subdomains'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    try:
+        tenant = request.tenant
+        if tenant.logo:
+            tenant.logo.delete(save=True)
+            return Response({'message': 'Logo removed successfully'})
+        else:
+            return Response({'message': 'No logo to remove'})
+    except Exception as e:
+        logger.error(f'Failed to remove logo: {str(e)}')
+        return Response(
+            {'error': 'Failed to remove logo'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
