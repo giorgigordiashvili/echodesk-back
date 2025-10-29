@@ -141,7 +141,7 @@ class Package(models.Model):
         Calculate price for custom package based on selected features
 
         For agent-based (per-user): sum of (feature.price_per_user_gel * user_count)
-        For CRM-based (unlimited): sum of feature.price_unlimited_gel - 10% discount
+        For CRM-based (unlimited): sum of feature.price_unlimited_gel
 
         Args:
             user_count: Number of users for agent-based pricing (overrides max_users)
@@ -160,13 +160,9 @@ class Package(models.Model):
                 users = user_count if user_count is not None else (self.max_users or 1)
                 total += feature.price_per_user_gel * users
 
-            # CRM-based: unlimited pricing with 10% discount
+            # CRM-based: unlimited pricing
             else:
                 total += feature.price_unlimited_gel
-
-        # Apply 10% discount for CRM-based packages
-        if self.pricing_model == PricingModel.CRM_BASED:
-            total = total * 0.9  # 10% discount
 
         return total
 

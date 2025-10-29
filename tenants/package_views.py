@@ -399,19 +399,11 @@ def calculate_custom_package_price(request):
             'pricing_type': pricing_type
         })
 
-    # Apply 10% discount for CRM-based
-    discount = 0
-    if pricing_model == 'crm':
-        discount = subtotal * 0.1
-        total_price = subtotal - discount
-    else:
-        total_price = subtotal
+    # No discount applied
+    total_price = subtotal
 
     return Response({
         'features': features_data,
-        'subtotal': str(subtotal),
-        'discount': str(discount) if discount > 0 else '0',
-        'discount_percentage': '10' if discount > 0 else '0',
         'total_price': str(total_price),
         'pricing_model': pricing_model,
         'user_count': user_count if pricing_model == 'agent' else None,
