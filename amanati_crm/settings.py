@@ -385,5 +385,5 @@ CRON_SECRET_TOKEN = config('CRON_SECRET_TOKEN', default='')
 
 # SendGrid Email Configuration
 SENDGRID_API_KEY = config('SENDGRID_API_KEY', default='')
-SENDGRID_FROM_EMAIL = config('SENDGRID_FROM_EMAIL', default='noreply@echodesk.ge')
+SENDGRID_FROM_EMAIL = config('SENDGRID_FROM_EMAIL', default='noreply@email.echodesk.ge')
 SENDGRID_FROM_NAME = config('SENDGRID_FROM_NAME', default='EchoDesk')
