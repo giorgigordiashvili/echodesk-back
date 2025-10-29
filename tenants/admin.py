@@ -51,6 +51,23 @@ class PackageAdminForm(forms.ModelForm):
 
     def save(self, commit=True):
         package = super().save(commit=False)
+
+        # For custom packages, auto-calculate price based on selected features
+        if package.is_custom and self.cleaned_data.get('features'):
+            total = 0
+            for feature in self.cleaned_data['features']:
+                if package.pricing_model == 'agent':
+                    # For agent-based, use base per-user price (will be multiplied by user count at runtime)
+                    total += feature.price_per_user_gel
+                else:  # CRM-based
+                    total += feature.price_unlimited_gel
+
+            # Apply 10% discount for CRM-based packages
+            if package.pricing_model == 'crm':
+                total = total * 0.9
+
+            package.price_gel = total
+
         if commit:
             package.save()
         if package.pk:
@@ -85,28 +102,26 @@ class PackageAdmin(admin.ModelAdmin):
         }),
         ('Features', {
             'fields': ('features',),
-            'description': 'Select features that this package includes'
+            'description': 'Select features that this package includes. For custom packages, price is auto-calculated.'
         }),
         ('Pricing', {
-            'fields': ('price_gel', 'billing_period')
+            'fields': ('price_gel', 'billing_period'),
+            'description': 'For custom packages, price_gel is auto-calculated from selected features'
         }),
         ('Limits', {
             'fields': ('max_users', 'max_whatsapp_messages', 'max_storage_gb')
-        }),
-        ('Legacy Features (deprecated - use Dynamic Features above)', {
-            'fields': (
-                'ticket_management', 'email_integration', 'sip_calling',
-                'facebook_integration', 'instagram_integration', 'whatsapp_integration',
-                'advanced_analytics', 'api_access', 'custom_integrations',
-                'priority_support', 'dedicated_account_manager'
-            ),
-            'classes': ['collapse'],
-            'description': 'Legacy boolean features - use Dynamic Features system instead'
         }),
         ('Display Settings', {
             'fields': ('is_highlighted', 'is_active', 'sort_order')
         })
     )
+
+    def get_readonly_fields(self, request, obj=None):
+        """Make price_gel readonly for custom packages"""
+        readonly = list(super().get_readonly_fields(request, obj))
+        if obj and obj.is_custom:
+            readonly.append('price_gel')
+        return readonly
 
     def get_queryset(self, request):
         return super().get_queryset(request).select_related()
