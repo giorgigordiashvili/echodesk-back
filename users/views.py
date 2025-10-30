@@ -184,11 +184,10 @@ class UserViewSet(viewsets.ModelViewSet):
         alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
         temporary_password = ''.join(secrets.choice(alphabet) for _ in range(12))
 
-        # Save user with temporary password and password change required flag
+        # Save user with temporary password
         user = serializer.save(
             invited_by=self.request.user,
             invitation_sent_at=timezone.now(),
-            password_change_required=True,
             temporary_password=temporary_password
         )
 

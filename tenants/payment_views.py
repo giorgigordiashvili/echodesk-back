@@ -10,7 +10,7 @@ from drf_spectacular.utils import extend_schema, OpenApiResponse
 from django.conf import settings
 from django.utils import timezone
 from datetime import timedelta
-from .models import Tenant, Package, TenantSubscription, UsageLog, PaymentOrder, PendingRegistration
+from .models import Tenant, Package, TenantSubscription, UsageLog, PaymentOrder, PendingRegistration, SavedCard
 from .bog_payment import bog_service
 from .services import SingleFrontendDeploymentService
 from .email_service import email_service
@@ -383,6 +383,25 @@ def bog_webhook(request):
                             next_billing_date=trial_ends_at
                         )
                         logger.info(f'Trial subscription created for {tenant.schema_name}, ends at {trial_ends_at}, parent_order_id: {parent_order_id_for_subscription}')
+
+                        # Save card details if card was saved for recurring payments
+                        if card_saved_for_recurring and parent_order_id_for_subscription:
+                            card_type = payment_detail.get('card_type', '')
+                            masked_card = payment_detail.get('payer_identifier', '')
+                            card_expiry = payment_detail.get('card_expiry_date', '')
+
+                            SavedCard.objects.update_or_create(
+                                tenant=tenant,
+                                defaults={
+                                    'parent_order_id': parent_order_id_for_subscription,
+                                    'card_type': card_type,
+                                    'masked_card_number': masked_card,
+                                    'card_expiry': card_expiry,
+                                    'transaction_id': transaction_id,
+                                    'is_active': True
+                                }
+                            )
+                            logger.info(f'Saved card details for tenant {tenant.schema_name}: {card_type} {masked_card}')
                     else:
                         # Regular paid subscription
                         subscription = TenantSubscription.objects.create(
@@ -806,4 +825,107 @@ def manual_payment(request):
         return Response(
             {'error': f'Failed to create payment: {str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@extend_schema(
+    operation_id='get_saved_card',
+    summary='Get Saved Payment Card',
+    description='Retrieve the saved payment card for the current tenant',
+    responses={
+        200: OpenApiResponse(description='Saved card details'),
+        404: OpenApiResponse(description='No saved card found')
+    },
+    tags=['Payments']
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_saved_card(request):
+    """
+    Get the saved payment card for the current tenant
+
+    Only returns masked card details (last 4 digits, expiry, card type)
+    Actual card details are stored at Bank of Georgia
+    """
+    if not hasattr(request, 'tenant'):
+        return Response(
+            {'error': 'This endpoint is only available from tenant subdomains'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    # Only staff/admin can view saved card
+    if not request.user.is_staff:
+        return Response(
+            {'error': 'Only administrators can view saved card details'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    try:
+        saved_card = SavedCard.objects.get(tenant=request.tenant, is_active=True)
+        from .serializers import SavedCardSerializer
+        serializer = SavedCardSerializer(saved_card)
+        return Response(serializer.data)
+    except SavedCard.DoesNotExist:
+        return Response(
+            {'error': 'No saved card found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+
+@extend_schema(
+    operation_id='remove_saved_card',
+    summary='Remove Saved Payment Card',
+    description='Remove the saved payment card from the tenant account. This will prevent automatic recurring payments.',
+    responses={
+        200: OpenApiResponse(description='Card removed successfully'),
+        404: OpenApiResponse(description='No saved card found')
+    },
+    tags=['Payments']
+)
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def remove_saved_card(request):
+    """
+    Remove the saved payment card
+
+    This deactivates the saved card and removes the parent_order_id from the subscription.
+    After removing the card, the tenant will need to manually pay for renewals.
+    """
+    if not hasattr(request, 'tenant'):
+        return Response(
+            {'error': 'This endpoint is only available from tenant subdomains'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    # Only staff/admin can remove saved card
+    if not request.user.is_staff:
+        return Response(
+            {'error': 'Only administrators can remove saved card'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    try:
+        with transaction.atomic():
+            # Deactivate the saved card
+            saved_card = SavedCard.objects.get(tenant=request.tenant, is_active=True)
+            saved_card.is_active = False
+            saved_card.save()
+
+            # Remove parent_order_id from subscription
+            try:
+                subscription = TenantSubscription.objects.get(tenant=request.tenant)
+                subscription.parent_order_id = None
+                subscription.save()
+                logger.info(f'Removed saved card for tenant {request.tenant.schema_name}')
+            except TenantSubscription.DoesNotExist:
+                logger.warning(f'No subscription found for tenant {request.tenant.schema_name}')
+
+            return Response({
+                'status': 'success',
+                'message': 'Saved card removed successfully. You will need to manually pay for future renewals.'
+            })
+    except SavedCard.DoesNotExist:
+        return Response(
+            {'error': 'No saved card found'},
+            status=status.HTTP_404_NOT_FOUND
         )

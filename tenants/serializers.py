@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model, authenticate
 from rest_framework.authtoken.models import Token
-from .models import Tenant
+from .models import Tenant, SavedCard
 
 User = get_user_model()
 
@@ -361,3 +361,15 @@ class TenantDashboardDataSerializer(serializers.Serializer):
             return {
                 'error': f'Could not fetch statistics: {str(e)}'
             }
+
+
+class SavedCardSerializer(serializers.ModelSerializer):
+    """Serializer for SavedCard model - shows masked card details"""
+
+    class Meta:
+        model = SavedCard
+        fields = (
+            'id', 'card_type', 'masked_card_number', 'card_expiry',
+            'saved_at', 'is_active'
+        )
+        read_only_fields = ('id', 'card_type', 'masked_card_number', 'card_expiry', 'saved_at')

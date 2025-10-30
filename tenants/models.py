@@ -376,6 +376,68 @@ class UsageLog(models.Model):
         return f"{self.subscription.tenant.name} - {self.event_type} ({self.quantity})"
 
 
+class SavedCard(models.Model):
+    """
+    Store saved payment card details from Bank of Georgia for recurring payments
+    """
+    tenant = models.OneToOneField(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name='saved_card',
+        help_text='Tenant that owns this saved card'
+    )
+
+    # BOG order ID for recurring charges
+    parent_order_id = models.CharField(
+        max_length=100,
+        unique=True,
+        help_text='BOG parent order ID used for recurring payments'
+    )
+
+    # Card details (masked/safe to store)
+    card_type = models.CharField(
+        max_length=20,
+        blank=True,
+        help_text='Card type (e.g., mc, visa)'
+    )
+    masked_card_number = models.CharField(
+        max_length=20,
+        blank=True,
+        help_text='Masked card number (e.g., 531125***1450)'
+    )
+    card_expiry = models.CharField(
+        max_length=7,
+        blank=True,
+        help_text='Card expiry date (MM/YY format)'
+    )
+
+    # Payment metadata
+    transaction_id = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text='Initial transaction ID'
+    )
+    saved_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text='When the card was saved'
+    )
+
+    # Status
+    is_active = models.BooleanField(
+        default=True,
+        help_text='Whether this card is active for recurring payments'
+    )
+
+    class Meta:
+        db_table = 'tenants_saved_card'
+        verbose_name = 'Saved Card'
+        verbose_name_plural = 'Saved Cards'
+
+    def __str__(self):
+        card_display = f"{self.card_type.upper()} {self.masked_card_number}" if self.masked_card_number else "Card"
+        return f"{self.tenant.name} - {card_display}"
+
+
 class PaymentOrder(models.Model):
     """
     Track payment orders and metadata for subscription payments

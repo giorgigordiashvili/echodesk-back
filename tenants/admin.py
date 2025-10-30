@@ -8,7 +8,7 @@ from django.contrib.auth.models import Permission
 from tenant_schemas.utils import get_public_schema_name
 from .models import (
     Tenant, Package, TenantSubscription, UsageLog, PaymentOrder, PendingRegistration,
-    Feature, FeaturePermission, PackageFeature,
+    SavedCard, Feature, FeaturePermission, PackageFeature,
     TenantFeature, TenantPermission
 )
 
@@ -337,6 +337,44 @@ class UsageLogAdmin(admin.ModelAdmin):
 
     def get_queryset(self, request):
         return super().get_queryset(request).select_related('subscription__tenant')
+
+
+@admin.register(SavedCard)
+class SavedCardAdmin(admin.ModelAdmin):
+    """Admin interface for SavedCard model"""
+    list_display = [
+        'tenant', 'card_display', 'card_expiry', 'saved_at', 'is_active'
+    ]
+    list_filter = ['is_active', 'card_type', 'saved_at']
+    search_fields = ['tenant__name', 'tenant__schema_name', 'masked_card_number']
+    ordering = ['-saved_at']
+    readonly_fields = ['parent_order_id', 'card_type', 'masked_card_number', 'card_expiry', 'transaction_id', 'saved_at']
+
+    fieldsets = (
+        ('Tenant', {
+            'fields': ('tenant',)
+        }),
+        ('Card Details (Masked)', {
+            'fields': ('card_type', 'masked_card_number', 'card_expiry')
+        }),
+        ('Payment Reference', {
+            'fields': ('parent_order_id', 'transaction_id'),
+            'description': 'BOG parent_order_id used for recurring payments'
+        }),
+        ('Status', {
+            'fields': ('is_active', 'saved_at')
+        })
+    )
+
+    @admin.display(description='Card')
+    def card_display(self, obj):
+        """Display card type and masked number"""
+        if obj.card_type and obj.masked_card_number:
+            return f"{obj.card_type.upper()} {obj.masked_card_number}"
+        return '-'
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related('tenant')
 
 
 @admin.register(PaymentOrder)
