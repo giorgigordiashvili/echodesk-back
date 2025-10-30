@@ -1077,13 +1077,17 @@ class BoardViewSet(viewsets.ModelViewSet):
         # 3. User's group is attached via board_groups
         group_attached = Q(board_groups__in=user_groups) if user_groups.exists() else Q(pk__in=[])
 
-        # 4. Board has no restrictions (no board_users AND no board_groups) - available to everyone
-        unrestricted = Q(board_users__isnull=True, board_groups__isnull=True)
+        # Annotate boards with counts of restrictions
+        from django.db.models import Count
+        boards_with_counts = Board.objects.annotate(
+            user_count=Count('board_users', distinct=True),
+            group_count=Count('board_groups', distinct=True)
+        )
 
-        # Combine all conditions
-        # Users can see boards they're explicitly attached to, via their groups, or unrestricted boards
-        return Board.objects.filter(
-            order_user_attached | board_user_attached | group_attached | unrestricted
+        # Filter: user has access OR board has no restrictions (both counts are 0)
+        return boards_with_counts.filter(
+            Q(order_user_attached | board_user_attached | group_attached) |  # User has explicit access
+            Q(user_count=0, group_count=0)  # OR board is unrestricted
         ).distinct()
     
     def perform_create(self, serializer):
