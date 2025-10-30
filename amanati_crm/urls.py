@@ -77,4 +77,5 @@ urlpatterns = [
     path('', include('crm.urls')),
     path('', include('tickets.urls')),
     path('api/social/', include('social_integrations.urls')),
+    path('', include('notifications.urls')),
 ]
