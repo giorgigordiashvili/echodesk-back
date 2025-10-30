@@ -1077,10 +1077,13 @@ class BoardViewSet(viewsets.ModelViewSet):
         # 3. User's group is attached via board_groups
         group_attached = Q(board_groups__in=user_groups) if user_groups.exists() else Q(pk__in=[])
 
+        # 4. Board has no restrictions (no board_users AND no board_groups) - available to everyone
+        unrestricted = Q(board_users__isnull=True, board_groups__isnull=True)
+
         # Combine all conditions
-        # Users can only see boards they're explicitly attached to or via their groups
+        # Users can see boards they're explicitly attached to, via their groups, or unrestricted boards
         return Board.objects.filter(
-            order_user_attached | board_user_attached | group_attached
+            order_user_attached | board_user_attached | group_attached | unrestricted
         ).distinct()
     
     def perform_create(self, serializer):
