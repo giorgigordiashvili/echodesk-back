@@ -756,3 +756,266 @@ class FavoriteProduct(models.Model):
 
     def __str__(self):
         return f"{self.client.full_name} - {self.product.sku}"
+
+
+class Cart(models.Model):
+    """
+    Shopping cart for ecommerce clients
+    Each client has one active cart at a time
+    """
+    STATUS_CHOICES = [
+        ('active', 'Active'),
+        ('abandoned', 'Abandoned'),
+        ('converted', 'Converted to Order'),
+    ]
+
+    client = models.ForeignKey(
+        EcommerceClient,
+        on_delete=models.CASCADE,
+        related_name='carts',
+        help_text="Client who owns this cart"
+    )
+    delivery_address = models.ForeignKey(
+        ClientAddress,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='carts',
+        help_text="Selected delivery address for this cart"
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='active',
+        help_text="Cart status"
+    )
+    notes = models.TextField(blank=True, help_text="Special instructions or notes")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-updated_at']
+        verbose_name = 'Shopping Cart'
+        verbose_name_plural = 'Shopping Carts'
+        indexes = [
+            models.Index(fields=['client', 'status']),
+            models.Index(fields=['status', '-updated_at']),
+        ]
+
+    def __str__(self):
+        return f"Cart #{self.id} - {self.client.full_name} ({self.status})"
+
+    @property
+    def total_amount(self):
+        """Calculate total cart amount"""
+        return sum(item.subtotal for item in self.items.all())
+
+    @property
+    def total_items(self):
+        """Get total number of items in cart"""
+        return sum(item.quantity for item in self.items.all())
+
+
+class CartItem(models.Model):
+    """
+    Individual items in a shopping cart
+    """
+    cart = models.ForeignKey(
+        Cart,
+        on_delete=models.CASCADE,
+        related_name='items',
+        help_text="Cart this item belongs to"
+    )
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.CASCADE,
+        related_name='cart_items',
+        help_text="Product in cart"
+    )
+    variant = models.ForeignKey(
+        ProductVariant,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='cart_items',
+        help_text="Product variant (if applicable)"
+    )
+    quantity = models.IntegerField(
+        default=1,
+        validators=[MinValueValidator(1)],
+        help_text="Quantity of this product"
+    )
+    price_at_add = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        help_text="Price when added to cart (to track price changes)"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['created_at']
+        verbose_name = 'Cart Item'
+        verbose_name_plural = 'Cart Items'
+        indexes = [
+            models.Index(fields=['cart', 'product']),
+        ]
+
+    def __str__(self):
+        return f"{self.product.sku} x{self.quantity} in Cart #{self.cart.id}"
+
+    @property
+    def subtotal(self):
+        """Calculate subtotal for this cart item"""
+        return self.price_at_add * self.quantity
+
+    def save(self, *args, **kwargs):
+        """Auto-set price_at_add if not provided"""
+        if not self.price_at_add:
+            if self.variant and self.variant.price:
+                self.price_at_add = self.variant.price
+            else:
+                self.price_at_add = self.product.price
+        super().save(*args, **kwargs)
+
+
+class Order(models.Model):
+    """
+    Customer orders created from cart checkout
+    """
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('confirmed', 'Confirmed'),
+        ('processing', 'Processing'),
+        ('shipped', 'Shipped'),
+        ('delivered', 'Delivered'),
+        ('cancelled', 'Cancelled'),
+        ('refunded', 'Refunded'),
+    ]
+
+    order_number = models.CharField(
+        max_length=50,
+        unique=True,
+        help_text="Unique order number"
+    )
+    client = models.ForeignKey(
+        EcommerceClient,
+        on_delete=models.PROTECT,
+        related_name='orders',
+        help_text="Client who placed the order"
+    )
+    delivery_address = models.ForeignKey(
+        ClientAddress,
+        on_delete=models.PROTECT,
+        related_name='orders',
+        help_text="Delivery address for this order"
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='pending',
+        help_text="Order status"
+    )
+    total_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        help_text="Total order amount"
+    )
+    notes = models.TextField(
+        blank=True,
+        help_text="Customer notes or special instructions"
+    )
+    admin_notes = models.TextField(
+        blank=True,
+        help_text="Internal admin notes"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+    shipped_at = models.DateTimeField(null=True, blank=True)
+    delivered_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Order'
+        verbose_name_plural = 'Orders'
+        indexes = [
+            models.Index(fields=['order_number']),
+            models.Index(fields=['client', '-created_at']),
+            models.Index(fields=['status', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f"Order {self.order_number} - {self.client.full_name}"
+
+    @property
+    def total_items(self):
+        """Get total number of items in order"""
+        return sum(item.quantity for item in self.items.all())
+
+    @staticmethod
+    def generate_order_number():
+        """Generate unique order number"""
+        import random
+        import string
+        from django.utils import timezone
+
+        timestamp = timezone.now().strftime('%Y%m%d')
+        random_str = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+        return f"ORD-{timestamp}-{random_str}"
+
+
+class OrderItem(models.Model):
+    """
+    Individual items in an order
+    Snapshot of product details at time of order
+    """
+    order = models.ForeignKey(
+        Order,
+        on_delete=models.CASCADE,
+        related_name='items',
+        help_text="Order this item belongs to"
+    )
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.PROTECT,
+        related_name='order_items',
+        help_text="Product ordered"
+    )
+    variant = models.ForeignKey(
+        ProductVariant,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='order_items',
+        help_text="Product variant (if applicable)"
+    )
+    product_name = models.JSONField(
+        help_text="Product name at time of order (multilingual)"
+    )
+    quantity = models.IntegerField(
+        validators=[MinValueValidator(1)],
+        help_text="Quantity ordered"
+    )
+    price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        help_text="Price per item at time of order"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
+        verbose_name = 'Order Item'
+        verbose_name_plural = 'Order Items'
+        indexes = [
+            models.Index(fields=['order', 'product']),
+        ]
+
+    def __str__(self):
+        return f"{self.product.sku} x{self.quantity} in {self.order.order_number}"
+
+    @property
+    def subtotal(self):
+        """Calculate subtotal for this order item"""
+        return self.price * self.quantity

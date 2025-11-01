@@ -11,6 +11,9 @@ from .views import (
     EcommerceClientViewSet,
     ClientAddressViewSet,
     FavoriteProductViewSet,
+    CartViewSet,
+    CartItemViewSet,
+    OrderViewSet,
     register_client,
     login_client
 )
@@ -26,6 +29,9 @@ router.register(r'variants', ProductVariantViewSet, basename='product-variant')
 router.register(r'clients', EcommerceClientViewSet, basename='ecommerce-client')
 router.register(r'addresses', ClientAddressViewSet, basename='client-address')
 router.register(r'favorites', FavoriteProductViewSet, basename='favorite-product')
+router.register(r'cart', CartViewSet, basename='cart')
+router.register(r'cart-items', CartItemViewSet, basename='cart-item')
+router.register(r'orders', OrderViewSet, basename='order')
 
 app_name = 'ecommerce_crm'
 

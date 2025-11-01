@@ -16,7 +16,11 @@ from .models import (
     ProductAttributeValue,
     EcommerceClient,
     ClientAddress,
-    FavoriteProduct
+    FavoriteProduct,
+    Cart,
+    CartItem,
+    Order,
+    OrderItem
 )
 from .serializers import (
     LanguageSerializer,
@@ -33,7 +37,12 @@ from .serializers import (
     ClientLoginSerializer,
     ClientAddressSerializer,
     FavoriteProductSerializer,
-    FavoriteProductCreateSerializer
+    FavoriteProductCreateSerializer,
+    CartSerializer,
+    CartItemSerializer,
+    CartItemCreateSerializer,
+    OrderSerializer,
+    OrderCreateSerializer
 )
 
 
@@ -856,3 +865,239 @@ class FavoriteProductViewSet(viewsets.ModelViewSet):
                 'is_favorited': True,
                 'favorite': serializer.data
             }, status=status.HTTP_201_CREATED)
+
+
+class CartViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing shopping carts"""
+    queryset = Cart.objects.all()
+    serializer_class = CartSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['client', 'status']
+    ordering_fields = ['created_at', 'updated_at']
+    ordering = ['-updated_at']
+
+    @extend_schema(
+        tags=['Ecommerce - Cart'],
+        summary='List all carts',
+        description='Get all shopping carts with optional filtering'
+    )
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Cart'],
+        summary='Get cart details',
+        description='Retrieve cart with all items and totals'
+    )
+    def retrieve(self, request, *args, **kwargs):
+        return super().retrieve(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Cart'],
+        summary='Create new cart'
+    )
+    def create(self, request, *args, **kwargs):
+        return super().create(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Cart'],
+        summary='Update cart',
+        description='Update cart details (e.g., delivery address, notes)'
+    )
+    def update(self, request, *args, **kwargs):
+        return super().update(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Cart'],
+        summary='Delete cart'
+    )
+    def destroy(self, request, *args, **kwargs):
+        return super().destroy(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Cart'],
+        summary='Get or create active cart',
+        description='Get client\'s active cart or create new one',
+        parameters=[OpenApiParameter(name='client', type=int, required=True)]
+    )
+    @action(detail=False, methods=['get'])
+    def get_or_create(self, request):
+        """Get or create active cart for client"""
+        client_id = request.query_params.get('client')
+        if not client_id:
+            return Response({'error': 'Client ID required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        cart, created = Cart.objects.get_or_create(
+            client_id=client_id,
+            status='active',
+            defaults={'status': 'active'}
+        )
+        serializer = self.get_serializer(cart)
+        return Response({
+            'cart': serializer.data,
+            'created': created
+        })
+
+    @extend_schema(
+        tags=['Ecommerce - Cart'],
+        summary='Set delivery address',
+        description='Set or update delivery address for cart'
+    )
+    @action(detail=True, methods=['post'])
+    def set_address(self, request, pk=None):
+        """Set delivery address for cart"""
+        cart = self.get_object()
+        address_id = request.data.get('address_id')
+        
+        if not address_id:
+            return Response({'error': 'Address ID required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            address = ClientAddress.objects.get(id=address_id, client=cart.client)
+            cart.delivery_address = address
+            cart.save()
+            serializer = self.get_serializer(cart)
+            return Response(serializer.data)
+        except ClientAddress.DoesNotExist:
+            return Response({'error': 'Address not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    @extend_schema(
+        tags=['Ecommerce - Cart'],
+        summary='Clear cart',
+        description='Remove all items from cart'
+    )
+    @action(detail=True, methods=['post'])
+    def clear(self, request, pk=None):
+        """Clear all items from cart"""
+        cart = self.get_object()
+        cart.items.all().delete()
+        serializer = self.get_serializer(cart)
+        return Response(serializer.data)
+
+
+class CartItemViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing cart items"""
+    queryset = CartItem.objects.all()
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['cart', 'product']
+
+    def get_serializer_class(self):
+        if self.action in ['create', 'update', 'partial_update']:
+            return CartItemCreateSerializer
+        return CartItemSerializer
+
+    @extend_schema(
+        tags=['Ecommerce - Cart Items'],
+        summary='List cart items'
+    )
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Cart Items'],
+        summary='Add item to cart',
+        description='Add a product to shopping cart'
+    )
+    def create(self, request, *args, **kwargs):
+        return super().create(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Cart Items'],
+        summary='Update cart item',
+        description='Update quantity or variant'
+    )
+    def update(self, request, *args, **kwargs):
+        return super().update(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Cart Items'],
+        summary='Remove item from cart'
+    )
+    def destroy(self, request, *args, **kwargs):
+        return super().destroy(request, *args, **kwargs)
+
+
+class OrderViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing orders"""
+    queryset = Order.objects.all()
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['order_number', 'client__first_name', 'client__last_name', 'client__email']
+    filterset_fields = ['client', 'status']
+    ordering_fields = ['created_at', 'total_amount', 'status']
+    ordering = ['-created_at']
+
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return OrderCreateSerializer
+        return OrderSerializer
+
+    @extend_schema(
+        tags=['Ecommerce - Orders'],
+        summary='List all orders',
+        description='Get all orders with filtering and search'
+    )
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Orders'],
+        summary='Get order details',
+        description='Retrieve order with all items and client info'
+    )
+    def retrieve(self, request, *args, **kwargs):
+        return super().retrieve(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Orders'],
+        summary='Create order from cart',
+        description='Submit cart and create order'
+    )
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        order = serializer.save()
+        output_serializer = OrderSerializer(order)
+        return Response(output_serializer.data, status=status.HTTP_201_CREATED)
+
+    @extend_schema(
+        tags=['Ecommerce - Orders'],
+        summary='Update order',
+        description='Update order status, notes, etc.'
+    )
+    def update(self, request, *args, **kwargs):
+        return super().update(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Orders'],
+        summary='Update order status',
+        description='Change order status (pending, confirmed, shipped, etc.)'
+    )
+    @action(detail=True, methods=['post'])
+    def update_status(self, request, pk=None):
+        """Update order status"""
+        from django.utils import timezone
+        order = self.get_object()
+        new_status = request.data.get('status')
+
+        if not new_status:
+            return Response({'error': 'Status required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if new_status not in dict(Order.STATUS_CHOICES):
+            return Response({'error': 'Invalid status'}, status=status.HTTP_400_BAD_REQUEST)
+
+        order.status = new_status
+
+        # Update timestamps based on status
+        if new_status == 'confirmed' and not order.confirmed_at:
+            order.confirmed_at = timezone.now()
+        elif new_status == 'shipped' and not order.shipped_at:
+            order.shipped_at = timezone.now()
+        elif new_status == 'delivered' and not order.delivered_at:
+            order.delivered_at = timezone.now()
+
+        order.save()
+        serializer = self.get_serializer(order)
+        return Response(serializer.data)

@@ -11,7 +11,11 @@ from .models import (
     ProductVariant,
     ProductVariantAttributeValue,
     ClientAddress,
-    FavoriteProduct
+    FavoriteProduct,
+    Cart,
+    CartItem,
+    Order,
+    OrderItem
 )
 
 
@@ -521,3 +525,132 @@ class ClientLoginSerializer(serializers.Serializer):
         # Add client to validated data
         data['client'] = client
         return data
+
+class CartItemSerializer(serializers.ModelSerializer):
+    """Serializer for cart items with product details"""
+    product = ProductListSerializer(read_only=True)
+    variant = ProductVariantSerializer(read_only=True)
+    subtotal = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+
+    class Meta:
+        model = CartItem
+        fields = ['id', 'cart', 'product', 'variant', 'quantity', 'price_at_add', 'subtotal', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'price_at_add', 'created_at', 'updated_at']
+
+
+class CartSerializer(serializers.ModelSerializer):
+    """Serializer for shopping cart with nested items"""
+    items = CartItemSerializer(many=True, read_only=True)
+    delivery_address = ClientAddressSerializer(read_only=True)
+    total_amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    total_items = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = Cart
+        fields = ['id', 'client', 'delivery_address', 'status', 'notes', 'items', 'total_amount', 'total_items', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class CartItemCreateSerializer(serializers.ModelSerializer):
+    """Serializer for adding items to cart"""
+    
+    class Meta:
+        model = CartItem
+        fields = ['id', 'cart', 'product', 'variant', 'quantity', 'price_at_add']
+        read_only_fields = ['id', 'price_at_add']
+
+
+class OrderItemSerializer(serializers.ModelSerializer):
+    """Serializer for order items"""
+    subtotal = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+
+    class Meta:
+        model = OrderItem
+        fields = ['id', 'order', 'product', 'variant', 'product_name', 'quantity', 'price', 'subtotal', 'created_at']
+        read_only_fields = ['id', 'created_at']
+
+
+class OrderSerializer(serializers.ModelSerializer):
+    """Serializer for orders with nested items"""
+    items = OrderItemSerializer(many=True, read_only=True)
+    delivery_address = ClientAddressSerializer(read_only=True)
+    total_items = serializers.IntegerField(read_only=True)
+    client_details = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Order
+        fields = [
+            'id', 'order_number', 'client', 'client_details', 'delivery_address', 
+            'status', 'total_amount', 'notes', 'admin_notes', 'items', 'total_items',
+            'created_at', 'updated_at', 'confirmed_at', 'shipped_at', 'delivered_at'
+        ]
+        read_only_fields = ['id', 'order_number', 'created_at', 'updated_at']
+
+    def get_client_details(self, obj):
+        """Return client basic info"""
+        return {
+            'id': obj.client.id,
+            'full_name': obj.client.full_name,
+            'email': obj.client.email,
+            'phone_number': obj.client.phone_number
+        }
+
+
+class OrderCreateSerializer(serializers.Serializer):
+    """Serializer for creating an order from cart"""
+    cart_id = serializers.IntegerField(required=True)
+    delivery_address_id = serializers.IntegerField(required=True)
+    notes = serializers.CharField(required=False, allow_blank=True)
+
+    def validate_cart_id(self, value):
+        """Validate cart exists and has items"""
+        try:
+            cart = Cart.objects.get(id=value, status='active')
+            if not cart.items.exists():
+                raise serializers.ValidationError("Cart is empty")
+            return value
+        except Cart.DoesNotExist:
+            raise serializers.ValidationError("Cart not found")
+
+    def validate_delivery_address_id(self, value):
+        """Validate delivery address exists"""
+        try:
+            ClientAddress.objects.get(id=value)
+            return value
+        except ClientAddress.DoesNotExist:
+            raise serializers.ValidationError("Delivery address not found")
+
+    def create(self, validated_data):
+        """Create order from cart"""
+        cart = Cart.objects.get(id=validated_data['cart_id'])
+        delivery_address = ClientAddress.objects.get(id=validated_data['delivery_address_id'])
+
+        # Generate unique order number
+        order_number = Order.generate_order_number()
+
+        # Create order
+        order = Order.objects.create(
+            order_number=order_number,
+            client=cart.client,
+            delivery_address=delivery_address,
+            total_amount=cart.total_amount,
+            notes=validated_data.get('notes', ''),
+            status='pending'
+        )
+
+        # Create order items from cart items
+        for cart_item in cart.items.all():
+            OrderItem.objects.create(
+                order=order,
+                product=cart_item.product,
+                variant=cart_item.variant,
+                product_name=cart_item.product.name,  # Snapshot of product name
+                quantity=cart_item.quantity,
+                price=cart_item.price_at_add
+            )
+
+        # Mark cart as converted
+        cart.status = 'converted'
+        cart.save()
+
+        return order
