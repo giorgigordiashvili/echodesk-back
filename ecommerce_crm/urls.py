@@ -1,6 +1,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
+    LanguageViewSet,
     ProductCategoryViewSet,
     ProductTypeViewSet,
     AttributeDefinitionViewSet,
@@ -13,6 +14,7 @@ from .views import (
 )
 
 router = DefaultRouter()
+router.register(r'languages', LanguageViewSet, basename='language')
 router.register(r'categories', ProductCategoryViewSet, basename='product-category')
 router.register(r'types', ProductTypeViewSet, basename='product-type')
 router.register(r'attributes', AttributeDefinitionViewSet, basename='attribute')

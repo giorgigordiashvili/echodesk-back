@@ -1,5 +1,6 @@
 from django.contrib import admin
 from .models import (
+    Language,
     ProductCategory,
     ProductType,
     AttributeDefinition,
@@ -11,6 +12,28 @@ from .models import (
     ProductVariantAttributeValue,
     EcommerceClient
 )
+
+
+@admin.register(Language)
+class LanguageAdmin(admin.ModelAdmin):
+    list_display = ['code', '__str__', 'is_default', 'is_active', 'sort_order', 'created_at']
+    list_filter = ['is_default', 'is_active']
+    search_fields = ['code']
+    ordering = ['sort_order', 'code']
+    readonly_fields = ['created_at', 'updated_at']
+
+    fieldsets = (
+        ('Language Information', {
+            'fields': ('code', 'name', 'sort_order')
+        }),
+        ('Settings', {
+            'fields': ('is_default', 'is_active')
+        }),
+        ('System', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
 
 
 @admin.register(ProductCategory)

@@ -6,6 +6,7 @@ from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiParamet
 from django_filters.rest_framework import DjangoFilterBackend, FilterSet, CharFilter, NumberFilter, BooleanFilter
 from django.db.models import Q, F
 from .models import (
+    Language,
     ProductCategory,
     ProductType,
     AttributeDefinition,
@@ -16,6 +17,7 @@ from .models import (
     EcommerceClient
 )
 from .serializers import (
+    LanguageSerializer,
     ProductCategorySerializer,
     ProductTypeSerializer,
     AttributeDefinitionSerializer,
@@ -28,6 +30,60 @@ from .serializers import (
     ClientRegistrationSerializer,
     ClientLoginSerializer
 )
+
+
+class LanguageViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing available languages
+    """
+    queryset = Language.objects.all()
+    serializer_class = LanguageSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [filters.OrderingFilter]
+    ordering_fields = ['sort_order', 'code']
+    ordering = ['sort_order', 'code']
+
+    @extend_schema(
+        tags=['Ecommerce - Languages'],
+        summary='List all languages'
+    )
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Languages'],
+        summary='Get language details'
+    )
+    def retrieve(self, request, *args, **kwargs):
+        return super().retrieve(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Languages'],
+        summary='Create new language'
+    )
+    def create(self, request, *args, **kwargs):
+        return super().create(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Languages'],
+        summary='Update language'
+    )
+    def update(self, request, *args, **kwargs):
+        return super().update(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Languages'],
+        summary='Partially update language'
+    )
+    def partial_update(self, request, *args, **kwargs):
+        return super().partial_update(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Languages'],
+        summary='Delete language'
+    )
+    def destroy(self, request, *args, **kwargs):
+        return super().destroy(request, *args, **kwargs)
 
 
 class ProductCategoryViewSet(viewsets.ModelViewSet):

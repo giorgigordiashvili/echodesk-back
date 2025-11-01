@@ -6,6 +6,53 @@ from decimal import Decimal
 import uuid
 
 
+class Language(models.Model):
+    """
+    Available languages for multilanguage product content
+    Default languages: English (en) and Georgian (ka)
+    Users can add additional languages as needed
+    """
+    code = models.CharField(
+        max_length=10,
+        unique=True,
+        help_text="Language code (e.g., 'en', 'ka', 'ru', 'de')"
+    )
+    name = models.JSONField(
+        help_text="Language name in different languages: {'en': 'English', 'ka': 'ინგლისური'}"
+    )
+    is_default = models.BooleanField(
+        default=False,
+        help_text="Whether this is a default required language"
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Whether this language is active and available for use"
+    )
+    sort_order = models.IntegerField(default=0, help_text="Display order")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['sort_order', 'code']
+        verbose_name = 'Language'
+        verbose_name_plural = 'Languages'
+        indexes = [
+            models.Index(fields=['code']),
+            models.Index(fields=['is_active', 'sort_order']),
+        ]
+
+    def __str__(self):
+        if isinstance(self.name, dict):
+            return self.name.get('en', self.name.get(list(self.name.keys())[0], self.code))
+        return str(self.name)
+
+    def get_name(self, language='en'):
+        """Get language name in specific language"""
+        if isinstance(self.name, dict):
+            return self.name.get(language, self.name.get('en', self.code))
+        return str(self.name)
+
+
 class ProductCategory(models.Model):
     """Product category for organization"""
     name = models.JSONField(

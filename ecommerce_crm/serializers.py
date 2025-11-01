@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from .models import (
+    Language,
     ProductCategory,
     ProductType,
     AttributeDefinition,
@@ -10,6 +11,14 @@ from .models import (
     ProductVariant,
     ProductVariantAttributeValue
 )
+
+
+class LanguageSerializer(serializers.ModelSerializer):
+    """Serializer for languages"""
+    class Meta:
+        model = Language
+        fields = ['id', 'code', 'name', 'is_default', 'is_active', 'sort_order', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at']
 
 
 class ProductCategorySerializer(serializers.ModelSerializer):
