@@ -53,104 +53,6 @@ class Language(models.Model):
         return str(self.name)
 
 
-class ProductCategory(models.Model):
-    """Product category for organization"""
-    name = models.JSONField(
-        help_text="Category name in different languages: {'en': 'Electronics', 'ka': 'ელექტრონიკა', 'ru': 'Электроника'}"
-    )
-    description = models.JSONField(
-        blank=True,
-        default=dict,
-        help_text="Category description in different languages"
-    )
-    slug = models.SlugField(max_length=100, unique=True)
-    parent = models.ForeignKey(
-        'self',
-        null=True,
-        blank=True,
-        on_delete=models.CASCADE,
-        related_name='subcategories'
-    )
-    image = models.ImageField(upload_to='product_categories/', blank=True, null=True)
-    sort_order = models.IntegerField(default=0)
-    is_active = models.BooleanField(default=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-    created_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
-        related_name='created_categories'
-    )
-
-    class Meta:
-        ordering = ['sort_order', 'id']
-        verbose_name = 'Product Category'
-        verbose_name_plural = 'Product Categories'
-        indexes = [
-            models.Index(fields=['slug']),
-            models.Index(fields=['is_active', 'sort_order']),
-        ]
-
-    def __str__(self):
-        # Return English name or first available language
-        if isinstance(self.name, dict):
-            return self.name.get('en', self.name.get(list(self.name.keys())[0], 'Unnamed'))
-        return str(self.name)
-
-    def get_name(self, language='en'):
-        """Get category name in specific language"""
-        if isinstance(self.name, dict):
-            return self.name.get(language, self.name.get('en', ''))
-        return str(self.name)
-
-
-class ProductType(models.Model):
-    """
-    Product types define different kinds of products with their own attribute sets
-    (e.g., 'Electronics', 'Clothing', 'Books')
-    Similar to Directus collections - each type can have its own fields/attributes
-    """
-    name = models.JSONField(
-        help_text="Type name in different languages: {'en': 'Electronics', 'ka': 'ელექტრონიკა', 'ru': 'Электроника'}"
-    )
-    key = models.CharField(
-        max_length=100,
-        unique=True,
-        help_text="Unique key for code reference (e.g., 'electronics', 'clothing')"
-    )
-    description = models.JSONField(
-        blank=True,
-        default=dict,
-        help_text="Type description in different languages"
-    )
-    icon = models.CharField(max_length=50, blank=True, help_text="Icon name or emoji")
-    sort_order = models.IntegerField(default=0)
-    is_active = models.BooleanField(default=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        ordering = ['sort_order', 'id']
-        verbose_name = 'Product Type'
-        verbose_name_plural = 'Product Types'
-        indexes = [
-            models.Index(fields=['key']),
-            models.Index(fields=['is_active', 'sort_order']),
-        ]
-
-    def __str__(self):
-        if isinstance(self.name, dict):
-            return self.name.get('en', self.name.get(list(self.name.keys())[0], self.key))
-        return str(self.name)
-
-    def get_name(self, language='en'):
-        """Get type name in specific language"""
-        if isinstance(self.name, dict):
-            return self.name.get(language, self.name.get('en', self.key))
-        return str(self.name)
-
-
 class AttributeDefinition(models.Model):
     """
     Define dynamic attributes that can be assigned to products
@@ -220,38 +122,6 @@ class AttributeDefinition(models.Model):
         return str(self.name)
 
 
-class ProductTypeAttribute(models.Model):
-    """
-    Link product types to their specific attributes
-    Defines which attributes are available for each product type
-    """
-    product_type = models.ForeignKey(
-        ProductType,
-        on_delete=models.CASCADE,
-        related_name='type_attributes'
-    )
-    attribute = models.ForeignKey(
-        AttributeDefinition,
-        on_delete=models.CASCADE,
-        related_name='product_types'
-    )
-    is_required = models.BooleanField(
-        default=False,
-        help_text="Override the attribute's default is_required setting for this product type"
-    )
-    sort_order = models.IntegerField(default=0)
-    is_active = models.BooleanField(default=True)
-
-    class Meta:
-        unique_together = ['product_type', 'attribute']
-        ordering = ['sort_order', 'id']
-        verbose_name = 'Product Type Attribute'
-        verbose_name_plural = 'Product Type Attributes'
-
-    def __str__(self):
-        return f"{self.product_type} - {self.attribute.key}"
-
-
 class Product(models.Model):
     """Main product model"""
 
@@ -278,22 +148,7 @@ class Product(models.Model):
         help_text="Short product description in different languages"
     )
 
-    # Product Type (defines which attributes are available)
-    product_type = models.ForeignKey(
-        ProductType,
-        on_delete=models.PROTECT,
-        related_name='products',
-        help_text="Product type determines available attributes"
-    )
-
-    # Categorization
-    category = models.ForeignKey(
-        ProductCategory,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='products'
-    )
+    # Using dynamic attributes instead of fixed product types and categories
 
     # Pricing
     price = models.DecimalField(
@@ -384,7 +239,6 @@ class Product(models.Model):
             models.Index(fields=['sku']),
             models.Index(fields=['slug']),
             models.Index(fields=['status', '-created_at']),
-            models.Index(fields=['category', 'status']),
             models.Index(fields=['is_featured', 'status']),
         ]
 

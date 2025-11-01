@@ -1,10 +1,7 @@
 from rest_framework import serializers
 from .models import (
     Language,
-    ProductCategory,
-    ProductType,
     AttributeDefinition,
-    ProductTypeAttribute,
     Product,
     ProductImage,
     ProductAttributeValue,
@@ -27,32 +24,6 @@ class LanguageSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at', 'updated_at']
 
 
-class ProductCategorySerializer(serializers.ModelSerializer):
-    """Serializer for product categories with nested subcategories"""
-    subcategories = serializers.SerializerMethodField()
-    parent_name = serializers.SerializerMethodField()
-
-    class Meta:
-        model = ProductCategory
-        fields = [
-            'id', 'name', 'description', 'slug', 'parent', 'parent_name',
-            'image', 'sort_order', 'is_active', 'created_at', 'updated_at',
-            'subcategories'
-        ]
-        read_only_fields = ['created_at', 'updated_at', 'created_by']
-
-    def get_subcategories(self, obj):
-        # Return only active subcategories
-        subcategories = obj.subcategories.filter(is_active=True)
-        return ProductCategorySerializer(subcategories, many=True, context=self.context).data
-
-    def get_parent_name(self, obj):
-        if obj.parent:
-            language = self.context.get('language', 'en')
-            return obj.parent.get_name(language)
-        return None
-
-
 class AttributeDefinitionSerializer(serializers.ModelSerializer):
     """Serializer for attribute definitions"""
 
@@ -64,49 +35,6 @@ class AttributeDefinitionSerializer(serializers.ModelSerializer):
             'sort_order', 'is_active', 'created_at', 'updated_at'
         ]
         read_only_fields = ['created_at', 'updated_at']
-
-
-class ProductTypeAttributeSerializer(serializers.ModelSerializer):
-    """Serializer for product type attributes linking"""
-    attribute = AttributeDefinitionSerializer(read_only=True)
-    attribute_id = serializers.PrimaryKeyRelatedField(
-        queryset=AttributeDefinition.objects.all(),
-        source='attribute',
-        write_only=True
-    )
-
-    class Meta:
-        model = ProductTypeAttribute
-        fields = [
-            'id', 'product_type', 'attribute', 'attribute_id',
-            'is_required', 'sort_order', 'is_active'
-        ]
-
-
-class ProductTypeSerializer(serializers.ModelSerializer):
-    """Serializer for product types with their attributes"""
-    attributes = serializers.SerializerMethodField()
-    product_count = serializers.SerializerMethodField()
-
-    class Meta:
-        model = ProductType
-        fields = [
-            'id', 'name', 'key', 'description', 'icon',
-            'sort_order', 'is_active', 'created_at', 'updated_at',
-            'attributes', 'product_count'
-        ]
-        read_only_fields = ['created_at', 'updated_at']
-
-    def get_attributes(self, obj):
-        # Get all active attributes for this product type
-        type_attrs = obj.type_attributes.filter(
-            is_active=True,
-            attribute__is_active=True
-        ).select_related('attribute').order_by('sort_order')
-        return ProductTypeAttributeSerializer(type_attrs, many=True, context=self.context).data
-
-    def get_product_count(self, obj):
-        return obj.products.filter(status='active').count()
 
 
 class ProductImageSerializer(serializers.ModelSerializer):
@@ -173,8 +101,6 @@ class ProductVariantSerializer(serializers.ModelSerializer):
 
 class ProductListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for product listings"""
-    product_type_name = serializers.SerializerMethodField()
-    category_name = serializers.SerializerMethodField()
     discount_percentage = serializers.FloatField(read_only=True)
     is_low_stock = serializers.BooleanField(read_only=True)
     is_in_stock = serializers.BooleanField(read_only=True)
@@ -183,28 +109,15 @@ class ProductListSerializer(serializers.ModelSerializer):
         model = Product
         fields = [
             'id', 'sku', 'slug', 'name', 'short_description',
-            'product_type', 'product_type_name', 'category', 'category_name',
             'price', 'compare_at_price', 'discount_percentage',
             'image', 'quantity', 'status', 'is_featured',
             'is_low_stock', 'is_in_stock', 'created_at', 'updated_at'
         ]
         read_only_fields = ['created_at', 'updated_at']
 
-    def get_product_type_name(self, obj):
-        language = self.context.get('language', 'en')
-        return obj.product_type.get_name(language)
-
-    def get_category_name(self, obj):
-        if obj.category:
-            language = self.context.get('language', 'en')
-            return obj.category.get_name(language)
-        return None
-
 
 class ProductDetailSerializer(serializers.ModelSerializer):
     """Detailed serializer for product with all related data"""
-    product_type_detail = ProductTypeSerializer(source='product_type', read_only=True)
-    category_detail = ProductCategorySerializer(source='category', read_only=True)
     images = ProductImageSerializer(many=True, read_only=True)
     attribute_values = ProductAttributeValueSerializer(many=True, read_only=True)
     variants = ProductVariantSerializer(many=True, read_only=True)
@@ -218,7 +131,6 @@ class ProductDetailSerializer(serializers.ModelSerializer):
         model = Product
         fields = [
             'id', 'sku', 'slug', 'name', 'description', 'short_description',
-            'product_type', 'product_type_detail', 'category', 'category_detail',
             'price', 'compare_at_price', 'cost_price', 'discount_percentage',
             'image', 'images', 'track_inventory', 'quantity', 'low_stock_threshold',
             'is_low_stock', 'is_in_stock', 'status', 'is_featured',

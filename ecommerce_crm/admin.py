@@ -1,10 +1,7 @@
 from django.contrib import admin
 from .models import (
     Language,
-    ProductCategory,
-    ProductType,
     AttributeDefinition,
-    ProductTypeAttribute,
     Product,
     ProductImage,
     ProductAttributeValue,
@@ -36,36 +33,12 @@ class LanguageAdmin(admin.ModelAdmin):
     )
 
 
-@admin.register(ProductCategory)
-class ProductCategoryAdmin(admin.ModelAdmin):
-    list_display = ['__str__', 'slug', 'parent', 'sort_order', 'is_active', 'created_at']
-    list_filter = ['is_active', 'parent']
-    search_fields = ['slug']
-    ordering = ['sort_order', 'id']
-
-
-@admin.register(ProductType)
-class ProductTypeAdmin(admin.ModelAdmin):
-    list_display = ['__str__', 'key', 'icon', 'sort_order', 'is_active', 'created_at']
-    list_filter = ['is_active']
-    search_fields = ['key']
-    ordering = ['sort_order', 'id']
-
-
 @admin.register(AttributeDefinition)
 class AttributeDefinitionAdmin(admin.ModelAdmin):
     list_display = ['__str__', 'key', 'attribute_type', 'is_required', 'is_variant_attribute', 'is_filterable', 'is_active']
     list_filter = ['attribute_type', 'is_required', 'is_variant_attribute', 'is_filterable', 'is_active']
     search_fields = ['key']
     ordering = ['sort_order', 'id']
-
-
-@admin.register(ProductTypeAttribute)
-class ProductTypeAttributeAdmin(admin.ModelAdmin):
-    list_display = ['__str__', 'product_type', 'attribute', 'is_required', 'sort_order', 'is_active']
-    list_filter = ['product_type', 'is_required', 'is_active']
-    search_fields = ['product_type__key', 'attribute__key']
-    ordering = ['product_type', 'sort_order']
 
 
 class ProductImageInline(admin.TabularInline):
@@ -82,8 +55,8 @@ class ProductAttributeValueInline(admin.TabularInline):
 
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
-    list_display = ['sku', '__str__', 'product_type', 'category', 'price', 'quantity', 'status', 'is_featured', 'created_at']
-    list_filter = ['product_type', 'category', 'status', 'is_featured', 'track_inventory']
+    list_display = ['sku', '__str__', 'price', 'quantity', 'status', 'is_featured', 'created_at']
+    list_filter = ['status', 'is_featured', 'track_inventory']
     search_fields = ['sku', 'slug']
     ordering = ['-created_at']
     readonly_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
@@ -91,7 +64,7 @@ class ProductAdmin(admin.ModelAdmin):
 
     fieldsets = (
         ('Basic Information', {
-            'fields': ('sku', 'slug', 'name', 'description', 'short_description', 'product_type', 'category')
+            'fields': ('sku', 'slug', 'name', 'description', 'short_description')
         }),
         ('Pricing', {
             'fields': ('price', 'compare_at_price', 'cost_price')

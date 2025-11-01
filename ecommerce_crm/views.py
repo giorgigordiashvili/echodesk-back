@@ -7,8 +7,6 @@ from django_filters.rest_framework import DjangoFilterBackend, FilterSet, CharFi
 from django.db.models import Q, F
 from .models import (
     Language,
-    ProductCategory,
-    ProductType,
     AttributeDefinition,
     Product,
     ProductImage,
@@ -24,8 +22,6 @@ from .models import (
 )
 from .serializers import (
     LanguageSerializer,
-    ProductCategorySerializer,
-    ProductTypeSerializer,
     AttributeDefinitionSerializer,
     ProductListSerializer,
     ProductDetailSerializer,
@@ -100,140 +96,6 @@ class LanguageViewSet(viewsets.ModelViewSet):
         return super().destroy(request, *args, **kwargs)
 
 
-class ProductCategoryViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for product categories
-    """
-    queryset = ProductCategory.objects.filter(is_active=True)
-    serializer_class = ProductCategorySerializer
-    permission_classes = [IsAuthenticated]
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
-    search_fields = ['slug']
-    ordering_fields = ['sort_order', 'created_at']
-    ordering = ['sort_order', 'id']
-
-    def get_serializer_context(self):
-        context = super().get_serializer_context()
-        language = self.request.query_params.get('language', 'en')
-        context['language'] = language
-        return context
-
-    @extend_schema(
-        tags=['Ecommerce - Categories'],
-        summary='List all product categories'
-    )
-    def list(self, request, *args, **kwargs):
-        return super().list(request, *args, **kwargs)
-
-    @extend_schema(
-        tags=['Ecommerce - Categories'],
-        summary='Get category details'
-    )
-    def retrieve(self, request, *args, **kwargs):
-        return super().retrieve(request, *args, **kwargs)
-
-    @extend_schema(
-        tags=['Ecommerce - Categories'],
-        summary='Create new category'
-    )
-    def create(self, request, *args, **kwargs):
-        return super().create(request, *args, **kwargs)
-
-    @extend_schema(
-        tags=['Ecommerce - Categories'],
-        summary='Update category'
-    )
-    def update(self, request, *args, **kwargs):
-        return super().update(request, *args, **kwargs)
-
-    @extend_schema(
-        tags=['Ecommerce - Categories'],
-        summary='Partially update category'
-    )
-    def partial_update(self, request, *args, **kwargs):
-        return super().partial_update(request, *args, **kwargs)
-
-    @extend_schema(
-        tags=['Ecommerce - Categories'],
-        summary='Delete category'
-    )
-    def destroy(self, request, *args, **kwargs):
-        return super().destroy(request, *args, **kwargs)
-
-    @extend_schema(
-        tags=['Ecommerce - Categories'],
-        summary='Get category tree',
-        description='Retrieve hierarchical category tree structure'
-    )
-    @action(detail=False, methods=['get'])
-    def tree(self, request):
-        """Get category tree"""
-        root_categories = self.queryset.filter(parent=None)
-        serializer = self.get_serializer(root_categories, many=True)
-        return Response(serializer.data)
-
-
-class ProductTypeViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for product types
-    """
-    queryset = ProductType.objects.filter(is_active=True)
-    serializer_class = ProductTypeSerializer
-    permission_classes = [IsAuthenticated]
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
-    search_fields = ['key']
-    ordering_fields = ['sort_order', 'created_at']
-    ordering = ['sort_order', 'id']
-
-    def get_serializer_context(self):
-        context = super().get_serializer_context()
-        language = self.request.query_params.get('language', 'en')
-        context['language'] = language
-        return context
-
-    @extend_schema(
-        tags=['Ecommerce - Product Types'],
-        summary='List all product types'
-    )
-    def list(self, request, *args, **kwargs):
-        return super().list(request, *args, **kwargs)
-
-    @extend_schema(
-        tags=['Ecommerce - Product Types'],
-        summary='Get product type details'
-    )
-    def retrieve(self, request, *args, **kwargs):
-        return super().retrieve(request, *args, **kwargs)
-
-    @extend_schema(
-        tags=['Ecommerce - Product Types'],
-        summary='Create new product type'
-    )
-    def create(self, request, *args, **kwargs):
-        return super().create(request, *args, **kwargs)
-
-    @extend_schema(
-        tags=['Ecommerce - Product Types'],
-        summary='Update product type'
-    )
-    def update(self, request, *args, **kwargs):
-        return super().update(request, *args, **kwargs)
-
-    @extend_schema(
-        tags=['Ecommerce - Product Types'],
-        summary='Partially update product type'
-    )
-    def partial_update(self, request, *args, **kwargs):
-        return super().partial_update(request, *args, **kwargs)
-
-    @extend_schema(
-        tags=['Ecommerce - Product Types'],
-        summary='Delete product type'
-    )
-    def destroy(self, request, *args, **kwargs):
-        return super().destroy(request, *args, **kwargs)
-
-
 class AttributeDefinitionViewSet(viewsets.ModelViewSet):
     """
     ViewSet for attribute definitions
@@ -295,14 +157,12 @@ class ProductFilter(FilterSet):
     min_price = NumberFilter(field_name='price', lookup_expr='gte')
     max_price = NumberFilter(field_name='price', lookup_expr='lte')
     search = CharFilter(method='search_filter')
-    category_slug = CharFilter(field_name='category__slug')
-    product_type_key = CharFilter(field_name='product_type__key')
     in_stock = BooleanFilter(method='filter_in_stock')
     low_stock = BooleanFilter(method='filter_low_stock')
 
     class Meta:
         model = Product
-        fields = ['status', 'is_featured', 'product_type', 'category']
+        fields = ['status', 'is_featured']
 
     def search_filter(self, queryset, name, value):
         """Search across multiple fields"""
