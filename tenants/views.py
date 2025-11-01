@@ -1210,3 +1210,90 @@ def forced_password_change(request):
             {'error': 'Failed to change password'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+
+@extend_schema(
+    operation_id='upload_image',
+    summary='Upload Image',
+    description='Upload an image file and get back the URL. Used for gallery fields in item lists.',
+    request={
+        'multipart/form-data': {
+            'type': 'object',
+            'properties': {
+                'image': {
+                    'type': 'string',
+                    'format': 'binary'
+                }
+            }
+        }
+    },
+    responses={
+        200: OpenApiResponse(
+            description='Image uploaded successfully',
+            response={
+                'type': 'object',
+                'properties': {
+                    'url': {'type': 'string'},
+                    'message': {'type': 'string'}
+                }
+            }
+        ),
+        400: OpenApiResponse(description='Invalid file or missing file'),
+        403: OpenApiResponse(description='Not available from main domain')
+    },
+    tags=['Uploads']
+)
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def upload_image(request):
+    """Upload an image and return its URL"""
+    if not hasattr(request, 'tenant') or request.tenant.schema_name == get_public_schema_name():
+        return Response(
+            {'error': 'This endpoint is only available from tenant subdomains'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    if 'image' not in request.FILES:
+        return Response({'error': 'No file provided'}, status=status.HTTP_400_BAD_REQUEST)
+
+    image_file = request.FILES['image']
+
+    # Validate file type
+    allowed_types = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp']
+    if image_file.content_type not in allowed_types:
+        return Response(
+            {'error': 'Invalid file type. Only JPG, PNG, GIF, and WebP are allowed.'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # Validate file size (5MB max)
+    if image_file.size > 5 * 1024 * 1024:
+        return Response(
+            {'error': 'File size must be less than 5MB'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        from django.core.files.storage import default_storage
+        from django.core.files.base import ContentFile
+        import os
+        from datetime import datetime
+
+        # Generate unique filename
+        ext = os.path.splitext(image_file.name)[1]
+        filename = f'gallery/{request.tenant.schema_name}/{datetime.now().strftime("%Y%m%d_%H%M%S")}_{image_file.name}'
+
+        # Save file
+        path = default_storage.save(filename, ContentFile(image_file.read()))
+        url = request.build_absolute_uri(default_storage.url(path))
+
+        return Response({
+            'url': url,
+            'message': 'Image uploaded successfully'
+        })
+    except Exception as e:
+        logger.error(f'Failed to upload image: {str(e)}')
+        return Response(
+            {'error': 'Failed to upload image'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )

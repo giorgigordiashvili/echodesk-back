@@ -5,7 +5,7 @@ from .views import (
     register_tenant_form, get_tenant_language, update_tenant_language, get_tenant_config,
     get_all_tenants, check_deployment_status, tenant_login, tenant_logout,
     tenant_dashboard, tenant_profile, update_tenant_profile, change_tenant_password,
-    tenant_settings, upload_logo, remove_logo, forced_password_change
+    tenant_settings, upload_logo, remove_logo, forced_password_change, upload_image
 )
 from .package_views import (
     PackageViewSet, list_packages_by_model, calculate_pricing, get_package_features,
@@ -87,6 +87,9 @@ urlpatterns = [
     path('api/tenant-settings/', tenant_settings, name='tenant_settings'),
     path('api/tenant-settings/upload-logo/', upload_logo, name='upload_logo'),
     path('api/tenant-settings/remove-logo/', remove_logo, name='remove_logo'),
+
+    # Upload endpoints
+    path('api/upload/image/', upload_image, name='upload_image'),
 
     # CORS testing endpoints
     path('api/cors-test/', cors_test, name='cors_test'),
