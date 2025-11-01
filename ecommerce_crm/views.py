@@ -104,6 +104,53 @@ class ProductCategoryViewSet(viewsets.ModelViewSet):
         context['language'] = language
         return context
 
+    @extend_schema(
+        tags=['Ecommerce - Categories'],
+        summary='List all product categories'
+    )
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Categories'],
+        summary='Get category details'
+    )
+    def retrieve(self, request, *args, **kwargs):
+        return super().retrieve(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Categories'],
+        summary='Create new category'
+    )
+    def create(self, request, *args, **kwargs):
+        return super().create(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Categories'],
+        summary='Update category'
+    )
+    def update(self, request, *args, **kwargs):
+        return super().update(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Categories'],
+        summary='Partially update category'
+    )
+    def partial_update(self, request, *args, **kwargs):
+        return super().partial_update(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Categories'],
+        summary='Delete category'
+    )
+    def destroy(self, request, *args, **kwargs):
+        return super().destroy(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Categories'],
+        summary='Get category tree',
+        description='Retrieve hierarchical category tree structure'
+    )
     @action(detail=False, methods=['get'])
     def tree(self, request):
         """Get category tree"""
@@ -130,6 +177,48 @@ class ProductTypeViewSet(viewsets.ModelViewSet):
         context['language'] = language
         return context
 
+    @extend_schema(
+        tags=['Ecommerce - Product Types'],
+        summary='List all product types'
+    )
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Product Types'],
+        summary='Get product type details'
+    )
+    def retrieve(self, request, *args, **kwargs):
+        return super().retrieve(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Product Types'],
+        summary='Create new product type'
+    )
+    def create(self, request, *args, **kwargs):
+        return super().create(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Product Types'],
+        summary='Update product type'
+    )
+    def update(self, request, *args, **kwargs):
+        return super().update(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Product Types'],
+        summary='Partially update product type'
+    )
+    def partial_update(self, request, *args, **kwargs):
+        return super().partial_update(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Product Types'],
+        summary='Delete product type'
+    )
+    def destroy(self, request, *args, **kwargs):
+        return super().destroy(request, *args, **kwargs)
+
 
 class AttributeDefinitionViewSet(viewsets.ModelViewSet):
     """
@@ -143,6 +232,48 @@ class AttributeDefinitionViewSet(viewsets.ModelViewSet):
     filterset_fields = ['attribute_type', 'is_variant_attribute', 'is_filterable']
     ordering_fields = ['sort_order', 'created_at']
     ordering = ['sort_order', 'id']
+
+    @extend_schema(
+        tags=['Ecommerce - Attributes'],
+        summary='List all product attributes'
+    )
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Attributes'],
+        summary='Get attribute details'
+    )
+    def retrieve(self, request, *args, **kwargs):
+        return super().retrieve(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Attributes'],
+        summary='Create new attribute'
+    )
+    def create(self, request, *args, **kwargs):
+        return super().create(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Attributes'],
+        summary='Update attribute'
+    )
+    def update(self, request, *args, **kwargs):
+        return super().update(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Attributes'],
+        summary='Partially update attribute'
+    )
+    def partial_update(self, request, *args, **kwargs):
+        return super().partial_update(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Attributes'],
+        summary='Delete attribute'
+    )
+    def destroy(self, request, *args, **kwargs):
+        return super().destroy(request, *args, **kwargs)
 
 
 class ProductFilter(FilterSet):
@@ -230,6 +361,58 @@ class ProductViewSet(viewsets.ModelViewSet):
         context['language'] = language
         return context
 
+    @extend_schema(
+        tags=['Ecommerce - Products'],
+        summary='List all products',
+        description='Get a list of products with advanced filtering by price, category, status, and stock levels'
+    )
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Products'],
+        summary='Get product details',
+        description='Retrieve detailed information about a specific product including variants and attributes'
+    )
+    def retrieve(self, request, *args, **kwargs):
+        return super().retrieve(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Products'],
+        summary='Create new product',
+        description='Create a new product with multilingual support'
+    )
+    def create(self, request, *args, **kwargs):
+        return super().create(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Products'],
+        summary='Update product',
+        description='Update all fields of an existing product'
+    )
+    def update(self, request, *args, **kwargs):
+        return super().update(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Products'],
+        summary='Partially update product',
+        description='Update specific fields of an existing product'
+    )
+    def partial_update(self, request, *args, **kwargs):
+        return super().partial_update(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Products'],
+        summary='Delete product'
+    )
+    def destroy(self, request, *args, **kwargs):
+        return super().destroy(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Products'],
+        summary='Get featured products',
+        description='Retrieve all products marked as featured'
+    )
     @action(detail=False, methods=['get'])
     def featured(self, request):
         """Get featured products"""
@@ -241,6 +424,11 @@ class ProductViewSet(viewsets.ModelViewSet):
         serializer = ProductListSerializer(products, many=True, context=self.get_serializer_context())
         return Response(serializer.data)
 
+    @extend_schema(
+        tags=['Ecommerce - Products'],
+        summary='Get low stock products',
+        description='Retrieve all products with stock levels at or below their low stock threshold'
+    )
     @action(detail=False, methods=['get'])
     def low_stock(self, request):
         """Get products with low stock"""
@@ -256,6 +444,11 @@ class ProductViewSet(viewsets.ModelViewSet):
         serializer = ProductListSerializer(products, many=True, context=self.get_serializer_context())
         return Response(serializer.data)
 
+    @extend_schema(
+        tags=['Ecommerce - Products'],
+        summary='Add image to product',
+        description='Upload and attach an image to a specific product'
+    )
     @action(detail=True, methods=['post'])
     def add_image(self, request, pk=None):
         """Add an image to a product"""
@@ -266,6 +459,11 @@ class ProductViewSet(viewsets.ModelViewSet):
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+    @extend_schema(
+        tags=['Ecommerce - Products'],
+        summary='Remove image from product',
+        description='Delete a specific image from a product'
+    )
     @action(detail=True, methods=['delete'], url_path='remove_image/(?P<image_id>[^/.]+)')
     def remove_image(self, request, pk=None, image_id=None):
         """Remove an image from a product"""
@@ -280,6 +478,11 @@ class ProductViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND
             )
 
+    @extend_schema(
+        tags=['Ecommerce - Products'],
+        summary='Update product attributes',
+        description='Update all attributes for a specific product'
+    )
     @action(detail=True, methods=['post'])
     def update_attributes(self, request, pk=None):
         """Update product attributes"""
