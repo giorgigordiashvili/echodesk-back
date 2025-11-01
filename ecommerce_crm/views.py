@@ -14,7 +14,8 @@ from .models import (
     ProductImage,
     ProductVariant,
     ProductAttributeValue,
-    EcommerceClient
+    EcommerceClient,
+    ClientAddress
 )
 from .serializers import (
     LanguageSerializer,
@@ -28,7 +29,8 @@ from .serializers import (
     ProductVariantSerializer,
     EcommerceClientSerializer,
     ClientRegistrationSerializer,
-    ClientLoginSerializer
+    ClientLoginSerializer,
+    ClientAddressSerializer
 )
 
 
@@ -649,3 +651,76 @@ def login_client(request):
         }, status=status.HTTP_200_OK)
 
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ClientAddressViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing client addresses"""
+    queryset = ClientAddress.objects.all()
+    serializer_class = ClientAddressSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['client', 'is_default']
+    ordering_fields = ['created_at', 'is_default']
+    ordering = ['-is_default', '-created_at']
+
+    @extend_schema(
+        tags=['Ecommerce - Client Addresses'],
+        summary='List all client addresses',
+        description='Get all delivery addresses with optional filtering by client'
+    )
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Client Addresses'],
+        summary='Get address details',
+        description='Retrieve detailed information about a specific address'
+    )
+    def retrieve(self, request, *args, **kwargs):
+        return super().retrieve(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Client Addresses'],
+        summary='Create new address',
+        description='Add a new delivery address for a client with Google Maps coordinates'
+    )
+    def create(self, request, *args, **kwargs):
+        return super().create(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Client Addresses'],
+        summary='Update address',
+        description='Update all fields of an existing address'
+    )
+    def update(self, request, *args, **kwargs):
+        return super().update(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Client Addresses'],
+        summary='Partially update address',
+        description='Update specific fields of an existing address'
+    )
+    def partial_update(self, request, *args, **kwargs):
+        return super().partial_update(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Client Addresses'],
+        summary='Delete address',
+        description='Remove an address from a client'
+    )
+    def destroy(self, request, *args, **kwargs):
+        return super().destroy(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Client Addresses'],
+        summary='Set address as default',
+        description='Mark a specific address as the default delivery address for the client'
+    )
+    @action(detail=True, methods=['post'])
+    def set_default(self, request, pk=None):
+        """Set an address as the default for the client"""
+        address = self.get_object()
+        address.is_default = True
+        address.save()
+        serializer = self.get_serializer(address)
+        return Response(serializer.data)

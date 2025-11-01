@@ -9,6 +9,7 @@ from .views import (
     ProductImageViewSet,
     ProductVariantViewSet,
     EcommerceClientViewSet,
+    ClientAddressViewSet,
     register_client,
     login_client
 )
@@ -22,6 +23,7 @@ router.register(r'products', ProductViewSet, basename='product')
 router.register(r'images', ProductImageViewSet, basename='product-image')
 router.register(r'variants', ProductVariantViewSet, basename='product-variant')
 router.register(r'clients', EcommerceClientViewSet, basename='ecommerce-client')
+router.register(r'addresses', ClientAddressViewSet, basename='client-address')
 
 app_name = 'ecommerce_crm'
 

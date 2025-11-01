@@ -652,3 +652,74 @@ class EcommerceClient(models.Model):
         from django.utils import timezone
         self.last_login = timezone.now()
         self.save(update_fields=['last_login'])
+
+
+class ClientAddress(models.Model):
+    """
+    Delivery addresses for ecommerce clients
+    Clients can have multiple addresses (home, work, etc.)
+    """
+    client = models.ForeignKey(
+        EcommerceClient,
+        on_delete=models.CASCADE,
+        related_name='addresses',
+        help_text="Client who owns this address"
+    )
+    label = models.CharField(
+        max_length=50,
+        help_text="Address label (e.g., 'Home', 'Work', 'Office')"
+    )
+    address = models.TextField(help_text="Full street address")
+    city = models.CharField(max_length=100, help_text="City name")
+    extra_instructions = models.TextField(
+        blank=True,
+        help_text="Special delivery instructions for courier"
+    )
+
+    # Geographic coordinates from Google Maps
+    latitude = models.DecimalField(
+        max_digits=9,
+        decimal_places=6,
+        null=True,
+        blank=True,
+        help_text="Latitude coordinate from Google Maps"
+    )
+    longitude = models.DecimalField(
+        max_digits=9,
+        decimal_places=6,
+        null=True,
+        blank=True,
+        help_text="Longitude coordinate from Google Maps"
+    )
+
+    # Default address flag
+    is_default = models.BooleanField(
+        default=False,
+        help_text="Mark this as the default delivery address"
+    )
+
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-is_default', '-created_at']
+        verbose_name = 'Client Address'
+        verbose_name_plural = 'Client Addresses'
+        indexes = [
+            models.Index(fields=['client', '-is_default']),
+            models.Index(fields=['client', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.client.full_name} - {self.label} ({self.city})"
+
+    def save(self, *args, **kwargs):
+        """Override save to ensure only one default address per client"""
+        if self.is_default:
+            # Set all other addresses for this client to non-default
+            ClientAddress.objects.filter(
+                client=self.client,
+                is_default=True
+            ).exclude(pk=self.pk).update(is_default=False)
+        super().save(*args, **kwargs)

@@ -9,7 +9,8 @@ from .models import (
     ProductImage,
     ProductAttributeValue,
     ProductVariant,
-    ProductVariantAttributeValue
+    ProductVariantAttributeValue,
+    ClientAddress
 )
 
 
@@ -355,16 +356,42 @@ class ProductCreateUpdateSerializer(serializers.ModelSerializer):
         return product
 
 
+class ClientAddressSerializer(serializers.ModelSerializer):
+    """Serializer for client addresses"""
+
+    class Meta:
+        model = ClientAddress
+        fields = [
+            'id', 'client', 'label', 'address', 'city',
+            'extra_instructions', 'latitude', 'longitude',
+            'is_default', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def validate(self, attrs):
+        """Ensure coordinates are both set or both unset"""
+        latitude = attrs.get('latitude')
+        longitude = attrs.get('longitude')
+
+        if (latitude is not None and longitude is None) or (latitude is None and longitude is not None):
+            raise serializers.ValidationError(
+                "Both latitude and longitude must be provided together"
+            )
+
+        return attrs
+
+
 class EcommerceClientSerializer(serializers.ModelSerializer):
     """Serializer for listing and viewing ecommerce clients"""
     full_name = serializers.CharField(read_only=True)
+    addresses = ClientAddressSerializer(many=True, read_only=True)
 
     class Meta:
         model = None  # Will be set dynamically
         fields = [
             'id', 'first_name', 'last_name', 'full_name', 'email',
             'phone_number', 'date_of_birth', 'is_active', 'is_verified',
-            'last_login', 'created_at', 'updated_at'
+            'last_login', 'created_at', 'updated_at', 'addresses'
         ]
         read_only_fields = ['id', 'is_verified', 'last_login', 'created_at', 'updated_at']
 
