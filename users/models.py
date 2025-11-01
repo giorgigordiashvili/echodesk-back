@@ -308,17 +308,11 @@ class User(AbstractBaseUser, PermissionsMixin):
             bool: True if user has access to the feature
 
         Logic:
-            - Features are ALWAYS based on tenant subscription boundaries
-            - User must be in a group that has the feature
-            - The feature must be active for the tenant
+            - Features are ALWAYS based on tenant subscription package
+            - All users in a tenant get the package features
             - Staff/superuser status does NOT bypass tenant subscription limits
         """
-        # Check if any of the user's groups have this feature
-        return self.tenant_groups.filter(
-            is_active=True,
-            features__key=feature_key,
-            features__is_active=True
-        ).exists()
+        return feature_key in self.get_feature_keys()
 
     def get_feature_keys(self):
         """
@@ -328,16 +322,44 @@ class User(AbstractBaseUser, PermissionsMixin):
             list: List of feature keys the user can access
 
         Logic:
-            - Features are ALWAYS based on tenant subscription boundaries
-            - Returns features from user's tenant groups
+            - Features come from tenant's subscription package
+            - All users in a tenant get the package features
+            - Tenant groups can optionally restrict features further (not implemented yet)
             - Staff/superuser status does NOT bypass tenant subscription limits
         """
-        # Get unique feature keys from all active groups
-        feature_keys = set()
-        for group in self.tenant_groups.filter(is_active=True):
-            feature_keys.update(group.get_feature_keys())
+        from django.db import connection
+        from tenants.models import Tenant
+        from tenants.feature_models import PackageFeature
 
-        return list(feature_keys)
+        try:
+            # Get current tenant from schema
+            tenant = Tenant.objects.get(schema_name=connection.schema_name)
+
+            # Get tenant's subscription package
+            subscription = tenant.current_subscription
+            if not subscription or not subscription.is_active:
+                return []
+
+            package = subscription.package
+            if not package:
+                return []
+
+            # Get all active features from the package
+            feature_keys = list(
+                PackageFeature.objects.filter(
+                    package=package,
+                    feature__is_active=True
+                ).values_list('feature__key', flat=True)
+            )
+
+            return feature_keys
+
+        except Exception as e:
+            # Fallback: return empty list if something goes wrong
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Failed to get feature keys for user {self.email}: {e}")
+            return []
 
     def get_all_permissions_dict(self):
         """Get all permissions as a dictionary with categories"""
