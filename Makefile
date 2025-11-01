@@ -2,13 +2,17 @@
 
 help:
 	@echo "Available commands:"
-	@echo "  make test          - Run all tests"
-	@echo "  make test-fast     - Run tests in parallel"
-	@echo "  make test-coverage - Run tests with coverage report"
-	@echo "  make lint          - Run code quality checks"
-	@echo "  make format        - Auto-format code"
-	@echo "  make clean         - Remove test artifacts"
-	@echo "  make install-dev   - Install development dependencies"
+	@echo "  make test              - Run all tests"
+	@echo "  make test-fast         - Run tests in parallel"
+	@echo "  make test-coverage     - Run tests with coverage report"
+	@echo "  make test-tickets      - Run tickets app tests"
+	@echo "  make test-tickets-models - Run tickets model tests"
+	@echo "  make test-tickets-api  - Run tickets API tests"
+	@echo "  make test-all          - Run all app tests"
+	@echo "  make lint              - Run code quality checks"
+	@echo "  make format            - Auto-format code"
+	@echo "  make clean             - Remove test artifacts"
+	@echo "  make install-dev       - Install development dependencies"
 
 install-dev:
 	pip install -r requirements-dev.txt
@@ -33,6 +37,18 @@ test-auth:
 
 test-api:
 	python manage.py test --settings=ecommerce_crm.tests.test_settings ecommerce_crm.tests.test_api --verbosity=2
+
+test-tickets:
+	python manage.py test --settings=ecommerce_crm.tests.test_settings tickets.tests --verbosity=2
+
+test-tickets-models:
+	python manage.py test --settings=ecommerce_crm.tests.test_settings tickets.tests.test_models --verbosity=2
+
+test-tickets-api:
+	python manage.py test --settings=ecommerce_crm.tests.test_settings tickets.tests.test_api --verbosity=2
+
+test-all:
+	python manage.py test --settings=ecommerce_crm.tests.test_settings ecommerce_crm.tests tickets.tests --verbosity=2
 
 lint:
 	flake8 ecommerce_crm --count --select=E9,F63,F7,F82 --show-source --statistics
