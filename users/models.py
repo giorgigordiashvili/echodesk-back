@@ -308,13 +308,11 @@ class User(AbstractBaseUser, PermissionsMixin):
             bool: True if user has access to the feature
 
         Logic:
-            - Superadmins (is_staff=True or is_superuser=True) have access to ALL features
-            - Regular users have access based on their group's features
+            - Features are ALWAYS based on tenant subscription boundaries
+            - User must be in a group that has the feature
+            - The feature must be active for the tenant
+            - Staff/superuser status does NOT bypass tenant subscription limits
         """
-        # Superadmins have access to everything
-        if self.is_staff or self.is_superuser:
-            return True
-
         # Check if any of the user's groups have this feature
         return self.tenant_groups.filter(
             is_active=True,
@@ -328,12 +326,12 @@ class User(AbstractBaseUser, PermissionsMixin):
 
         Returns:
             list: List of feature keys the user can access
-        """
-        # Superadmins get all active features
-        if self.is_staff or self.is_superuser:
-            from tenants.feature_models import Feature
-            return list(Feature.objects.filter(is_active=True).values_list('key', flat=True))
 
+        Logic:
+            - Features are ALWAYS based on tenant subscription boundaries
+            - Returns features from user's tenant groups
+            - Staff/superuser status does NOT bypass tenant subscription limits
+        """
         # Get unique feature keys from all active groups
         feature_keys = set()
         for group in self.tenant_groups.filter(is_active=True):
