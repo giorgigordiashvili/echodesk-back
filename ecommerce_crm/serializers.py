@@ -411,13 +411,14 @@ class EcommerceClientSerializer(serializers.ModelSerializer):
     """Serializer for listing and viewing ecommerce clients"""
     full_name = serializers.CharField(read_only=True)
     addresses = ClientAddressSerializer(many=True, read_only=True)
+    favorites = serializers.SerializerMethodField()
 
     class Meta:
         model = None  # Will be set dynamically
         fields = [
             'id', 'first_name', 'last_name', 'full_name', 'email',
             'phone_number', 'date_of_birth', 'is_active', 'is_verified',
-            'last_login', 'created_at', 'updated_at', 'addresses'
+            'last_login', 'created_at', 'updated_at', 'addresses', 'favorites'
         ]
         read_only_fields = ['id', 'is_verified', 'last_login', 'created_at', 'updated_at']
 
@@ -425,6 +426,13 @@ class EcommerceClientSerializer(serializers.ModelSerializer):
         super().__init__(*args, **kwargs)
         from .models import EcommerceClient
         self.Meta.model = EcommerceClient
+
+    def get_favorites(self, obj):
+        """Return client's favorite products with product details"""
+        from .serializers import FavoriteProductSerializer
+        language = self.context.get('language', 'en')
+        favorites = obj.favorites.all()
+        return FavoriteProductSerializer(favorites, many=True, context={'language': language}).data
 
 
 class ClientRegistrationSerializer(serializers.Serializer):
