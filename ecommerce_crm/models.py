@@ -873,3 +873,50 @@ class OrderItem(models.Model):
     def subtotal(self):
         """Calculate subtotal for this order item"""
         return self.price * self.quantity
+
+
+class PasswordResetToken(models.Model):
+    """
+    Password reset tokens for ecommerce clients
+    Tokens expire after 24 hours
+    """
+    client = models.ForeignKey(
+        EcommerceClient,
+        on_delete=models.CASCADE,
+        related_name='password_reset_tokens'
+    )
+    token = models.CharField(max_length=100, unique=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    used_at = models.DateTimeField(null=True, blank=True)
+    is_used = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Password Reset Token'
+        verbose_name_plural = 'Password Reset Tokens'
+        indexes = [
+            models.Index(fields=['token', 'is_used']),
+            models.Index(fields=['client', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f"Reset token for {self.client.email} - {'Used' if self.is_used else 'Active'}"
+
+    @staticmethod
+    def generate_token():
+        """Generate a secure random token"""
+        import secrets
+        return secrets.token_urlsafe(32)
+
+    def is_valid(self):
+        """Check if token is still valid (not used and not expired)"""
+        from django.utils import timezone
+        return not self.is_used and self.expires_at > timezone.now()
+
+    def mark_as_used(self):
+        """Mark token as used"""
+        from django.utils import timezone
+        self.is_used = True
+        self.used_at = timezone.now()
+        self.save(update_fields=['is_used', 'used_at'])

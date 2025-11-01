@@ -31,6 +31,8 @@ from .serializers import (
     EcommerceClientSerializer,
     ClientRegistrationSerializer,
     ClientLoginSerializer,
+    PasswordResetRequestSerializer,
+    PasswordResetConfirmSerializer,
     ClientAddressSerializer,
     FavoriteProductSerializer,
     FavoriteProductCreateSerializer,
@@ -484,10 +486,16 @@ class EcommerceClientViewSet(viewsets.ModelViewSet):
 @permission_classes([AllowAny])
 def register_client(request):
     """Register a new ecommerce client"""
+    from .email_utils import send_welcome_email
+
     serializer = ClientRegistrationSerializer(data=request.data)
 
     if serializer.is_valid():
         client = serializer.save()
+
+        # Send welcome email
+        send_welcome_email(client)
+
         response_serializer = EcommerceClientSerializer(client)
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
 
@@ -497,7 +505,7 @@ def register_client(request):
 @extend_schema(
     operation_id='login_client',
     summary='Login ecommerce client',
-    description='Authenticate a client using email or phone number with password. Returns client details on successful authentication.',
+    description='Authenticate a client using email or phone number with password. Returns JWT access and refresh tokens.',
     request=ClientLoginSerializer,
     responses={
         200: OpenApiResponse(
@@ -512,17 +520,153 @@ def register_client(request):
 @permission_classes([AllowAny])
 def login_client(request):
     """Login ecommerce client with email or phone"""
+    from rest_framework_simplejwt.tokens import RefreshToken
+
     serializer = ClientLoginSerializer(data=request.data)
 
     if serializer.is_valid():
         client = serializer.validated_data['client']
+
+        # Generate JWT tokens
+        refresh = RefreshToken()
+        refresh['client_id'] = client.id
+        refresh['email'] = client.email
+
         response_serializer = EcommerceClientSerializer(client)
         return Response({
             'message': 'Login successful',
-            'client': response_serializer.data
+            'client': response_serializer.data,
+            'access': str(refresh.access_token),
+            'refresh': str(refresh)
         }, status=status.HTTP_200_OK)
 
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@extend_schema(
+    operation_id='password_reset_request',
+    summary='Request password reset',
+    description='Send a password reset email to the client',
+    request=PasswordResetRequestSerializer,
+    responses={
+        200: OpenApiResponse(description='Password reset email sent'),
+        400: OpenApiResponse(description='Validation error')
+    },
+    tags=['Ecommerce - Client Auth']
+)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def request_password_reset(request):
+    """Request password reset for ecommerce client"""
+    from .email_utils import send_password_reset_email
+    from .models import PasswordResetToken
+    from django.utils import timezone
+    from datetime import timedelta
+
+    serializer = PasswordResetRequestSerializer(data=request.data)
+
+    if serializer.is_valid():
+        client = serializer.context.get('client')
+
+        # Generate reset token
+        token = PasswordResetToken.generate_token()
+        expires_at = timezone.now() + timedelta(hours=24)
+
+        # Create password reset token
+        reset_token = PasswordResetToken.objects.create(
+            client=client,
+            token=token,
+            expires_at=expires_at
+        )
+
+        # Send password reset email
+        send_password_reset_email(client, token)
+
+        return Response({
+            'message': 'Password reset email sent. Please check your inbox.'
+        }, status=status.HTTP_200_OK)
+
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@extend_schema(
+    operation_id='password_reset_confirm',
+    summary='Confirm password reset',
+    description='Reset password using the token received via email',
+    request=PasswordResetConfirmSerializer,
+    responses={
+        200: OpenApiResponse(description='Password reset successful'),
+        400: OpenApiResponse(description='Invalid token or validation error')
+    },
+    tags=['Ecommerce - Client Auth']
+)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def confirm_password_reset(request):
+    """Confirm password reset with token"""
+    serializer = PasswordResetConfirmSerializer(data=request.data)
+
+    if serializer.is_valid():
+        reset_token = serializer.validated_data['reset_token']
+        new_password = serializer.validated_data['new_password']
+
+        # Update client password
+        client = reset_token.client
+        client.set_password(new_password)
+        client.save()
+
+        # Mark token as used
+        reset_token.mark_as_used()
+
+        return Response({
+            'message': 'Password has been reset successfully. You can now login with your new password.'
+        }, status=status.HTTP_200_OK)
+
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@extend_schema(
+    operation_id='get_current_client',
+    summary='Get current client profile',
+    description='Retrieve the authenticated client\'s profile information',
+    responses={
+        200: OpenApiResponse(
+            description='Client profile',
+            response=EcommerceClientSerializer
+        ),
+        401: OpenApiResponse(description='Not authenticated')
+    },
+    tags=['Ecommerce - Client Auth']
+)
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def get_current_client(request):
+    """Get current authenticated client profile"""
+    from rest_framework_simplejwt.authentication import JWTAuthentication
+    from .models import EcommerceClient
+
+    # Try to authenticate using JWT
+    jwt_auth = JWTAuthentication()
+    try:
+        auth_result = jwt_auth.authenticate(request)
+        if auth_result is not None:
+            user, token = auth_result
+            # Extract client_id from token
+            client_id = token.get('client_id')
+            if client_id:
+                try:
+                    client = EcommerceClient.objects.get(id=client_id)
+                    serializer = EcommerceClientSerializer(client)
+                    return Response(serializer.data, status=status.HTTP_200_OK)
+                except EcommerceClient.DoesNotExist:
+                    pass
+    except Exception:
+        pass
+
+    return Response(
+        {'error': 'Authentication credentials were not provided or are invalid.'},
+        status=status.HTTP_401_UNAUTHORIZED
+    )
 
 
 class ClientAddressViewSet(viewsets.ModelViewSet):

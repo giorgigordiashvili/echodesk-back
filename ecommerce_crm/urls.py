@@ -13,7 +13,10 @@ from .views import (
     CartItemViewSet,
     OrderViewSet,
     register_client,
-    login_client
+    login_client,
+    request_password_reset,
+    confirm_password_reset,
+    get_current_client
 )
 
 router = DefaultRouter()
@@ -36,4 +39,7 @@ urlpatterns = [
     # Client authentication endpoints (public access)
     path('clients/register/', register_client, name='register-client'),
     path('clients/login/', login_client, name='login-client'),
+    path('clients/me/', get_current_client, name='current-client'),
+    path('clients/password-reset/request/', request_password_reset, name='password-reset-request'),
+    path('clients/password-reset/confirm/', confirm_password_reset, name='password-reset-confirm'),
 ]

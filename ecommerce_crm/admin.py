@@ -7,7 +7,8 @@ from .models import (
     ProductAttributeValue,
     ProductVariant,
     ProductVariantAttributeValue,
-    EcommerceClient
+    EcommerceClient,
+    PasswordResetToken
 )
 
 
@@ -124,5 +125,23 @@ class EcommerceClientAdmin(admin.ModelAdmin):
         ('System', {
             'fields': ('created_at', 'updated_at'),
             'classes': ('collapse',)
+        }),
+    )
+
+
+@admin.register(PasswordResetToken)
+class PasswordResetTokenAdmin(admin.ModelAdmin):
+    list_display = ['client', 'token', 'created_at', 'expires_at', 'is_used', 'used_at']
+    list_filter = ['is_used', 'created_at', 'expires_at']
+    search_fields = ['client__email', 'token']
+    ordering = ['-created_at']
+    readonly_fields = ['created_at', 'used_at']
+
+    fieldsets = (
+        ('Token Information', {
+            'fields': ('client', 'token', 'created_at', 'expires_at')
+        }),
+        ('Status', {
+            'fields': ('is_used', 'used_at')
         }),
     )

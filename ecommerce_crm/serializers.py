@@ -566,3 +566,45 @@ class OrderCreateSerializer(serializers.Serializer):
         cart.save()
 
         return order
+
+
+class PasswordResetRequestSerializer(serializers.Serializer):
+    """Serializer for requesting password reset"""
+    email = serializers.EmailField(required=True)
+
+    def validate_email(self, value):
+        """Validate that email exists"""
+        from .models import EcommerceClient
+        try:
+            client = EcommerceClient.objects.get(email=value, is_active=True)
+            self.context['client'] = client
+            return value
+        except EcommerceClient.DoesNotExist:
+            raise serializers.ValidationError("No active account found with this email address.")
+
+
+class PasswordResetConfirmSerializer(serializers.Serializer):
+    """Serializer for confirming password reset"""
+    token = serializers.CharField(required=True)
+    new_password = serializers.CharField(write_only=True, required=True, min_length=8)
+    new_password_confirm = serializers.CharField(write_only=True, required=True)
+
+    def validate(self, data):
+        """Validate token and passwords match"""
+        from .models import PasswordResetToken
+
+        # Validate passwords match
+        if data.get('new_password') != data.get('new_password_confirm'):
+            raise serializers.ValidationError({"new_password_confirm": "Passwords do not match."})
+
+        # Validate token
+        try:
+            reset_token = PasswordResetToken.objects.get(token=data['token'])
+        except PasswordResetToken.DoesNotExist:
+            raise serializers.ValidationError({"token": "Invalid or expired reset token."})
+
+        if not reset_token.is_valid():
+            raise serializers.ValidationError({"token": "This reset token has expired or been used."})
+
+        data['reset_token'] = reset_token
+        return data
