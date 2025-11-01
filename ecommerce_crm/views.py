@@ -1,7 +1,8 @@
 from rest_framework import viewsets, filters, status
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
+from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiParameter
 from django_filters.rest_framework import DjangoFilterBackend, FilterSet, CharFilter, NumberFilter, BooleanFilter
 from django.db.models import Q, F
 from .models import (
@@ -11,7 +12,8 @@ from .models import (
     Product,
     ProductImage,
     ProductVariant,
-    ProductAttributeValue
+    ProductAttributeValue,
+    EcommerceClient
 )
 from .serializers import (
     ProductCategorySerializer,
@@ -21,7 +23,10 @@ from .serializers import (
     ProductDetailSerializer,
     ProductCreateUpdateSerializer,
     ProductImageSerializer,
-    ProductVariantSerializer
+    ProductVariantSerializer,
+    EcommerceClientSerializer,
+    ClientRegistrationSerializer,
+    ClientLoginSerializer
 )
 
 
@@ -279,3 +284,109 @@ class ProductVariantViewSet(viewsets.ModelViewSet):
         return super().get_queryset().select_related('product').prefetch_related(
             'attribute_values__attribute'
         )
+
+
+class EcommerceClientViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing ecommerce clients"""
+    queryset = EcommerceClient.objects.all()
+    serializer_class = EcommerceClientSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['first_name', 'last_name', 'email', 'phone_number']
+    filterset_fields = ['is_active', 'is_verified']
+    ordering_fields = ['created_at', 'last_login', 'first_name', 'last_name']
+    ordering = ['-created_at']
+
+    @extend_schema(
+        tags=['Ecommerce - Clients'],
+        summary='List all ecommerce clients'
+    )
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Clients'],
+        summary='Get client details'
+    )
+    def retrieve(self, request, *args, **kwargs):
+        return super().retrieve(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Clients'],
+        summary='Update client'
+    )
+    def update(self, request, *args, **kwargs):
+        return super().update(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Clients'],
+        summary='Partially update client'
+    )
+    def partial_update(self, request, *args, **kwargs):
+        return super().partial_update(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Clients'],
+        summary='Delete client'
+    )
+    def destroy(self, request, *args, **kwargs):
+        return super().destroy(request, *args, **kwargs)
+
+
+@extend_schema(
+    operation_id='register_client',
+    summary='Register a new ecommerce client',
+    description='Create a new ecommerce client account. Supports registration with email and phone number.',
+    request=ClientRegistrationSerializer,
+    responses={
+        201: OpenApiResponse(
+            description='Client registered successfully',
+            response=EcommerceClientSerializer
+        ),
+        400: OpenApiResponse(description='Validation error')
+    },
+    tags=['Ecommerce - Client Auth']
+)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def register_client(request):
+    """Register a new ecommerce client"""
+    serializer = ClientRegistrationSerializer(data=request.data)
+
+    if serializer.is_valid():
+        client = serializer.save()
+        response_serializer = EcommerceClientSerializer(client)
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@extend_schema(
+    operation_id='login_client',
+    summary='Login ecommerce client',
+    description='Authenticate a client using email or phone number with password. Returns client details on successful authentication.',
+    request=ClientLoginSerializer,
+    responses={
+        200: OpenApiResponse(
+            description='Login successful',
+            response=EcommerceClientSerializer
+        ),
+        400: OpenApiResponse(description='Invalid credentials or validation error')
+    },
+    tags=['Ecommerce - Client Auth']
+)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def login_client(request):
+    """Login ecommerce client with email or phone"""
+    serializer = ClientLoginSerializer(data=request.data)
+
+    if serializer.is_valid():
+        client = serializer.validated_data['client']
+        response_serializer = EcommerceClientSerializer(client)
+        return Response({
+            'message': 'Login successful',
+            'client': response_serializer.data
+        }, status=status.HTTP_200_OK)
+
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

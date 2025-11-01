@@ -8,7 +8,8 @@ from .models import (
     ProductImage,
     ProductAttributeValue,
     ProductVariant,
-    ProductVariantAttributeValue
+    ProductVariantAttributeValue,
+    EcommerceClient
 )
 
 
@@ -104,3 +105,28 @@ class ProductVariantAdmin(admin.ModelAdmin):
     list_filter = ['is_active', 'product']
     search_fields = ['sku', 'product__sku']
     ordering = ['product', 'sort_order']
+
+
+@admin.register(EcommerceClient)
+class EcommerceClientAdmin(admin.ModelAdmin):
+    list_display = ['email', 'full_name', 'phone_number', 'is_active', 'is_verified', 'last_login', 'created_at']
+    list_filter = ['is_active', 'is_verified', 'created_at']
+    search_fields = ['email', 'first_name', 'last_name', 'phone_number']
+    ordering = ['-created_at']
+    readonly_fields = ['created_at', 'updated_at', 'last_login']
+
+    fieldsets = (
+        ('Personal Information', {
+            'fields': ('first_name', 'last_name', 'email', 'phone_number', 'date_of_birth')
+        }),
+        ('Authentication', {
+            'fields': ('password',)
+        }),
+        ('Status', {
+            'fields': ('is_active', 'is_verified', 'last_login')
+        }),
+        ('System', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )

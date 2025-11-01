@@ -1,6 +1,7 @@
 from django.db import models
 from django.conf import settings
 from django.core.validators import MinValueValidator
+from django.contrib.auth.hashers import make_password, check_password
 from decimal import Decimal
 import uuid
 
@@ -537,3 +538,70 @@ class ProductVariantAttributeValue(models.Model):
 
     def __str__(self):
         return f"{self.variant.sku} - {self.attribute.key}"
+
+
+class EcommerceClient(models.Model):
+    """
+    Ecommerce client/customer model for customer registration and authentication
+    Separate from the main User model - these are customers of the ecommerce store
+    """
+    # Personal Information
+    first_name = models.CharField(max_length=150, help_text="Client's first name")
+    last_name = models.CharField(max_length=150, help_text="Client's last name")
+    email = models.EmailField(unique=True, help_text="Client's email address (used for login)")
+    phone_number = models.CharField(
+        max_length=20,
+        unique=True,
+        help_text="Client's phone number (used for login)"
+    )
+
+    # Authentication
+    password = models.CharField(max_length=128, help_text="Hashed password")
+
+    # Additional Information
+    date_of_birth = models.DateField(null=True, blank=True, help_text="Client's date of birth")
+
+    # Status and Timestamps
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Designates whether this client should be treated as active"
+    )
+    is_verified = models.BooleanField(
+        default=False,
+        help_text="Email/phone verification status"
+    )
+    last_login = models.DateTimeField(null=True, blank=True, help_text="Last login timestamp")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Ecommerce Client'
+        verbose_name_plural = 'Ecommerce Clients'
+        indexes = [
+            models.Index(fields=['email']),
+            models.Index(fields=['phone_number']),
+            models.Index(fields=['is_active', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.first_name} {self.last_name} ({self.email})"
+
+    def set_password(self, raw_password):
+        """Hash and set the password"""
+        self.password = make_password(raw_password)
+
+    def check_password(self, raw_password):
+        """Verify a password against the stored hash"""
+        return check_password(raw_password, self.password)
+
+    @property
+    def full_name(self):
+        """Return the client's full name"""
+        return f"{self.first_name} {self.last_name}".strip()
+
+    def update_last_login(self):
+        """Update the last_login timestamp"""
+        from django.utils import timezone
+        self.last_login = timezone.now()
+        self.save(update_fields=['last_login'])

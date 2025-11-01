@@ -344,3 +344,110 @@ class ProductCreateUpdateSerializer(serializers.ModelSerializer):
                 )
 
         return product
+
+
+class EcommerceClientSerializer(serializers.ModelSerializer):
+    """Serializer for listing and viewing ecommerce clients"""
+    full_name = serializers.CharField(read_only=True)
+
+    class Meta:
+        model = None  # Will be set dynamically
+        fields = [
+            'id', 'first_name', 'last_name', 'full_name', 'email',
+            'phone_number', 'date_of_birth', 'is_active', 'is_verified',
+            'last_login', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'is_verified', 'last_login', 'created_at', 'updated_at']
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        from .models import EcommerceClient
+        self.Meta.model = EcommerceClient
+
+
+class ClientRegistrationSerializer(serializers.Serializer):
+    """Serializer for client registration"""
+    first_name = serializers.CharField(max_length=150, required=True)
+    last_name = serializers.CharField(max_length=150, required=True)
+    email = serializers.EmailField(required=True)
+    phone_number = serializers.CharField(max_length=20, required=True)
+    password = serializers.CharField(write_only=True, required=True, min_length=8)
+    password_confirm = serializers.CharField(write_only=True, required=True)
+    date_of_birth = serializers.DateField(required=False, allow_null=True)
+
+    def validate_email(self, value):
+        """Validate that email is unique"""
+        from .models import EcommerceClient
+        if EcommerceClient.objects.filter(email=value).exists():
+            raise serializers.ValidationError("A client with this email already exists.")
+        return value
+
+    def validate_phone_number(self, value):
+        """Validate that phone number is unique"""
+        from .models import EcommerceClient
+        if EcommerceClient.objects.filter(phone_number=value).exists():
+            raise serializers.ValidationError("A client with this phone number already exists.")
+        return value
+
+    def validate(self, data):
+        """Validate that passwords match"""
+        if data.get('password') != data.get('password_confirm'):
+            raise serializers.ValidationError({"password_confirm": "Passwords do not match."})
+        return data
+
+    def create(self, validated_data):
+        """Create and return a new client"""
+        from .models import EcommerceClient
+
+        # Remove password_confirm from validated data
+        validated_data.pop('password_confirm')
+
+        # Extract password
+        password = validated_data.pop('password')
+
+        # Create client
+        client = EcommerceClient(**validated_data)
+        client.set_password(password)
+        client.save()
+
+        return client
+
+
+class ClientLoginSerializer(serializers.Serializer):
+    """Serializer for client login (supports email or phone)"""
+    identifier = serializers.CharField(
+        required=True,
+        help_text="Email or phone number"
+    )
+    password = serializers.CharField(write_only=True, required=True)
+
+    def validate(self, data):
+        """Authenticate the client"""
+        from .models import EcommerceClient
+        from django.db.models import Q
+
+        identifier = data.get('identifier')
+        password = data.get('password')
+
+        # Try to find client by email or phone
+        try:
+            client = EcommerceClient.objects.get(
+                Q(email=identifier) | Q(phone_number=identifier)
+            )
+        except EcommerceClient.DoesNotExist:
+            raise serializers.ValidationError("Invalid credentials.")
+
+        # Check if client is active
+        if not client.is_active:
+            raise serializers.ValidationError("This account has been deactivated.")
+
+        # Verify password
+        if not client.check_password(password):
+            raise serializers.ValidationError("Invalid credentials.")
+
+        # Update last login
+        client.update_last_login()
+
+        # Add client to validated data
+        data['client'] = client
+        return data
