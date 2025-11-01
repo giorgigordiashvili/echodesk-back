@@ -38,7 +38,7 @@ repos:
     hooks:
       - id: tests
         name: run tests
-        entry: python manage.py test ecommerce_crm.tests --failfast
+        entry: python manage.py test --settings=ecommerce_crm.tests.test_settings ecommerce_crm.tests --failfast
         language: system
         pass_filenames: false
         always_run: true

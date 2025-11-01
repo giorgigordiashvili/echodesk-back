@@ -14,25 +14,25 @@ install-dev:
 	pip install -r requirements-dev.txt
 
 test:
-	python manage.py test ecommerce_crm.tests --verbosity=2
+	python manage.py test --settings=ecommerce_crm.tests.test_settings ecommerce_crm.tests --verbosity=2
 
 test-fast:
-	python manage.py test ecommerce_crm.tests --parallel --verbosity=2
+	python manage.py test --settings=ecommerce_crm.tests.test_settings ecommerce_crm.tests --parallel --verbosity=2
 
 test-coverage:
-	coverage run --source='ecommerce_crm' manage.py test ecommerce_crm.tests
+	coverage run --source='ecommerce_crm' manage.py test --settings=ecommerce_crm.tests.test_settings ecommerce_crm.tests
 	coverage report
 	coverage html
 	@echo "Coverage report generated in htmlcov/index.html"
 
 test-models:
-	python manage.py test ecommerce_crm.tests.test_models --verbosity=2
+	python manage.py test --settings=ecommerce_crm.tests.test_settings ecommerce_crm.tests.test_models --verbosity=2
 
 test-auth:
-	python manage.py test ecommerce_crm.tests.test_authentication --verbosity=2
+	python manage.py test --settings=ecommerce_crm.tests.test_settings ecommerce_crm.tests.test_authentication --verbosity=2
 
 test-api:
-	python manage.py test ecommerce_crm.tests.test_api --verbosity=2
+	python manage.py test --settings=ecommerce_crm.tests.test_settings ecommerce_crm.tests.test_api --verbosity=2
 
 lint:
 	flake8 ecommerce_crm --count --select=E9,F63,F7,F82 --show-source --statistics

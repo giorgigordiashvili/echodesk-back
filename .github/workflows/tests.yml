@@ -54,7 +54,7 @@ jobs:
         DEBUG: False
         SENDGRID_API_KEY: test-key
       run: |
-        coverage run --source='ecommerce_crm' manage.py test ecommerce_crm.tests --verbosity=2
+        coverage run --source='ecommerce_crm' manage.py test --settings=ecommerce_crm.tests.test_settings ecommerce_crm.tests --verbosity=2
         coverage report
         coverage xml
 

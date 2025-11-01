@@ -6,19 +6,52 @@ from amanati_crm.settings import *
 # Override database to use SQLite for tests
 DATABASES = {
     'default': {
-        'ENGINE': 'tenant_schemas.postgresql_backend',
+        'ENGINE': 'django.db.backends.sqlite3',
         'NAME': ':memory:',  # In-memory database
-        'USER': '',
-        'PASSWORD': '',
-        'HOST': '',
-        'PORT': '',
     }
 }
 
-# Disable tenant-specific features for unit tests
-# For testing individual components without full tenant context
-TENANT_MODEL = "tenants.Client"
-TENANT_DOMAIN_MODEL = "tenants.Domain"
+# Disable tenant schemas for testing
+DATABASE_ROUTERS = []
+
+# Simplify installed apps for testing - remove tenant_schemas
+INSTALLED_APPS = [
+    'django.contrib.contenttypes',
+    'django.contrib.auth',
+    'django.contrib.sessions',
+    'django.contrib.messages',
+    'django.contrib.staticfiles',
+    'django.contrib.admin',
+    'rest_framework',
+    'rest_framework.authtoken',
+    'drf_spectacular',
+    'corsheaders',
+    'django_filters',
+    'channels',
+    'storages',
+
+    # App modules
+    'tenants',
+    'users',
+    'crm',
+    'tickets',
+    'social_integrations',
+    'notifications',
+    'ecommerce_crm',
+]
+
+# Remove tenant-specific middleware for testing
+MIDDLEWARE = [
+    'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
+    'django.contrib.sessions.middleware.SessionMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
+    'django.middleware.common.CommonMiddleware',
+    'django.middleware.csrf.CsrfViewMiddleware',
+    'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'django.contrib.messages.middleware.MessageMiddleware',
+    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+]
 
 # Use console email backend for testing
 EMAIL_BACKEND = 'django.core.mail.backends.locmem.EmailBackend'
@@ -31,6 +64,3 @@ PASSWORD_HASHERS = [
 # Disable debugging in tests
 DEBUG = False
 TEMPLATE_DEBUG = False
-
-# Disable some middleware for faster tests
-MIDDLEWARE = [m for m in MIDDLEWARE if 'Debug' not in m]
