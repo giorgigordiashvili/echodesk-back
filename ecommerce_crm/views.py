@@ -206,8 +206,6 @@ class ProductViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         """Optimize queryset with prefetch_related"""
         queryset = Product.objects.select_related(
-            'product_type',
-            'category',
             'created_by',
             'updated_by'
         ).prefetch_related(

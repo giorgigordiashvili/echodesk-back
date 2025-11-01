@@ -27,7 +27,6 @@ class ProductAPITest(APITestCase, TestDataMixin):
         self.client = APIClient()
         # Create admin user for authenticated requests
         self.user = User.objects.create_user(
-            username='admin',
             email='admin@echodesk.ge',
             password='adminpass123'
         )
@@ -72,7 +71,7 @@ class ProductAPITest(APITestCase, TestDataMixin):
 
         # Verify product was created
         product = Product.objects.get(sku='NEW-001')
-        self.assertEqual(product.price, 149.99)
+        self.assertEqual(str(product.price), '149.99')
 
     def test_update_product(self):
         """Test PATCH /api/ecommerce/products/{id}/"""
@@ -92,7 +91,7 @@ class ProductAPITest(APITestCase, TestDataMixin):
 
         # Verify product was updated
         self.product.refresh_from_db()
-        self.assertEqual(self.product.price, 119.99)
+        self.assertEqual(str(self.product.price), '119.99')
         self.assertEqual(self.product.status, 'active')
 
     def test_delete_product(self):
@@ -113,7 +112,7 @@ class LanguageAPITest(APITestCase, TestDataMixin):
     def setUp(self):
         self.client = APIClient()
         self.user = User.objects.create_user(
-            username='admin',
+            email='admin@example.com',
             password='adminpass123'
         )
         self.client.force_authenticate(user=self.user)
@@ -141,7 +140,7 @@ class CartAPITest(APITestCase, TestDataMixin):
     def setUp(self):
         self.client = APIClient()
         self.user = User.objects.create_user(
-            username='admin',
+            email='admin@example.com',
             password='adminpass123'
         )
         self.client.force_authenticate(user=self.user)
@@ -158,7 +157,10 @@ class CartAPITest(APITestCase, TestDataMixin):
 
     def test_get_or_create_cart(self):
         """Test GET /api/ecommerce/cart/get_or_create/"""
-        new_client = self.create_test_client(email='new@example.com')
+        new_client = self.create_test_client(
+            email='new@example.com',
+            phone_number='+995555999991'
+        )
 
         response = self.client.get(
             f'/api/ecommerce/cart/get_or_create/?client={new_client.id}'
@@ -190,7 +192,7 @@ class FavoriteProductAPITest(APITestCase, TestDataMixin):
     def setUp(self):
         self.client = APIClient()
         self.user = User.objects.create_user(
-            username='admin',
+            email='admin@example.com',
             password='adminpass123'
         )
         self.client.force_authenticate(user=self.user)
@@ -232,7 +234,7 @@ class OrderAPITest(APITestCase, TestDataMixin):
     def setUp(self):
         self.client = APIClient()
         self.user = User.objects.create_user(
-            username='admin',
+            email='admin@example.com',
             password='adminpass123'
         )
         self.client.force_authenticate(user=self.user)
@@ -252,7 +254,7 @@ class ClientAPITest(APITestCase, TestDataMixin):
     def setUp(self):
         self.client = APIClient()
         self.user = User.objects.create_user(
-            username='admin',
+            email='admin@example.com',
             password='adminpass123'
         )
         self.client.force_authenticate(user=self.user)

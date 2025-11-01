@@ -171,7 +171,7 @@ class ProductCreateUpdateSerializer(serializers.ModelSerializer):
         model = Product
         fields = [
             'id', 'sku', 'slug', 'name', 'description', 'short_description',
-            'product_type', 'category', 'price', 'compare_at_price', 'cost_price',
+            'price', 'compare_at_price', 'cost_price',
             'image', 'track_inventory', 'quantity', 'low_stock_threshold',
             'status', 'is_featured', 'weight', 'dimensions',
             'meta_title', 'meta_description', 'attributes', 'images_data'

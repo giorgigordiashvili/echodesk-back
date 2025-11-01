@@ -166,6 +166,7 @@ class ClientLoginTest(APITestCase, TestDataMixin):
         """Test login fails for inactive client"""
         inactive_client = self.create_test_client(
             email='inactive@example.com',
+            phone_number='+995555999992',
             password='testpass123',
             is_active=False
         )
