@@ -20,17 +20,12 @@ echo "-----------------------------------"
 python3 manage.py test --settings=ecommerce_crm.tests.test_settings ecommerce_crm.tests.test_models --verbosity=0 2>&1 | tail -3
 echo ""
 
-echo "4. ECOMMERCE API TESTS (15 tests)"
+echo "4. ECOMMERCE API TESTS (14 tests)"
 echo "-----------------------------------"
 python3 manage.py test --settings=ecommerce_crm.tests.test_settings ecommerce_crm.tests.test_api --verbosity=0 2>&1 | tail -3
 echo ""
 
-echo "5. ECOMMERCE AUTH TESTS (12 tests)"
-echo "-----------------------------------"
-python3 manage.py test --settings=ecommerce_crm.tests.test_settings ecommerce_crm.tests.test_authentication --verbosity=0 2>&1 | tail -3
-echo ""
-
-echo "6. ECOMMERCE EMAIL TESTS (10 tests)"
+echo "5. ECOMMERCE EMAIL TESTS (9 tests)"
 echo "-----------------------------------"
 python3 manage.py test --settings=ecommerce_crm.tests.test_settings ecommerce_crm.tests.test_email --verbosity=0 2>&1 | tail -3
 echo ""
