@@ -10,7 +10,8 @@ from .models import (
     ProductAttributeValue,
     ProductVariant,
     ProductVariantAttributeValue,
-    ClientAddress
+    ClientAddress,
+    FavoriteProduct
 )
 
 
@@ -379,6 +380,31 @@ class ClientAddressSerializer(serializers.ModelSerializer):
             )
 
         return attrs
+
+
+class FavoriteProductSerializer(serializers.ModelSerializer):
+    """Serializer for favorite products with nested product details"""
+    product = serializers.SerializerMethodField()
+
+    class Meta:
+        model = FavoriteProduct
+        fields = ['id', 'client', 'product', 'created_at']
+        read_only_fields = ['id', 'created_at']
+
+    def get_product(self, obj):
+        """Return product details in the current language context"""
+        from .serializers import ProductListSerializer
+        language = self.context.get('language', 'en')
+        return ProductListSerializer(obj.product, context={'language': language}).data
+
+
+class FavoriteProductCreateSerializer(serializers.ModelSerializer):
+    """Serializer for adding products to favorites"""
+
+    class Meta:
+        model = FavoriteProduct
+        fields = ['id', 'client', 'product', 'created_at']
+        read_only_fields = ['id', 'created_at']
 
 
 class EcommerceClientSerializer(serializers.ModelSerializer):

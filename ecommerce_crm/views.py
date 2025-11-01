@@ -15,7 +15,8 @@ from .models import (
     ProductVariant,
     ProductAttributeValue,
     EcommerceClient,
-    ClientAddress
+    ClientAddress,
+    FavoriteProduct
 )
 from .serializers import (
     LanguageSerializer,
@@ -30,7 +31,9 @@ from .serializers import (
     EcommerceClientSerializer,
     ClientRegistrationSerializer,
     ClientLoginSerializer,
-    ClientAddressSerializer
+    ClientAddressSerializer,
+    FavoriteProductSerializer,
+    FavoriteProductCreateSerializer
 )
 
 
@@ -724,3 +727,132 @@ class ClientAddressViewSet(viewsets.ModelViewSet):
         address.save()
         serializer = self.get_serializer(address)
         return Response(serializer.data)
+
+
+class FavoriteProductViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing client favorite products (wishlist)"""
+    queryset = FavoriteProduct.objects.all()
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['client', 'product']
+    ordering_fields = ['created_at']
+    ordering = ['-created_at']
+
+    def get_serializer_class(self):
+        """Return appropriate serializer based on action"""
+        if self.action in ['create']:
+            return FavoriteProductCreateSerializer
+        return FavoriteProductSerializer
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        language = self.request.query_params.get('language', 'en')
+        context['language'] = language
+        return context
+
+    @extend_schema(
+        tags=['Ecommerce - Favorites'],
+        summary='List favorite products',
+        description='Get all favorite products with optional filtering by client or product'
+    )
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Favorites'],
+        summary='Get favorite details',
+        description='Retrieve details of a specific favorite item'
+    )
+    def retrieve(self, request, *args, **kwargs):
+        return super().retrieve(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Favorites'],
+        summary='Add product to favorites',
+        description='Add a product to client\'s favorites/wishlist'
+    )
+    def create(self, request, *args, **kwargs):
+        return super().create(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Favorites'],
+        summary='Remove from favorites',
+        description='Remove a product from favorites/wishlist'
+    )
+    def destroy(self, request, *args, **kwargs):
+        return super().destroy(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Favorites'],
+        summary='Check if product is favorited',
+        description='Check if a specific product is in client\'s favorites',
+        parameters=[
+            OpenApiParameter(name='client', type=int, required=True),
+            OpenApiParameter(name='product', type=int, required=True),
+        ]
+    )
+    @action(detail=False, methods=['get'])
+    def is_favorited(self, request):
+        """Check if a product is in client's favorites"""
+        client_id = request.query_params.get('client')
+        product_id = request.query_params.get('product')
+
+        if not client_id or not product_id:
+            return Response(
+                {'error': 'Both client and product IDs are required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        is_favorited = FavoriteProduct.objects.filter(
+            client_id=client_id,
+            product_id=product_id
+        ).exists()
+
+        return Response({'is_favorited': is_favorited})
+
+    @extend_schema(
+        tags=['Ecommerce - Favorites'],
+        summary='Toggle favorite',
+        description='Add or remove a product from favorites',
+        request={
+            'application/json': {
+                'type': 'object',
+                'properties': {
+                    'client': {'type': 'integer'},
+                    'product': {'type': 'integer'},
+                }
+            }
+        }
+    )
+    @action(detail=False, methods=['post'])
+    def toggle(self, request):
+        """Toggle product in favorites (add if not exists, remove if exists)"""
+        client_id = request.data.get('client')
+        product_id = request.data.get('product')
+
+        if not client_id or not product_id:
+            return Response(
+                {'error': 'Both client and product IDs are required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        favorite, created = FavoriteProduct.objects.get_or_create(
+            client_id=client_id,
+            product_id=product_id
+        )
+
+        if not created:
+            # Already exists, so remove it
+            favorite.delete()
+            return Response({
+                'message': 'Removed from favorites',
+                'is_favorited': False
+            })
+        else:
+            # Newly created
+            serializer = self.get_serializer(favorite)
+            return Response({
+                'message': 'Added to favorites',
+                'is_favorited': True,
+                'favorite': serializer.data
+            }, status=status.HTTP_201_CREATED)

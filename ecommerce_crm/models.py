@@ -723,3 +723,36 @@ class ClientAddress(models.Model):
                 is_default=True
             ).exclude(pk=self.pk).update(is_default=False)
         super().save(*args, **kwargs)
+
+
+class FavoriteProduct(models.Model):
+    """
+    Client's favorite/wishlist products
+    Many-to-many relationship between clients and products
+    """
+    client = models.ForeignKey(
+        EcommerceClient,
+        on_delete=models.CASCADE,
+        related_name='favorites',
+        help_text="Client who favorited the product"
+    )
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.CASCADE,
+        related_name='favorited_by',
+        help_text="Product that was favorited"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ['client', 'product']
+        ordering = ['-created_at']
+        verbose_name = 'Favorite Product'
+        verbose_name_plural = 'Favorite Products'
+        indexes = [
+            models.Index(fields=['client', '-created_at']),
+            models.Index(fields=['product']),
+        ]
+
+    def __str__(self):
+        return f"{self.client.full_name} - {self.product.sku}"
