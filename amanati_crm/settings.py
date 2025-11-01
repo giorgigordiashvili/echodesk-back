@@ -72,6 +72,7 @@ TENANT_APPS = [
     'tickets',
     'social_integrations',
     'notifications',
+    'ecommerce_crm',  # E-commerce product management
 ]
 
 INSTALLED_APPS = list(SHARED_APPS) + [app for app in TENANT_APPS if app not in SHARED_APPS]
