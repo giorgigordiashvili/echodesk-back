@@ -114,7 +114,10 @@ urlpatterns = [
     
     # Social integrations (needed for OAuth callbacks)
     path('api/social/', include('social_integrations.urls')),
-    
+
+    # Ecommerce endpoints (public access for client registration/login)
+    path('api/ecommerce/', include('ecommerce_crm.urls')),
+
     # Public/tenant management endpoints
     path('', include('tenants.urls')),
 ]

@@ -65,6 +65,12 @@ PASSWORD_HASHERS = [
 DEBUG = False
 TEMPLATE_DEBUG = False
 
+# Explicitly set ROOT_URLCONF to use main URLs (not public schema URLs)
+ROOT_URLCONF = 'amanati_crm.urls'
+
+# Allow testserver hostname for Django test client
+ALLOWED_HOSTS = ['*']  # Allow all hosts in test environment
+
 # Override REST_FRAMEWORK settings for testing
 # Keep authentication classes but change default permission to AllowAny
 # This allows @permission_classes decorators to work properly in tests
