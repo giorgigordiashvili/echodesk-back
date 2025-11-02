@@ -154,7 +154,7 @@ class ProductDetailSerializer(serializers.ModelSerializer):
 
 class ProductCreateUpdateSerializer(serializers.ModelSerializer):
     """Serializer for creating/updating products with attributes"""
-    image = serializers.CharField(required=False, allow_null=True, allow_blank=True, help_text="Image file upload or URL string")
+    image = serializers.CharField(required=False, allow_null=True, allow_blank=True, help_text="Image URL string")
     attributes = serializers.ListField(
         child=serializers.DictField(),
         write_only=True,
@@ -178,27 +178,6 @@ class ProductCreateUpdateSerializer(serializers.ModelSerializer):
             'meta_title', 'meta_description', 'attributes', 'images_data'
         ]
         read_only_fields = ['created_at', 'updated_at']
-
-    def validate_image(self, value):
-        """Accept both file uploads and URL strings for image field"""
-        # If it's a string (URL from DigitalOcean Spaces), extract the file path
-        if isinstance(value, str) and value:
-            from urllib.parse import urlparse
-
-            # Extract the path from the full URL
-            # e.g., "https://echodesk-spaces.fra1.digitaloceanspaces.com/media/gallery/artlighthouse/file.png"
-            # becomes "gallery/artlighthouse/file.png"
-            parsed_url = urlparse(value)
-            path = parsed_url.path
-
-            # Remove '/media/' prefix if present
-            if path.startswith('/media/'):
-                path = path[7:]  # Remove '/media/'
-
-            # Return just the relative path - Django's storage will handle the full URL
-            return path
-
-        return value
 
     def create(self, validated_data):
         # Extract nested data
