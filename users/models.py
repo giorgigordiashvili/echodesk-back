@@ -322,20 +322,44 @@ class User(AbstractBaseUser, PermissionsMixin):
             list: List of feature keys the user can access
 
         Logic:
-            - Features come from tenant's subscription package
-            - All users in a tenant get the package features
-            - Tenant groups can optionally restrict features further (not implemented yet)
-            - Staff/superuser status does NOT bypass tenant subscription limits
+            - Features come from tenant's subscription package (what's available)
+            - User's tenant groups determine which features they can actually use
+            - Returns intersection of package features and group features
+            - If user has no groups, returns empty list (except superadmin)
+            - Superuser gets all package features regardless of groups
         """
         from django.db import connection
         from tenants.models import Tenant
         from tenants.feature_models import PackageFeature
 
         try:
-            # Get current tenant from schema
-            tenant = Tenant.objects.get(schema_name=connection.schema_name)
+            # Superuser gets all package features
+            if self.is_superuser:
+                tenant = Tenant.objects.get(schema_name=connection.schema_name)
+                subscription = tenant.current_subscription
+                if not subscription or not subscription.is_active:
+                    return []
+                package = subscription.package
+                if not package:
+                    return []
+                return list(
+                    PackageFeature.objects.filter(
+                        package=package,
+                        feature__is_active=True
+                    ).values_list('feature__key', flat=True)
+                )
 
-            # Get tenant's subscription package
+            # Get feature keys from user's tenant groups
+            group_feature_keys = set()
+            for group in self.tenant_groups.filter(is_active=True):
+                group_feature_keys.update(group.get_feature_keys())
+
+            # If user has no groups, return empty list
+            if not group_feature_keys:
+                return []
+
+            # Get tenant's available features from package
+            tenant = Tenant.objects.get(schema_name=connection.schema_name)
             subscription = tenant.current_subscription
             if not subscription or not subscription.is_active:
                 return []
@@ -344,15 +368,16 @@ class User(AbstractBaseUser, PermissionsMixin):
             if not package:
                 return []
 
-            # Get all active features from the package
-            feature_keys = list(
+            package_feature_keys = set(
                 PackageFeature.objects.filter(
                     package=package,
                     feature__is_active=True
                 ).values_list('feature__key', flat=True)
             )
 
-            return feature_keys
+            # Return intersection: features that are both in package AND in user's groups
+            available_features = list(group_feature_keys & package_feature_keys)
+            return available_features
 
         except Exception as e:
             # Fallback: return empty list if something goes wrong
