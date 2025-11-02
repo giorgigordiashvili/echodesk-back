@@ -1064,18 +1064,16 @@ class CartViewSet(viewsets.ModelViewSet):
     @extend_schema(
         tags=['Ecommerce - Cart'],
         summary='Get or create active cart',
-        description='Get client\'s active cart or create new one',
-        parameters=[OpenApiParameter(name='client', type=int, required=True)]
+        description='Get authenticated client\'s active cart or create new one'
     )
     @action(detail=False, methods=['get'])
     def get_or_create(self, request):
-        """Get or create active cart for client"""
-        client_id = request.query_params.get('client')
-        if not client_id:
-            return Response({'error': 'Client ID required'}, status=status.HTTP_400_BAD_REQUEST)
+        """Get or create active cart for authenticated client"""
+        # Use authenticated client from token
+        client = request.user
 
         cart, created = Cart.objects.get_or_create(
-            client_id=client_id,
+            client=client,
             status='active',
             defaults={'status': 'active'}
         )
