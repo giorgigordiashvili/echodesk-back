@@ -10,7 +10,7 @@ from decimal import Decimal
 from datetime import timedelta, date
 from tickets.tests.test_utils import TestDataMixin
 from tickets.models import (
-    Board, TicketColumn, Tag, Ticket, SubTicket,
+    Board, TicketColumn, Tag, Ticket,
     ChecklistItem, TicketComment, TicketTimeLog,
     TicketPayment
 )
@@ -270,44 +270,6 @@ class TicketModelTest(TestCase, TestDataMixin):
         self.assertTrue(ticket.is_paid)
 
 
-class SubTicketModelTest(TestCase, TestDataMixin):
-    """Test the SubTicket model."""
-
-    def test_create_sub_ticket(self):
-        """Test creating a sub-ticket."""
-        sub_ticket = self.create_test_sub_ticket(title='Subtask 1')
-        self.assertEqual(sub_ticket.title, 'Subtask 1')
-        self.assertIsNotNone(sub_ticket.parent_ticket)
-        self.assertFalse(sub_ticket.is_completed)
-
-    def test_sub_ticket_string_representation(self):
-        """Test sub-ticket __str__ method."""
-        parent = self.create_test_ticket(title='Parent')
-        sub = self.create_test_sub_ticket(title='Child', parent_ticket=parent)
-        self.assertEqual(str(sub), 'Parent -> Child')
-
-    def test_sub_ticket_position_auto_increment(self):
-        """Test that sub-ticket positions auto-increment."""
-        parent = self.create_test_ticket()
-        sub1 = self.create_test_sub_ticket(parent_ticket=parent)
-        sub2 = self.create_test_sub_ticket(parent_ticket=parent)
-
-        # sub2 should have position greater than sub1
-        self.assertGreater(sub2.position, sub1.position)
-
-    def test_sub_ticket_cascade_delete(self):
-        """Test that sub-tickets are deleted when parent is deleted."""
-        parent = self.create_test_ticket()
-        sub1 = self.create_test_sub_ticket(parent_ticket=parent)
-        sub2 = self.create_test_sub_ticket(parent_ticket=parent)
-
-        parent_id = parent.id
-        parent.delete()
-
-        # Sub-tickets should be deleted
-        self.assertEqual(SubTicket.objects.filter(parent_ticket_id=parent_id).count(), 0)
-
-
 class ChecklistItemModelTest(TestCase, TestDataMixin):
     """Test the ChecklistItem model."""
 
@@ -317,18 +279,6 @@ class ChecklistItemModelTest(TestCase, TestDataMixin):
         self.assertEqual(item.text, 'Check this')
         self.assertFalse(item.is_checked)
         self.assertIsNotNone(item.ticket)
-        self.assertIsNone(item.sub_ticket)
-
-    def test_create_checklist_item_for_sub_ticket(self):
-        """Test creating a checklist item for a sub-ticket."""
-        sub_ticket = self.create_test_sub_ticket()
-        item = ChecklistItem.objects.create(
-            text='Sub check',
-            sub_ticket=sub_ticket,
-            created_by=sub_ticket.created_by
-        )
-        self.assertIsNone(item.ticket)
-        self.assertIsNotNone(item.sub_ticket)
 
     def test_checklist_item_string_representation(self):
         """Test checklist item __str__ method."""

@@ -8,16 +8,16 @@ from django.utils import timezone
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse
 from drf_spectacular.openapi import OpenApiTypes
 from .models import (
-    Ticket, Tag, TicketComment, TicketColumn, SubTicket, ChecklistItem,
-    TicketAssignment, SubTicketAssignment, TicketTimeLog, Board, TicketPayment,
+    Ticket, Tag, TicketComment, TicketColumn, ChecklistItem,
+    TicketAssignment, TicketTimeLog, Board, TicketPayment,
     ItemList, ListItem, TicketForm, TicketFormSubmission, TicketAttachment
 )
 from .serializers import (
     TicketSerializer, TicketListSerializer, TagSerializer,
     TicketCommentSerializer, TicketColumnSerializer,
     TicketColumnCreateSerializer, TicketColumnUpdateSerializer,
-    KanbanBoardSerializer, SubTicketSerializer, ChecklistItemSerializer,
-    TicketAssignmentSerializer, SubTicketAssignmentSerializer, TicketTimeLogSerializer,
+    KanbanBoardSerializer, ChecklistItemSerializer,
+    TicketAssignmentSerializer, TicketTimeLogSerializer,
     TimeTrackingSummarySerializer, BoardSerializer, TicketPaymentSerializer,
     ItemListSerializer, ItemListMinimalSerializer, ListItemSerializer, ListItemMinimalSerializer,
     TicketFormSerializer, TicketFormMinimalSerializer, TicketFormSubmissionSerializer,
@@ -648,91 +648,6 @@ class TicketCommentViewSet(viewsets.ModelViewSet):
         serializer.save(user=self.request.user)
 
 
-class SubTicketViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for managing sub-tickets.
-    """
-    serializer_class = SubTicketSerializer
-    permission_classes = [permissions.IsAuthenticated]
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['parent_ticket', 'priority', 'is_completed', 'assigned_to', 'created_by']
-    search_fields = ['title', 'description']
-    ordering_fields = ['created_at', 'updated_at', 'priority', 'position']
-    ordering = ['position', 'created_at']
-
-    def get_queryset(self):
-        """Filter sub-tickets based on user permissions."""
-        if self.request.user.is_staff:
-            return SubTicket.objects.all().select_related(
-                'parent_ticket', 'created_by', 'assigned_to'
-            ).prefetch_related('checklist_items')
-        
-        # Non-staff users can only see sub-tickets for tickets they have access to
-        return SubTicket.objects.filter(
-            Q(parent_ticket__created_by=self.request.user) | 
-            Q(parent_ticket__assigned_to=self.request.user) |
-            Q(parent_ticket__assigned_users=self.request.user) |
-            Q(created_by=self.request.user) |
-            Q(assigned_to=self.request.user) |
-            Q(assigned_users=self.request.user)
-        ).select_related(
-            'parent_ticket', 'created_by', 'assigned_to'
-        ).prefetch_related('checklist_items')
-
-    @action(detail=True, methods=['patch'])
-    def toggle_completion(self, request, pk=None):
-        """Toggle the completion status of a sub-ticket."""
-        sub_ticket = self.get_object()
-        sub_ticket.is_completed = not sub_ticket.is_completed
-        sub_ticket.save()
-        serializer = self.get_serializer(sub_ticket)
-        return Response(serializer.data)
-
-    @action(detail=True, methods=['patch'])
-    def reorder(self, request, pk=None):
-        """Reorder sub-ticket within its parent ticket."""
-        sub_ticket = self.get_object()
-        new_position = request.data.get('position')
-        
-        if new_position is None:
-            return Response(
-                {'error': 'Position is required'}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        try:
-            new_position = int(new_position)
-        except ValueError:
-            return Response(
-                {'error': 'Position must be a number'}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        with transaction.atomic():
-            # Update positions of other sub-tickets in the same parent
-            if new_position > sub_ticket.position:
-                # Moving down
-                SubTicket.objects.filter(
-                    parent_ticket=sub_ticket.parent_ticket,
-                    position__gt=sub_ticket.position,
-                    position__lte=new_position
-                ).update(position=F('position') - 1)
-            else:
-                # Moving up
-                SubTicket.objects.filter(
-                    parent_ticket=sub_ticket.parent_ticket,
-                    position__gte=new_position,
-                    position__lt=sub_ticket.position
-                ).update(position=F('position') + 1)
-            
-            # Update the sub-ticket's position
-            sub_ticket.position = new_position
-            sub_ticket.save()
-        
-        serializer = self.get_serializer(sub_ticket)
-        return Response(serializer.data)
-
-
 class ChecklistItemViewSet(viewsets.ModelViewSet):
     """
     ViewSet for managing checklist items.
@@ -740,7 +655,7 @@ class ChecklistItemViewSet(viewsets.ModelViewSet):
     serializer_class = ChecklistItemSerializer
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
-    filterset_fields = ['ticket', 'sub_ticket', 'is_checked', 'created_by']
+    filterset_fields = ['ticket', 'is_checked', 'created_by']
     ordering_fields = ['created_at', 'position']
     ordering = ['position', 'created_at']
 
@@ -748,19 +663,16 @@ class ChecklistItemViewSet(viewsets.ModelViewSet):
         """Filter checklist items based on user permissions."""
         if self.request.user.is_staff:
             return ChecklistItem.objects.all().select_related(
-                'ticket', 'sub_ticket', 'created_by'
+                'ticket', 'created_by'
             )
-        
+
         # Non-staff users can only see checklist items for tickets they have access to
         return ChecklistItem.objects.filter(
-            Q(ticket__created_by=self.request.user) | 
+            Q(ticket__created_by=self.request.user) |
             Q(ticket__assigned_to=self.request.user) |
             Q(ticket__assigned_users=self.request.user) |
-            Q(sub_ticket__parent_ticket__created_by=self.request.user) |
-            Q(sub_ticket__parent_ticket__assigned_to=self.request.user) |
-            Q(sub_ticket__parent_ticket__assigned_users=self.request.user) |
             Q(created_by=self.request.user)
-        ).select_related('ticket', 'sub_ticket', 'created_by')
+        ).select_related('ticket', 'created_by')
 
     @action(detail=True, methods=['patch'])
     def toggle_check(self, request, pk=None):
@@ -773,31 +685,28 @@ class ChecklistItemViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['patch'])
     def reorder(self, request, pk=None):
-        """Reorder checklist item within its parent (ticket or sub-ticket)."""
+        """Reorder checklist item within its parent ticket."""
         item = self.get_object()
         new_position = request.data.get('position')
-        
+
         if new_position is None:
             return Response(
-                {'error': 'Position is required'}, 
+                {'error': 'Position is required'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         try:
             new_position = int(new_position)
         except ValueError:
             return Response(
-                {'error': 'Position must be a number'}, 
+                {'error': 'Position must be a number'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         with transaction.atomic():
-            # Determine the parent and filter other items
-            if item.ticket:
-                other_items = ChecklistItem.objects.filter(ticket=item.ticket)
-            else:
-                other_items = ChecklistItem.objects.filter(sub_ticket=item.sub_ticket)
-            
+            # Filter other items in the same ticket
+            other_items = ChecklistItem.objects.filter(ticket=item.ticket)
+
             # Update positions
             if new_position > item.position:
                 # Moving down
@@ -811,11 +720,11 @@ class ChecklistItemViewSet(viewsets.ModelViewSet):
                     position__gte=new_position,
                     position__lt=item.position
                 ).update(position=F('position') + 1)
-            
+
             # Update the item's position
             item.position = new_position
             item.save()
-        
+
         serializer = self.get_serializer(item)
         return Response(serializer.data)
 
@@ -874,66 +783,7 @@ class TicketAssignmentViewSet(viewsets.ModelViewSet):
         ).delete()
         
         return Response(
-            {'message': f'Removed {deleted_count} assignments'}, 
-            status=status.HTTP_204_NO_CONTENT
-        )
-
-
-class SubTicketAssignmentViewSet(viewsets.ModelViewSet):
-    """ViewSet for managing sub-ticket assignments."""
-    serializer_class = SubTicketAssignmentSerializer
-    permission_classes = [permissions.IsAuthenticated]
-    
-    def get_queryset(self):
-        """Return assignments for a specific sub-ticket."""
-        sub_ticket_pk = self.kwargs.get('sub_ticket_pk')
-        if sub_ticket_pk:
-            return SubTicketAssignment.objects.filter(sub_ticket_id=sub_ticket_pk)
-        return SubTicketAssignment.objects.none()
-    
-    def perform_create(self, serializer):
-        """Create a new sub-ticket assignment."""
-        sub_ticket_pk = self.kwargs.get('sub_ticket_pk')
-        sub_ticket = SubTicket.objects.get(pk=sub_ticket_pk)
-        serializer.save(sub_ticket=sub_ticket, assigned_by=self.request.user)
-    
-    @action(detail=False, methods=['post'])
-    def bulk_assign(self, request, sub_ticket_pk=None):
-        """Bulk assign users to a sub-ticket."""
-        sub_ticket = SubTicket.objects.get(pk=sub_ticket_pk)
-        user_ids = request.data.get('user_ids', [])
-        roles = request.data.get('roles', {})
-        
-        # Clear existing assignments if replace is True
-        if request.data.get('replace', False):
-            SubTicketAssignment.objects.filter(sub_ticket=sub_ticket).delete()
-        
-        assignments = []
-        for user_id in user_ids:
-            role = roles.get(str(user_id), 'collaborator')
-            assignment, created = SubTicketAssignment.objects.get_or_create(
-                sub_ticket=sub_ticket,
-                user_id=user_id,
-                defaults={'role': role, 'assigned_by': request.user}
-            )
-            assignments.append(assignment)
-        
-        serializer = SubTicketAssignmentSerializer(assignments, many=True)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
-    
-    @action(detail=False, methods=['delete'])
-    def bulk_unassign(self, request, sub_ticket_pk=None):
-        """Bulk remove user assignments from a sub-ticket."""
-        sub_ticket = SubTicket.objects.get(pk=sub_ticket_pk)
-        user_ids = request.data.get('user_ids', [])
-        
-        deleted_count, _ = SubTicketAssignment.objects.filter(
-            sub_ticket=sub_ticket,
-            user_id__in=user_ids
-        ).delete()
-        
-        return Response(
-            {'message': f'Removed {deleted_count} assignments'}, 
+            {'message': f'Removed {deleted_count} assignments'},
             status=status.HTTP_204_NO_CONTENT
         )
 

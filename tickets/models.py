@@ -327,173 +327,41 @@ class Ticket(models.Model):
         super().save(*args, **kwargs)
 
 
-class SubTicketAssignment(models.Model):
-    """Through model for sub-ticket assignments with additional metadata."""
-    ROLE_CHOICES = [
-        ('primary', 'Primary Assignee'),
-        ('collaborator', 'Collaborator'),
-        ('reviewer', 'Reviewer'),
-        ('observer', 'Observer'),
-    ]
-    
-    sub_ticket = models.ForeignKey('SubTicket', on_delete=models.CASCADE)
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
-    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='collaborator')
-    assigned_at = models.DateTimeField(auto_now_add=True)
-    assigned_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
-        related_name='sub_ticket_assignments_made'
-    )
-    
-    class Meta:
-        unique_together = [['sub_ticket', 'user']]
-        ordering = ['-assigned_at']
-    
-    def __str__(self):
-        return f'{self.user.email} assigned to {self.sub_ticket.title} as {self.role}'
-
-
-class SubTicket(models.Model):
-    """SubTicket model for creating hierarchical ticket relationships."""
-    parent_ticket = models.ForeignKey(
-        Ticket, 
-        related_name='sub_tickets', 
-        on_delete=models.CASCADE,
-        help_text='Parent ticket that this sub-ticket belongs to'
-    )
-    title = models.CharField(max_length=255)
-    description = models.TextField(blank=True)
-    rich_description = models.JSONField(
-        null=True, 
-        blank=True,
-        help_text='Rich text content stored as JSON'
-    )
-    description_format = models.CharField(
-        max_length=20,
-        choices=[
-            ('plain', 'Plain Text'),
-            ('html', 'HTML'),
-            ('delta', 'Quill Delta'),
-        ],
-        default='plain'
-    )
-    
-    # Sub-tickets inherit some properties from parent but can have their own
-    priority = models.CharField(
-        max_length=20, 
-        choices=Ticket.PRIORITY_CHOICES, 
-        default='medium'
-    )
-    is_completed = models.BooleanField(default=False)
-    
-    # Position for ordering sub-tickets within parent
-    position = models.PositiveIntegerField(
-        default=0,
-        help_text='Position of sub-ticket within parent ticket'
-    )
-    
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-    created_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, 
-        related_name='created_sub_tickets', 
+class ChecklistItem(models.Model):
+    """Checklist items that can be embedded in ticket descriptions."""
+    ticket = models.ForeignKey(
+        Ticket,
+        related_name='checklist_items',
         on_delete=models.CASCADE
     )
-    assigned_to = models.ForeignKey(
-        settings.AUTH_USER_MODEL, 
-        related_name='assigned_sub_tickets', 
-        on_delete=models.SET_NULL, 
-        null=True, 
-        blank=True,
-        help_text='Primary assignee (for backward compatibility)'
-    )
-    assigned_users = models.ManyToManyField(
-        settings.AUTH_USER_MODEL,
-        through='SubTicketAssignment',
-        through_fields=('sub_ticket', 'user'),
-        related_name='sub_tickets_assigned',
-        blank=True,
-        help_text='All users assigned to this sub-ticket'
-    )
 
-    class Meta:
-        ordering = ['position', 'created_at']
-
-    def __str__(self):
-        return f'{self.parent_ticket.title} -> {self.title}'
-
-    def save(self, *args, **kwargs):
-        # Auto-assign position if not set
-        if not self.position:
-            max_position = SubTicket.objects.filter(parent_ticket=self.parent_ticket).aggregate(
-                models.Max('position')
-            )['position__max'] or 0
-            self.position = max_position + 1
-        super().save(*args, **kwargs)
-
-
-class ChecklistItem(models.Model):
-    """Checklist items that can be embedded in ticket or sub-ticket descriptions."""
-    # Can belong to either a ticket or sub-ticket
-    ticket = models.ForeignKey(
-        Ticket, 
-        related_name='checklist_items', 
-        on_delete=models.CASCADE,
-        null=True,
-        blank=True
-    )
-    sub_ticket = models.ForeignKey(
-        SubTicket, 
-        related_name='checklist_items', 
-        on_delete=models.CASCADE,
-        null=True,
-        blank=True
-    )
-    
     text = models.TextField()
     is_checked = models.BooleanField(default=False)
     position = models.PositiveIntegerField(
         default=0,
         help_text='Position of checklist item'
     )
-    
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     created_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, 
+        settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE
     )
 
     class Meta:
         ordering = ['position', 'created_at']
-        constraints = [
-            models.CheckConstraint(
-                check=(
-                    models.Q(ticket__isnull=False, sub_ticket__isnull=True) |
-                    models.Q(ticket__isnull=True, sub_ticket__isnull=False)
-                ),
-                name='checklist_item_belongs_to_ticket_or_sub_ticket'
-            )
-        ]
 
     def __str__(self):
-        parent = self.ticket or self.sub_ticket
         status = "✓" if self.is_checked else "☐"
-        return f'{status} {self.text} ({parent})'
+        return f'{status} {self.text} ({self.ticket})'
 
     def save(self, *args, **kwargs):
         # Auto-assign position if not set
         if not self.position:
-            if self.ticket:
-                max_position = ChecklistItem.objects.filter(ticket=self.ticket).aggregate(
-                    models.Max('position')
-                )['position__max'] or 0
-            else:
-                max_position = ChecklistItem.objects.filter(sub_ticket=self.sub_ticket).aggregate(
-                    models.Max('position')
-                )['position__max'] or 0
+            max_position = ChecklistItem.objects.filter(ticket=self.ticket).aggregate(
+                models.Max('position')
+            )['position__max'] or 0
             self.position = max_position + 1
         super().save(*args, **kwargs)
 

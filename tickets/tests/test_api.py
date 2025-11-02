@@ -9,7 +9,7 @@ from decimal import Decimal
 from django.utils import timezone
 from tickets.tests.test_utils import TestDataMixin
 from tickets.models import (
-    Board, TicketColumn, Tag, Ticket, SubTicket,
+    Board, TicketColumn, Tag, Ticket,
     ChecklistItem, TicketComment, TicketPayment
 )
 
@@ -32,7 +32,7 @@ class BoardAPITest(APITestCase, TestDataMixin):
         response = self.client.get(url)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 2)
+        self.assertEqual(len(response.data.get("results", response.data)), 2)
 
     def test_create_board(self):
         """Test creating a board."""
@@ -98,7 +98,7 @@ class TicketColumnAPITest(APITestCase, TestDataMixin):
         response = self.client.get(url)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 2)
+        self.assertEqual(len(response.data.get("results", response.data)), 2)
 
     def test_create_column(self):
         """Test creating a column."""
@@ -124,7 +124,7 @@ class TicketColumnAPITest(APITestCase, TestDataMixin):
         response = self.client.get(url)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 1)
+        self.assertEqual(len(response.data.get("results", response.data)), 1)
 
 
 class TagAPITest(APITestCase, TestDataMixin):
@@ -145,7 +145,7 @@ class TagAPITest(APITestCase, TestDataMixin):
         response = self.client.get(url)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 2)
+        self.assertEqual(len(response.data.get("results", response.data)), 2)
 
     def test_create_tag(self):
         """Test creating a tag."""
@@ -181,7 +181,7 @@ class TicketAPITest(APITestCase, TestDataMixin):
         response = self.client.get(url)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 2)
+        self.assertEqual(len(response.data.get("results", response.data)), 2)
 
     def test_create_ticket(self):
         """Test creating a ticket."""
@@ -241,7 +241,7 @@ class TicketAPITest(APITestCase, TestDataMixin):
         response = self.client.get(url)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 1)
+        self.assertEqual(len(response.data.get("results", response.data)), 1)
 
     def test_filter_tickets_by_column(self):
         """Test filtering tickets by column."""
@@ -253,57 +253,7 @@ class TicketAPITest(APITestCase, TestDataMixin):
         response = self.client.get(url)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 1)
-
-
-class SubTicketAPITest(APITestCase, TestDataMixin):
-    """Test the SubTicket API endpoints."""
-
-    def setUp(self):
-        """Set up test client and user."""
-        self.user = self.create_test_user()
-        self.client = APIClient()
-        self.client.force_authenticate(user=self.user)
-        self.board = self.create_test_board(created_by=self.user)
-        self.column = self.create_test_column(board=self.board, created_by=self.user)
-        self.parent_ticket = self.create_test_ticket(created_by=self.user, column=self.column)
-
-    def test_list_sub_tickets(self):
-        """Test listing sub-tickets."""
-        self.create_test_sub_ticket(parent_ticket=self.parent_ticket, created_by=self.user)
-        self.create_test_sub_ticket(parent_ticket=self.parent_ticket, created_by=self.user)
-
-        url = reverse('tickets:subticket-list')
-        response = self.client.get(url)
-
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 2)
-
-    def test_create_sub_ticket(self):
-        """Test creating a sub-ticket."""
-        url = reverse('tickets:subticket-list')
-        data = {
-            'title': 'New Subtask',
-            'description': 'Subtask description',
-            'parent_ticket': self.parent_ticket.id,
-            'priority': 'medium'
-        }
-
-        response = self.client.post(url, data)
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(SubTicket.objects.count(), 1)
-
-    def test_filter_sub_tickets_by_parent(self):
-        """Test filtering sub-tickets by parent ticket."""
-        parent2 = self.create_test_ticket(title='Parent 2', created_by=self.user, column=self.column)
-        self.create_test_sub_ticket(parent_ticket=self.parent_ticket, created_by=self.user)
-        self.create_test_sub_ticket(parent_ticket=parent2, created_by=self.user)
-
-        url = f"{reverse('tickets:subticket-list')}?parent_ticket={self.parent_ticket.id}"
-        response = self.client.get(url)
-
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 1)
+        self.assertEqual(len(response.data.get("results", response.data)), 1)
 
 
 class TicketCommentAPITest(APITestCase, TestDataMixin):
@@ -327,7 +277,7 @@ class TicketCommentAPITest(APITestCase, TestDataMixin):
         response = self.client.get(url)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 2)
+        self.assertEqual(len(response.data.get("results", response.data)), 2)
 
     def test_create_comment(self):
         """Test creating a comment."""
@@ -351,7 +301,7 @@ class TicketCommentAPITest(APITestCase, TestDataMixin):
         response = self.client.get(url)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 1)
+        self.assertEqual(len(response.data.get("results", response.data)), 1)
 
 
 class TicketPaymentAPITest(APITestCase, TestDataMixin):
@@ -379,7 +329,7 @@ class TicketPaymentAPITest(APITestCase, TestDataMixin):
         response = self.client.get(url)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 2)
+        self.assertEqual(len(response.data.get("results", response.data)), 2)
 
     def test_create_payment(self):
         """Test creating a payment."""
@@ -411,7 +361,7 @@ class TicketPaymentAPITest(APITestCase, TestDataMixin):
         response = self.client.get(url)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 1)
+        self.assertEqual(len(response.data.get("results", response.data)), 1)
 
 
 class ChecklistItemAPITest(APITestCase, TestDataMixin):
@@ -435,7 +385,7 @@ class ChecklistItemAPITest(APITestCase, TestDataMixin):
         response = self.client.get(url)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 2)
+        self.assertEqual(len(response.data.get("results", response.data)), 2)
 
     def test_create_checklist_item(self):
         """Test creating a checklist item."""

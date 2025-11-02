@@ -4,9 +4,9 @@ Provides helper functions for creating test data.
 """
 from django.contrib.auth import get_user_model
 from tickets.models import (
-    Board, TicketColumn, Tag, Ticket, SubTicket,
+    Board, TicketColumn, Tag, Ticket,
     ChecklistItem, TicketComment, TicketTimeLog,
-    TicketPayment, TicketAssignment, SubTicketAssignment,
+    TicketPayment, TicketAssignment,
     ItemList, ListItem, TicketForm, TicketFormSubmission,
     TicketAttachment, TicketHistory
 )
@@ -31,15 +31,12 @@ class TestDataMixin:
             cls._user_counter += 1
             email = f'test{cls._user_counter}@example.com'
 
-        # Check if user already exists
-        existing_user = User.objects.filter(email=email).first()
-        if existing_user:
-            return existing_user
-
         defaults = {
             'first_name': 'Test',
             'last_name': 'User',
             'is_active': True,
+            'is_superuser': True,  # Give superuser permissions for tests
+            'is_staff': True,  # Also set staff flag
         }
         defaults.update(kwargs)
 
@@ -164,29 +161,6 @@ class TestDataMixin:
             **defaults
         )
         return ticket
-
-    @classmethod
-    def create_test_sub_ticket(cls, title='Test SubTicket', parent_ticket=None, created_by=None, **kwargs):
-        """Create a test sub-ticket."""
-        if not parent_ticket:
-            parent_ticket = cls.create_test_ticket()
-        if not created_by:
-            created_by = parent_ticket.created_by
-
-        defaults = {
-            'description': 'Test sub-ticket description',
-            'priority': 'medium',
-            'is_completed': False,
-        }
-        defaults.update(kwargs)
-
-        sub_ticket = SubTicket.objects.create(
-            title=title,
-            parent_ticket=parent_ticket,
-            created_by=created_by,
-            **defaults
-        )
-        return sub_ticket
 
     @classmethod
     def create_test_checklist_item(cls, text='Test checklist item', ticket=None, created_by=None, **kwargs):

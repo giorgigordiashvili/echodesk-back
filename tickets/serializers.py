@@ -1,8 +1,8 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from .models import (
-    Ticket, Tag, TicketComment, TicketColumn, SubTicket, ChecklistItem,
-    TicketAssignment, SubTicketAssignment, TicketTimeLog, Board, TicketPayment,
+    Ticket, Tag, TicketComment, TicketColumn, ChecklistItem,
+    TicketAssignment, TicketTimeLog, Board, TicketPayment,
     ItemList, ListItem, TicketForm, TicketFormSubmission, TicketAttachment, TicketHistory
 )
 from users.models import TenantGroup, Department
@@ -224,17 +224,6 @@ class TicketAssignmentSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'assigned_at', 'assigned_by']
 
 
-class SubTicketAssignmentSerializer(serializers.ModelSerializer):
-    """Serializer for SubTicketAssignment model."""
-    user = UserMinimalSerializer(read_only=True)
-    assigned_by = UserMinimalSerializer(read_only=True)
-    
-    class Meta:
-        model = SubTicketAssignment
-        fields = ['id', 'user', 'role', 'assigned_at', 'assigned_by']
-        read_only_fields = ['id', 'assigned_at', 'assigned_by']
-
-
 class TicketCommentSerializer(serializers.ModelSerializer):
     """Serializer for TicketComment model."""
     user = UserMinimalSerializer(read_only=True)
@@ -258,11 +247,11 @@ class TicketCommentSerializer(serializers.ModelSerializer):
 class ChecklistItemSerializer(serializers.ModelSerializer):
     """Serializer for ChecklistItem model."""
     created_by = UserMinimalSerializer(read_only=True)
-    
+
     class Meta:
         model = ChecklistItem
         fields = [
-            'id', 'ticket', 'sub_ticket', 'text', 'is_checked', 'position',
+            'id', 'ticket', 'text', 'is_checked', 'position',
             'created_at', 'updated_at', 'created_by'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'created_by']
@@ -271,124 +260,6 @@ class ChecklistItemSerializer(serializers.ModelSerializer):
         # Set created_by from request context
         validated_data['created_by'] = self.context['request'].user
         return super().create(validated_data)
-
-    def validate(self, data):
-        """Ensure checklist item belongs to either ticket or sub_ticket, not both."""
-        ticket = data.get('ticket')
-        sub_ticket = data.get('sub_ticket')
-        
-        if not ticket and not sub_ticket:
-            raise serializers.ValidationError("Checklist item must belong to either a ticket or sub_ticket.")
-        
-        if ticket and sub_ticket:
-            raise serializers.ValidationError("Checklist item cannot belong to both ticket and sub_ticket.")
-        
-        return data
-
-
-class SubTicketSerializer(serializers.ModelSerializer):
-    """Serializer for SubTicket model."""
-    created_by = UserMinimalSerializer(read_only=True)
-    assigned_to = UserMinimalSerializer(read_only=True)
-    assigned_to_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
-    assigned_users = UserMinimalSerializer(many=True, read_only=True)
-    assignments = SubTicketAssignmentSerializer(source='subticketassignment_set', many=True, read_only=True)
-    assigned_user_ids = serializers.ListField(
-        child=serializers.IntegerField(),
-        write_only=True,
-        required=False,
-        allow_empty=True,
-        help_text='List of user IDs to assign to this sub-ticket'
-    )
-    assignment_roles = serializers.DictField(
-        child=serializers.CharField(max_length=20),
-        write_only=True,
-        required=False,
-        help_text='Dictionary mapping user IDs to roles (e.g., {"1": "primary", "2": "collaborator"})'
-    )
-    checklist_items = ChecklistItemSerializer(many=True, read_only=True)
-    checklist_items_count = serializers.SerializerMethodField()
-    completed_items_count = serializers.SerializerMethodField()
-    
-    class Meta:
-        model = SubTicket
-        fields = [
-            'id', 'parent_ticket', 'title', 'description', 'rich_description',
-            'description_format', 'priority', 'is_completed', 'position',
-            'created_at', 'updated_at', 'created_by', 'assigned_to', 'assigned_to_id',
-            'assigned_users', 'assignments', 'assigned_user_ids', 'assignment_roles',
-            'checklist_items', 'checklist_items_count', 'completed_items_count'
-        ]
-        read_only_fields = ['id', 'created_at', 'updated_at', 'created_by']
-
-    def get_checklist_items_count(self, obj):
-        """Get the number of checklist items for this sub-ticket."""
-        return obj.checklist_items.count()
-
-    def get_completed_items_count(self, obj):
-        """Get the number of completed checklist items."""
-        return obj.checklist_items.filter(is_checked=True).count()
-
-    def create(self, validated_data):
-        assigned_to_id = validated_data.pop('assigned_to_id', None)
-        assigned_user_ids = validated_data.pop('assigned_user_ids', [])
-        assignment_roles = validated_data.pop('assignment_roles', {})
-        
-        # Set created_by from request context
-        validated_data['created_by'] = self.context['request'].user
-        current_user = self.context['request'].user
-        
-        # Set assigned_to if provided
-        if assigned_to_id:
-            validated_data['assigned_to'] = User.objects.get(id=assigned_to_id)
-        
-        sub_ticket = super().create(validated_data)
-        
-        # Handle multiple user assignments
-        if assigned_user_ids:
-            for user_id in assigned_user_ids:
-                role = assignment_roles.get(str(user_id), 'collaborator')
-                SubTicketAssignment.objects.create(
-                    sub_ticket=sub_ticket,
-                    user_id=user_id,
-                    role=role,
-                    assigned_by=current_user
-                )
-        
-        return sub_ticket
-
-    def update(self, instance, validated_data):
-        assigned_to_id = validated_data.pop('assigned_to_id', None)
-        assigned_user_ids = validated_data.pop('assigned_user_ids', None)
-        assignment_roles = validated_data.pop('assignment_roles', {})
-        
-        current_user = self.context['request'].user
-        
-        # Handle assigned_to field
-        if assigned_to_id is not None:
-            if assigned_to_id:
-                validated_data['assigned_to'] = User.objects.get(id=assigned_to_id)
-            else:
-                validated_data['assigned_to'] = None
-        
-        sub_ticket = super().update(instance, validated_data)
-        
-        # Handle multiple user assignments update
-        if assigned_user_ids is not None:
-            # Clear existing assignments
-            SubTicketAssignment.objects.filter(sub_ticket=sub_ticket).delete()
-            
-            # Add new assignments
-            for user_id in assigned_user_ids:
-                role = assignment_roles.get(str(user_id), 'collaborator')
-                SubTicketAssignment.objects.create(
-                    sub_ticket=sub_ticket,
-                    user_id=user_id,
-                    role=role,
-                    assigned_by=current_user
-                )
-        
-        return sub_ticket
 
 
 class TicketSerializer(serializers.ModelSerializer):
@@ -432,10 +303,7 @@ class TicketSerializer(serializers.ModelSerializer):
     )
     comments = TicketCommentSerializer(many=True, read_only=True)
     comments_count = serializers.SerializerMethodField()
-    # Add new fields for rich content and sub-tickets
-    sub_tickets = SubTicketSerializer(many=True, read_only=True)
-    sub_tickets_count = serializers.SerializerMethodField()
-    completed_sub_tickets_count = serializers.SerializerMethodField()
+    # Add new fields for rich content
     checklist_items = ChecklistItemSerializer(many=True, read_only=True)
     checklist_items_count = serializers.SerializerMethodField()
     completed_checklist_items_count = serializers.SerializerMethodField()
@@ -464,7 +332,6 @@ class TicketSerializer(serializers.ModelSerializer):
             'assigned_groups', 'assigned_group_ids',
             'assigned_department', 'assigned_department_id',
             'tags', 'tag_ids', 'comments', 'comments_count',
-            'sub_tickets', 'sub_tickets_count', 'completed_sub_tickets_count',
             'checklist_items', 'checklist_items_count', 'completed_checklist_items_count',
             'price', 'currency', 'is_paid', 'amount_paid', 'payment_due_date',
             'payments', 'remaining_balance', 'payment_status', 'is_overdue', 'form_submissions',
@@ -475,14 +342,6 @@ class TicketSerializer(serializers.ModelSerializer):
     def get_comments_count(self, obj):
         """Get the number of comments for this ticket."""
         return obj.comments.count()
-
-    def get_sub_tickets_count(self, obj):
-        """Get the number of sub-tickets for this ticket."""
-        return obj.sub_tickets.count()
-
-    def get_completed_sub_tickets_count(self, obj):
-        """Get the number of completed sub-tickets."""
-        return obj.sub_tickets.filter(is_completed=True).count()
 
     def get_checklist_items_count(self, obj):
         """Get the number of checklist items for this ticket."""

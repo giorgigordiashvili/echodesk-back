@@ -7,7 +7,6 @@ from django.contrib.auth import get_user_model
 from .models import (
     Ticket,
     TicketComment,
-    SubTicket,
     TicketAssignment,
 )
 import re
@@ -255,58 +254,3 @@ def notify_on_ticket_status_change(sender, instance, created, **kwargs):
         delattr(instance, '_old_department')
 
 
-@receiver(post_save, sender=SubTicket)
-def notify_on_sub_ticket_created(sender, instance, created, **kwargs):
-    """
-    Notify parent ticket creator and assigned users when a sub-ticket is created.
-    """
-    if not created:
-        return
-
-    parent_ticket = instance.parent_ticket
-    creator = instance.created_by
-
-    # Notify parent ticket creator
-    if parent_ticket.created_by.id != creator.id:
-        create_notification(
-            user=parent_ticket.created_by,
-            notification_type='sub_ticket_created',
-            title=f'Sub-ticket created: {instance.title}',
-            message=f'{creator.get_full_name()} created a sub-ticket for "{parent_ticket.title}"',
-            ticket_id=parent_ticket.id,
-            metadata={
-                'sub_ticket_id': instance.id,
-                'sub_ticket_title': instance.title,
-                'creator': creator.email,
-            }
-        )
-
-    # Notify assigned users of parent ticket
-    for assigned_user in parent_ticket.assigned_users.exclude(id=creator.id):
-        create_notification(
-            user=assigned_user,
-            notification_type='sub_ticket_created',
-            title=f'Sub-ticket created: {instance.title}',
-            message=f'{creator.get_full_name()} created a sub-ticket for "{parent_ticket.title}"',
-            ticket_id=parent_ticket.id,
-            metadata={
-                'sub_ticket_id': instance.id,
-                'sub_ticket_title': instance.title,
-                'creator': creator.email,
-            }
-        )
-
-    # Notify assigned user of the sub-ticket if different from creator
-    if instance.assigned_to and instance.assigned_to.id != creator.id:
-        create_notification(
-            user=instance.assigned_to,
-            notification_type='ticket_assigned',
-            title=f'Assigned to sub-ticket: {instance.title}',
-            message=f'{creator.get_full_name()} assigned you to a sub-ticket',
-            ticket_id=parent_ticket.id,
-            metadata={
-                'sub_ticket_id': instance.id,
-                'sub_ticket_title': instance.title,
-                'creator': creator.email,
-            }
-        )
