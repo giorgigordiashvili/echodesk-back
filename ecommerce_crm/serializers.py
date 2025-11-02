@@ -154,6 +154,7 @@ class ProductDetailSerializer(serializers.ModelSerializer):
 
 class ProductCreateUpdateSerializer(serializers.ModelSerializer):
     """Serializer for creating/updating products with attributes"""
+    image = serializers.CharField(required=False, allow_null=True, allow_blank=True, help_text="Image file upload or URL string")
     attributes = serializers.ListField(
         child=serializers.DictField(),
         write_only=True,
@@ -177,6 +178,30 @@ class ProductCreateUpdateSerializer(serializers.ModelSerializer):
             'meta_title', 'meta_description', 'attributes', 'images_data'
         ]
         read_only_fields = ['created_at', 'updated_at']
+
+    def validate_image(self, value):
+        """Accept both file uploads and URL strings for image field"""
+        # If it's a string (URL), download and convert to file
+        if isinstance(value, str) and value:
+            import requests
+            from django.core.files.base import ContentFile
+            from urllib.parse import urlparse
+            import os
+
+            try:
+                response = requests.get(value, timeout=10)
+                response.raise_for_status()
+
+                # Extract filename from URL
+                parsed_url = urlparse(value)
+                filename = os.path.basename(parsed_url.path) or 'image.jpg'
+
+                # Create a ContentFile from the downloaded image
+                return ContentFile(response.content, name=filename)
+            except Exception as e:
+                raise serializers.ValidationError(f"Failed to download image from URL: {str(e)}")
+
+        return value
 
     def create(self, validated_data):
         # Extract nested data
