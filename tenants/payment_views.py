@@ -1035,3 +1035,129 @@ def set_default_card(request):
             {'error': 'Card not found'},
             status=status.HTTP_404_NOT_FOUND
         )
+
+
+@extend_schema(
+    operation_id='add_new_card',
+    summary='Add New Payment Card',
+    description='Create a 0 GEL payment to add and save a new payment card without charging',
+    request=inline_serializer(
+        name='AddNewCardRequest',
+        fields={
+            'make_default': serializers.BooleanField(
+                default=False,
+                help_text='Set this card as default after adding'
+            )
+        }
+    ),
+    responses={
+        200: OpenApiResponse(
+            description='Payment URL created to add card',
+            response=inline_serializer(
+                name='AddNewCardResponse',
+                fields={
+                    'payment_id': serializers.CharField(),
+                    'payment_url': serializers.CharField(),
+                    'amount': serializers.FloatField(),
+                    'currency': serializers.CharField()
+                }
+            )
+        ),
+        403: OpenApiResponse(description='Not accessible from this domain'),
+        503: OpenApiResponse(description='Payment gateway not configured')
+    },
+    tags=['Payments']
+)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def add_new_card(request):
+    """
+    Create a 0 GEL payment to add and save a new payment card
+
+    This endpoint creates a payment session with 0 amount, allowing the user
+    to go through the BOG payment flow and add their card details. The card
+    will be saved for future automatic payments without any charge.
+    """
+    if not hasattr(request, 'tenant'):
+        return Response(
+            {'error': 'This endpoint is only available from tenant subdomains'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    make_default = request.data.get('make_default', False)
+
+    # Check if BOG is configured
+    if not bog_service.is_configured():
+        return Response(
+            {
+                'error': 'Payment gateway not configured',
+                'message': 'Please contact support to set up payment processing'
+            },
+            status=status.HTTP_503_SERVICE_UNAVAILABLE
+        )
+
+    # Generate URLs
+    base_url = f"https://{request.get_host()}"
+    return_url = f"{base_url}/settings/subscription?card_added=success"
+    callback_url = f"{settings.API_DOMAIN}/api/payments/webhook/"
+
+    try:
+        # Generate external order ID for tracking
+        import uuid
+        external_order_id = f"CARD-{uuid.uuid4().hex[:12].upper()}"
+
+        # Create 0 GEL payment session
+        payment_result = bog_service.create_payment(
+            amount=0.0,  # 0 GEL charge
+            currency='GEL',
+            description='Add new payment card',
+            customer_email=request.user.email if hasattr(request.user, 'email') else '',
+            customer_name=f"{request.user.first_name} {request.user.last_name}" if hasattr(request.user, 'first_name') else '',
+            return_url_success=return_url,
+            return_url_fail=f"{base_url}/settings/subscription?card_added=failed",
+            callback_url=callback_url,
+            external_order_id=external_order_id,
+            metadata={
+                'type': 'add_card',
+                'tenant_id': request.tenant.id,
+                'make_default': make_default
+            }
+        )
+
+        # Store payment order in database
+        payment_order = PaymentOrder.objects.create(
+            order_id=payment_result['order_id'],
+            tenant=request.tenant,
+            package=None,  # No package for card addition
+            amount=0.0,
+            currency='GEL',
+            agent_count=0,
+            payment_url=payment_result['payment_url'],
+            status='pending',
+            metadata={
+                **payment_result.get('metadata', {}),
+                'type': 'add_card',
+                'make_default': make_default
+            }
+        )
+
+        logger.info(f'Card addition payment order created: {payment_order.order_id} for tenant {request.tenant.schema_name}')
+
+        return Response({
+            'payment_id': payment_result.get('payment_id'),
+            'payment_url': payment_result.get('payment_url'),
+            'amount': 0.0,
+            'currency': 'GEL',
+            'status': 'pending',
+            'message': 'Redirect user to payment_url to add card'
+        })
+
+    except Exception as e:
+        logger.error(f'Failed to create card addition payment for tenant {request.tenant.schema_name}: {e}')
+        return Response(
+            {
+                'error': 'Card addition failed',
+                'message': str(e)
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
