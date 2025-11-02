@@ -758,31 +758,48 @@ def confirm_password_reset(request):
 @permission_classes([AllowAny])
 def get_current_client(request):
     """Get current authenticated client profile"""
-    from rest_framework_simplejwt.authentication import JWTAuthentication
+    from rest_framework_simplejwt.tokens import AccessToken
+    from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
     from .models import EcommerceClient
 
-    # Try to authenticate using JWT
-    jwt_auth = JWTAuthentication()
-    try:
-        auth_result = jwt_auth.authenticate(request)
-        if auth_result is not None:
-            user, token = auth_result
-            # Extract client_id from token
-            client_id = token.get('client_id')
-            if client_id:
-                try:
-                    client = EcommerceClient.objects.get(id=client_id)
-                    serializer = EcommerceClientSerializer(client)
-                    return Response(serializer.data, status=status.HTTP_200_OK)
-                except EcommerceClient.DoesNotExist:
-                    pass
-    except Exception:
-        pass
+    # Extract token from Authorization header
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return Response(
+            {'error': 'Authentication credentials were not provided.'},
+            status=status.HTTP_401_UNAUTHORIZED
+        )
 
-    return Response(
-        {'error': 'Authentication credentials were not provided or are invalid.'},
-        status=status.HTTP_401_UNAUTHORIZED
-    )
+    token_string = auth_header.split(' ')[1]
+
+    try:
+        # Decode the JWT token
+        token = AccessToken(token_string)
+
+        # Extract client_id from token
+        client_id = token.get('client_id')
+        if not client_id:
+            return Response(
+                {'error': 'Token does not contain client_id.'},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+
+        # Get the client
+        try:
+            client = EcommerceClient.objects.get(id=client_id)
+            serializer = EcommerceClientSerializer(client)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except EcommerceClient.DoesNotExist:
+            return Response(
+                {'error': 'Client not found.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+    except (InvalidToken, TokenError) as e:
+        return Response(
+            {'error': f'Invalid token: {str(e)}'},
+            status=status.HTTP_401_UNAUTHORIZED
+        )
 
 
 class ClientAddressViewSet(viewsets.ModelViewSet):
