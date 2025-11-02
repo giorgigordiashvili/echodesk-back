@@ -139,7 +139,8 @@ def create_subscription_payment(request):
 
         # Store payment order in database
         payment_order = PaymentOrder.objects.create(
-            order_id=payment_result['order_id'],
+            order_id=external_order_id,  # Store our external_order_id for webhook lookup
+            bog_order_id=payment_result['order_id'],  # Store BOG's internal order_id
             tenant=request.tenant,
             package=package,
             amount=payment_result['amount'],
@@ -490,6 +491,44 @@ def bog_webhook(request):
                         'tenant_id': tenant.id,
                         'schema_name': tenant.schema_name
                     })
+
+            # Check if this is a card-only payment (not a subscription payment)
+            payment_type = payment_order.metadata.get('type')
+            if payment_type == 'add_card':
+                # This is a card addition payment (0 GEL)
+                tenant = payment_order.tenant
+                make_default = payment_order.metadata.get('make_default', False)
+
+                # Extract card information from webhook
+                card_type = payment_detail.get('card_type', '')
+                masked_card_number = payment_detail.get('payer_identifier', '')
+                card_expiry = payment_detail.get('card_expiry_date', '')
+
+                logger.info(f'Processing card addition for tenant {tenant.schema_name}: {card_type} {masked_card_number}')
+
+                # Save the card to SavedCard model
+                with transaction.atomic():
+                    saved_card = SavedCard.objects.create(
+                        tenant=tenant,
+                        parent_order_id=bog_order_id,  # BOG's order_id for future charges
+                        card_type=card_type,
+                        masked_card_number=masked_card_number,
+                        card_expiry=card_expiry,
+                        is_active=True,
+                        is_default=make_default
+                    )
+
+                    logger.info(f'Card saved for tenant {tenant.schema_name}: {saved_card.id}, default: {make_default}')
+
+                    # Mark payment order as having saved the card
+                    payment_order.card_saved = True
+                    payment_order.save()
+
+                return Response({
+                    'status': 'success',
+                    'action': 'card_added',
+                    'card_id': saved_card.id
+                })
 
             # Regular subscription payment for existing tenant
             tenant = payment_order.tenant
@@ -1142,7 +1181,8 @@ def add_new_card(request):
 
         # Store payment order in database
         payment_order = PaymentOrder.objects.create(
-            order_id=payment_result['order_id'],
+            order_id=external_order_id,  # Store our external_order_id for webhook lookup
+            bog_order_id=payment_result['order_id'],  # Store BOG's internal order_id
             tenant=request.tenant,
             package=None,  # No package for card addition
             amount=0.0,
