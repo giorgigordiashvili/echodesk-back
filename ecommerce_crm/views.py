@@ -1066,7 +1066,7 @@ class CartViewSet(viewsets.ModelViewSet):
         summary='Get or create active cart',
         description='Get authenticated client\'s active cart or create new one'
     )
-    @action(detail=False, methods=['get'])
+    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated])
     def get_or_create(self, request):
         """Get or create active cart for authenticated client"""
         # Use authenticated client from token
