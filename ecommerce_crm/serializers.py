@@ -7,6 +7,7 @@ from .models import (
     ProductAttributeValue,
     ProductVariant,
     ProductVariantAttributeValue,
+    EcommerceClient,
     ClientAddress,
     FavoriteProduct,
     Cart,
@@ -276,6 +277,11 @@ class ProductCreateUpdateSerializer(serializers.ModelSerializer):
 
 class ClientAddressSerializer(serializers.ModelSerializer):
     """Serializer for client addresses"""
+    client = serializers.PrimaryKeyRelatedField(
+        queryset=EcommerceClient.objects.all(),
+        required=False,
+        help_text="Client ID (automatically set from token for regular clients, required for admin)"
+    )
 
     class Meta:
         model = ClientAddress
@@ -284,7 +290,7 @@ class ClientAddressSerializer(serializers.ModelSerializer):
             'extra_instructions', 'latitude', 'longitude',
             'is_default', 'created_at', 'updated_at'
         ]
-        read_only_fields = ['id', 'client', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at']
 
     def validate(self, attrs):
         """Ensure coordinates are both set or both unset"""

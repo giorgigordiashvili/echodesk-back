@@ -820,17 +820,36 @@ class ClientAddressViewSet(viewsets.ModelViewSet):
     ordering = ['-is_default', '-created_at']
 
     def get_queryset(self):
-        """Filter addresses to only show authenticated client's addresses"""
-        return ClientAddress.objects.filter(client=self.request.user)
+        """
+        Filter addresses for ecommerce clients to only show their own addresses.
+        Admins can see all addresses.
+        """
+        from .models import EcommerceClient
+
+        # If authenticated as an ecommerce client, only show their addresses
+        if isinstance(self.request.user, EcommerceClient):
+            return ClientAddress.objects.filter(client=self.request.user)
+
+        # Otherwise (admin user), show all addresses
+        return ClientAddress.objects.all()
 
     def perform_create(self, serializer):
-        """Automatically set the client to the authenticated user"""
-        serializer.save(client=self.request.user)
+        """
+        Automatically set the client from token for ecommerce clients.
+        Admins must specify client manually.
+        """
+        from .models import EcommerceClient
+
+        # If client not provided and authenticated as ecommerce client, auto-set it
+        if 'client' not in serializer.validated_data and isinstance(self.request.user, EcommerceClient):
+            serializer.save(client=self.request.user)
+        else:
+            serializer.save()
 
     @extend_schema(
         tags=['Ecommerce - Client Addresses'],
-        summary='List authenticated client addresses',
-        description='Get all delivery addresses for the authenticated client'
+        summary='List client addresses',
+        description='Get delivery addresses (filtered to authenticated client for regular users, all addresses for admins)'
     )
     def list(self, request, *args, **kwargs):
         return super().list(request, *args, **kwargs)
@@ -846,7 +865,7 @@ class ClientAddressViewSet(viewsets.ModelViewSet):
     @extend_schema(
         tags=['Ecommerce - Client Addresses'],
         summary='Create new address',
-        description='Add a new delivery address for a client with Google Maps coordinates'
+        description='Add a new delivery address. Client ID is optional - automatically set from token for ecommerce clients, required for admins.'
     )
     def create(self, request, *args, **kwargs):
         return super().create(request, *args, **kwargs)
