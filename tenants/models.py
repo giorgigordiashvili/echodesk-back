@@ -462,7 +462,7 @@ class PaymentOrder(models.Model):
     order_id = models.CharField(max_length=100, unique=True, db_index=True)
     bog_order_id = models.CharField(max_length=100, blank=True, null=True, help_text='BOG internal order ID for saved card charging')
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, null=True, blank=True)
-    package = models.ForeignKey(Package, on_delete=models.CASCADE)
+    package = models.ForeignKey(Package, on_delete=models.CASCADE, null=True, blank=True, help_text='Package for subscription payments. Null for card-only payments.')
 
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     currency = models.CharField(max_length=3, default='GEL')
