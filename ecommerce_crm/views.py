@@ -2,7 +2,6 @@ from rest_framework import viewsets, filters, status, serializers
 from rest_framework.decorators import action, api_view, permission_classes, authentication_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
-from rest_framework_simplejwt.authentication import JWTAuthentication
 from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiParameter, inline_serializer
 from django_filters.rest_framework import DjangoFilterBackend, FilterSet, CharFilter, NumberFilter, BooleanFilter
 from django.db.models import Q, F
@@ -197,7 +196,6 @@ class ProductViewSet(viewsets.ModelViewSet):
     """
     ViewSet for products with advanced filtering and sorting (Admin only)
     """
-    authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_class = ProductFilter
@@ -397,7 +395,6 @@ class ProductImageViewSet(viewsets.ModelViewSet):
     """ViewSet for product images (Admin only)"""
     queryset = ProductImage.objects.all()
     serializer_class = ProductImageSerializer
-    authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ['product']
@@ -409,7 +406,6 @@ class ProductVariantViewSet(viewsets.ModelViewSet):
     """ViewSet for product variants (Admin only)"""
     queryset = ProductVariant.objects.filter(is_active=True)
     serializer_class = ProductVariantSerializer
-    authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['product', 'is_active']
@@ -427,7 +423,6 @@ class EcommerceClientViewSet(viewsets.ModelViewSet):
     """ViewSet for managing ecommerce clients (Admin only)"""
     queryset = EcommerceClient.objects.all()
     serializer_class = EcommerceClientSerializer
-    authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['first_name', 'last_name', 'email', 'phone_number']
@@ -812,7 +807,6 @@ class ClientAddressViewSet(viewsets.ModelViewSet):
     """ViewSet for managing client addresses (Admin only)"""
     queryset = ClientAddress.objects.all()
     serializer_class = ClientAddressSerializer
-    authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ['is_default', 'client']
@@ -885,7 +879,6 @@ class ClientAddressViewSet(viewsets.ModelViewSet):
 class FavoriteProductViewSet(viewsets.ModelViewSet):
     """ViewSet for managing client favorite products/wishlist (Admin only)"""
     queryset = FavoriteProduct.objects.all()
-    authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ['client', 'product']
@@ -1016,7 +1009,6 @@ class CartViewSet(viewsets.ModelViewSet):
     """ViewSet for managing shopping carts (Admin only)"""
     queryset = Cart.objects.all()
     serializer_class = CartSerializer
-    authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ['client', 'status']
@@ -1101,7 +1093,6 @@ class CartViewSet(viewsets.ModelViewSet):
 class CartItemViewSet(viewsets.ModelViewSet):
     """ViewSet for managing cart items (Admin only)"""
     queryset = CartItem.objects.all()
-    authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['cart', 'product']
@@ -1145,7 +1136,6 @@ class CartItemViewSet(viewsets.ModelViewSet):
 class OrderViewSet(viewsets.ModelViewSet):
     """ViewSet for managing orders (Admin only)"""
     queryset = Order.objects.all()
-    authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['order_number', 'client__first_name', 'client__last_name', 'client__email']
