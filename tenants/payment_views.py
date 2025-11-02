@@ -111,7 +111,12 @@ def create_subscription_payment(request):
     # Generate URLs
     base_url = f"https://{request.get_host()}"
     return_url = f"{base_url}/settings/subscription/success"
-    callback_url = f"{settings.API_DOMAIN}/api/payments/webhook/"
+
+    # Ensure callback_url starts with https://
+    api_domain = settings.API_DOMAIN
+    if not api_domain.startswith('http'):
+        api_domain = f"https://{api_domain}"
+    callback_url = f"{api_domain}/api/payments/webhook/"
 
     try:
         # Generate external order ID
@@ -1099,7 +1104,12 @@ def add_new_card(request):
     # Generate URLs
     base_url = f"https://{request.get_host()}"
     return_url = f"{base_url}/settings/subscription?card_added=success"
-    callback_url = f"{settings.API_DOMAIN}/api/payments/webhook/"
+
+    # Ensure callback_url starts with https://
+    api_domain = settings.API_DOMAIN
+    if not api_domain.startswith('http'):
+        api_domain = f"https://{api_domain}"
+    callback_url = f"{api_domain}/api/payments/webhook/"
 
     try:
         # Generate external order ID for tracking
