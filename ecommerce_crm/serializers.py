@@ -284,7 +284,7 @@ class ClientAddressSerializer(serializers.ModelSerializer):
             'extra_instructions', 'latitude', 'longitude',
             'is_default', 'created_at', 'updated_at'
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'client', 'created_at', 'updated_at']
 
     def validate(self, attrs):
         """Ensure coordinates are both set or both unset"""

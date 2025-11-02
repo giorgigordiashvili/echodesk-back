@@ -815,14 +815,22 @@ class ClientAddressViewSet(viewsets.ModelViewSet):
     authentication_classes = [EcommerceClientJWTAuthentication]
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
-    filterset_fields = ['client', 'is_default']
+    filterset_fields = ['is_default']
     ordering_fields = ['created_at', 'is_default']
     ordering = ['-is_default', '-created_at']
 
+    def get_queryset(self):
+        """Filter addresses to only show authenticated client's addresses"""
+        return ClientAddress.objects.filter(client=self.request.user)
+
+    def perform_create(self, serializer):
+        """Automatically set the client to the authenticated user"""
+        serializer.save(client=self.request.user)
+
     @extend_schema(
         tags=['Ecommerce - Client Addresses'],
-        summary='List all client addresses',
-        description='Get all delivery addresses with optional filtering by client'
+        summary='List authenticated client addresses',
+        description='Get all delivery addresses for the authenticated client'
     )
     def list(self, request, *args, **kwargs):
         return super().list(request, *args, **kwargs)
