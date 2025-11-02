@@ -1064,8 +1064,7 @@ class CartViewSet(viewsets.ModelViewSet):
     @extend_schema(
         tags=['Ecommerce - Cart'],
         summary='Get or create active cart',
-        description='Get authenticated client\'s active cart or create new one',
-        auth=['jwtAuth']
+        description='Get authenticated client\'s active cart or create new one'
     )
     @action(detail=False, methods=['get'])
     def get_or_create(self, request):
