@@ -424,10 +424,10 @@ class ProductVariantViewSet(viewsets.ModelViewSet):
 
 
 class EcommerceClientViewSet(viewsets.ModelViewSet):
-    """ViewSet for managing ecommerce clients"""
+    """ViewSet for managing ecommerce clients (Admin only)"""
     queryset = EcommerceClient.objects.all()
     serializer_class = EcommerceClientSerializer
-    authentication_classes = [EcommerceClientJWTAuthentication]
+    authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['first_name', 'last_name', 'email', 'phone_number']
