@@ -380,10 +380,10 @@ class SavedCard(models.Model):
     """
     Store saved payment card details from Bank of Georgia for recurring payments
     """
-    tenant = models.OneToOneField(
+    tenant = models.ForeignKey(
         Tenant,
         on_delete=models.CASCADE,
-        related_name='saved_card',
+        related_name='saved_cards',
         help_text='Tenant that owns this saved card'
     )
 
@@ -427,15 +427,32 @@ class SavedCard(models.Model):
         default=True,
         help_text='Whether this card is active for recurring payments'
     )
+    is_default = models.BooleanField(
+        default=False,
+        help_text='Whether this is the default card for automatic payments'
+    )
 
     class Meta:
         db_table = 'tenants_saved_card'
         verbose_name = 'Saved Card'
         verbose_name_plural = 'Saved Cards'
+        ordering = ['-is_default', '-saved_at']
 
     def __str__(self):
         card_display = f"{self.card_type.upper()} {self.masked_card_number}" if self.masked_card_number else "Card"
-        return f"{self.tenant.name} - {card_display}"
+        default_indicator = " (Default)" if self.is_default else ""
+        return f"{self.tenant.name} - {card_display}{default_indicator}"
+
+    def save(self, *args, **kwargs):
+        # If this card is being set as default, unset other default cards for this tenant
+        if self.is_default:
+            SavedCard.objects.filter(tenant=self.tenant, is_default=True).exclude(id=self.id).update(is_default=False)
+
+        # If this is the first active card for the tenant, make it default
+        if self.is_active and not SavedCard.objects.filter(tenant=self.tenant, is_active=True).exclude(id=self.id).exists():
+            self.is_default = True
+
+        super().save(*args, **kwargs)
 
 
 class PaymentOrder(models.Model):

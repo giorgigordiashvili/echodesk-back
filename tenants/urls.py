@@ -13,7 +13,7 @@ from .package_views import (
 )
 from .payment_views import (
     create_subscription_payment, check_payment_status, bog_webhook, cancel_subscription,
-    get_saved_card, remove_saved_card, manual_payment
+    get_saved_card, remove_saved_card, set_default_card, manual_payment
 )
 from .cron_views import (
     cron_recurring_payments, cron_subscription_check, cron_health_check,
@@ -59,6 +59,7 @@ urlpatterns = [
     path('api/payments/cancel/', cancel_subscription, name='cancel_subscription'),
     path('api/payments/saved-card/', get_saved_card, name='get_saved_card'),
     path('api/payments/saved-card/', remove_saved_card, name='remove_saved_card'),
+    path('api/payments/saved-card/set-default/', set_default_card, name='set_default_card'),
     path('api/payments/manual/', manual_payment, name='manual_payment'),
 
     # Cron job endpoints (called by DigitalOcean Functions)

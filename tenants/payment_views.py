@@ -6,7 +6,8 @@ from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
-from drf_spectacular.utils import extend_schema, OpenApiResponse
+from drf_spectacular.utils import extend_schema, OpenApiResponse, inline_serializer
+from rest_framework import serializers
 from django.conf import settings
 from django.utils import timezone
 from datetime import timedelta
@@ -842,7 +843,7 @@ def manual_payment(request):
 @permission_classes([IsAuthenticated])
 def get_saved_card(request):
     """
-    Get the saved payment card for the current tenant
+    Get all saved payment cards for the current tenant
 
     Only returns masked card details (last 4 digits, expiry, card type)
     Actual card details are stored at Bank of Georgia
@@ -853,32 +854,33 @@ def get_saved_card(request):
             status=status.HTTP_403_FORBIDDEN
         )
 
-    # Only staff/admin can view saved card
+    # Only staff/admin can view saved cards
     if not request.user.is_staff:
         return Response(
             {'error': 'Only administrators can view saved card details'},
             status=status.HTTP_403_FORBIDDEN
         )
 
-    try:
-        saved_card = SavedCard.objects.get(tenant=request.tenant, is_active=True)
-        from .serializers import SavedCardSerializer
-        serializer = SavedCardSerializer(saved_card)
-        return Response(serializer.data)
-    except SavedCard.DoesNotExist:
-        return Response(
-            {'error': 'No saved card found'},
-            status=status.HTTP_404_NOT_FOUND
-        )
+    # Get all active saved cards for this tenant, ordered by default first
+    saved_cards = SavedCard.objects.filter(tenant=request.tenant, is_active=True)
+    from .serializers import SavedCardSerializer
+    serializer = SavedCardSerializer(saved_cards, many=True)
+    return Response(serializer.data)
 
 
 @extend_schema(
     operation_id='remove_saved_card',
     summary='Remove Saved Payment Card',
-    description='Remove the saved payment card from the tenant account. This will prevent automatic recurring payments.',
+    description='Remove a specific saved payment card from the tenant account by card ID.',
+    request=inline_serializer(
+        'RemoveCardRequest',
+        fields={
+            'card_id': serializers.IntegerField(help_text='ID of the card to remove')
+        }
+    ),
     responses={
         200: OpenApiResponse(description='Card removed successfully'),
-        404: OpenApiResponse(description='No saved card found')
+        404: OpenApiResponse(description='Card not found')
     },
     tags=['Payments']
 )
@@ -886,10 +888,10 @@ def get_saved_card(request):
 @permission_classes([IsAuthenticated])
 def remove_saved_card(request):
     """
-    Remove the saved payment card
+    Remove a specific saved payment card
 
-    This deactivates the saved card and removes the parent_order_id from the subscription.
-    After removing the card, the tenant will need to manually pay for renewals.
+    This deactivates the saved card. If it's the default card and there are other cards,
+    another card will be set as default automatically.
     """
     if not hasattr(request, 'tenant'):
         return Response(
@@ -904,28 +906,132 @@ def remove_saved_card(request):
             status=status.HTTP_403_FORBIDDEN
         )
 
+    card_id = request.data.get('card_id')
+    if not card_id:
+        return Response(
+            {'error': 'card_id is required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
     try:
         with transaction.atomic():
-            # Deactivate the saved card
-            saved_card = SavedCard.objects.get(tenant=request.tenant, is_active=True)
+            # Get and deactivate the specified card
+            saved_card = SavedCard.objects.get(id=card_id, tenant=request.tenant, is_active=True)
+            was_default = saved_card.is_default
             saved_card.is_active = False
+            saved_card.is_default = False
             saved_card.save()
 
-            # Remove parent_order_id from subscription
-            try:
-                subscription = TenantSubscription.objects.get(tenant=request.tenant)
-                subscription.parent_order_id = None
-                subscription.save()
-                logger.info(f'Removed saved card for tenant {request.tenant.schema_name}')
-            except TenantSubscription.DoesNotExist:
-                logger.warning(f'No subscription found for tenant {request.tenant.schema_name}')
+            # If this was the default card, set another active card as default
+            if was_default:
+                other_card = SavedCard.objects.filter(
+                    tenant=request.tenant,
+                    is_active=True
+                ).first()
+                if other_card:
+                    other_card.is_default = True
+                    other_card.save()
+                else:
+                    # No more cards - remove parent_order_id from subscription
+                    try:
+                        subscription = TenantSubscription.objects.get(tenant=request.tenant)
+                        subscription.parent_order_id = None
+                        subscription.save()
+                    except TenantSubscription.DoesNotExist:
+                        pass
+
+            logger.info(f'Removed saved card {card_id} for tenant {request.tenant.schema_name}')
 
             return Response({
                 'status': 'success',
-                'message': 'Saved card removed successfully. You will need to manually pay for future renewals.'
+                'message': 'Saved card removed successfully'
             })
     except SavedCard.DoesNotExist:
         return Response(
-            {'error': 'No saved card found'},
+            {'error': 'Card not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+
+@extend_schema(
+    operation_id='set_default_card',
+    summary='Set Default Payment Card',
+    description='Set a specific saved card as the default payment method for automatic renewals.',
+    request=inline_serializer(
+        'SetDefaultCardRequest',
+        fields={
+            'card_id': serializers.IntegerField(help_text='ID of the card to set as default')
+        }
+    ),
+    responses={
+        200: OpenApiResponse(description='Default card updated successfully'),
+        404: OpenApiResponse(description='Card not found')
+    },
+    tags=['Payments']
+)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def set_default_card(request):
+    """
+    Set a specific card as the default payment method
+
+    This card will be used for automatic subscription renewals.
+    Any previously default card will be unmarked.
+    """
+    if not hasattr(request, 'tenant'):
+        return Response(
+            {'error': 'This endpoint is only available from tenant subdomains'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    # Only staff/admin can set default card
+    if not request.user.is_staff:
+        return Response(
+            {'error': 'Only administrators can set default card'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    card_id = request.data.get('card_id')
+    if not card_id:
+        return Response(
+            {'error': 'card_id is required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        with transaction.atomic():
+            # Get the card to set as default
+            card = SavedCard.objects.get(id=card_id, tenant=request.tenant, is_active=True)
+
+            # Unset all other default cards
+            SavedCard.objects.filter(
+                tenant=request.tenant,
+                is_default=True
+            ).exclude(id=card_id).update(is_default=False)
+
+            # Set this card as default
+            card.is_default = True
+            card.save()
+
+            # Update subscription parent_order_id to use this card
+            try:
+                subscription = TenantSubscription.objects.get(tenant=request.tenant)
+                subscription.parent_order_id = card.parent_order_id
+                subscription.save()
+            except TenantSubscription.DoesNotExist:
+                pass
+
+            logger.info(f'Set card {card_id} as default for tenant {request.tenant.schema_name}')
+
+            from .serializers import SavedCardSerializer
+            serializer = SavedCardSerializer(card)
+            return Response({
+                'status': 'success',
+                'message': 'Default card updated successfully',
+                'card': serializer.data
+            })
+    except SavedCard.DoesNotExist:
+        return Response(
+            {'error': 'Card not found'},
             status=status.HTTP_404_NOT_FOUND
         )

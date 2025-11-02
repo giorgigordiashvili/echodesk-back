@@ -370,6 +370,6 @@ class SavedCardSerializer(serializers.ModelSerializer):
         model = SavedCard
         fields = (
             'id', 'card_type', 'masked_card_number', 'card_expiry',
-            'saved_at', 'is_active'
+            'saved_at', 'is_active', 'is_default'
         )
         read_only_fields = ('id', 'card_type', 'masked_card_number', 'card_expiry', 'saved_at')
