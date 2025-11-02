@@ -404,8 +404,8 @@ BOG_CLIENT_SECRET = config('BOG_CLIENT_SECRET', default='')
 # If no credentials provided, use test environment with demo credentials
 if not BOG_CLIENT_ID or not BOG_CLIENT_SECRET:
     # Test environment credentials (for development/demo)
-    BOG_CLIENT_ID = config('BOG_TEST_CLIENT_ID', default='test_client_id')
-    BOG_CLIENT_SECRET = config('BOG_TEST_CLIENT_SECRET', default='test_client_secret')
+    BOG_CLIENT_ID = config('BOG_TEST_CLIENT_ID', default='10002769')
+    BOG_CLIENT_SECRET = config('BOG_TEST_CLIENT_SECRET', default='ODSXnzS1q1Hs')
     BOG_AUTH_URL = 'https://account-ob-test.bog.ge/auth/realms/bog-test/protocol/openid-connect/token'
     BOG_API_BASE_URL = 'https://api-test.bog.ge/payments/v1'
 else:

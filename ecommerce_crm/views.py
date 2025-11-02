@@ -1192,23 +1192,39 @@ class OrderViewSet(viewsets.ModelViewSet):
             response_data['message'] = 'Order will be paid on delivery'
             return Response(response_data, status=status.HTTP_201_CREATED)
 
-        # Get BOG credentials
+        # Get BOG credentials and configure service
         try:
             from .models import EcommerceSettings
+            from tenants.bog_payment import BOGPaymentService
+
             ecommerce_settings = EcommerceSettings.objects.get(tenant=request.tenant)
 
             if ecommerce_settings.has_bog_credentials:
+                # User provided their own credentials - use production URLs
                 client_id = ecommerce_settings.bog_client_id
                 client_secret = ecommerce_settings.get_bog_secret()
-                use_production = ecommerce_settings.bog_use_production
+                auth_url = 'https://oauth2.bog.ge/auth/realms/bog/protocol/openid-connect/token'
+                api_base_url = 'https://api.bog.ge/payments/v1'
             else:
+                # No credentials provided - use test environment with credentials from env
                 client_id = settings.BOG_CLIENT_ID
                 client_secret = settings.BOG_CLIENT_SECRET
-                use_production = not settings.BOG_API_BASE_URL.endswith('-test.bog.ge/payments/v1')
+                auth_url = 'https://account-ob-test.bog.ge/auth/realms/bog-test/protocol/openid-connect/token'
+                api_base_url = 'https://api-test.bog.ge/payments/v1'
         except:
+            # Fallback to test environment with credentials from env
             client_id = settings.BOG_CLIENT_ID
             client_secret = settings.BOG_CLIENT_SECRET
-            use_production = not settings.BOG_API_BASE_URL.endswith('-test.bog.ge/payments/v1')
+            auth_url = 'https://account-ob-test.bog.ge/auth/realms/bog-test/protocol/openid-connect/token'
+            api_base_url = 'https://api-test.bog.ge/payments/v1'
+
+        # Create BOG service instance with the appropriate credentials
+        from tenants.bog_payment import BOGPaymentService
+        bog_service_instance = BOGPaymentService()
+        bog_service_instance.client_id = client_id
+        bog_service_instance.client_secret = client_secret
+        bog_service_instance.auth_url = auth_url
+        bog_service_instance.base_url = api_base_url
 
         # Create BOG payment
         try:
@@ -1216,7 +1232,7 @@ class OrderViewSet(viewsets.ModelViewSet):
             return_url_success = request.data.get('return_url_success', '')
             return_url_fail = request.data.get('return_url_fail', '')
 
-            payment_result = bog_service.create_payment(
+            payment_result = bog_service_instance.create_payment(
                 amount=float(order.total_amount),
                 currency='GEL',
                 description=f"Order {order.order_number}",
