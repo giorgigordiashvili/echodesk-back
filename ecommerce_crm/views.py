@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiParameter, inline_serializer
 from django_filters.rest_framework import DjangoFilterBackend, FilterSet, CharFilter, NumberFilter, BooleanFilter
+from .authentication import EcommerceClientJWTAuthentication
 from django.db.models import Q, F
 from .models import (
     Language,
@@ -196,6 +197,7 @@ class ProductViewSet(viewsets.ModelViewSet):
     """
     ViewSet for products with advanced filtering and sorting
     """
+    authentication_classes = [EcommerceClientJWTAuthentication]
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_class = ProductFilter
@@ -395,6 +397,7 @@ class ProductImageViewSet(viewsets.ModelViewSet):
     """ViewSet for product images"""
     queryset = ProductImage.objects.all()
     serializer_class = ProductImageSerializer
+    authentication_classes = [EcommerceClientJWTAuthentication]
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ['product']
@@ -406,6 +409,7 @@ class ProductVariantViewSet(viewsets.ModelViewSet):
     """ViewSet for product variants"""
     queryset = ProductVariant.objects.filter(is_active=True)
     serializer_class = ProductVariantSerializer
+    authentication_classes = [EcommerceClientJWTAuthentication]
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['product', 'is_active']
@@ -423,6 +427,7 @@ class EcommerceClientViewSet(viewsets.ModelViewSet):
     """ViewSet for managing ecommerce clients"""
     queryset = EcommerceClient.objects.all()
     serializer_class = EcommerceClientSerializer
+    authentication_classes = [EcommerceClientJWTAuthentication]
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['first_name', 'last_name', 'email', 'phone_number']
@@ -807,6 +812,7 @@ class ClientAddressViewSet(viewsets.ModelViewSet):
     """ViewSet for managing client addresses"""
     queryset = ClientAddress.objects.all()
     serializer_class = ClientAddressSerializer
+    authentication_classes = [EcommerceClientJWTAuthentication]
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ['client', 'is_default']
@@ -879,6 +885,7 @@ class ClientAddressViewSet(viewsets.ModelViewSet):
 class FavoriteProductViewSet(viewsets.ModelViewSet):
     """ViewSet for managing client favorite products (wishlist)"""
     queryset = FavoriteProduct.objects.all()
+    authentication_classes = [EcommerceClientJWTAuthentication]
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ['client', 'product']
@@ -1009,6 +1016,7 @@ class CartViewSet(viewsets.ModelViewSet):
     """ViewSet for managing shopping carts"""
     queryset = Cart.objects.all()
     serializer_class = CartSerializer
+    authentication_classes = [EcommerceClientJWTAuthentication]
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ['client', 'status']
@@ -1117,6 +1125,7 @@ class CartViewSet(viewsets.ModelViewSet):
 class CartItemViewSet(viewsets.ModelViewSet):
     """ViewSet for managing cart items"""
     queryset = CartItem.objects.all()
+    authentication_classes = [EcommerceClientJWTAuthentication]
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['cart', 'product']
@@ -1160,6 +1169,7 @@ class CartItemViewSet(viewsets.ModelViewSet):
 class OrderViewSet(viewsets.ModelViewSet):
     """ViewSet for managing orders"""
     queryset = Order.objects.all()
+    authentication_classes = [EcommerceClientJWTAuthentication]
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['order_number', 'client__first_name', 'client__last_name', 'client__email']
