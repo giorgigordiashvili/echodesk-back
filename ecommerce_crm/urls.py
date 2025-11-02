@@ -36,8 +36,8 @@ router.register(r'orders', OrderViewSet, basename='order')
 app_name = 'ecommerce_crm'
 
 urlpatterns = [
-    path('', include(router.urls)),
-    # Client authentication endpoints (public access)
+    # Client authentication endpoints (public access) - MUST come before router
+    # to prevent router from treating them as detail lookups
     path('clients/register/', register_client, name='register-client'),
     path('clients/login/', login_client, name='login-client'),
     path('clients/me/', get_current_client, name='current-client'),
@@ -45,4 +45,6 @@ urlpatterns = [
     path('clients/password-reset/confirm/', confirm_password_reset, name='password-reset-confirm'),
     # Payment webhook (public access - called by BOG)
     path('payment-webhook/', ecommerce_payment_webhook, name='payment-webhook'),
+    # Router URLs (should come last)
+    path('', include(router.urls)),
 ]
