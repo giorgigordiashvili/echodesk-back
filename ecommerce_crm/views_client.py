@@ -12,6 +12,7 @@ from drf_spectacular.utils import extend_schema, OpenApiResponse
 from django_filters.rest_framework import DjangoFilterBackend
 from .authentication import EcommerceClientJWTAuthentication
 from .models import (
+    EcommerceClient,
     Product,
     ClientAddress,
     FavoriteProduct,
@@ -20,6 +21,7 @@ from .models import (
     Order,
 )
 from .serializers import (
+    EcommerceClientSerializer,
     ProductListSerializer,
     ProductDetailSerializer,
     FavoriteProductSerializer,
@@ -56,6 +58,40 @@ class ClientAddressSerializer(serializers.ModelSerializer):
             )
 
         return attrs
+
+
+class ClientProfileViewSet(viewsets.GenericViewSet):
+    """
+    Client profile management
+    Authenticated clients can view and update their own profile
+    """
+    serializer_class = EcommerceClientSerializer
+    authentication_classes = [EcommerceClientJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=['Client - Profile'],
+        summary='Get authenticated client profile',
+        description='Get the profile information of the authenticated client'
+    )
+    @action(detail=False, methods=['get'])
+    def me(self, request):
+        """Get authenticated client's profile"""
+        serializer = self.get_serializer(request.user)
+        return Response(serializer.data)
+
+    @extend_schema(
+        tags=['Client - Profile'],
+        summary='Update authenticated client profile',
+        description='Update the profile information of the authenticated client'
+    )
+    @action(detail=False, methods=['patch'])
+    def update_profile(self, request):
+        """Update authenticated client's profile"""
+        serializer = self.get_serializer(request.user, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
 
 
 class ClientProductViewSet(viewsets.ReadOnlyModelViewSet):
@@ -275,19 +311,26 @@ class ClientCartViewSet(viewsets.ModelViewSet):
     @extend_schema(
         tags=['Client - Cart'],
         summary='Set delivery address',
-        description='Set or update delivery address for cart'
+        description='Set or update delivery address for authenticated client\'s active cart'
     )
-    @action(detail=True, methods=['post'])
-    def set_address(self, request, pk=None):
-        """Set delivery address for cart"""
-        cart = self.get_object()
+    @action(detail=False, methods=['post'])
+    def set_address(self, request):
+        """Set delivery address for authenticated client's active cart"""
+        client = request.user
         address_id = request.data.get('address_id')
 
         if not address_id:
             return Response({'error': 'Address ID required'}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Get or create active cart
+        cart, created = Cart.objects.get_or_create(
+            client=client,
+            status='active',
+            defaults={'status': 'active'}
+        )
+
         try:
-            address = ClientAddress.objects.get(id=address_id, client=cart.client)
+            address = ClientAddress.objects.get(id=address_id, client=client)
             cart.delivery_address = address
             cart.save()
             serializer = self.get_serializer(cart)

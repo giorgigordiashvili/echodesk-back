@@ -21,6 +21,7 @@ from .views import (
     ecommerce_payment_webhook
 )
 from .views_client import (
+    ClientProfileViewSet,
     ClientProductViewSet,
     ClientAddressViewSet as ClientClientAddressViewSet,
     ClientFavoriteViewSet,
@@ -45,6 +46,7 @@ admin_router.register(r'orders', OrderViewSet, basename='order')
 
 # Client router - requires client JWT authentication
 client_router = DefaultRouter()
+client_router.register(r'profile', ClientProfileViewSet, basename='client-profile')
 client_router.register(r'products', ClientProductViewSet, basename='client-product')
 client_router.register(r'addresses', ClientClientAddressViewSet, basename='client-address')
 client_router.register(r'favorites', ClientFavoriteViewSet, basename='client-favorite')
