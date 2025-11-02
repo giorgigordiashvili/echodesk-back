@@ -11,7 +11,7 @@ from rest_framework import serializers
 from django.conf import settings
 from django.utils import timezone
 from datetime import timedelta
-from .models import Tenant, Package, TenantSubscription, UsageLog, PaymentOrder, PendingRegistration, SavedCard
+from .models import Tenant, Package, TenantSubscription, UsageLog, PaymentOrder, PendingRegistration, SavedCard, Invoice
 from .bog_payment import bog_service
 from .services import SingleFrontendDeploymentService
 from .email_service import email_service
@@ -227,6 +227,54 @@ def check_payment_status(request, payment_id):
     },
     tags=['Payments']
 )
+def generate_invoice_for_payment(payment_order, tenant, package, agent_count):
+    """
+    Generate an invoice for a successful payment
+    Returns the created Invoice object
+    """
+    try:
+        # Check if invoice already exists for this payment order
+        if hasattr(payment_order, 'invoice'):
+            logger.info(f'Invoice already exists for payment order {payment_order.order_id}')
+            return payment_order.invoice
+
+        # Don't generate invoice for 0 GEL payments (trial or card-only)
+        if payment_order.amount <= 0:
+            logger.info(f'Skipping invoice generation for 0 GEL payment: {payment_order.order_id}')
+            return None
+
+        # Generate invoice description
+        if package:
+            description = f"Subscription to {package.name} package"
+            if agent_count > 1:
+                description += f" for {agent_count} agents"
+        else:
+            description = "Subscription payment"
+
+        # Create invoice
+        invoice = Invoice.objects.create(
+            tenant=tenant,
+            payment_order=payment_order,
+            amount=payment_order.amount,
+            currency=payment_order.currency,
+            package=package,
+            description=description,
+            agent_count=agent_count,
+            paid_date=payment_order.paid_at or timezone.now(),
+            metadata={
+                'order_id': payment_order.order_id,
+                'bog_order_id': payment_order.bog_order_id,
+            }
+        )
+
+        logger.info(f'Invoice {invoice.invoice_number} generated for payment order {payment_order.order_id}')
+        return invoice
+
+    except Exception as e:
+        logger.error(f'Error generating invoice for payment order {payment_order.order_id}: {str(e)}')
+        return None
+
+
 @api_view(['POST'])
 @permission_classes([AllowAny])  # Webhook from BOG, no auth
 def bog_webhook(request):
@@ -393,6 +441,15 @@ def bog_webhook(request):
                             next_billing_date=trial_ends_at
                         )
                         logger.info(f'Trial subscription created for {tenant.schema_name}, ends at {trial_ends_at}, parent_order_id: {parent_order_id_for_subscription}')
+
+                        # Generate invoice for non-trial payments
+                        if payment_order.amount > 0:
+                            generate_invoice_for_payment(
+                                payment_order=payment_order,
+                                tenant=tenant,
+                                package=pending_registration.package,
+                                agent_count=pending_registration.agent_count
+                            )
 
                         # Save card details if card was saved for recurring payments
                         if card_saved_for_recurring and parent_order_id_for_subscription:
@@ -565,6 +622,14 @@ def bog_webhook(request):
             )
 
             logger.info(f'Subscription {"created" if created else "updated"} for tenant {tenant.schema_name}')
+
+            # Generate invoice for the payment
+            generate_invoice_for_payment(
+                payment_order=payment_order,
+                tenant=tenant,
+                package=package,
+                agent_count=agent_count
+            )
 
             return Response({'status': 'success', 'action': 'created' if created else 'renewed'})
 
@@ -1215,5 +1280,56 @@ def add_new_card(request):
                 'error': 'Card addition failed',
                 'message': str(e)
             },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@extend_schema(
+    operation_id='list_invoices',
+    summary='List Invoices',
+    description='Get list of invoices for the current tenant',
+    responses={
+        200: inline_serializer(
+            name='InvoiceListResponse',
+            fields={
+                'invoices': serializers.ListField(child=serializers.DictField())
+            }
+        ),
+    },
+    tags=['Payments']
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def list_invoices(request):
+    """
+    Get list of invoices for the current tenant
+    """
+    try:
+        # Get invoices for the current tenant
+        invoices = Invoice.objects.filter(tenant=request.tenant).select_related('package', 'payment_order')
+
+        invoices_data = []
+        for invoice in invoices:
+            invoices_data.append({
+                'id': invoice.id,
+                'invoice_number': invoice.invoice_number,
+                'amount': float(invoice.amount),
+                'currency': invoice.currency,
+                'description': invoice.description,
+                'package_name': invoice.package.name if invoice.package else None,
+                'agent_count': invoice.agent_count,
+                'invoice_date': invoice.invoice_date.isoformat(),
+                'paid_date': invoice.paid_date.isoformat() if invoice.paid_date else None,
+                'due_date': invoice.due_date.isoformat() if invoice.due_date else None,
+                'pdf_url': invoice.pdf_url,
+                'pdf_generated': invoice.pdf_generated
+            })
+
+        return Response({'invoices': invoices_data})
+
+    except Exception as e:
+        logger.error(f'Error fetching invoices for tenant {request.tenant.schema_name}: {str(e)}')
+        return Response(
+            {'error': 'Failed to fetch invoices'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )

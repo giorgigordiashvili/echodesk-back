@@ -497,6 +497,70 @@ class PaymentOrder(models.Model):
         return f"{self.order_id} - {tenant_name} - {self.status}"
 
 
+class Invoice(models.Model):
+    """
+    Invoice generated for successful payments
+    """
+    invoice_number = models.CharField(max_length=100, unique=True, db_index=True)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE)
+    payment_order = models.OneToOneField(PaymentOrder, on_delete=models.CASCADE, related_name='invoice')
+
+    # Invoice details
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    currency = models.CharField(max_length=3, default='GEL')
+
+    # What was invoiced for
+    package = models.ForeignKey(Package, on_delete=models.SET_NULL, null=True, blank=True)
+    description = models.TextField()
+    agent_count = models.IntegerField(default=1)
+
+    # Dates
+    invoice_date = models.DateTimeField(auto_now_add=True)
+    due_date = models.DateField(null=True, blank=True)
+    paid_date = models.DateTimeField(null=True, blank=True)
+
+    # PDF generation
+    pdf_generated = models.BooleanField(default=False)
+    pdf_url = models.URLField(max_length=500, blank=True)
+
+    # Additional data
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        db_table = 'tenants_invoice'
+        ordering = ['-invoice_date']
+
+    def __str__(self):
+        return f"Invoice {self.invoice_number} - {self.tenant.name} - {self.amount} {self.currency}"
+
+    def generate_invoice_number(self):
+        """Generate a unique invoice number"""
+        from datetime import datetime
+        date_str = datetime.now().strftime('%Y%m')
+        # Find the last invoice for this month
+        last_invoice = Invoice.objects.filter(
+            invoice_number__startswith=f'INV-{date_str}'
+        ).order_by('-invoice_number').first()
+
+        if last_invoice:
+            # Extract the sequence number and increment
+            try:
+                last_seq = int(last_invoice.invoice_number.split('-')[-1])
+                new_seq = last_seq + 1
+            except (ValueError, IndexError):
+                new_seq = 1
+        else:
+            new_seq = 1
+
+        return f'INV-{date_str}-{new_seq:04d}'
+
+    def save(self, *args, **kwargs):
+        # Auto-generate invoice number if not set
+        if not self.invoice_number:
+            self.invoice_number = self.generate_invoice_number()
+        super().save(*args, **kwargs)
+
+
 class PendingRegistration(models.Model):
     """
     Stores tenant registration data temporarily until payment is completed
