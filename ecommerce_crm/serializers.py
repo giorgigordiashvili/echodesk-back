@@ -181,25 +181,22 @@ class ProductCreateUpdateSerializer(serializers.ModelSerializer):
 
     def validate_image(self, value):
         """Accept both file uploads and URL strings for image field"""
-        # If it's a string (URL), download and convert to file
+        # If it's a string (URL from DigitalOcean Spaces), extract the file path
         if isinstance(value, str) and value:
-            import requests
-            from django.core.files.base import ContentFile
             from urllib.parse import urlparse
-            import os
 
-            try:
-                response = requests.get(value, timeout=10)
-                response.raise_for_status()
+            # Extract the path from the full URL
+            # e.g., "https://echodesk-spaces.fra1.digitaloceanspaces.com/media/gallery/artlighthouse/file.png"
+            # becomes "gallery/artlighthouse/file.png"
+            parsed_url = urlparse(value)
+            path = parsed_url.path
 
-                # Extract filename from URL
-                parsed_url = urlparse(value)
-                filename = os.path.basename(parsed_url.path) or 'image.jpg'
+            # Remove '/media/' prefix if present
+            if path.startswith('/media/'):
+                path = path[7:]  # Remove '/media/'
 
-                # Create a ContentFile from the downloaded image
-                return ContentFile(response.content, name=filename)
-            except Exception as e:
-                raise serializers.ValidationError(f"Failed to download image from URL: {str(e)}")
+            # Return just the relative path - Django's storage will handle the full URL
+            return path
 
         return value
 
