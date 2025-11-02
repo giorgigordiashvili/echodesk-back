@@ -581,7 +581,7 @@ def login_client(request):
 @extend_schema(
     operation_id='verify_email',
     summary='Verify email with code',
-    description='Verify client email using the verification token and code sent via email',
+    description='Verify client email using the verification token and code sent via email. Returns JWT tokens upon successful verification.',
     request=inline_serializer(
         'EmailVerificationRequest',
         fields={
@@ -597,6 +597,8 @@ def login_client(request):
                 fields={
                     'message': serializers.CharField(),
                     'client': EcommerceClientSerializer(),
+                    'access': serializers.CharField(help_text='JWT access token'),
+                    'refresh': serializers.CharField(help_text='JWT refresh token'),
                 }
             )
         ),
@@ -610,6 +612,7 @@ def verify_email(request):
     """Verify client email with verification code"""
     from .models import ClientVerificationCode, EcommerceClient
     from django.utils import timezone
+    from rest_framework_simplejwt.tokens import RefreshToken
 
     verification_token = request.data.get('verification_token')
     code = request.data.get('code')
@@ -642,10 +645,17 @@ def verify_email(request):
             client.is_verified = True
             client.save()
 
+            # Generate JWT tokens
+            refresh = RefreshToken()
+            refresh['client_id'] = client.id
+            refresh['email'] = client.email
+
             response_serializer = EcommerceClientSerializer(client)
             return Response({
                 'message': 'Email verified successfully',
-                'client': response_serializer.data
+                'client': response_serializer.data,
+                'access': str(refresh.access_token),
+                'refresh': str(refresh)
             }, status=status.HTTP_200_OK)
 
         except EcommerceClient.DoesNotExist:
