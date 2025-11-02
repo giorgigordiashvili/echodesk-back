@@ -14,6 +14,7 @@ from .views import (
     OrderViewSet,
     register_client,
     login_client,
+    verify_email,
     request_password_reset,
     confirm_password_reset,
     get_current_client,
@@ -40,6 +41,7 @@ urlpatterns = [
     # to prevent router from treating them as detail lookups
     path('clients/register/', register_client, name='register-client'),
     path('clients/login/', login_client, name='login-client'),
+    path('clients/verify/', verify_email, name='verify-email'),
     path('clients/me/', get_current_client, name='current-client'),
     path('clients/password-reset/request/', request_password_reset, name='password-reset-request'),
     path('clients/password-reset/confirm/', confirm_password_reset, name='password-reset-confirm'),

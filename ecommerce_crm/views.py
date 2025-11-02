@@ -1,8 +1,8 @@
-from rest_framework import viewsets, filters, status
+from rest_framework import viewsets, filters, status, serializers
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
-from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiParameter
+from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiParameter, inline_serializer
 from django_filters.rest_framework import DjangoFilterBackend, FilterSet, CharFilter, NumberFilter, BooleanFilter
 from django.db.models import Q, F
 from .models import (
@@ -469,12 +469,19 @@ class EcommerceClientViewSet(viewsets.ModelViewSet):
 @extend_schema(
     operation_id='register_client',
     summary='Register a new ecommerce client',
-    description='Create a new ecommerce client account. Supports registration with email and phone number.',
+    description='Create a new ecommerce client account. Returns a verification token that should be used with the verification code sent via email.',
     request=ClientRegistrationSerializer,
     responses={
         201: OpenApiResponse(
-            description='Client registered successfully',
-            response=EcommerceClientSerializer
+            description='Client registered successfully. Verification code sent to email.',
+            response=inline_serializer(
+                'ClientRegistrationResponse',
+                fields={
+                    'client': EcommerceClientSerializer(),
+                    'verification_token': serializers.CharField(help_text='Token to use for email verification'),
+                    'message': serializers.CharField(),
+                }
+            )
         ),
         400: OpenApiResponse(description='Validation error')
     },
@@ -483,19 +490,49 @@ class EcommerceClientViewSet(viewsets.ModelViewSet):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def register_client(request):
-    """Register a new ecommerce client"""
-    from .email_utils import send_welcome_email
+    """Register a new ecommerce client and send verification code"""
+    import random
+    import secrets
+    from datetime import timedelta
+    from django.utils import timezone
+    from .email_utils import send_verification_code_email
+    from .models import ClientVerificationCode
 
     serializer = ClientRegistrationSerializer(data=request.data)
 
     if serializer.is_valid():
         client = serializer.save()
 
-        # Send welcome email
-        send_welcome_email(client)
+        # Generate 6-digit verification code
+        verification_code = ''.join([str(random.randint(0, 9)) for _ in range(6)])
+
+        # Generate unique verification token
+        verification_token = secrets.token_urlsafe(32)
+
+        # Set expiration time (15 minutes from now)
+        expires_at = timezone.now() + timedelta(minutes=15)
+
+        # Store verification code
+        ClientVerificationCode.objects.create(
+            email=client.email,
+            code=verification_code,
+            token=verification_token,
+            expires_at=expires_at
+        )
+
+        # Send verification code email
+        send_verification_code_email(
+            email=client.email,
+            code=verification_code,
+            client_name=client.first_name
+        )
 
         response_serializer = EcommerceClientSerializer(client)
-        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+        return Response({
+            'client': response_serializer.data,
+            'verification_token': verification_token,
+            'message': 'Registration successful. Please check your email for verification code.'
+        }, status=status.HTTP_201_CREATED)
 
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -539,6 +576,87 @@ def login_client(request):
         }, status=status.HTTP_200_OK)
 
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@extend_schema(
+    operation_id='verify_email',
+    summary='Verify email with code',
+    description='Verify client email using the verification token and code sent via email',
+    request=inline_serializer(
+        'EmailVerificationRequest',
+        fields={
+            'verification_token': serializers.CharField(help_text='Token received during registration'),
+            'code': serializers.CharField(help_text='6-digit code received via email'),
+        }
+    ),
+    responses={
+        200: OpenApiResponse(
+            description='Email verified successfully',
+            response=inline_serializer(
+                'EmailVerificationResponse',
+                fields={
+                    'message': serializers.CharField(),
+                    'client': EcommerceClientSerializer(),
+                }
+            )
+        ),
+        400: OpenApiResponse(description='Invalid or expired code')
+    },
+    tags=['Ecommerce - Client Auth']
+)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def verify_email(request):
+    """Verify client email with verification code"""
+    from .models import ClientVerificationCode, EcommerceClient
+    from django.utils import timezone
+
+    verification_token = request.data.get('verification_token')
+    code = request.data.get('code')
+
+    if not verification_token or not code:
+        return Response({
+            'error': 'Both verification_token and code are required'
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        # Find verification code record
+        verification = ClientVerificationCode.objects.get(
+            token=verification_token,
+            code=code
+        )
+
+        # Check if code is valid
+        if not verification.is_valid():
+            return Response({
+                'error': 'Verification code is invalid or has expired'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Mark code as used
+        verification.is_used = True
+        verification.save()
+
+        # Get the client and mark as verified
+        try:
+            client = EcommerceClient.objects.get(email=verification.email)
+            client.is_verified = True
+            client.save()
+
+            response_serializer = EcommerceClientSerializer(client)
+            return Response({
+                'message': 'Email verified successfully',
+                'client': response_serializer.data
+            }, status=status.HTTP_200_OK)
+
+        except EcommerceClient.DoesNotExist:
+            return Response({
+                'error': 'Client not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+    except ClientVerificationCode.DoesNotExist:
+        return Response({
+            'error': 'Invalid verification token or code'
+        }, status=status.HTTP_400_BAD_REQUEST)
 
 
 @extend_schema(

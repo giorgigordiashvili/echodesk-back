@@ -509,6 +509,33 @@ class EcommerceClient(models.Model):
         self.save(update_fields=['last_login'])
 
 
+class ClientVerificationCode(models.Model):
+    """Model to store email verification codes for clients"""
+    email = models.EmailField(help_text="Email address to verify")
+    code = models.CharField(max_length=6, help_text="6-digit verification code")
+    token = models.CharField(max_length=100, unique=True, help_text="Verification token")
+    is_used = models.BooleanField(default=False, help_text="Whether code has been used")
+    expires_at = models.DateTimeField(help_text="Expiration time for code")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Client Verification Code'
+        verbose_name_plural = 'Client Verification Codes'
+        indexes = [
+            models.Index(fields=['email', 'token']),
+            models.Index(fields=['expires_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.email} - {self.code}"
+
+    def is_valid(self):
+        """Check if code is still valid (not used and not expired)"""
+        from django.utils import timezone
+        return not self.is_used and timezone.now() < self.expires_at
+
+
 class ClientAddress(models.Model):
     """
     Delivery addresses for ecommerce clients

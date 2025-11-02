@@ -8,6 +8,7 @@ from .models import (
     ProductVariant,
     ProductVariantAttributeValue,
     EcommerceClient,
+    ClientVerificationCode,
     PasswordResetToken
 )
 
@@ -143,5 +144,23 @@ class PasswordResetTokenAdmin(admin.ModelAdmin):
         }),
         ('Status', {
             'fields': ('is_used', 'used_at')
+        }),
+    )
+
+
+@admin.register(ClientVerificationCode)
+class ClientVerificationCodeAdmin(admin.ModelAdmin):
+    list_display = ['email', 'code', 'token', 'created_at', 'expires_at', 'is_used']
+    list_filter = ['is_used', 'created_at', 'expires_at']
+    search_fields = ['email', 'code', 'token']
+    ordering = ['-created_at']
+    readonly_fields = ['created_at']
+
+    fieldsets = (
+        ('Verification Information', {
+            'fields': ('email', 'code', 'token', 'created_at', 'expires_at')
+        }),
+        ('Status', {
+            'fields': ('is_used',)
         }),
     )

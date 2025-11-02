@@ -93,6 +93,31 @@ def send_welcome_email(client):
     )
 
 
+def send_verification_code_email(email, code, client_name=None):
+    """
+    Send email verification code to client
+
+    Args:
+        email: Client email address
+        code: 6-digit verification code
+        client_name: Client's first name (optional)
+
+    Returns:
+        bool: True if email sent successfully
+    """
+    context = {
+        'client_name': client_name or 'Valued Customer',
+        'verification_code': code,
+    }
+
+    return send_email(
+        subject='Verify Your Email Address',
+        recipient_email=email,
+        template_name='verification_code',
+        context=context
+    )
+
+
 def send_password_reset_email(client, reset_token):
     """
     Send password reset email to client
