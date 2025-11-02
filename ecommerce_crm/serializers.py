@@ -276,12 +276,7 @@ class ProductCreateUpdateSerializer(serializers.ModelSerializer):
 
 
 class ClientAddressSerializer(serializers.ModelSerializer):
-    """Serializer for client addresses"""
-    client = serializers.PrimaryKeyRelatedField(
-        queryset=EcommerceClient.objects.all(),
-        required=False,
-        help_text="Client ID (automatically set from token for regular clients, required for admin)"
-    )
+    """Serializer for client addresses (Admin only)"""
 
     class Meta:
         model = ClientAddress

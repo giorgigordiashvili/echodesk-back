@@ -5,7 +5,6 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiParameter, inline_serializer
 from django_filters.rest_framework import DjangoFilterBackend, FilterSet, CharFilter, NumberFilter, BooleanFilter
-from .authentication import EcommerceClientJWTAuthentication
 from django.db.models import Q, F
 from .models import (
     Language,
@@ -196,9 +195,9 @@ class ProductFilter(FilterSet):
 
 class ProductViewSet(viewsets.ModelViewSet):
     """
-    ViewSet for products with advanced filtering and sorting
+    ViewSet for products with advanced filtering and sorting (Admin only)
     """
-    authentication_classes = [EcommerceClientJWTAuthentication, JWTAuthentication]
+    authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_class = ProductFilter
@@ -395,10 +394,10 @@ class ProductViewSet(viewsets.ModelViewSet):
 
 
 class ProductImageViewSet(viewsets.ModelViewSet):
-    """ViewSet for product images"""
+    """ViewSet for product images (Admin only)"""
     queryset = ProductImage.objects.all()
     serializer_class = ProductImageSerializer
-    authentication_classes = [EcommerceClientJWTAuthentication, JWTAuthentication]
+    authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ['product']
@@ -407,10 +406,10 @@ class ProductImageViewSet(viewsets.ModelViewSet):
 
 
 class ProductVariantViewSet(viewsets.ModelViewSet):
-    """ViewSet for product variants"""
+    """ViewSet for product variants (Admin only)"""
     queryset = ProductVariant.objects.filter(is_active=True)
     serializer_class = ProductVariantSerializer
-    authentication_classes = [EcommerceClientJWTAuthentication, JWTAuthentication]
+    authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['product', 'is_active']
@@ -810,47 +809,20 @@ def get_current_client(request):
 
 
 class ClientAddressViewSet(viewsets.ModelViewSet):
-    """ViewSet for managing client addresses"""
+    """ViewSet for managing client addresses (Admin only)"""
     queryset = ClientAddress.objects.all()
     serializer_class = ClientAddressSerializer
-    authentication_classes = [EcommerceClientJWTAuthentication, JWTAuthentication]
+    authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
-    filterset_fields = ['is_default']
+    filterset_fields = ['is_default', 'client']
     ordering_fields = ['created_at', 'is_default']
     ordering = ['-is_default', '-created_at']
-
-    def get_queryset(self):
-        """
-        Filter addresses for ecommerce clients to only show their own addresses.
-        Admins can see all addresses.
-        """
-        from .models import EcommerceClient
-
-        # If authenticated as an ecommerce client, only show their addresses
-        if isinstance(self.request.user, EcommerceClient):
-            return ClientAddress.objects.filter(client=self.request.user)
-
-        # Otherwise (admin user), show all addresses
-        return ClientAddress.objects.all()
-
-    def perform_create(self, serializer):
-        """
-        Automatically set the client from token for ecommerce clients.
-        Admins must specify client manually.
-        """
-        from .models import EcommerceClient
-
-        # If client not provided and authenticated as ecommerce client, auto-set it
-        if 'client' not in serializer.validated_data and isinstance(self.request.user, EcommerceClient):
-            serializer.save(client=self.request.user)
-        else:
-            serializer.save()
 
     @extend_schema(
         tags=['Ecommerce - Client Addresses'],
         summary='List client addresses',
-        description='Get delivery addresses (filtered to authenticated client for regular users, all addresses for admins)'
+        description='Get all delivery addresses (admin only)'
     )
     def list(self, request, *args, **kwargs):
         return super().list(request, *args, **kwargs)
@@ -866,7 +838,7 @@ class ClientAddressViewSet(viewsets.ModelViewSet):
     @extend_schema(
         tags=['Ecommerce - Client Addresses'],
         summary='Create new address',
-        description='Add a new delivery address. Client ID is optional - automatically set from token for ecommerce clients, required for admins.'
+        description='Add a new delivery address (admin only, client ID required)'
     )
     def create(self, request, *args, **kwargs):
         return super().create(request, *args, **kwargs)
@@ -911,28 +883,14 @@ class ClientAddressViewSet(viewsets.ModelViewSet):
 
 
 class FavoriteProductViewSet(viewsets.ModelViewSet):
-    """ViewSet for managing client favorite products (wishlist)"""
+    """ViewSet for managing client favorite products/wishlist (Admin only)"""
     queryset = FavoriteProduct.objects.all()
-    authentication_classes = [EcommerceClientJWTAuthentication, JWTAuthentication]
+    authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ['client', 'product']
     ordering_fields = ['created_at']
     ordering = ['-created_at']
-
-    def get_queryset(self):
-        """
-        Filter favorites for ecommerce clients to only show their own favorites.
-        Admins can see all favorites.
-        """
-        from .models import EcommerceClient
-
-        # If authenticated as an ecommerce client, only show their favorites
-        if isinstance(self.request.user, EcommerceClient):
-            return FavoriteProduct.objects.filter(client=self.request.user)
-
-        # Otherwise (admin user), show all favorites
-        return FavoriteProduct.objects.all()
 
     def get_serializer_class(self):
         """Return appropriate serializer based on action"""
@@ -1055,29 +1013,15 @@ class FavoriteProductViewSet(viewsets.ModelViewSet):
 
 
 class CartViewSet(viewsets.ModelViewSet):
-    """ViewSet for managing shopping carts"""
+    """ViewSet for managing shopping carts (Admin only)"""
     queryset = Cart.objects.all()
     serializer_class = CartSerializer
-    authentication_classes = [EcommerceClientJWTAuthentication, JWTAuthentication]
+    authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ['client', 'status']
     ordering_fields = ['created_at', 'updated_at']
     ordering = ['-updated_at']
-
-    def get_queryset(self):
-        """
-        Filter carts for ecommerce clients to only show their own carts.
-        Admins can see all carts.
-        """
-        from .models import EcommerceClient
-
-        # If authenticated as an ecommerce client, only show their carts
-        if isinstance(self.request.user, EcommerceClient):
-            return Cart.objects.filter(client=self.request.user)
-
-        # Otherwise (admin user), show all carts
-        return Cart.objects.all()
 
     @extend_schema(
         tags=['Ecommerce - Cart'],
@@ -1119,42 +1063,6 @@ class CartViewSet(viewsets.ModelViewSet):
 
     @extend_schema(
         tags=['Ecommerce - Cart'],
-        summary='Get or create active cart',
-        description='Get authenticated client\'s active cart or create new one'
-    )
-    @action(
-        detail=False,
-        methods=['get'],
-        authentication_classes=[EcommerceClientJWTAuthentication, JWTAuthentication],
-        permission_classes=[IsAuthenticated]
-    )
-    def get_or_create(self, request):
-        """Get or create active cart for authenticated client"""
-        from .models import EcommerceClient
-
-        # Only works for ecommerce clients
-        if not isinstance(request.user, EcommerceClient):
-            return Response(
-                {'error': 'This endpoint is only available for ecommerce clients'},
-                status=status.HTTP_403_FORBIDDEN
-            )
-
-        # Use authenticated client from token
-        client = request.user
-
-        cart, created = Cart.objects.get_or_create(
-            client=client,
-            status='active',
-            defaults={'status': 'active'}
-        )
-        serializer = self.get_serializer(cart)
-        return Response({
-            'cart': serializer.data,
-            'created': created
-        })
-
-    @extend_schema(
-        tags=['Ecommerce - Cart'],
         summary='Set delivery address',
         description='Set or update delivery address for cart'
     )
@@ -1191,9 +1099,9 @@ class CartViewSet(viewsets.ModelViewSet):
 
 
 class CartItemViewSet(viewsets.ModelViewSet):
-    """ViewSet for managing cart items"""
+    """ViewSet for managing cart items (Admin only)"""
     queryset = CartItem.objects.all()
-    authentication_classes = [EcommerceClientJWTAuthentication, JWTAuthentication]
+    authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['cart', 'product']
@@ -1235,29 +1143,15 @@ class CartItemViewSet(viewsets.ModelViewSet):
 
 
 class OrderViewSet(viewsets.ModelViewSet):
-    """ViewSet for managing orders"""
+    """ViewSet for managing orders (Admin only)"""
     queryset = Order.objects.all()
-    authentication_classes = [EcommerceClientJWTAuthentication, JWTAuthentication]
+    authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['order_number', 'client__first_name', 'client__last_name', 'client__email']
     filterset_fields = ['client', 'status']
     ordering_fields = ['created_at', 'total_amount', 'status']
     ordering = ['-created_at']
-
-    def get_queryset(self):
-        """
-        Filter orders for ecommerce clients to only show their own orders.
-        Admins can see all orders.
-        """
-        from .models import EcommerceClient
-
-        # If authenticated as an ecommerce client, only show their orders
-        if isinstance(self.request.user, EcommerceClient):
-            return Order.objects.filter(client=self.request.user)
-
-        # Otherwise (admin user), show all orders
-        return Order.objects.all()
 
     def get_serializer_class(self):
         if self.action == 'create':
