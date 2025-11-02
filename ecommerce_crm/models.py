@@ -502,6 +502,14 @@ class EcommerceClient(models.Model):
         """Return the client's full name"""
         return f"{self.first_name} {self.last_name}".strip()
 
+    @property
+    def is_authenticated(self):
+        """
+        Always return True for authenticated clients.
+        This is required by DRF's IsAuthenticated permission class.
+        """
+        return True
+
     def update_last_login(self):
         """Update the last_login timestamp"""
         from django.utils import timezone
