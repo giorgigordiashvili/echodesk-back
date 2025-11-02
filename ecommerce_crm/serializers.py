@@ -492,11 +492,18 @@ class OrderSerializer(serializers.ModelSerializer):
     class Meta:
         model = Order
         fields = [
-            'id', 'order_number', 'client', 'client_details', 'delivery_address', 
+            'id', 'order_number', 'client', 'client_details', 'delivery_address',
             'status', 'total_amount', 'notes', 'admin_notes', 'items', 'total_items',
-            'created_at', 'updated_at', 'confirmed_at', 'shipped_at', 'delivered_at'
+            # Payment fields
+            'payment_status', 'payment_method', 'bog_order_id', 'payment_url',
+            'payment_metadata',
+            # Timestamps
+            'created_at', 'updated_at', 'paid_at', 'confirmed_at', 'shipped_at', 'delivered_at'
         ]
-        read_only_fields = ['id', 'order_number', 'created_at', 'updated_at']
+        read_only_fields = [
+            'id', 'order_number', 'created_at', 'updated_at', 'paid_at',
+            'bog_order_id', 'payment_url', 'payment_metadata'
+        ]
 
     def get_client_details(self, obj):
         """Return client basic info"""

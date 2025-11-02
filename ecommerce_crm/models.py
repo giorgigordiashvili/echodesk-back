@@ -4,6 +4,7 @@ from django.core.validators import MinValueValidator
 from django.contrib.auth.hashers import make_password, check_password
 from decimal import Decimal
 import uuid
+import base64
 
 
 class Language(models.Model):
@@ -747,6 +748,14 @@ class Order(models.Model):
         ('refunded', 'Refunded'),
     ]
 
+    PAYMENT_STATUS_CHOICES = [
+        ('pending', 'Pending Payment'),
+        ('paid', 'Paid'),
+        ('failed', 'Payment Failed'),
+        ('refunded', 'Refunded'),
+        ('partially_refunded', 'Partially Refunded'),
+    ]
+
     order_number = models.CharField(
         max_length=50,
         unique=True,
@@ -775,6 +784,37 @@ class Order(models.Model):
         decimal_places=2,
         help_text="Total order amount"
     )
+
+    # Payment fields
+    payment_status = models.CharField(
+        max_length=20,
+        choices=PAYMENT_STATUS_CHOICES,
+        default='pending',
+        help_text="Payment status"
+    )
+    payment_method = models.CharField(
+        max_length=50,
+        blank=True,
+        default='card',
+        help_text="Payment method (card, cash_on_delivery, etc.)"
+    )
+    bog_order_id = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        help_text="Bank of Georgia order ID"
+    )
+    payment_url = models.URLField(
+        blank=True,
+        null=True,
+        help_text="BOG payment page URL"
+    )
+    payment_metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Payment gateway response data"
+    )
+
     notes = models.TextField(
         blank=True,
         help_text="Customer notes or special instructions"
@@ -785,6 +825,7 @@ class Order(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    paid_at = models.DateTimeField(null=True, blank=True, help_text="When payment was completed")
     confirmed_at = models.DateTimeField(null=True, blank=True)
     shipped_at = models.DateTimeField(null=True, blank=True)
     delivered_at = models.DateTimeField(null=True, blank=True)
@@ -797,6 +838,8 @@ class Order(models.Model):
             models.Index(fields=['order_number']),
             models.Index(fields=['client', '-created_at']),
             models.Index(fields=['status', '-created_at']),
+            models.Index(fields=['payment_status', '-created_at']),
+            models.Index(fields=['bog_order_id']),
         ]
 
     def __str__(self):
@@ -873,6 +916,99 @@ class OrderItem(models.Model):
     def subtotal(self):
         """Calculate subtotal for this order item"""
         return self.price * self.quantity
+
+
+class EcommerceSettings(models.Model):
+    """
+    Per-tenant ecommerce settings including encrypted payment gateway credentials
+    Each tenant can configure their own BOG API credentials
+    """
+    # OneToOne with Tenant (from tenants app)
+    tenant = models.OneToOneField(
+        'tenants.Tenant',
+        on_delete=models.CASCADE,
+        related_name='ecommerce_settings',
+        help_text="Tenant these settings belong to"
+    )
+
+    # BOG Payment Gateway Settings
+    bog_client_id = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Bank of Georgia Client ID"
+    )
+    bog_client_secret_encrypted = models.BinaryField(
+        blank=True,
+        null=True,
+        help_text="Encrypted Bank of Georgia Client Secret"
+    )
+    bog_use_production = models.BooleanField(
+        default=False,
+        help_text="Use production BOG API (unchecked = test environment)"
+    )
+
+    # Payment settings
+    enable_cash_on_delivery = models.BooleanField(
+        default=True,
+        help_text="Allow cash on delivery payments"
+    )
+    enable_card_payment = models.BooleanField(
+        default=True,
+        help_text="Allow card payments via BOG"
+    )
+
+    # Store information
+    store_name = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Store name for payment descriptions"
+    )
+    store_email = models.EmailField(
+        blank=True,
+        help_text="Store contact email"
+    )
+    store_phone = models.CharField(
+        max_length=50,
+        blank=True,
+        help_text="Store contact phone"
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Ecommerce Settings'
+        verbose_name_plural = 'Ecommerce Settings'
+
+    def __str__(self):
+        return f"Ecommerce Settings for {self.tenant.name}"
+
+    def set_bog_secret(self, secret: str):
+        """Encrypt and store BOG client secret"""
+        from cryptography.fernet import Fernet
+        from django.conf import settings
+
+        # Use Django's SECRET_KEY for encryption
+        key = settings.SECRET_KEY[:32].encode().ljust(32, b'0')
+        fernet = Fernet(base64.urlsafe_b64encode(key))
+        self.bog_client_secret_encrypted = fernet.encrypt(secret.encode())
+
+    def get_bog_secret(self) -> str:
+        """Decrypt and return BOG client secret"""
+        if not self.bog_client_secret_encrypted:
+            return ''
+
+        from cryptography.fernet import Fernet
+        from django.conf import settings
+
+        key = settings.SECRET_KEY[:32].encode().ljust(32, b'0')
+        fernet = Fernet(base64.urlsafe_b64encode(key))
+        return fernet.decrypt(bytes(self.bog_client_secret_encrypted)).decode()
+
+    @property
+    def has_bog_credentials(self) -> bool:
+        """Check if BOG credentials are configured"""
+        return bool(self.bog_client_id and self.bog_client_secret_encrypted)
 
 
 class PasswordResetToken(models.Model):

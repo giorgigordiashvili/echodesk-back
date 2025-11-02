@@ -16,7 +16,8 @@ from .views import (
     login_client,
     request_password_reset,
     confirm_password_reset,
-    get_current_client
+    get_current_client,
+    ecommerce_payment_webhook
 )
 
 router = DefaultRouter()
@@ -42,4 +43,6 @@ urlpatterns = [
     path('clients/me/', get_current_client, name='current-client'),
     path('clients/password-reset/request/', request_password_reset, name='password-reset-request'),
     path('clients/password-reset/confirm/', confirm_password_reset, name='password-reset-confirm'),
+    # Payment webhook (public access - called by BOG)
+    path('payment-webhook/', ecommerce_payment_webhook, name='payment-webhook'),
 ]

@@ -1103,3 +1103,246 @@ class OrderViewSet(viewsets.ModelViewSet):
         order.save()
         serializer = self.get_serializer(order)
         return Response(serializer.data)
+
+    @extend_schema(
+        tags=['Ecommerce - Orders'],
+        summary='Initiate payment for order',
+        description='Create BOG payment session for an order'
+    )
+    @action(detail=True, methods=['post'])
+    def initiate_payment(self, request, pk=None):
+        """
+        Initiate payment for an order
+        Creates a BOG payment session and returns payment URL
+        """
+        from tenants.bog_payment import bog_service
+        import uuid
+
+        order = self.get_object()
+
+        # Check if order is already paid
+        if order.payment_status == 'paid':
+            return Response(
+                {'error': 'Order is already paid'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Check if payment is pending
+        if order.payment_url and order.payment_status == 'pending':
+            return Response({
+                'payment_url': order.payment_url,
+                'bog_order_id': order.bog_order_id,
+                'status': 'pending'
+            })
+
+        # Get tenant's ecommerce settings for BOG credentials
+        try:
+            from .models import EcommerceSettings
+            ecommerce_settings = EcommerceSettings.objects.get(tenant=request.tenant)
+
+            # Use tenant-specific credentials if available
+            if ecommerce_settings.has_bog_credentials:
+                client_id = ecommerce_settings.bog_client_id
+                client_secret = ecommerce_settings.get_bog_secret()
+                use_production = ecommerce_settings.bog_use_production
+            else:
+                # Fall back to default credentials from settings
+                from django.conf import settings
+                client_id = settings.BOG_CLIENT_ID
+                client_secret = settings.BOG_CLIENT_SECRET
+                use_production = not settings.BOG_API_BASE_URL.endswith('-test.bog.ge/payments/v1')
+        except EcommerceSettings.DoesNotExist:
+            # Use default credentials
+            from django.conf import settings
+            client_id = settings.BOG_CLIENT_ID
+            client_secret = settings.BOG_CLIENT_SECRET
+            use_production = not settings.BOG_API_BASE_URL.endswith('-test.bog.ge/payments/v1')
+
+        # Check payment method
+        payment_method = request.data.get('payment_method', 'card')
+
+        if payment_method == 'cash_on_delivery':
+            # No BOG payment needed, just mark as COD
+            order.payment_method = 'cash_on_delivery'
+            order.payment_status = 'pending'
+            order.save()
+            return Response({
+                'payment_method': 'cash_on_delivery',
+                'message': 'Order will be paid on delivery'
+            })
+
+        # Create BOG payment
+        try:
+            # Generate callback URL
+            callback_url = f"{request.scheme}://{request.get_host()}/api/ecommerce/payment-webhook/"
+            return_url_success = request.data.get('return_url_success', '')
+            return_url_fail = request.data.get('return_url_fail', '')
+
+            # Create payment with tenant-specific or default credentials
+            payment_result = bog_service.create_payment(
+                amount=float(order.total_amount),
+                currency='GEL',
+                description=f"Order {order.order_number}",
+                customer_email=order.client.email,
+                customer_name=order.client.full_name,
+                customer_phone=order.client.phone_number or '',
+                return_url_success=return_url_success,
+                return_url_fail=return_url_fail,
+                callback_url=callback_url,
+                external_order_id=order.order_number,
+                metadata={
+                    'order_id': order.id,
+                    'order_number': order.order_number,
+                    'tenant_id': request.tenant.id
+                }
+            )
+
+            # Update order with payment info
+            order.bog_order_id = payment_result['order_id']
+            order.payment_url = payment_result['payment_url']
+            order.payment_status = 'pending'
+            order.payment_method = 'card'
+            order.payment_metadata = payment_result
+            order.save()
+
+            return Response({
+                'payment_url': payment_result['payment_url'],
+                'bog_order_id': payment_result['order_id'],
+                'amount': payment_result['amount'],
+                'currency': payment_result['currency'],
+                'status': 'pending'
+            })
+
+        except Exception as e:
+            return Response(
+                {'error': f'Failed to create payment: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+@extend_schema(
+    operation_id='ecommerce_payment_webhook',
+    summary='BOG Payment Webhook for Ecommerce Orders',
+    description='Webhook endpoint for receiving payment status updates from Bank of Georgia for ecommerce orders',
+    responses={
+        200: OpenApiResponse(description='Webhook processed successfully'),
+        400: OpenApiResponse(description='Invalid payload')
+    },
+    tags=['Ecommerce - Orders']
+)
+@api_view(['POST'])
+@permission_classes([AllowAny])  # Webhook from BOG, no auth
+def ecommerce_payment_webhook(request):
+    """
+    Handle webhook notifications from Bank of Georgia payment gateway for ecommerce orders
+    
+    BOG Callback format:
+    {
+        "event": "order_payment",
+        "zoned_request_time": "2024-01-01T12:00:00.000000Z",
+        "body": {
+            "order_id": "...",
+            "order_status": {"key": "completed", ...},
+            "external_order_id": "ORD-20250211-XYZ789",
+            ...
+        }
+    }
+    """
+    import logging
+    from django.utils import timezone
+    
+    logger = logging.getLogger(__name__)
+    
+    # Process payment event
+    event_type = request.data.get('event')
+    body = request.data.get('body', {})
+    
+    if event_type != 'order_payment':
+        logger.warning(f'Unexpected webhook event type: {event_type}')
+        return Response({'error': 'Unexpected event type'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Extract payment details
+    bog_order_id = body.get('order_id') or body.get('id')
+    external_order_id = body.get('external_order_id')  # This is our order_number
+    order_status_obj = body.get('order_status', {})
+    bog_status = order_status_obj.get('key', '')
+    
+    # Get response code from payment_detail
+    payment_detail = body.get('payment_detail', {})
+    response_code = payment_detail.get('code', '')
+    transaction_id = payment_detail.get('transaction_id', '')
+    
+    logger.info(f'Ecommerce payment webhook: bog_order_id={bog_order_id}, order_number={external_order_id}, status={bog_status}, code={response_code}')
+    
+    # Handle successful payment (BOG status: 'completed' with response code '100')
+    if bog_status == 'completed' and response_code == '100':
+        try:
+            # Find order by order_number (external_order_id)
+            if not external_order_id:
+                logger.error('Missing external_order_id in webhook payload')
+                return Response({'error': 'Invalid payload'}, status=status.HTTP_400_BAD_REQUEST)
+            
+            try:
+                order = Order.objects.get(order_number=external_order_id)
+            except Order.DoesNotExist:
+                logger.error(f'Order not found: {external_order_id}')
+                return Response({'error': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
+            
+            # Check if already processed (idempotency)
+            if order.payment_status == 'paid' and order.paid_at:
+                logger.info(f'Webhook already processed for order: {external_order_id}')
+                return Response({
+                    'status': 'success',
+                    'message': 'Payment already processed'
+                }, status=status.HTTP_200_OK)
+            
+            # Update order payment status
+            order.payment_status = 'paid'
+            order.paid_at = timezone.now()
+            order.status = 'confirmed'  # Auto-confirm order when paid
+            order.confirmed_at = timezone.now()
+            order.payment_metadata.update({
+                'bog_order_id': bog_order_id,
+                'transaction_id': transaction_id,
+                'response_code': response_code,
+                'paid_at': timezone.now().isoformat()
+            })
+            order.save()
+            
+            logger.info(f'Payment completed for order: {external_order_id}')
+            
+            # TODO: Send order confirmation email to client
+            # TODO: Notify admin of new paid order
+            
+            return Response({
+                'status': 'success',
+                'action': 'payment_completed',
+                'order_number': order.order_number
+            })
+        
+        except Exception as e:
+            logger.error(f'Error processing webhook: {e}')
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    # Handle failed payment (BOG status: 'rejected')
+    elif bog_status == 'rejected':
+        logger.warning(f'Payment failed: order_number={external_order_id}, code={response_code}')
+        
+        # Update order status if exists
+        try:
+            order = Order.objects.get(order_number=external_order_id)
+            order.payment_status = 'failed'
+            order.payment_metadata.update({
+                'bog_status': bog_status,
+                'response_code': response_code,
+                'failed_at': timezone.now().isoformat()
+            })
+            order.save()
+        except Order.DoesNotExist:
+            logger.error(f'Order not found for failed payment: {external_order_id}')
+    
+    # Handle other statuses
+    else:
+        logger.info(f'Webhook received with status: {bog_status}, code: {response_code}')
+    
+    return Response({'status': 'received'})

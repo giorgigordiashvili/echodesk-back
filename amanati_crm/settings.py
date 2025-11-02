@@ -390,13 +390,28 @@ SOCIAL_INTEGRATIONS = {
 #   Auth: https://account-ob-test.bog.ge/auth/realms/bog-test/protocol/openid-connect/token
 #   API: https://api-test.bog.ge/payments/v1
 #
-# PRODUCTION ENVIRONMENT (change when ready to go live):
+# PRODUCTION ENVIRONMENT:
 #   Auth: https://oauth2.bog.ge/auth/realms/bog/protocol/openid-connect/token
 #   API: https://api.bog.ge/payments/v1
+# TEST ENVIRONMENT:
+#   Auth: https://account-ob-test.bog.ge/auth/realms/bog-test/protocol/openid-connect/token
+#   API: https://api-test.bog.ge/payments/v1
+
+# User's production credentials (optional)
 BOG_CLIENT_ID = config('BOG_CLIENT_ID', default='')
 BOG_CLIENT_SECRET = config('BOG_CLIENT_SECRET', default='')
-BOG_AUTH_URL = config('BOG_AUTH_URL', default='https://account-ob-test.bog.ge/auth/realms/bog-test/protocol/openid-connect/token')
-BOG_API_BASE_URL = config('BOG_API_BASE_URL', default='https://api-test.bog.ge/payments/v1')
+
+# If no credentials provided, use test environment with demo credentials
+if not BOG_CLIENT_ID or not BOG_CLIENT_SECRET:
+    # Test environment credentials (for development/demo)
+    BOG_CLIENT_ID = config('BOG_TEST_CLIENT_ID', default='test_client_id')
+    BOG_CLIENT_SECRET = config('BOG_TEST_CLIENT_SECRET', default='test_client_secret')
+    BOG_AUTH_URL = 'https://account-ob-test.bog.ge/auth/realms/bog-test/protocol/openid-connect/token'
+    BOG_API_BASE_URL = 'https://api-test.bog.ge/payments/v1'
+else:
+    # Production environment (user provided their own credentials)
+    BOG_AUTH_URL = config('BOG_AUTH_URL', default='https://oauth2.bog.ge/auth/realms/bog/protocol/openid-connect/token')
+    BOG_API_BASE_URL = config('BOG_API_BASE_URL', default='https://api.bog.ge/payments/v1')
 
 # Cron Job Security Token (for scheduled task HTTP endpoints)
 CRON_SECRET_TOKEN = config('CRON_SECRET_TOKEN', default='')
