@@ -1231,14 +1231,98 @@ class OrderViewSet(viewsets.ModelViewSet):
     @extend_schema(
         tags=['Ecommerce - Orders'],
         summary='Create order from cart',
-        description='Submit cart and create order'
+        description='Submit cart and create order with automatic BOG payment URL generation'
     )
     def create(self, request, *args, **kwargs):
+        from tenants.bog_payment import bog_service
+        from django.conf import settings
+
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         order = serializer.save()
-        output_serializer = OrderSerializer(order)
-        return Response(output_serializer.data, status=status.HTTP_201_CREATED)
+
+        # Automatically generate payment URL
+        payment_method = request.data.get('payment_method', 'card')
+
+        if payment_method == 'cash_on_delivery':
+            # No BOG payment needed, just mark as COD
+            order.payment_method = 'cash_on_delivery'
+            order.payment_status = 'pending'
+            order.save()
+
+            output_serializer = OrderSerializer(order)
+            response_data = output_serializer.data
+            response_data['payment_method'] = 'cash_on_delivery'
+            response_data['message'] = 'Order will be paid on delivery'
+            return Response(response_data, status=status.HTTP_201_CREATED)
+
+        # Get BOG credentials
+        try:
+            from .models import EcommerceSettings
+            ecommerce_settings = EcommerceSettings.objects.get(tenant=request.tenant)
+
+            if ecommerce_settings.has_bog_credentials:
+                client_id = ecommerce_settings.bog_client_id
+                client_secret = ecommerce_settings.get_bog_secret()
+                use_production = ecommerce_settings.bog_use_production
+            else:
+                client_id = settings.BOG_CLIENT_ID
+                client_secret = settings.BOG_CLIENT_SECRET
+                use_production = not settings.BOG_API_BASE_URL.endswith('-test.bog.ge/payments/v1')
+        except:
+            client_id = settings.BOG_CLIENT_ID
+            client_secret = settings.BOG_CLIENT_SECRET
+            use_production = not settings.BOG_API_BASE_URL.endswith('-test.bog.ge/payments/v1')
+
+        # Create BOG payment
+        try:
+            callback_url = f"{request.scheme}://{request.get_host()}/api/ecommerce/payment-webhook/"
+            return_url_success = request.data.get('return_url_success', '')
+            return_url_fail = request.data.get('return_url_fail', '')
+
+            payment_result = bog_service.create_payment(
+                amount=float(order.total_amount),
+                currency='GEL',
+                description=f"Order {order.order_number}",
+                customer_email=order.client.email,
+                customer_name=order.client.full_name,
+                customer_phone=order.client.phone_number or '',
+                return_url_success=return_url_success,
+                return_url_fail=return_url_fail,
+                callback_url=callback_url,
+                external_order_id=order.order_number,
+                metadata={
+                    'order_id': order.id,
+                    'order_number': order.order_number,
+                    'tenant_id': request.tenant.id
+                }
+            )
+
+            # Update order with payment info
+            order.bog_order_id = payment_result['order_id']
+            order.payment_url = payment_result['payment_url']
+            order.payment_status = 'pending'
+            order.payment_method = 'card'
+            order.payment_metadata = payment_result
+            order.save()
+
+            # Return order data with payment info
+            output_serializer = OrderSerializer(order)
+            response_data = output_serializer.data
+            response_data['payment_url'] = payment_result['payment_url']
+            response_data['bog_order_id'] = payment_result['order_id']
+            response_data['payment_amount'] = payment_result['amount']
+            response_data['payment_currency'] = payment_result['currency']
+            return Response(response_data, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            # If payment creation fails, return order without payment URL
+            # User can try to initiate payment later
+            output_serializer = OrderSerializer(order)
+            response_data = output_serializer.data
+            response_data['payment_error'] = str(e)
+            response_data['message'] = 'Order created but payment initialization failed'
+            return Response(response_data, status=status.HTTP_201_CREATED)
 
     @extend_schema(
         tags=['Ecommerce - Orders'],
