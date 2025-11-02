@@ -109,8 +109,11 @@ def create_subscription_payment(request):
         )
 
     # Generate URLs
-    base_url = f"https://{request.get_host()}"
-    return_url = f"{base_url}/settings/subscription/success"
+    # Get frontend URL by removing 'api.' from the request host
+    api_host = request.get_host()
+    frontend_host = api_host.replace('api.', '')
+    frontend_url = f"https://{frontend_host}"
+    return_url = f"{frontend_url}/settings/subscription/success"
 
     # Ensure callback_url starts with https://
     api_domain = settings.API_DOMAIN
@@ -129,7 +132,7 @@ def create_subscription_payment(request):
             package=package,
             agent_count=agent_count,
             return_url_success=return_url,
-            return_url_fail=f"{base_url}/settings/subscription/failed",
+            return_url_fail=f"{frontend_url}/settings/subscription/failed",
             callback_url=callback_url,
             external_order_id=external_order_id
         )
@@ -1102,8 +1105,11 @@ def add_new_card(request):
         )
 
     # Generate URLs
-    base_url = f"https://{request.get_host()}"
-    return_url = f"{base_url}/settings/subscription?card_added=success"
+    # Get frontend URL by removing 'api.' from the request host
+    api_host = request.get_host()
+    frontend_host = api_host.replace('api.', '')
+    frontend_url = f"https://{frontend_host}"
+    return_url = f"{frontend_url}/settings/subscription?card_added=success"
 
     # Ensure callback_url starts with https://
     api_domain = settings.API_DOMAIN
@@ -1124,7 +1130,7 @@ def add_new_card(request):
             customer_email=request.user.email if hasattr(request.user, 'email') else '',
             customer_name=f"{request.user.first_name} {request.user.last_name}" if hasattr(request.user, 'first_name') else '',
             return_url_success=return_url,
-            return_url_fail=f"{base_url}/settings/subscription?card_added=failed",
+            return_url_fail=f"{frontend_url}/settings/subscription?card_added=failed",
             callback_url=callback_url,
             external_order_id=external_order_id,
             metadata={
