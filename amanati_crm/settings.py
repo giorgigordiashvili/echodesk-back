@@ -232,6 +232,11 @@ SPECTACULAR_SETTINGS = {
     'DESCRIPTION': 'Multi-tenant CRM system for EchoDesk',
     'VERSION': '1.0.0',
     'SERVE_INCLUDE_SCHEMA': False,
+    # Map custom authentication classes to security schemes
+    'AUTHENTICATION_WHITELIST': [
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+        'ecommerce_crm.authentication.EcommerceClientJWTAuthentication',
+    ],
 }
 
 # CORS settings - Allow wildcard subdomains for multi-tenant frontend
