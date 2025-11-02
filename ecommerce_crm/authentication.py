@@ -38,7 +38,9 @@ class EcommerceClientJWTAuthentication(BaseAuthentication):
             # Extract client_id from token
             client_id = token.get('client_id')
             if not client_id:
-                raise AuthenticationFailed('Token does not contain client_id')
+                # No client_id means this is not an ecommerce client token
+                # Return None to let other authentication classes try
+                return None
 
             # Get the client
             try:
@@ -50,7 +52,8 @@ class EcommerceClientJWTAuthentication(BaseAuthentication):
             return (client, token)
 
         except (InvalidToken, TokenError) as e:
-            raise AuthenticationFailed(f'Invalid token: {str(e)}')
+            # Invalid token format - let other auth classes try
+            return None
 
     def authenticate_header(self, request):
         """
