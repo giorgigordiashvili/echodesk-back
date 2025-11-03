@@ -175,6 +175,7 @@ class UserSerializer(serializers.ModelSerializer):
     group_permissions = serializers.SerializerMethodField()
     all_permissions = serializers.SerializerMethodField()
     feature_keys = serializers.SerializerMethodField()
+    is_booking_staff = serializers.SerializerMethodField()
     groups = GroupSerializer(many=True, read_only=True)
     tenant_groups = TenantGroupSerializer(many=True, read_only=True)
     department = DepartmentSerializer(read_only=True)
@@ -203,11 +204,11 @@ class UserSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'email', 'first_name', 'last_name', 'full_name',
             'role', 'status', 'phone_number', 'job_title', 'department', 'department_id',
-            'is_active', 'is_staff', 'date_joined', 'last_login',
+            'is_active', 'is_staff', 'is_booking_staff', 'date_joined', 'last_login',
             'permissions', 'group_permissions', 'all_permissions', 'feature_keys',
             'groups', 'group_ids', 'tenant_groups', 'tenant_group_ids', 'user_permission_ids'
         ]
-        read_only_fields = ['id', 'date_joined', 'last_login', 'feature_keys']
+        read_only_fields = ['id', 'date_joined', 'last_login', 'feature_keys', 'is_booking_staff']
 
     def get_permissions(self, obj):
         """Get user's direct permissions"""
@@ -224,7 +225,11 @@ class UserSerializer(serializers.ModelSerializer):
     def get_all_permissions(self, obj):
         """Get all permissions (user + group) as a dictionary"""
         return obj.get_all_permissions_dict()
-    
+
+    def get_is_booking_staff(self, obj):
+        """Check if user is assigned as booking staff"""
+        return hasattr(obj, 'booking_staff')
+
     def update(self, instance, validated_data):
         group_ids = validated_data.pop('group_ids', None)
         tenant_group_ids = validated_data.pop('tenant_group_ids', None)
