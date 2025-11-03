@@ -176,7 +176,13 @@ class Product(models.Model):
     )
 
     # Media
-    image = models.ImageField(upload_to='products/', blank=True, null=True, help_text="Main product image")
+    image = models.ImageField(
+        upload_to='products/',
+        max_length=500,
+        blank=True,
+        null=True,
+        help_text="Main product image"
+    )
 
     # Inventory
     track_inventory = models.BooleanField(default=True)
@@ -287,7 +293,7 @@ class Product(models.Model):
 class ProductImage(models.Model):
     """Additional product images"""
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='images')
-    image = models.ImageField(upload_to='products/gallery/')
+    image = models.ImageField(upload_to='products/gallery/', max_length=500)
     alt_text = models.JSONField(
         blank=True,
         default=dict,
@@ -393,7 +399,12 @@ class ProductVariant(models.Model):
 
     # Inventory
     quantity = models.IntegerField(default=0)
-    image = models.ImageField(upload_to='products/variants/', blank=True, null=True)
+    image = models.ImageField(
+        upload_to='products/variants/',
+        max_length=500,
+        blank=True,
+        null=True
+    )
 
     # Status
     is_active = models.BooleanField(default=True)

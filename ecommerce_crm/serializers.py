@@ -196,6 +196,15 @@ class ProductCreateUpdateSerializer(serializers.ModelSerializer):
             )
         return value
 
+    def validate_image(self, value):
+        """Validate image URL length"""
+        if value and len(value) > 500:
+            raise serializers.ValidationError(
+                f"Image URL must be 500 characters or less. Current length: {len(value)}. "
+                f"Please use a shorter URL or filename."
+            )
+        return value
+
     def create(self, validated_data):
         # Extract nested data
         attributes_data = validated_data.pop('attributes', [])
