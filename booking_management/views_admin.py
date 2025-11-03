@@ -12,7 +12,7 @@ from .models import (
 )
 from .serializers import (
     BookingClientSerializer, ServiceListSerializer, ServiceDetailSerializer,
-    ServiceCategorySerializer, BookingStaffSerializer,
+    ServiceCategorySerializer, BookingStaffSerializer, BookingStaffCreateSerializer,
     BookingListSerializer, BookingDetailSerializer,
     RecurringBookingSerializer, StaffAvailabilitySerializer,
     StaffExceptionSerializer, BookingSettingsSerializer
@@ -235,6 +235,12 @@ class AdminBookingStaffViewSet(viewsets.ModelViewSet):
     feature_required = 'booking_management'
     filterset_fields = ['is_active_for_bookings']
     search_fields = ['user__first_name', 'user__last_name']
+
+    def get_serializer_class(self):
+        """Use different serializer for create/update operations"""
+        if self.action in ['create', 'update', 'partial_update']:
+            return BookingStaffCreateSerializer
+        return BookingStaffSerializer
 
     @action(detail=True, methods=['get'])
     def availability(self, request, pk=None):
