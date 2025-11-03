@@ -180,6 +180,22 @@ class ProductCreateUpdateSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['created_at', 'updated_at']
 
+    def validate_sku(self, value):
+        """Validate SKU length"""
+        if len(value) > 100:
+            raise serializers.ValidationError(
+                f"SKU must be 100 characters or less. Current length: {len(value)}"
+            )
+        return value
+
+    def validate_slug(self, value):
+        """Validate slug length"""
+        if len(value) > 200:
+            raise serializers.ValidationError(
+                f"Slug must be 200 characters or less. Current length: {len(value)}"
+            )
+        return value
+
     def create(self, validated_data):
         # Extract nested data
         attributes_data = validated_data.pop('attributes', [])
