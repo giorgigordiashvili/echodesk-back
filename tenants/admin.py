@@ -660,7 +660,10 @@ class FeatureAdminForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         if self.instance.pk:
             # Load existing permissions for this feature
-            self.initial['permissions'] = self.instance.permissions.all()
+            # Get the actual Permission objects from FeaturePermission relationships
+            self.initial['permissions'] = Permission.objects.filter(
+                feature_permissions__feature=self.instance
+            )
 
     def save(self, commit=True):
         feature = super().save(commit=False)
