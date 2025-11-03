@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.utils import timezone
 from django.db.models import Q
+from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter
 from .models import (
     BookingClient, Service, ServiceCategory, BookingStaff,
     Booking, RecurringBooking
@@ -25,6 +26,7 @@ from .payment_service import get_booking_payment_service
 # PUBLIC AUTHENTICATION ENDPOINTS
 # ============================================================================
 
+@extend_schema(tags=['Booking Client - Authentication'])
 @api_view(['POST'])
 @permission_classes([permissions.AllowAny])
 def client_register(request):
@@ -45,6 +47,7 @@ def client_register(request):
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
+@extend_schema(tags=['Booking Client - Authentication'])
 @api_view(['POST'])
 @permission_classes([permissions.AllowAny])
 def client_login(request):
@@ -61,6 +64,7 @@ def client_login(request):
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
+@extend_schema(tags=['Booking Client - Authentication'])
 @api_view(['POST'])
 @permission_classes([permissions.AllowAny])
 def client_verify_email(request):
@@ -86,6 +90,7 @@ def client_verify_email(request):
         return Response({'error': 'Invalid verification token'}, status=status.HTTP_400_BAD_REQUEST)
 
 
+@extend_schema(tags=['Booking Client - Authentication'])
 @api_view(['POST'])
 @permission_classes([permissions.AllowAny])
 def client_password_reset_request(request):
@@ -110,6 +115,7 @@ def client_password_reset_request(request):
         return Response({'message': 'If email exists, reset link will be sent'})
 
 
+@extend_schema(tags=['Booking Client - Authentication'])
 @api_view(['POST'])
 @permission_classes([permissions.AllowAny])
 def client_password_reset_confirm(request):
@@ -141,6 +147,7 @@ def client_password_reset_confirm(request):
 # CLIENT PROFILE
 # ============================================================================
 
+@extend_schema(tags=['Booking Client - Profile'])
 @api_view(['GET', 'PATCH'])
 @permission_classes([IsAuthenticatedBookingClient])
 def client_profile(request):
@@ -167,11 +174,16 @@ def client_profile(request):
 # CLIENT VIEWSETS
 # ============================================================================
 
+@extend_schema_view(
+    list=extend_schema(tags=['Booking Client - Services']),
+    retrieve=extend_schema(tags=['Booking Client - Services'])
+)
 class ClientServiceCategoryViewSet(viewsets.ReadOnlyModelViewSet):
     """View service categories (public read-only)"""
     queryset = ServiceCategory.objects.filter(is_active=True)
     serializer_class = ServiceCategorySerializer
     permission_classes = [permissions.AllowAny]
+    feature_required = 'booking_management'
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -180,6 +192,11 @@ class ClientServiceCategoryViewSet(viewsets.ReadOnlyModelViewSet):
         return context
 
 
+@extend_schema_view(
+    list=extend_schema(tags=['Booking Client - Services']),
+    retrieve=extend_schema(tags=['Booking Client - Services']),
+    slots=extend_schema(tags=['Booking Client - Services'])
+)
 class ClientServiceViewSet(viewsets.ReadOnlyModelViewSet):
     """View services (public read-only)"""
     queryset = Service.objects.filter(status='active')
@@ -187,6 +204,7 @@ class ClientServiceViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [permissions.AllowAny]
     filterset_fields = ['category', 'booking_type']
     search_fields = ['name']
+    feature_required = 'booking_management'
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -228,18 +246,32 @@ class ClientServiceViewSet(viewsets.ReadOnlyModelViewSet):
         })
 
 
+@extend_schema_view(
+    list=extend_schema(tags=['Booking Client - Staff']),
+    retrieve=extend_schema(tags=['Booking Client - Staff'])
+)
 class ClientBookingStaffViewSet(viewsets.ReadOnlyModelViewSet):
     """View staff members (public read-only)"""
     queryset = BookingStaff.objects.filter(is_active_for_bookings=True)
     serializer_class = BookingStaffSerializer
     permission_classes = [permissions.AllowAny]
+    feature_required = 'booking_management'
 
 
+@extend_schema_view(
+    list=extend_schema(tags=['Booking Client - Bookings']),
+    retrieve=extend_schema(tags=['Booking Client - Bookings']),
+    create=extend_schema(tags=['Booking Client - Bookings']),
+    update=extend_schema(tags=['Booking Client - Bookings']),
+    partial_update=extend_schema(tags=['Booking Client - Bookings']),
+    cancel=extend_schema(tags=['Booking Client - Bookings'])
+)
 class ClientBookingViewSet(viewsets.ModelViewSet):
     """Manage client's own bookings"""
     serializer_class = BookingListSerializer
     authentication_classes = [BookingClientJWTAuthentication]
     permission_classes = [IsAuthenticatedBookingClient]
+    feature_required = 'booking_management'
 
     def get_queryset(self):
         """Get only client's own bookings"""
@@ -326,11 +358,21 @@ class ClientBookingViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
 
+@extend_schema_view(
+    list=extend_schema(tags=['Booking Client - Recurring Bookings']),
+    retrieve=extend_schema(tags=['Booking Client - Recurring Bookings']),
+    create=extend_schema(tags=['Booking Client - Recurring Bookings']),
+    update=extend_schema(tags=['Booking Client - Recurring Bookings']),
+    partial_update=extend_schema(tags=['Booking Client - Recurring Bookings']),
+    pause=extend_schema(tags=['Booking Client - Recurring Bookings']),
+    resume=extend_schema(tags=['Booking Client - Recurring Bookings'])
+)
 class ClientRecurringBookingViewSet(viewsets.ModelViewSet):
     """Manage recurring bookings"""
     serializer_class = RecurringBookingSerializer
     authentication_classes = [BookingClientJWTAuthentication]
     permission_classes = [IsAuthenticatedBookingClient]
+    feature_required = 'booking_management'
 
     def get_queryset(self):
         """Get only client's own recurring bookings"""

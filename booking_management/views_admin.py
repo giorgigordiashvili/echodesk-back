@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from django.utils import timezone
 from django.db.models import Q, Count, Sum, Avg
 from datetime import datetime, timedelta, date
+from drf_spectacular.utils import extend_schema, extend_schema_view
 from .models import (
     BookingClient, Service, ServiceCategory, BookingStaff,
     Booking, RecurringBooking, StaffAvailability, StaffException,
@@ -28,6 +29,7 @@ logger = logging.getLogger(__name__)
 # DASHBOARD & ANALYTICS
 # ============================================================================
 
+@extend_schema(tags=['Booking Admin - Dashboard'])
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated, HasBookingManagementFeature])
 def dashboard_stats(request):
@@ -89,6 +91,7 @@ def dashboard_stats(request):
     })
 
 
+@extend_schema(tags=['Booking Admin - Dashboard'])
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated, HasBookingManagementFeature])
 def staff_schedule(request):
@@ -142,11 +145,20 @@ def staff_schedule(request):
 # SERVICE MANAGEMENT
 # ============================================================================
 
+@extend_schema_view(
+    list=extend_schema(tags=['Booking Admin - Services']),
+    retrieve=extend_schema(tags=['Booking Admin - Services']),
+    create=extend_schema(tags=['Booking Admin - Services']),
+    update=extend_schema(tags=['Booking Admin - Services']),
+    partial_update=extend_schema(tags=['Booking Admin - Services']),
+    destroy=extend_schema(tags=['Booking Admin - Services'])
+)
 class AdminServiceCategoryViewSet(viewsets.ModelViewSet):
     """Admin service category management"""
     queryset = ServiceCategory.objects.all()
     serializer_class = ServiceCategorySerializer
     permission_classes = [permissions.IsAuthenticated, HasBookingManagementFeature]
+    feature_required = 'booking_management'
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -154,10 +166,21 @@ class AdminServiceCategoryViewSet(viewsets.ModelViewSet):
         return context
 
 
+@extend_schema_view(
+    list=extend_schema(tags=['Booking Admin - Services']),
+    retrieve=extend_schema(tags=['Booking Admin - Services']),
+    create=extend_schema(tags=['Booking Admin - Services']),
+    update=extend_schema(tags=['Booking Admin - Services']),
+    partial_update=extend_schema(tags=['Booking Admin - Services']),
+    destroy=extend_schema(tags=['Booking Admin - Services']),
+    activate=extend_schema(tags=['Booking Admin - Services']),
+    deactivate=extend_schema(tags=['Booking Admin - Services'])
+)
 class AdminServiceViewSet(viewsets.ModelViewSet):
     """Admin service management"""
     queryset = Service.objects.all()
     permission_classes = [permissions.IsAuthenticated, HasBookingManagementFeature]
+    feature_required = 'booking_management'
     filterset_fields = ['category', 'status', 'booking_type']
     search_fields = ['name']
 
@@ -192,11 +215,24 @@ class AdminServiceViewSet(viewsets.ModelViewSet):
 # STAFF MANAGEMENT
 # ============================================================================
 
+@extend_schema_view(
+    list=extend_schema(tags=['Booking Admin - Staff']),
+    retrieve=extend_schema(tags=['Booking Admin - Staff']),
+    create=extend_schema(tags=['Booking Admin - Staff']),
+    update=extend_schema(tags=['Booking Admin - Staff']),
+    partial_update=extend_schema(tags=['Booking Admin - Staff']),
+    destroy=extend_schema(tags=['Booking Admin - Staff']),
+    availability=extend_schema(tags=['Booking Admin - Staff']),
+    exceptions=extend_schema(tags=['Booking Admin - Staff']),
+    bookings=extend_schema(tags=['Booking Admin - Staff']),
+    toggle_active=extend_schema(tags=['Booking Admin - Staff'])
+)
 class AdminBookingStaffViewSet(viewsets.ModelViewSet):
     """Admin staff management"""
     queryset = BookingStaff.objects.all()
     serializer_class = BookingStaffSerializer
     permission_classes = [permissions.IsAuthenticated, HasBookingManagementFeature]
+    feature_required = 'booking_management'
     filterset_fields = ['is_active_for_bookings']
     search_fields = ['user__first_name', 'user__last_name']
 
@@ -248,19 +284,37 @@ class AdminBookingStaffViewSet(viewsets.ModelViewSet):
         return Response(BookingStaffSerializer(staff).data)
 
 
+@extend_schema_view(
+    list=extend_schema(tags=['Booking Admin - Staff']),
+    retrieve=extend_schema(tags=['Booking Admin - Staff']),
+    create=extend_schema(tags=['Booking Admin - Staff']),
+    update=extend_schema(tags=['Booking Admin - Staff']),
+    partial_update=extend_schema(tags=['Booking Admin - Staff']),
+    destroy=extend_schema(tags=['Booking Admin - Staff'])
+)
 class AdminStaffAvailabilityViewSet(viewsets.ModelViewSet):
     """Admin staff availability management"""
     queryset = StaffAvailability.objects.all()
     serializer_class = StaffAvailabilitySerializer
     permission_classes = [permissions.IsAuthenticated, HasBookingManagementFeature]
+    feature_required = 'booking_management'
     filterset_fields = ['staff', 'day_of_week', 'is_available']
 
 
+@extend_schema_view(
+    list=extend_schema(tags=['Booking Admin - Staff']),
+    retrieve=extend_schema(tags=['Booking Admin - Staff']),
+    create=extend_schema(tags=['Booking Admin - Staff']),
+    update=extend_schema(tags=['Booking Admin - Staff']),
+    partial_update=extend_schema(tags=['Booking Admin - Staff']),
+    destroy=extend_schema(tags=['Booking Admin - Staff'])
+)
 class AdminStaffExceptionViewSet(viewsets.ModelViewSet):
     """Admin staff exception management"""
     queryset = StaffException.objects.all()
     serializer_class = StaffExceptionSerializer
     permission_classes = [permissions.IsAuthenticated, HasBookingManagementFeature]
+    feature_required = 'booking_management'
     filterset_fields = ['staff', 'is_available']
 
     def get_queryset(self):
@@ -278,10 +332,25 @@ class AdminStaffExceptionViewSet(viewsets.ModelViewSet):
 # BOOKING MANAGEMENT
 # ============================================================================
 
+@extend_schema_view(
+    list=extend_schema(tags=['Booking Admin - Bookings']),
+    retrieve=extend_schema(tags=['Booking Admin - Bookings']),
+    create=extend_schema(tags=['Booking Admin - Bookings']),
+    update=extend_schema(tags=['Booking Admin - Bookings']),
+    partial_update=extend_schema(tags=['Booking Admin - Bookings']),
+    destroy=extend_schema(tags=['Booking Admin - Bookings']),
+    confirm=extend_schema(tags=['Booking Admin - Bookings']),
+    complete=extend_schema(tags=['Booking Admin - Bookings']),
+    cancel=extend_schema(tags=['Booking Admin - Bookings']),
+    assign_staff=extend_schema(tags=['Booking Admin - Bookings']),
+    reschedule=extend_schema(tags=['Booking Admin - Bookings']),
+    check_payment_status=extend_schema(tags=['Booking Admin - Bookings'])
+)
 class AdminBookingViewSet(viewsets.ModelViewSet):
     """Admin booking management - view and manage all bookings"""
     serializer_class = BookingListSerializer
     permission_classes = [permissions.IsAuthenticated, HasBookingManagementFeature]
+    feature_required = 'booking_management'
     filterset_fields = ['status', 'payment_status', 'service', 'staff', 'client']
     search_fields = ['booking_number', 'client__email', 'client__first_name', 'client__last_name']
 
@@ -469,11 +538,23 @@ class AdminBookingViewSet(viewsets.ModelViewSet):
             )
 
 
+@extend_schema_view(
+    list=extend_schema(tags=['Booking Admin - Bookings']),
+    retrieve=extend_schema(tags=['Booking Admin - Bookings']),
+    create=extend_schema(tags=['Booking Admin - Bookings']),
+    update=extend_schema(tags=['Booking Admin - Bookings']),
+    partial_update=extend_schema(tags=['Booking Admin - Bookings']),
+    destroy=extend_schema(tags=['Booking Admin - Bookings']),
+    pause=extend_schema(tags=['Booking Admin - Bookings']),
+    resume=extend_schema(tags=['Booking Admin - Bookings']),
+    cancel=extend_schema(tags=['Booking Admin - Bookings'])
+)
 class AdminRecurringBookingViewSet(viewsets.ModelViewSet):
     """Admin recurring booking management"""
     queryset = RecurringBooking.objects.all()
     serializer_class = RecurringBookingSerializer
     permission_classes = [permissions.IsAuthenticated, HasBookingManagementFeature]
+    feature_required = 'booking_management'
     filterset_fields = ['status', 'frequency', 'client', 'service']
 
     @action(detail=True, methods=['post'])
@@ -506,11 +587,18 @@ class AdminRecurringBookingViewSet(viewsets.ModelViewSet):
 # CLIENT MANAGEMENT
 # ============================================================================
 
+@extend_schema_view(
+    list=extend_schema(tags=['Booking Admin - Clients']),
+    retrieve=extend_schema(tags=['Booking Admin - Clients']),
+    bookings=extend_schema(tags=['Booking Admin - Clients']),
+    stats=extend_schema(tags=['Booking Admin - Clients'])
+)
 class AdminBookingClientViewSet(viewsets.ReadOnlyModelViewSet):
     """Admin client viewing (read-only for now)"""
     queryset = BookingClient.objects.all()
     serializer_class = BookingClientSerializer
     permission_classes = [permissions.IsAuthenticated, HasBookingManagementFeature]
+    feature_required = 'booking_management'
     search_fields = ['email', 'first_name', 'last_name', 'phone_number']
 
     @action(detail=True, methods=['get'])
@@ -548,6 +636,7 @@ class AdminBookingClientViewSet(viewsets.ReadOnlyModelViewSet):
 # SETTINGS MANAGEMENT
 # ============================================================================
 
+@extend_schema(tags=['Booking Admin - Settings'])
 @api_view(['GET', 'PUT', 'PATCH'])
 @permission_classes([permissions.IsAuthenticated, HasBookingManagementFeature])
 def booking_settings(request):

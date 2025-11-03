@@ -233,6 +233,11 @@ SPECTACULAR_SETTINGS = {
     'DESCRIPTION': 'Multi-tenant CRM system for EchoDesk',
     'VERSION': '1.0.0',
     'SERVE_INCLUDE_SCHEMA': False,
+    'DEFAULT_SCHEMA_CLASS': 'amanati_crm.schema.FeatureAwareAutoSchema',
+    'DEFAULT_GENERATOR_CLASS': 'amanati_crm.schema.TenantAwareSchemaGenerator',
+    'PREPROCESSING_HOOKS': [
+        'amanati_crm.schema.feature_based_preprocessing_hook',
+    ],
 }
 
 # CORS settings - Allow wildcard subdomains for multi-tenant frontend
