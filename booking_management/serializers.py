@@ -147,15 +147,11 @@ class BookingStaffCreateSerializer(serializers.ModelSerializer):
         fields = ['user_id', 'bio', 'profile_image', 'is_active_for_bookings']
 
     def validate_user_id(self, value):
-        """Validate that user exists and is in a booking_staff enabled group"""
+        """Validate that user exists and is not already booking staff"""
         try:
             user = User.objects.get(id=value)
         except User.DoesNotExist:
             raise serializers.ValidationError("User not found")
-
-        # Check if user is in a group with is_booking_staff=True
-        if not user.tenant_groups.filter(is_booking_staff=True).exists():
-            raise serializers.ValidationError("User must be in a group enabled for booking staff")
 
         # Check if user is already a booking staff
         if hasattr(user, 'booking_staff'):
