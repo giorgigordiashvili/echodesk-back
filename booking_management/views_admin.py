@@ -1,0 +1,583 @@
+from rest_framework import viewsets, status, permissions
+from rest_framework.decorators import api_view, permission_classes, action
+from rest_framework.response import Response
+from django.utils import timezone
+from django.db.models import Q, Count, Sum, Avg
+from datetime import datetime, timedelta, date
+from .models import (
+    BookingClient, Service, ServiceCategory, BookingStaff,
+    Booking, RecurringBooking, StaffAvailability, StaffException,
+    BookingSettings
+)
+from .serializers import (
+    BookingClientSerializer, ServiceListSerializer, ServiceDetailSerializer,
+    ServiceCategorySerializer, BookingStaffSerializer,
+    BookingListSerializer, BookingDetailSerializer,
+    RecurringBookingSerializer, StaffAvailabilitySerializer,
+    StaffExceptionSerializer, BookingSettingsSerializer
+)
+from .permissions import HasBookingManagementFeature
+from .utils import generate_available_slots, can_cancel_booking
+from .payment_service import get_booking_payment_service
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# DASHBOARD & ANALYTICS
+# ============================================================================
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated, HasBookingManagementFeature])
+def dashboard_stats(request):
+    """Get dashboard statistics"""
+    today = timezone.now().date()
+
+    # Today's bookings
+    today_bookings = Booking.objects.filter(date=today).exclude(status='cancelled')
+
+    # This week's stats
+    week_start = today - timedelta(days=today.weekday())
+    week_end = week_start + timedelta(days=7)
+    week_bookings = Booking.objects.filter(
+        date__gte=week_start,
+        date__lt=week_end
+    ).exclude(status='cancelled')
+
+    # Revenue stats
+    total_revenue = Booking.objects.filter(
+        payment_status__in=['fully_paid', 'deposit_paid']
+    ).aggregate(total=Sum('paid_amount'))['total'] or 0
+
+    week_revenue = week_bookings.filter(
+        payment_status__in=['fully_paid', 'deposit_paid']
+    ).aggregate(total=Sum('paid_amount'))['total'] or 0
+
+    # Status breakdown
+    status_counts = today_bookings.values('status').annotate(count=Count('id'))
+
+    # Popular services
+    popular_services = Booking.objects.filter(
+        date__gte=week_start
+    ).values('service__name').annotate(
+        count=Count('id')
+    ).order_by('-count')[:5]
+
+    return Response({
+        'today': {
+            'total_bookings': today_bookings.count(),
+            'confirmed': today_bookings.filter(status='confirmed').count(),
+            'pending': today_bookings.filter(status='pending').count(),
+            'completed': today_bookings.filter(status='completed').count(),
+            'status_breakdown': list(status_counts),
+            'bookings': BookingListSerializer(
+                today_bookings.order_by('start_time'),
+                many=True
+            ).data
+        },
+        'week': {
+            'total_bookings': week_bookings.count(),
+            'revenue': float(week_revenue),
+            'popular_services': list(popular_services)
+        },
+        'overall': {
+            'total_clients': BookingClient.objects.count(),
+            'total_revenue': float(total_revenue),
+            'active_staff': BookingStaff.objects.filter(is_active_for_bookings=True).count()
+        }
+    })
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated, HasBookingManagementFeature])
+def staff_schedule(request):
+    """Get staff schedule for a specific date"""
+    date_str = request.query_params.get('date')
+    staff_id = request.query_params.get('staff_id')
+
+    if not date_str:
+        date_obj = timezone.now().date()
+    else:
+        try:
+            date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return Response(
+                {'error': 'Invalid date format. Use YYYY-MM-DD'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+    # Filter by staff if specified
+    queryset = Booking.objects.filter(date=date_obj).exclude(status='cancelled')
+    if staff_id:
+        queryset = queryset.filter(staff_id=staff_id)
+
+    # Get staff availability
+    staff_list = BookingStaff.objects.filter(is_active_for_bookings=True)
+    if staff_id:
+        staff_list = staff_list.filter(id=staff_id)
+
+    schedule = []
+    for staff_member in staff_list:
+        staff_bookings = queryset.filter(staff=staff_member).order_by('start_time')
+
+        # Get availability
+        from .utils import get_staff_availability
+        availability = get_staff_availability(staff_member, date_obj)
+
+        schedule.append({
+            'staff': BookingStaffSerializer(staff_member).data,
+            'availability': availability,
+            'bookings': BookingListSerializer(staff_bookings, many=True).data,
+            'booking_count': staff_bookings.count()
+        })
+
+    return Response({
+        'date': date_str or str(date_obj),
+        'schedule': schedule
+    })
+
+
+# ============================================================================
+# SERVICE MANAGEMENT
+# ============================================================================
+
+class AdminServiceCategoryViewSet(viewsets.ModelViewSet):
+    """Admin service category management"""
+    queryset = ServiceCategory.objects.all()
+    serializer_class = ServiceCategorySerializer
+    permission_classes = [permissions.IsAuthenticated, HasBookingManagementFeature]
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['language'] = self.request.query_params.get('lang', 'en')
+        return context
+
+
+class AdminServiceViewSet(viewsets.ModelViewSet):
+    """Admin service management"""
+    queryset = Service.objects.all()
+    permission_classes = [permissions.IsAuthenticated, HasBookingManagementFeature]
+    filterset_fields = ['category', 'status', 'booking_type']
+    search_fields = ['name']
+
+    def get_serializer_class(self):
+        if self.action in ['retrieve', 'create', 'update', 'partial_update']:
+            return ServiceDetailSerializer
+        return ServiceListSerializer
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['language'] = self.request.query_params.get('lang', 'en')
+        return context
+
+    @action(detail=True, methods=['post'])
+    def activate(self, request, pk=None):
+        """Activate service"""
+        service = self.get_object()
+        service.status = 'active'
+        service.save(update_fields=['status'])
+        return Response(ServiceDetailSerializer(service).data)
+
+    @action(detail=True, methods=['post'])
+    def deactivate(self, request, pk=None):
+        """Deactivate service"""
+        service = self.get_object()
+        service.status = 'inactive'
+        service.save(update_fields=['status'])
+        return Response(ServiceDetailSerializer(service).data)
+
+
+# ============================================================================
+# STAFF MANAGEMENT
+# ============================================================================
+
+class AdminBookingStaffViewSet(viewsets.ModelViewSet):
+    """Admin staff management"""
+    queryset = BookingStaff.objects.all()
+    serializer_class = BookingStaffSerializer
+    permission_classes = [permissions.IsAuthenticated, HasBookingManagementFeature]
+    filterset_fields = ['is_active_for_bookings']
+    search_fields = ['user__first_name', 'user__last_name']
+
+    @action(detail=True, methods=['get'])
+    def availability(self, request, pk=None):
+        """Get staff availability schedule"""
+        staff = self.get_object()
+        availability = StaffAvailability.objects.filter(staff=staff).order_by('day_of_week')
+        return Response(StaffAvailabilitySerializer(availability, many=True).data)
+
+    @action(detail=True, methods=['get'])
+    def exceptions(self, request, pk=None):
+        """Get staff exceptions (vacations, special hours)"""
+        staff = self.get_object()
+        # Get future exceptions
+        exceptions = StaffException.objects.filter(
+            staff=staff,
+            date__gte=timezone.now().date()
+        ).order_by('date')
+        return Response(StaffExceptionSerializer(exceptions, many=True).data)
+
+    @action(detail=True, methods=['get'])
+    def bookings(self, request, pk=None):
+        """Get staff bookings"""
+        staff = self.get_object()
+        date_str = request.query_params.get('date')
+
+        queryset = Booking.objects.filter(staff=staff).exclude(status='cancelled')
+
+        if date_str:
+            try:
+                date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
+                queryset = queryset.filter(date=date_obj)
+            except ValueError:
+                pass
+        else:
+            # Default to upcoming bookings
+            queryset = queryset.filter(date__gte=timezone.now().date())
+
+        queryset = queryset.order_by('date', 'start_time')
+        return Response(BookingListSerializer(queryset, many=True).data)
+
+    @action(detail=True, methods=['post'])
+    def toggle_active(self, request, pk=None):
+        """Toggle staff active status"""
+        staff = self.get_object()
+        staff.is_active_for_bookings = not staff.is_active_for_bookings
+        staff.save(update_fields=['is_active_for_bookings'])
+        return Response(BookingStaffSerializer(staff).data)
+
+
+class AdminStaffAvailabilityViewSet(viewsets.ModelViewSet):
+    """Admin staff availability management"""
+    queryset = StaffAvailability.objects.all()
+    serializer_class = StaffAvailabilitySerializer
+    permission_classes = [permissions.IsAuthenticated, HasBookingManagementFeature]
+    filterset_fields = ['staff', 'day_of_week', 'is_available']
+
+
+class AdminStaffExceptionViewSet(viewsets.ModelViewSet):
+    """Admin staff exception management"""
+    queryset = StaffException.objects.all()
+    serializer_class = StaffExceptionSerializer
+    permission_classes = [permissions.IsAuthenticated, HasBookingManagementFeature]
+    filterset_fields = ['staff', 'is_available']
+
+    def get_queryset(self):
+        """Filter future exceptions by default"""
+        queryset = super().get_queryset()
+        show_past = self.request.query_params.get('show_past', 'false').lower() == 'true'
+
+        if not show_past:
+            queryset = queryset.filter(date__gte=timezone.now().date())
+
+        return queryset.order_by('date')
+
+
+# ============================================================================
+# BOOKING MANAGEMENT
+# ============================================================================
+
+class AdminBookingViewSet(viewsets.ModelViewSet):
+    """Admin booking management - view and manage all bookings"""
+    serializer_class = BookingListSerializer
+    permission_classes = [permissions.IsAuthenticated, HasBookingManagementFeature]
+    filterset_fields = ['status', 'payment_status', 'service', 'staff', 'client']
+    search_fields = ['booking_number', 'client__email', 'client__first_name', 'client__last_name']
+
+    def get_queryset(self):
+        """Get all bookings with filters"""
+        queryset = Booking.objects.all().select_related(
+            'client', 'service', 'staff'
+        ).order_by('-date', '-start_time')
+
+        # Date range filter
+        date_from = self.request.query_params.get('date_from')
+        date_to = self.request.query_params.get('date_to')
+
+        if date_from:
+            try:
+                queryset = queryset.filter(date__gte=datetime.strptime(date_from, '%Y-%m-%d').date())
+            except ValueError:
+                pass
+
+        if date_to:
+            try:
+                queryset = queryset.filter(date__lte=datetime.strptime(date_to, '%Y-%m-%d').date())
+            except ValueError:
+                pass
+
+        return queryset
+
+    def get_serializer_class(self):
+        if self.action == 'retrieve':
+            return BookingDetailSerializer
+        return BookingListSerializer
+
+    @action(detail=True, methods=['post'])
+    def confirm(self, request, pk=None):
+        """Confirm booking"""
+        booking = self.get_object()
+
+        if booking.status != 'pending':
+            return Response(
+                {'error': f'Cannot confirm booking with status: {booking.status}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        booking.confirm()
+        return Response(BookingDetailSerializer(booking).data)
+
+    @action(detail=True, methods=['post'])
+    def complete(self, request, pk=None):
+        """Mark booking as completed"""
+        booking = self.get_object()
+
+        if booking.status not in ['confirmed', 'in_progress']:
+            return Response(
+                {'error': f'Cannot complete booking with status: {booking.status}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        booking.complete()
+        return Response(BookingDetailSerializer(booking).data)
+
+    @action(detail=True, methods=['post'])
+    def cancel(self, request, pk=None):
+        """Cancel booking (admin can cancel anytime)"""
+        booking = self.get_object()
+
+        if booking.status in ['completed', 'cancelled']:
+            return Response(
+                {'error': f'Cannot cancel booking with status: {booking.status}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        cancellation_reason = request.data.get('reason', 'Cancelled by admin')
+        booking.cancel(cancelled_by='admin', reason=cancellation_reason)
+
+        # Initiate refund if applicable
+        if booking.paid_amount > 0:
+            refund_requested = request.data.get('refund', True)
+            if refund_requested:
+                try:
+                    payment_service = get_booking_payment_service()
+                    refund_result = payment_service.initiate_refund(booking)
+                except Exception as e:
+                    logger.error(f"Failed to initiate refund for {booking.booking_number}: {str(e)}")
+
+        return Response(BookingDetailSerializer(booking).data)
+
+    @action(detail=True, methods=['post'])
+    def assign_staff(self, request, pk=None):
+        """Assign or reassign staff to booking"""
+        booking = self.get_object()
+        staff_id = request.data.get('staff_id')
+
+        if not staff_id:
+            return Response(
+                {'error': 'staff_id is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            staff = BookingStaff.objects.get(id=staff_id)
+        except BookingStaff.DoesNotExist:
+            return Response(
+                {'error': 'Staff not found'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Check if staff is available for this service
+        if not staff.services.filter(id=booking.service.id).exists():
+            return Response(
+                {'error': 'Staff is not assigned to this service'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Check availability
+        from .utils import is_slot_booked
+        if is_slot_booked(staff, booking.date, booking.start_time, booking.service.total_duration_minutes):
+            return Response(
+                {'error': 'Staff is not available at this time'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        booking.staff = staff
+        booking.save(update_fields=['staff'])
+
+        return Response(BookingDetailSerializer(booking).data)
+
+    @action(detail=True, methods=['post'])
+    def reschedule(self, request, pk=None):
+        """Reschedule booking to new date/time"""
+        booking = self.get_object()
+
+        new_date_str = request.data.get('date')
+        new_time_str = request.data.get('start_time')
+
+        if not new_date_str or not new_time_str:
+            return Response(
+                {'error': 'date and start_time are required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            new_date = datetime.strptime(new_date_str, '%Y-%m-%d').date()
+            new_time = datetime.strptime(new_time_str, '%H:%M').time()
+        except ValueError:
+            return Response(
+                {'error': 'Invalid date or time format'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Validate availability
+        from .utils import validate_booking_availability
+        is_available, error_msg = validate_booking_availability(
+            booking.service,
+            booking.staff,
+            new_date,
+            new_time
+        )
+
+        if not is_available:
+            return Response({'error': error_msg}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Update booking
+        booking.date = new_date
+        booking.start_time = new_time
+        booking.end_time = booking.service.get_end_time(new_time)
+        booking.save(update_fields=['date', 'start_time', 'end_time'])
+
+        # TODO: Send notification to client about reschedule
+
+        return Response(BookingDetailSerializer(booking).data)
+
+    @action(detail=True, methods=['get'])
+    def check_payment_status(self, request, pk=None):
+        """Check payment status from BOG"""
+        booking = self.get_object()
+
+        try:
+            payment_service = get_booking_payment_service()
+            payment_status = payment_service.check_payment_status(booking)
+            return Response(payment_status)
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class AdminRecurringBookingViewSet(viewsets.ModelViewSet):
+    """Admin recurring booking management"""
+    queryset = RecurringBooking.objects.all()
+    serializer_class = RecurringBookingSerializer
+    permission_classes = [permissions.IsAuthenticated, HasBookingManagementFeature]
+    filterset_fields = ['status', 'frequency', 'client', 'service']
+
+    @action(detail=True, methods=['post'])
+    def pause(self, request, pk=None):
+        """Pause recurring booking"""
+        recurring = self.get_object()
+        recurring.status = 'paused'
+        recurring.save(update_fields=['status'])
+        return Response(RecurringBookingSerializer(recurring).data)
+
+    @action(detail=True, methods=['post'])
+    def resume(self, request, pk=None):
+        """Resume recurring booking"""
+        recurring = self.get_object()
+        recurring.status = 'active'
+        recurring.save(update_fields=['status'])
+        return Response(RecurringBookingSerializer(recurring).data)
+
+    @action(detail=True, methods=['post'])
+    def cancel(self, request, pk=None):
+        """Cancel recurring booking"""
+        recurring = self.get_object()
+        recurring.status = 'cancelled'
+        recurring.end_date = timezone.now().date()
+        recurring.save(update_fields=['status', 'end_date'])
+        return Response(RecurringBookingSerializer(recurring).data)
+
+
+# ============================================================================
+# CLIENT MANAGEMENT
+# ============================================================================
+
+class AdminBookingClientViewSet(viewsets.ReadOnlyModelViewSet):
+    """Admin client viewing (read-only for now)"""
+    queryset = BookingClient.objects.all()
+    serializer_class = BookingClientSerializer
+    permission_classes = [permissions.IsAuthenticated, HasBookingManagementFeature]
+    search_fields = ['email', 'first_name', 'last_name', 'phone_number']
+
+    @action(detail=True, methods=['get'])
+    def bookings(self, request, pk=None):
+        """Get client's booking history"""
+        client = self.get_object()
+        bookings = Booking.objects.filter(client=client).order_by('-date', '-start_time')
+        return Response(BookingListSerializer(bookings, many=True).data)
+
+    @action(detail=True, methods=['get'])
+    def stats(self, request, pk=None):
+        """Get client statistics"""
+        client = self.get_object()
+
+        total_bookings = Booking.objects.filter(client=client).count()
+        completed_bookings = Booking.objects.filter(client=client, status='completed').count()
+        cancelled_bookings = Booking.objects.filter(client=client, status='cancelled').count()
+        total_spent = Booking.objects.filter(
+            client=client,
+            payment_status__in=['fully_paid', 'deposit_paid']
+        ).aggregate(total=Sum('paid_amount'))['total'] or 0
+
+        return Response({
+            'total_bookings': total_bookings,
+            'completed_bookings': completed_bookings,
+            'cancelled_bookings': cancelled_bookings,
+            'total_spent': float(total_spent),
+            'last_booking': BookingListSerializer(
+                Booking.objects.filter(client=client).order_by('-date', '-start_time').first()
+            ).data if total_bookings > 0 else None
+        })
+
+
+# ============================================================================
+# SETTINGS MANAGEMENT
+# ============================================================================
+
+@api_view(['GET', 'PUT', 'PATCH'])
+@permission_classes([permissions.IsAuthenticated, HasBookingManagementFeature])
+def booking_settings(request):
+    """Get or update booking settings"""
+    from .models import BookingSettings
+    from django.db import connection
+    from tenants.models import Tenant
+
+    # Get current tenant
+    try:
+        tenant = Tenant.objects.get(schema_name=connection.schema_name)
+    except Tenant.DoesNotExist:
+        return Response(
+            {'error': 'Tenant not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    # Get or create settings
+    settings, created = BookingSettings.objects.get_or_create(tenant=tenant)
+
+    if request.method == 'GET':
+        serializer = BookingSettingsSerializer(settings)
+        return Response(serializer.data)
+
+    elif request.method in ['PUT', 'PATCH']:
+        partial = request.method == 'PATCH'
+        serializer = BookingSettingsSerializer(settings, data=request.data, partial=partial)
+
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

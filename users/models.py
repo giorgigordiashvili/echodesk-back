@@ -24,6 +24,12 @@ class TenantGroup(models.Model):
     name = models.CharField(max_length=150, unique=True)
     description = models.TextField(blank=True)
 
+    # Booking staff designation
+    is_booking_staff = models.BooleanField(
+        default=False,
+        help_text="Designates members of this group as booking staff who can be assigned to bookings"
+    )
+
     # Feature-based permissions - tied to tenant subscription
     features = models.ManyToManyField(
         'tenants.Feature',

@@ -65,7 +65,7 @@ TENANT_APPS = [
     'drf_spectacular',
     'django_filters',
     'channels',  # Add channels for WebSocket support
-    
+
     # Tenant-specific apps
     'users',    # Only available in tenant schemas
     'crm',      # Keep in tenant apps too for backwards compatibility
@@ -73,6 +73,7 @@ TENANT_APPS = [
     'social_integrations',
     'notifications',
     'ecommerce_crm',  # E-commerce product management
+    'booking_management',  # Booking management for service-based businesses
 ]
 
 INSTALLED_APPS = list(SHARED_APPS) + [app for app in TENANT_APPS if app not in SHARED_APPS]
