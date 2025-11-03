@@ -992,6 +992,16 @@ class EcommerceSettings(models.Model):
         default=False,
         help_text="Use production BOG API (unchecked = test environment)"
     )
+    bog_return_url_success = models.URLField(
+        max_length=500,
+        blank=True,
+        help_text="URL to redirect after successful payment (e.g., https://yourstore.com/payment/success)"
+    )
+    bog_return_url_fail = models.URLField(
+        max_length=500,
+        blank=True,
+        help_text="URL to redirect after failed payment (e.g., https://yourstore.com/payment/fail)"
+    )
 
     # Payment settings
     enable_cash_on_delivery = models.BooleanField(

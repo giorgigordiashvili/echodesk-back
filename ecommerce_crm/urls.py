@@ -12,6 +12,7 @@ from .views import (
     CartViewSet,
     CartItemViewSet,
     OrderViewSet,
+    EcommerceSettingsViewSet,
     register_client,
     login_client,
     verify_email,
@@ -43,6 +44,7 @@ admin_router.register(r'favorites', FavoriteProductViewSet, basename='favorite-p
 admin_router.register(r'cart', CartViewSet, basename='cart')
 admin_router.register(r'cart-items', CartItemViewSet, basename='cart-item')
 admin_router.register(r'orders', OrderViewSet, basename='order')
+admin_router.register(r'settings', EcommerceSettingsViewSet, basename='ecommerce-settings')
 
 # Client router - requires client JWT authentication
 client_router = DefaultRouter()

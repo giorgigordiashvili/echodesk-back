@@ -13,7 +13,8 @@ from .models import (
     Cart,
     CartItem,
     Order,
-    OrderItem
+    OrderItem,
+    EcommerceSettings
 )
 
 
@@ -540,6 +541,45 @@ class OrderSerializer(serializers.ModelSerializer):
             'email': obj.client.email,
             'phone_number': obj.client.phone_number
         }
+
+
+class EcommerceSettingsSerializer(serializers.ModelSerializer):
+    """Serializer for ecommerce settings"""
+    bog_client_secret = serializers.CharField(
+        write_only=True,
+        required=False,
+        allow_blank=True,
+        help_text="BOG client secret (write-only, will be encrypted)"
+    )
+
+    class Meta:
+        model = EcommerceSettings
+        fields = [
+            'id', 'tenant', 'bog_client_id', 'bog_client_secret',
+            'bog_use_production', 'bog_return_url_success', 'bog_return_url_fail',
+            'enable_cash_on_delivery', 'enable_card_payment',
+            'store_name', 'store_email', 'store_phone',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'tenant', 'created_at', 'updated_at']
+
+    def create(self, validated_data):
+        # Handle encrypted secret
+        bog_secret = validated_data.pop('bog_client_secret', None)
+        instance = super().create(validated_data)
+        if bog_secret:
+            instance.set_bog_secret(bog_secret)
+            instance.save()
+        return instance
+
+    def update(self, instance, validated_data):
+        # Handle encrypted secret
+        bog_secret = validated_data.pop('bog_client_secret', None)
+        instance = super().update(instance, validated_data)
+        if bog_secret:
+            instance.set_bog_secret(bog_secret)
+            instance.save()
+        return instance
 
 
 class OrderCreateSerializer(serializers.Serializer):

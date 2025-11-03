@@ -490,8 +490,15 @@ class ClientOrderViewSet(viewsets.ModelViewSet):
         # Create BOG payment
         try:
             callback_url = f"{request.scheme}://{request.get_host()}/api/ecommerce/payment-webhook/"
-            return_url_success = request.data.get('return_url_success', '')
-            return_url_fail = request.data.get('return_url_fail', '')
+
+            # Use return URLs from EcommerceSettings if configured, otherwise from request
+            try:
+                ecommerce_settings = EcommerceSettings.objects.get(tenant=request.tenant)
+                return_url_success = ecommerce_settings.bog_return_url_success or request.data.get('return_url_success', '')
+                return_url_fail = ecommerce_settings.bog_return_url_fail or request.data.get('return_url_fail', '')
+            except EcommerceSettings.DoesNotExist:
+                return_url_success = request.data.get('return_url_success', '')
+                return_url_fail = request.data.get('return_url_fail', '')
 
             payment_result = bog_service_instance.create_payment(
                 amount=float(order.total_amount),

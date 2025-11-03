@@ -18,7 +18,8 @@ from .models import (
     Cart,
     CartItem,
     Order,
-    OrderItem
+    OrderItem,
+    EcommerceSettings
 )
 from .serializers import (
     LanguageSerializer,
@@ -40,7 +41,8 @@ from .serializers import (
     CartItemSerializer,
     CartItemCreateSerializer,
     OrderSerializer,
-    OrderCreateSerializer
+    OrderCreateSerializer,
+    EcommerceSettingsSerializer
 )
 
 
@@ -1219,14 +1221,14 @@ class OrderViewSet(viewsets.ModelViewSet):
                 # No credentials provided - use test environment with credentials from env
                 client_id = settings.BOG_CLIENT_ID
                 client_secret = settings.BOG_CLIENT_SECRET
-                auth_url = 'https://account-ob-test.bog.ge/auth/realms/bog-test/protocol/openid-connect/token'
-                api_base_url = 'https://api-test.bog.ge/payments/v1'
+                auth_url = 'https://oauth2.bog.ge/auth/realms/bog/protocol/openid-connect/token'
+                api_base_url = 'https://api.bog.ge/payments/v1'
         except:
             # Fallback to test environment with credentials from env
             client_id = settings.BOG_CLIENT_ID
             client_secret = settings.BOG_CLIENT_SECRET
-            auth_url = 'https://account-ob-test.bog.ge/auth/realms/bog-test/protocol/openid-connect/token'
-            api_base_url = 'https://api-test.bog.ge/payments/v1'
+            auth_url = 'https://oauth2.bog.ge/auth/realms/bog/protocol/openid-connect/token'
+            api_base_url = 'https://api.bog.ge/payments/v1'
 
         # Create BOG service instance with the appropriate credentials
         from tenants.bog_payment import BOGPaymentService
@@ -1566,5 +1568,59 @@ def ecommerce_payment_webhook(request):
     # Handle other statuses
     else:
         logger.info(f'Webhook received with status: {bog_status}, code: {response_code}')
-    
+
     return Response({'status': 'received'})
+
+
+class EcommerceSettingsViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing ecommerce settings including BOG payment configuration"""
+    serializer_class = EcommerceSettingsSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        """Return settings for the current tenant only"""
+        return EcommerceSettings.objects.filter(tenant=self.request.tenant)
+
+    def perform_create(self, serializer):
+        """Automatically set tenant when creating settings"""
+        serializer.save(tenant=self.request.tenant)
+
+    @extend_schema(
+        tags=['Ecommerce - Settings'],
+        summary='Get ecommerce settings',
+        description='Retrieve ecommerce settings for current tenant including BOG configuration'
+    )
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Settings'],
+        summary='Get settings detail',
+        description='Retrieve detailed ecommerce settings'
+    )
+    def retrieve(self, request, *args, **kwargs):
+        return super().retrieve(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Settings'],
+        summary='Create ecommerce settings',
+        description='Create ecommerce settings for tenant including BOG credentials and return URLs'
+    )
+    def create(self, request, *args, **kwargs):
+        return super().create(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Settings'],
+        summary='Update ecommerce settings',
+        description='Update ecommerce settings including BOG configuration'
+    )
+    def update(self, request, *args, **kwargs):
+        return super().update(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce - Settings'],
+        summary='Partial update settings',
+        description='Partially update ecommerce settings'
+    )
+    def partial_update(self, request, *args, **kwargs):
+        return super().partial_update(request, *args, **kwargs)
