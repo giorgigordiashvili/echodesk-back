@@ -461,23 +461,23 @@ class ClientOrderViewSet(viewsets.ModelViewSet):
             ecommerce_settings = EcommerceSettings.objects.get(tenant=request.tenant)
 
             if ecommerce_settings.has_bog_credentials:
-                # User provided their own credentials - use production URLs
+                # Tenant provided their own credentials
                 client_id = ecommerce_settings.bog_client_id
                 client_secret = ecommerce_settings.get_bog_secret()
-                auth_url = 'https://oauth2.bog.ge/auth/realms/bog/protocol/openid-connect/token'
-                api_base_url = 'https://api.bog.ge/payments/v1'
+                auth_url = settings.BOG_AUTH_URL
+                api_base_url = settings.BOG_API_BASE_URL
             else:
-                # No credentials provided - use test environment with credentials from env
+                # Use credentials from environment variables
                 client_id = settings.BOG_CLIENT_ID
                 client_secret = settings.BOG_CLIENT_SECRET
-                auth_url = 'https://account-ob-test.bog.ge/auth/realms/bog-test/protocol/openid-connect/token'
-                api_base_url = 'https://api-test.bog.ge/payments/v1'
+                auth_url = settings.BOG_AUTH_URL
+                api_base_url = settings.BOG_API_BASE_URL
         except:
-            # Fallback to test environment with credentials from env
+            # Fallback to environment variables
             client_id = settings.BOG_CLIENT_ID
             client_secret = settings.BOG_CLIENT_SECRET
-            auth_url = 'https://account-ob-test.bog.ge/auth/realms/bog-test/protocol/openid-connect/token'
-            api_base_url = 'https://api-test.bog.ge/payments/v1'
+            auth_url = settings.BOG_AUTH_URL
+            api_base_url = settings.BOG_API_BASE_URL
 
         # Create BOG service instance with the appropriate credentials
         from tenants.bog_payment import BOGPaymentService
@@ -530,6 +530,17 @@ class ClientOrderViewSet(viewsets.ModelViewSet):
 
         except Exception as e:
             # If payment creation fails, return order without payment URL
+            import logging
+            import requests
+            logger = logging.getLogger(__name__)
+
+            # Try to get server's public IP for debugging
+            try:
+                server_ip = requests.get('https://api.ipify.org', timeout=5).text
+                logger.error(f'BOG payment failed. Server IP: {server_ip}. Error: {str(e)}')
+            except:
+                logger.error(f'BOG payment failed. Error: {str(e)}')
+
             output_serializer = OrderSerializer(order)
             response_data = output_serializer.data
             response_data['payment_error'] = str(e)
