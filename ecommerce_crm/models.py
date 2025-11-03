@@ -178,7 +178,7 @@ class Product(models.Model):
     # Media
     image = models.ImageField(
         upload_to='products/',
-        max_length=500,
+        max_length=2000,
         blank=True,
         null=True,
         help_text="Main product image"
@@ -293,7 +293,7 @@ class Product(models.Model):
 class ProductImage(models.Model):
     """Additional product images"""
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='images')
-    image = models.ImageField(upload_to='products/gallery/', max_length=500)
+    image = models.ImageField(upload_to='products/gallery/', max_length=2000)
     alt_text = models.JSONField(
         blank=True,
         default=dict,
@@ -401,7 +401,7 @@ class ProductVariant(models.Model):
     quantity = models.IntegerField(default=0)
     image = models.ImageField(
         upload_to='products/variants/',
-        max_length=500,
+        max_length=2000,
         blank=True,
         null=True
     )

@@ -198,9 +198,9 @@ class ProductCreateUpdateSerializer(serializers.ModelSerializer):
 
     def validate_image(self, value):
         """Validate image URL length"""
-        if value and len(value) > 500:
+        if value and len(value) > 2000:
             raise serializers.ValidationError(
-                f"Image URL must be 500 characters or less. Current length: {len(value)}. "
+                f"Image URL must be 2000 characters or less. Current length: {len(value)}. "
                 f"Please use a shorter URL or filename."
             )
         return value
