@@ -97,9 +97,9 @@ class ClientProfileViewSet(viewsets.GenericViewSet):
 class ClientProductViewSet(viewsets.ReadOnlyModelViewSet):
     """
     Client-facing product browsing (read-only)
-    Clients can view published products only
+    Clients can view active products only
     """
-    queryset = Product.objects.filter(status='published')
+    queryset = Product.objects.filter(status='active')
     authentication_classes = [EcommerceClientJWTAuthentication]
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -122,7 +122,7 @@ class ClientProductViewSet(viewsets.ReadOnlyModelViewSet):
     @extend_schema(
         tags=['Client - Products'],
         summary='List products',
-        description='Browse published products'
+        description='Browse active products'
     )
     def list(self, request, *args, **kwargs):
         return super().list(request, *args, **kwargs)
