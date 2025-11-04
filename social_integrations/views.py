@@ -1508,13 +1508,14 @@ def instagram_send_message(request):
 
         page_id = account_connection.facebook_page.page_id
 
-        # For Instagram messages, use the Instagram account ID in the URL
-        # but authenticate with the Facebook Page's access token
-        send_url = f"https://graph.facebook.com/v23.0/me/messages"
+        # Instagram messaging through Facebook Pages requires specific formatting
+        # The sender must be specified in the request for Instagram
+        send_url = f"https://graph.facebook.com/v23.0/{page_id}/messages"
 
         message_data = {
             'recipient': {'id': recipient_id},
-            'message': {'text': message_text}
+            'message': {'text': message_text},
+            'messaging_type': 'RESPONSE'  # Instagram requires this
         }
 
         headers = {
@@ -1525,17 +1526,17 @@ def instagram_send_message(request):
         access_token = account_connection.facebook_page.page_access_token
 
         params = {
-            'access_token': access_token,
-            'platform': 'instagram'  # Explicitly specify this is for Instagram
+            'access_token': access_token
         }
 
-        print(f"🚀 Sending Instagram message:")
+        print(f"🚀 Sending Instagram message via Facebook Page:")
         print(f"   Instagram Account: @{account_connection.username} (ID: {instagram_account_id})")
         print(f"   Facebook Page ID: {page_id}")
         print(f"   To recipient: {recipient_id}")
         print(f"   Message: {message_text}")
         print(f"   URL: {send_url}")
-        print(f"   Using Page access token with platform=instagram")
+        print(f"   Messaging Type: RESPONSE (24hr window)")
+        print(f"   Using Page access token")
 
         response = requests.post(
             send_url,
