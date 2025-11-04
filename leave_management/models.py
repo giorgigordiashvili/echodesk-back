@@ -45,6 +45,10 @@ class LeaveSettings(models.Model):
     class Meta:
         verbose_name = 'Leave Settings'
         verbose_name_plural = 'Leave Settings'
+        permissions = [
+            ('manage_leave_settings', 'Can manage leave settings'),
+            ('view_leave_settings', 'Can view leave settings'),
+        ]
 
     def __str__(self):
         return f"Leave Settings for {self.tenant.name}"
@@ -151,6 +155,10 @@ class LeaveType(models.Model):
             models.Index(fields=['tenant', 'is_active']),
             models.Index(fields=['code']),
         ]
+        permissions = [
+            ('manage_leave_types', 'Can manage leave types'),
+            ('view_leave_types', 'Can view leave types'),
+        ]
 
     def __str__(self):
         if isinstance(self.name, dict):
@@ -233,6 +241,12 @@ class LeaveBalance(models.Model):
         indexes = [
             models.Index(fields=['tenant', 'user', 'year']),
             models.Index(fields=['leave_type', 'year']),
+        ]
+        permissions = [
+            ('manage_leave_balances', 'Can manage leave balances'),
+            ('view_leave_balances', 'Can view leave balances'),
+            ('view_own_balance', 'Can view own leave balance'),
+            ('view_team_balances', 'Can view team leave balances'),
         ]
 
     def __str__(self):
@@ -365,6 +379,18 @@ class LeaveRequest(models.Model):
             models.Index(fields=['leave_type', 'status']),
             models.Index(fields=['start_date', 'end_date']),
         ]
+        permissions = [
+            ('manage_leave_requests', 'Can manage all leave requests'),
+            ('view_leave_requests', 'Can view all leave requests'),
+            ('approve_leave', 'Can approve leave requests'),
+            ('approve_leave_hr', 'Can approve leave requests as HR'),
+            ('reject_leave', 'Can reject leave requests'),
+            ('cancel_leave', 'Can cancel leave requests'),
+            ('view_own_leaves', 'Can view own leave requests'),
+            ('submit_leave', 'Can submit leave requests'),
+            ('view_team_leaves', 'Can view team leave requests'),
+            ('approve_team_leaves', 'Can approve team leave requests'),
+        ]
 
     def __str__(self):
         return f"{self.employee.get_full_name()} - {self.leave_type} ({self.start_date} to {self.end_date})"
@@ -434,6 +460,10 @@ class PublicHoliday(models.Model):
             models.Index(fields=['tenant', 'date']),
             models.Index(fields=['date']),
         ]
+        permissions = [
+            ('manage_public_holidays', 'Can manage public holidays'),
+            ('view_public_holidays', 'Can view public holidays'),
+        ]
 
     def __str__(self):
         name = self.name if isinstance(self.name, str) else self.name.get('en', 'Holiday')
@@ -491,6 +521,10 @@ class LeaveApprovalChain(models.Model):
         unique_together = [['tenant', 'leave_type', 'level']]
         indexes = [
             models.Index(fields=['tenant', 'leave_type']),
+        ]
+        permissions = [
+            ('manage_approval_chains', 'Can manage leave approval chains'),
+            ('view_approval_chains', 'Can view leave approval chains'),
         ]
 
     def __str__(self):
