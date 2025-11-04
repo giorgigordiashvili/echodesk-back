@@ -129,12 +129,13 @@ def facebook_oauth_start(request):
         
         # Facebook OAuth URL for business pages with business_management permission
         # Including Instagram permissions: instagram_basic for account access
-        # Note: Instagram messaging requires the Messenger Platform API setup
+        # instagram_manage_messages for sending/receiving Instagram DMs
+        # Note: instagram_manage_messages requires app to be in Beta mode or approved
         oauth_url = (
             f"https://www.facebook.com/v23.0/dialog/oauth?"
             f"client_id={fb_app_id}&"
             f"redirect_uri={quote(redirect_uri)}&"
-            f"scope=business_management,pages_show_list,pages_manage_metadata,pages_messaging,pages_read_engagement,instagram_basic,public_profile,email&"
+            f"scope=business_management,pages_show_list,pages_manage_metadata,pages_messaging,pages_read_engagement,instagram_basic,instagram_manage_messages,public_profile,email&"
             f"state={state}&"
             f"response_type=code&"
             f"auth_type=rerequest"
