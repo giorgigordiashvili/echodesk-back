@@ -6,6 +6,8 @@ from . import views, admin_views
 router = DefaultRouter()
 router.register(r'facebook-pages', views.FacebookPageConnectionViewSet, basename='facebook_pages')
 router.register(r'facebook-messages', views.FacebookMessageViewSet, basename='facebook_messages')
+router.register(r'instagram-accounts', views.InstagramAccountConnectionViewSet, basename='instagram_accounts')
+router.register(r'instagram-messages', views.InstagramMessageViewSet, basename='instagram_messages')
 
 # URL patterns for the social integrations app
 urlpatterns = [
@@ -25,7 +27,12 @@ urlpatterns = [
     path('facebook/disconnect/', views.facebook_disconnect, name='facebook_disconnect'),
     path('facebook/send-message/', views.facebook_send_message, name='facebook_send_message'),
     path('facebook/webhook/', views.facebook_webhook, name='facebook_webhook'),
-    
+
+    # Instagram endpoints
+    path('instagram/status/', views.instagram_connection_status, name='instagram_status'),
+    path('instagram/disconnect/', views.instagram_disconnect, name='instagram_disconnect'),
+    path('instagram/send-message/', views.instagram_send_message, name='instagram_send_message'),
+
     # Admin OAuth endpoints
     path('admin/facebook/oauth/start/', admin_views.facebook_oauth_admin_start, name='admin_facebook_oauth_start'),
     path('admin/facebook/oauth/callback/', admin_views.facebook_oauth_admin_callback, name='admin_facebook_oauth_callback'),

@@ -19,10 +19,12 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from drf_spectacular.utils import extend_schema
 from .models import (
-    FacebookPageConnection, FacebookMessage
+    FacebookPageConnection, FacebookMessage,
+    InstagramAccountConnection, InstagramMessage
 )
 from .serializers import (
-    FacebookPageConnectionSerializer, FacebookMessageSerializer, FacebookSendMessageSerializer
+    FacebookPageConnectionSerializer, FacebookMessageSerializer, FacebookSendMessageSerializer,
+    InstagramAccountConnectionSerializer, InstagramMessageSerializer, InstagramSendMessageSerializer
 )
 from .permissions import (
     CanManageSocialConnections, CanViewSocialMessages,
@@ -1246,17 +1248,17 @@ def test_database_save(request):
     try:
         # Find the first active page connection
         page_connection = FacebookPageConnection.objects.filter(is_active=True).first()
-        
+
         if not page_connection:
             return Response({
                 'error': 'No active Facebook page connections found',
                 'available_connections': list(FacebookPageConnection.objects.values('page_id', 'page_name', 'is_active'))
             }, status=400)
-        
+
         # Create a test message
         from datetime import datetime
         import random
-        
+
         test_message = FacebookMessage.objects.create(
             page_connection=page_connection,
             message_id=f"test_message_{random.randint(1000, 9999)}",
@@ -1267,7 +1269,7 @@ def test_database_save(request):
             is_from_page=False,
             profile_pic_url=None
         )
-        
+
         return Response({
             'success': True,
             'message_id': test_message.id,
@@ -1278,8 +1280,238 @@ def test_database_save(request):
             },
             'admin_url': f'https://amanati.api.echodesk.ge/admin/social_integrations/facebookmessage/{test_message.id}/change/'
         })
-        
+
     except Exception as e:
         return Response({
             'error': f'Failed to create test message: {str(e)}'
         }, status=500)
+
+
+# ============================================================================
+# INSTAGRAM VIEWS
+# ============================================================================
+
+class InstagramAccountConnectionViewSet(viewsets.ModelViewSet):
+    serializer_class = InstagramAccountConnectionSerializer
+    permission_classes = [IsAuthenticated, CanManageSocialConnections]
+
+    def get_queryset(self):
+        return InstagramAccountConnection.objects.all()  # Tenant schema provides isolation
+
+    def perform_create(self, serializer):
+        serializer.save()  # No user assignment needed in multi-tenant setup
+
+
+class InstagramMessageViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = InstagramMessageSerializer
+    permission_classes = [IsAuthenticated, CanViewSocialMessages]
+
+    def get_queryset(self):
+        tenant_accounts = InstagramAccountConnection.objects.all()  # All accounts for this tenant
+        return InstagramMessage.objects.filter(account_connection__in=tenant_accounts)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def instagram_connection_status(request):
+    """Check Instagram connection status for current tenant"""
+    try:
+        accounts = InstagramAccountConnection.objects.all()  # All accounts for this tenant
+        accounts_data = []
+
+        for account in accounts:
+            accounts_data.append({
+                'id': account.id,
+                'instagram_account_id': account.instagram_account_id,
+                'username': account.username,
+                'profile_picture_url': account.profile_picture_url,
+                'is_active': account.is_active,
+                'connected_at': account.created_at.isoformat()
+            })
+
+        return Response({
+            'connected': accounts.exists(),
+            'accounts_count': accounts.count(),
+            'accounts': accounts_data
+        })
+    except Exception as e:
+        return Response({
+            'error': f'Failed to get connection status: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, CanManageSocialConnections])
+def instagram_disconnect(request):
+    """Disconnect Instagram integration for current tenant"""
+    try:
+        logger = logging.getLogger(__name__)
+
+        # Get count before deletion for response
+        accounts_to_delete = InstagramAccountConnection.objects.all()  # All accounts for this tenant
+        account_count = accounts_to_delete.count()
+        usernames = list(accounts_to_delete.values_list('username', flat=True))
+
+        if account_count == 0:
+            return Response({
+                'status': 'no_accounts',
+                'message': 'No Instagram accounts found to disconnect'
+            })
+
+        # Delete Instagram messages
+        instagram_message_count = 0
+        for account in accounts_to_delete:
+            messages_deleted = InstagramMessage.objects.filter(
+                account_connection=account
+            ).count()
+            InstagramMessage.objects.filter(account_connection=account).delete()
+            instagram_message_count += messages_deleted
+
+        # Delete Instagram account connections
+        accounts_to_delete.delete()
+
+        logger.info(f"✅ Instagram disconnect completed:")
+        logger.info(f"   - Instagram accounts deleted: {account_count}")
+        logger.info(f"   - Instagram messages deleted: {instagram_message_count}")
+
+        return Response({
+            'status': 'disconnected',
+            'instagram_accounts_deleted': account_count,
+            'instagram_messages_deleted': instagram_message_count,
+            'deleted_accounts': usernames,
+            'message': f'Permanently removed {account_count} Instagram account(s) and {instagram_message_count} messages'
+        })
+
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.error(f"Failed to disconnect Instagram: {e}")
+        return Response({
+            'error': f'Failed to disconnect: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@extend_schema(
+    request=InstagramSendMessageSerializer,
+    responses={
+        200: {
+            'type': 'object',
+            'properties': {
+                'success': {'type': 'boolean'},
+                'message': {'type': 'string'},
+                'instagram_message_id': {'type': 'string'}
+            }
+        },
+        400: {
+            'type': 'object',
+            'properties': {
+                'error': {'type': 'string'},
+                'details': {'type': 'object'}
+            }
+        },
+        404: {
+            'type': 'object',
+            'properties': {
+                'error': {'type': 'string'}
+            }
+        }
+    },
+    description="Send a message to an Instagram user",
+    summary="Send Instagram Message"
+)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, CanSendSocialMessages])
+def instagram_send_message(request):
+    """Send a message to an Instagram user"""
+    try:
+        # Validate input data using serializer
+        serializer = InstagramSendMessageSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({
+                'error': 'Invalid data',
+                'details': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        validated_data = serializer.validated_data
+        recipient_id = validated_data['recipient_id']
+        message_text = validated_data['message']
+        instagram_account_id = validated_data['instagram_account_id']
+
+        # Get the Instagram account connection for this tenant
+        try:
+            account_connection = InstagramAccountConnection.objects.get(
+                instagram_account_id=instagram_account_id,
+                is_active=True
+            )
+        except InstagramAccountConnection.DoesNotExist:
+            return Response({
+                'error': 'Instagram account not found or not connected to this tenant'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        # Send message using Instagram Graph API
+        send_url = f"https://graph.facebook.com/v23.0/me/messages"
+
+        message_data = {
+            'recipient': {'id': recipient_id},
+            'message': {'text': message_text}
+        }
+
+        headers = {
+            'Content-Type': 'application/json',
+        }
+
+        params = {
+            'access_token': account_connection.access_token
+        }
+
+        print(f"🚀 Sending Instagram message:")
+        print(f"   Account: @{account_connection.username}")
+        print(f"   To: {recipient_id}")
+        print(f"   Message: {message_text}")
+
+        response = requests.post(
+            send_url,
+            json=message_data,
+            headers=headers,
+            params=params
+        )
+
+        print(f"📤 Instagram API Response: {response.status_code} - {response.text}")
+
+        if response.status_code == 200:
+            response_data = response.json()
+            message_id = response_data.get('message_id')
+
+            # Optionally save the sent message to our database
+            try:
+                InstagramMessage.objects.create(
+                    account_connection=account_connection,
+                    message_id=message_id or f"sent_{datetime.now().timestamp()}",
+                    sender_id=instagram_account_id,  # Account is the sender
+                    sender_username=account_connection.username,
+                    message_text=message_text,
+                    timestamp=datetime.now(),
+                    is_from_business=True
+                )
+                print(f"✅ Saved sent message to database")
+            except Exception as e:
+                print(f"⚠️ Failed to save sent message to database: {e}")
+
+            return Response({
+                'status': 'sent',
+                'message_id': message_id,
+                'recipient_id': recipient_id
+            })
+        else:
+            error_data = response.json() if response.content else {}
+            error_message = error_data.get('error', {}).get('message', 'Unknown error')
+
+            return Response({
+                'error': f'Failed to send message: {error_message}',
+                'instagram_error': error_data
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+    except Exception as e:
+        print(f"❌ Exception in instagram_send_message: {e}")
+        return Response({
+            'error': f'Failed to send message: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
