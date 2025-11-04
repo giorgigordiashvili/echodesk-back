@@ -1498,9 +1498,16 @@ def instagram_send_message(request):
                 'error': 'Instagram account not found or not connected to this tenant'
             }, status=status.HTTP_404_NOT_FOUND)
 
-        # Send message using Instagram Graph API
-        # Instagram messages are sent through the Facebook Page's access token
-        send_url = f"https://graph.facebook.com/v23.0/{instagram_account_id}/messages"
+        # Send message using Facebook Pages Messaging API
+        # Instagram messages are sent through the Facebook Page, not the Instagram account directly
+        # We use the Page ID in the URL, not the Instagram account ID
+        if not account_connection.facebook_page:
+            return Response({
+                'error': 'Instagram account is not linked to a Facebook Page'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        page_id = account_connection.facebook_page.page_id
+        send_url = f"https://graph.facebook.com/v23.0/{page_id}/messages"
 
         message_data = {
             'recipient': {'id': recipient_id},
@@ -1511,18 +1518,16 @@ def instagram_send_message(request):
             'Content-Type': 'application/json',
         }
 
-        # Use the Facebook Page's access token (Instagram accounts are linked to Pages)
-        access_token = account_connection.access_token
-        if account_connection.facebook_page:
-            access_token = account_connection.facebook_page.page_access_token
-            print(f"📘 Using Facebook Page token for Instagram messaging")
+        # Use the Facebook Page's access token
+        access_token = account_connection.facebook_page.page_access_token
 
         params = {
             'access_token': access_token
         }
 
-        print(f"🚀 Sending Instagram message:")
-        print(f"   Account: @{account_connection.username} (ID: {instagram_account_id})")
+        print(f"🚀 Sending Instagram message via Facebook Page:")
+        print(f"   Instagram Account: @{account_connection.username} (ID: {instagram_account_id})")
+        print(f"   Via Facebook Page ID: {page_id}")
         print(f"   To: {recipient_id}")
         print(f"   Message: {message_text}")
         print(f"   URL: {send_url}")
