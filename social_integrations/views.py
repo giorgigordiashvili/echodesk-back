@@ -128,11 +128,12 @@ def facebook_oauth_start(request):
         logger.info(f"URL encoded state parameter: {state}")
         
         # Facebook OAuth URL for business pages with business_management permission
+        # Including Instagram permissions: instagram_basic, instagram_manage_messages
         oauth_url = (
             f"https://www.facebook.com/v23.0/dialog/oauth?"
             f"client_id={fb_app_id}&"
             f"redirect_uri={quote(redirect_uri)}&"
-            f"scope=business_management,pages_show_list,pages_manage_metadata,pages_messaging,pages_read_engagement,public_profile,email&"
+            f"scope=business_management,pages_show_list,pages_manage_metadata,pages_messaging,pages_read_engagement,instagram_basic,instagram_manage_messages,instagram_manage_comments,public_profile,email&"
             f"state={state}&"
             f"response_type=code&"
             f"auth_type=rerequest"
@@ -347,11 +348,12 @@ def facebook_oauth_callback(request):
                 logger.info(f"🗑️ Deleted {deleted_count} existing Facebook page connections for tenant {tenant_schema}")
             
             # Create new connections for all pages from callback
+            saved_instagram_accounts = 0
             for page in pages:
                 page_id = page.get('id')
                 page_name = page.get('name')
                 page_access_token = page.get('access_token')
-                
+
                 if page_id and page_access_token and page_name:
                     # Create new page connection for this tenant
                     page_connection = FacebookPageConnection.objects.create(
@@ -360,15 +362,63 @@ def facebook_oauth_callback(request):
                         page_access_token=page_access_token,
                         is_active=True
                     )
-                    
+
                     logger.info(f"✅ Created Facebook page connection: {page_name} ({page_id}) in schema {tenant_schema}")
                     saved_pages += 1
+
+                    # Try to fetch Instagram Business Account connected to this page
+                    try:
+                        instagram_url = f"https://graph.facebook.com/v23.0/{page_id}"
+                        instagram_params = {
+                            'fields': 'instagram_business_account',
+                            'access_token': page_access_token
+                        }
+                        instagram_response = requests.get(instagram_url, params=instagram_params)
+
+                        if instagram_response.status_code == 200:
+                            instagram_data = instagram_response.json()
+                            instagram_account = instagram_data.get('instagram_business_account')
+
+                            if instagram_account:
+                                instagram_account_id = instagram_account.get('id')
+
+                                # Fetch Instagram account details
+                                ig_details_url = f"https://graph.facebook.com/v23.0/{instagram_account_id}"
+                                ig_details_params = {
+                                    'fields': 'id,username,profile_picture_url',
+                                    'access_token': page_access_token
+                                }
+                                ig_details_response = requests.get(ig_details_url, params=ig_details_params)
+
+                                if ig_details_response.status_code == 200:
+                                    ig_details = ig_details_response.json()
+
+                                    # Create or update Instagram account connection
+                                    InstagramAccountConnection.objects.update_or_create(
+                                        instagram_account_id=ig_details.get('id'),
+                                        defaults={
+                                            'username': ig_details.get('username', ''),
+                                            'profile_picture_url': ig_details.get('profile_picture_url', ''),
+                                            'access_token': page_access_token,
+                                            'facebook_page': page_connection,
+                                            'is_active': True
+                                        }
+                                    )
+
+                                    logger.info(f"✅ Connected Instagram account: @{ig_details.get('username')} to page {page_name}")
+                                    saved_instagram_accounts += 1
+                    except Exception as e:
+                        logger.warning(f"⚠️ Could not fetch Instagram account for page {page_name}: {e}")
+                        # Continue processing other pages even if Instagram fetch fails
                 else:
                     logger.warning(f"⚠️ Skipped page with missing data: {page}")
         
         # Return success response with redirect to tenant frontend
-        success_msg = f"Successfully connected {saved_pages} Facebook page(s)"
-        logger.info(f"Facebook OAuth completed successfully: {saved_pages} pages saved")
+        if saved_instagram_accounts > 0:
+            success_msg = f"Successfully connected {saved_pages} Facebook page(s) and {saved_instagram_accounts} Instagram account(s)"
+        else:
+            success_msg = f"Successfully connected {saved_pages} Facebook page(s)"
+        logger.info(f"Facebook OAuth completed successfully: {saved_pages} pages and {saved_instagram_accounts} Instagram accounts saved")
         
         # Redirect to tenant frontend with success parameters
         from urllib.parse import quote_plus
@@ -1515,3 +1565,139 @@ def instagram_send_message(request):
         return Response({
             'error': f'Failed to send message: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+def find_tenant_by_instagram_account_id(instagram_account_id):
+    """Find which tenant schema contains the given Instagram account ID"""
+    from django.db import connection
+    from tenants.models import Tenant
+    from tenant_schemas.utils import schema_context
+
+    # Get all tenant schemas
+    tenants = Tenant.objects.all()
+
+    for tenant in tenants:
+        try:
+            # Switch to tenant schema and check if account exists
+            with schema_context(tenant.schema_name):
+                if InstagramAccountConnection.objects.filter(instagram_account_id=instagram_account_id, is_active=True).exists():
+                    return tenant.schema_name
+        except Exception as e:
+            # Skip tenant if there's an error (e.g., table doesn't exist)
+            continue
+
+    return None
+
+
+@csrf_exempt
+@require_http_methods(["GET", "POST"])
+def instagram_webhook(request):
+    """Handle Instagram webhook events for messages"""
+    logger = logging.getLogger(__name__)
+
+    if request.method == 'GET':
+        # Webhook verification - Instagram/Facebook sends these parameters
+        mode = request.GET.get('hub.mode')
+        token = request.GET.get('hub.verify_token')
+        challenge = request.GET.get('hub.challenge')
+
+        # Verify token from settings (same as Facebook)
+        verify_token = getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_VERIFY_TOKEN', 'echodesk_webhook_token_2024')
+
+        # Verify the mode and token
+        if mode == 'subscribe' and token == verify_token:
+            # Return the challenge as plain text
+            return HttpResponse(challenge, content_type='text/plain')
+        else:
+            return JsonResponse({
+                'error': 'Invalid verify token or mode'
+            }, status=403)
+
+    elif request.method == 'POST':
+        # Handle webhook events
+        try:
+            import json
+            from tenant_schemas.utils import schema_context
+
+            data = json.loads(request.body)
+            logger.info(f"📸 Instagram webhook received: {data}")
+
+            # Instagram webhooks have similar structure to Facebook
+            if 'entry' not in data:
+                logger.warning("No 'entry' field in Instagram webhook data")
+                return JsonResponse({'status': 'received'})
+
+            for entry in data['entry']:
+                # Get Instagram account ID from entry
+                instagram_account_id = entry.get('id')
+
+                if not instagram_account_id:
+                    logger.warning("No Instagram account ID in entry")
+                    continue
+
+                # Find which tenant this Instagram account belongs to
+                tenant_schema = find_tenant_by_instagram_account_id(instagram_account_id)
+
+                if not tenant_schema:
+                    logger.error(f"No tenant found for Instagram account: {instagram_account_id}")
+                    continue
+
+                logger.info(f"Processing Instagram webhook for account {instagram_account_id} in tenant: {tenant_schema}")
+
+                # Process webhook within the correct tenant context
+                with schema_context(tenant_schema):
+                    # Get the Instagram account connection
+                    try:
+                        account_connection = InstagramAccountConnection.objects.get(
+                            instagram_account_id=instagram_account_id,
+                            is_active=True
+                        )
+                    except InstagramAccountConnection.DoesNotExist:
+                        logger.error(f"Instagram account connection not found: {instagram_account_id}")
+                        continue
+
+                    # Process messaging events
+                    if 'messaging' in entry:
+                        for message_event in entry['messaging']:
+                            if 'message' in message_event:
+                                message_data = message_event['message']
+                                sender_id = message_event['sender']['id']
+
+                                # Skip if this is an echo (message sent by the business)
+                                if message_data.get('is_echo'):
+                                    logger.info("Skipping echo message")
+                                    continue
+
+                                # Get sender info
+                                sender_username = 'Unknown'
+                                sender_profile_pic = None
+
+                                # Save the message
+                                message_id = message_data.get('mid', '')
+                                message_text = message_data.get('text', '')
+
+                                if message_id and not InstagramMessage.objects.filter(message_id=message_id).exists():
+                                    try:
+                                        message_obj = InstagramMessage.objects.create(
+                                            account_connection=account_connection,
+                                            message_id=message_id,
+                                            sender_id=sender_id,
+                                            sender_username=sender_username,
+                                            sender_profile_pic=sender_profile_pic,
+                                            message_text=message_text,
+                                            timestamp=convert_facebook_timestamp(message_event.get('timestamp', 0)),
+                                            is_from_business=False
+                                        )
+                                        logger.info(f"✅ Saved Instagram message: {message_text[:50]}")
+                                    except Exception as e:
+                                        logger.error(f"❌ Failed to save Instagram message: {e}")
+
+            return JsonResponse({'status': 'received'})
+
+        except Exception as e:
+            logger.error(f"Instagram webhook processing failed: {e}")
+            return JsonResponse({
+                'error': f'Webhook processing failed: {str(e)}'
+            }, status=500)
+
+    return JsonResponse({'error': 'Method not allowed'}, status=405)

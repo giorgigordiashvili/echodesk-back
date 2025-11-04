@@ -32,6 +32,7 @@ urlpatterns = [
     path('instagram/status/', views.instagram_connection_status, name='instagram_status'),
     path('instagram/disconnect/', views.instagram_disconnect, name='instagram_disconnect'),
     path('instagram/send-message/', views.instagram_send_message, name='instagram_send_message'),
+    path('instagram/webhook/', views.instagram_webhook, name='instagram_webhook'),
 
     # Admin OAuth endpoints
     path('admin/facebook/oauth/start/', admin_views.facebook_oauth_admin_start, name='admin_facebook_oauth_start'),
