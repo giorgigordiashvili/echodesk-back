@@ -130,6 +130,7 @@ def facebook_oauth_start(request):
         # Facebook OAuth URL for business pages with Messenger Platform for Instagram
         # Using pages_messaging for both Facebook and Instagram messaging
         # instagram_basic for accessing connected Instagram accounts
+        # instagram_manage_messages for reading and responding to Instagram DMs (requires app review)
         # https://developers.facebook.com/docs/messenger-platform/instagram/get-started
         oauth_url = (
             f"https://www.facebook.com/v23.0/dialog/oauth?"
