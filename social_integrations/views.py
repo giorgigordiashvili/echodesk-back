@@ -24,6 +24,10 @@ from .models import (
 from .serializers import (
     FacebookPageConnectionSerializer, FacebookMessageSerializer, FacebookSendMessageSerializer
 )
+from .permissions import (
+    CanManageSocialConnections, CanViewSocialMessages,
+    CanSendSocialMessages, CanManageSocialSettings
+)
 
 
 def convert_facebook_timestamp(timestamp):
@@ -67,26 +71,26 @@ def find_tenant_by_page_id(page_id):
 
 class FacebookPageConnectionViewSet(viewsets.ModelViewSet):
     serializer_class = FacebookPageConnectionSerializer
-    permission_classes = [IsAuthenticated]
-    
+    permission_classes = [IsAuthenticated, CanManageSocialConnections]
+
     def get_queryset(self):
         return FacebookPageConnection.objects.all()  # Tenant schema provides isolation
-    
+
     def perform_create(self, serializer):
         serializer.save()  # No user assignment needed in multi-tenant setup
 
 
 class FacebookMessageViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = FacebookMessageSerializer
-    permission_classes = [IsAuthenticated]
-    
+    permission_classes = [IsAuthenticated, CanViewSocialMessages]
+
     def get_queryset(self):
         tenant_pages = FacebookPageConnection.objects.all()  # All pages for this tenant
         return FacebookMessage.objects.filter(page_connection__in=tenant_pages)
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, CanManageSocialConnections])
 def facebook_oauth_start(request):
     """Generate Facebook OAuth URL for business pages access"""
     logger = logging.getLogger(__name__)
@@ -409,7 +413,7 @@ def facebook_connection_status(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, CanManageSocialConnections])
 def facebook_disconnect(request):
     """Disconnect Facebook integration for current tenant"""
     try:
@@ -487,7 +491,7 @@ def facebook_disconnect(request):
     summary="Send Facebook Message"
 )
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, CanSendSocialMessages])
 def facebook_send_message(request):
     """Send a message to a Facebook user"""
     try:

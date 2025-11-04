@@ -140,7 +140,25 @@ class User(AbstractBaseUser, PermissionsMixin):
     can_edit_boards = models.BooleanField(default=False)
     can_delete_boards = models.BooleanField(default=False)
     can_access_orders = models.BooleanField(default=False)
-    
+
+    # Social Media permissions
+    can_manage_social_connections = models.BooleanField(
+        default=False,
+        help_text="Can connect/disconnect social media pages (Facebook, Instagram, etc.)"
+    )
+    can_view_social_messages = models.BooleanField(
+        default=False,
+        help_text="Can view social media messages and conversations"
+    )
+    can_send_social_messages = models.BooleanField(
+        default=False,
+        help_text="Can send messages to clients via social media"
+    )
+    can_manage_social_settings = models.BooleanField(
+        default=False,
+        help_text="Can configure social media integration settings"
+    )
+
     # Group membership
     tenant_groups = models.ManyToManyField(TenantGroup, blank=True, related_name='members')
     
@@ -202,6 +220,10 @@ class User(AbstractBaseUser, PermissionsMixin):
             'edit_boards': self.can_edit_boards,
             'delete_boards': self.can_delete_boards,
             'access_orders': self.can_access_orders,
+            'manage_social_connections': self.can_manage_social_connections,
+            'view_social_messages': self.can_view_social_messages,
+            'send_social_messages': self.can_send_social_messages,
+            'manage_social_settings': self.can_manage_social_settings,
         }
         
         # Check if user has individual permission
@@ -226,6 +248,10 @@ class User(AbstractBaseUser, PermissionsMixin):
             'create_boards': self.is_manager,
             'edit_boards': self.is_manager,
             'delete_boards': self.is_admin,
+            'manage_social_connections': self.is_admin,
+            'view_social_messages': self.is_manager,
+            'send_social_messages': self.is_manager,
+            'manage_social_settings': self.is_admin,
         }
         
         if role_permissions.get(permission, False):
@@ -245,12 +271,13 @@ class User(AbstractBaseUser, PermissionsMixin):
         
         # Individual permissions
         permission_fields = [
-            'view_all_tickets', 'manage_users', 'make_calls', 'manage_groups', 
-            'manage_settings', 'create_tickets', 'edit_own_tickets', 
-            'edit_all_tickets', 'delete_tickets', 'assign_tickets', 
+            'view_all_tickets', 'manage_users', 'make_calls', 'manage_groups',
+            'manage_settings', 'create_tickets', 'edit_own_tickets',
+            'edit_all_tickets', 'delete_tickets', 'assign_tickets',
             'view_reports', 'export_data', 'manage_tags', 'manage_columns',
             'view_boards', 'create_boards', 'edit_boards', 'delete_boards',
-            'access_orders'
+            'access_orders', 'manage_social_connections', 'view_social_messages',
+            'send_social_messages', 'manage_social_settings'
         ]
         
         for field in permission_fields:
