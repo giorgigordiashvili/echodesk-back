@@ -4,7 +4,7 @@ from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 from django.contrib import messages
 import requests
-from .models import FacebookPageConnection, FacebookMessage
+from .models import FacebookPageConnection, FacebookMessage, InstagramAccountConnection, InstagramMessage
 
 
 @admin.register(FacebookPageConnection)
@@ -57,3 +57,30 @@ class FacebookMessageAdmin(admin.ModelAdmin):
     list_display = ['sender_name', 'page_connection', 'timestamp', 'is_from_page']
     list_filter = ['is_from_page', 'timestamp', 'page_connection']
     search_fields = ['sender_name', 'message_text', 'sender_id']
+
+
+@admin.register(InstagramAccountConnection)
+class InstagramAccountConnectionAdmin(admin.ModelAdmin):
+    list_display = ['username', 'instagram_account_id', 'facebook_page', 'is_active', 'created_at']
+    list_filter = ['is_active', 'created_at']
+    search_fields = ['username', 'instagram_account_id']
+    fields = ['username', 'instagram_account_id', 'profile_picture_url', 'facebook_page', 'access_token', 'is_active']
+    readonly_fields = ['created_at', 'updated_at']
+
+    def get_readonly_fields(self, request, obj=None):
+        if obj:  # Editing an existing object
+            return self.readonly_fields + ['created_at', 'updated_at']
+        return self.readonly_fields
+
+
+@admin.register(InstagramMessage)
+class InstagramMessageAdmin(admin.ModelAdmin):
+    list_display = ['sender_username', 'account_connection', 'timestamp', 'is_from_business', 'message_preview']
+    list_filter = ['is_from_business', 'timestamp', 'account_connection']
+    search_fields = ['sender_username', 'message_text', 'sender_id']
+    readonly_fields = ['message_id', 'sender_id', 'timestamp', 'created_at']
+
+    def message_preview(self, obj):
+        """Show first 50 characters of message"""
+        return obj.message_text[:50] + '...' if len(obj.message_text) > 50 else obj.message_text
+    message_preview.short_description = 'Message Preview'
