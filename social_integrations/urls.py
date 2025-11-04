@@ -34,6 +34,11 @@ urlpatterns = [
     path('instagram/send-message/', views.instagram_send_message, name='instagram_send_message'),
     path('instagram/webhook/', views.instagram_webhook, name='instagram_webhook'),
 
+    # Webhook debugging endpoints
+    path('webhook-status/', views.webhook_status, name='webhook_status'),
+    path('webhook-logs/', views.webhook_debug_logs, name='webhook_debug_logs'),
+    path('webhook-test/', views.webhook_test_receiver, name='webhook_test'),
+
     # Admin OAuth endpoints
     path('admin/facebook/oauth/start/', admin_views.facebook_oauth_admin_start, name='admin_facebook_oauth_start'),
     path('admin/facebook/oauth/callback/', admin_views.facebook_oauth_admin_callback, name='admin_facebook_oauth_callback'),

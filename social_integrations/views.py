@@ -1702,3 +1702,184 @@ def instagram_webhook(request):
             }, status=500)
 
     return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+
+# ============================================================================
+# WEBHOOK DEBUGGING ENDPOINTS
+# ============================================================================
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def webhook_debug_logs(request):
+    """
+    Get recent webhook activity logs for debugging.
+    Shows last 50 webhook events from the log file.
+    """
+    import os
+    from datetime import datetime
+
+    log_file = os.path.join(os.getcwd(), 'facebook_webhook_log.txt')
+
+    if not os.path.exists(log_file):
+        return Response({
+            'status': 'no_logs',
+            'message': 'No webhook logs found yet. Send a test webhook to create logs.',
+            'log_file_path': log_file
+        })
+
+    try:
+        # Read the last 100 lines of the log file
+        with open(log_file, 'r') as f:
+            lines = f.readlines()
+
+        # Get last 100 lines
+        recent_lines = lines[-100:] if len(lines) > 100 else lines
+
+        # Parse into events
+        events = []
+        current_event = {}
+
+        for line in recent_lines:
+            if '=== WEBHOOK RECEIVED ===' in line:
+                if current_event:
+                    events.append(current_event)
+                current_event = {'raw': ''}
+
+            current_event['raw'] = current_event.get('raw', '') + line
+
+            if line.startswith('Time:'):
+                current_event['timestamp'] = line.replace('Time:', '').strip()
+            elif line.startswith('Method:'):
+                current_event['method'] = line.replace('Method:', '').strip()
+            elif line.startswith('Body:'):
+                current_event['body'] = line.replace('Body:', '').strip()
+
+        if current_event:
+            events.append(current_event)
+
+        return Response({
+            'status': 'success',
+            'total_events': len(events),
+            'events': events[-20:],  # Last 20 events
+            'log_file_path': log_file,
+            'file_size_bytes': os.path.getsize(log_file)
+        })
+
+    except Exception as e:
+        return Response({
+            'error': f'Failed to read webhook logs: {str(e)}',
+            'log_file_path': log_file
+        }, status=500)
+
+
+@api_view(['POST'])
+@permission_classes([])  # Public endpoint for testing
+def webhook_test_receiver(request):
+    """
+    Test endpoint to receive and log any webhook data.
+    Use this to test if webhooks are reaching your server.
+
+    Usage:
+    POST https://api.echodesk.ge/api/social/webhook-test/
+
+    Send any JSON data and it will be logged and returned.
+    """
+    import json
+    from datetime import datetime
+    import os
+
+    # Log everything we receive
+    log_data = {
+        'timestamp': str(datetime.now()),
+        'method': request.method,
+        'headers': dict(request.headers),
+        'query_params': dict(request.GET),
+        'body': request.body.decode('utf-8') if request.body else None,
+    }
+
+    try:
+        log_data['parsed_body'] = json.loads(request.body) if request.body else None
+    except:
+        log_data['parsed_body'] = 'Could not parse as JSON'
+
+    # Write to test log file
+    test_log_file = os.path.join(os.getcwd(), 'webhook_test_log.txt')
+    with open(test_log_file, 'a') as f:
+        f.write(f"\n{'='*80}\n")
+        f.write(f"WEBHOOK TEST RECEIVED at {datetime.now()}\n")
+        f.write(json.dumps(log_data, indent=2))
+        f.write(f"\n{'='*80}\n")
+
+    print(f"✅ Webhook test received and logged to {test_log_file}")
+    print(json.dumps(log_data, indent=2))
+
+    return Response({
+        'status': 'received',
+        'message': 'Webhook test successful! Your data has been logged.',
+        'received_data': log_data,
+        'logged_to': test_log_file
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def webhook_status(request):
+    """
+    Check webhook configuration and recent activity.
+    Shows webhook URLs, verify tokens, and recent activity.
+    """
+    import os
+    from datetime import datetime
+
+    # Check log files
+    fb_log = os.path.join(os.getcwd(), 'facebook_webhook_log.txt')
+    test_log = os.path.join(os.getcwd(), 'webhook_test_log.txt')
+
+    fb_log_exists = os.path.exists(fb_log)
+    test_log_exists = os.path.exists(test_log)
+
+    fb_log_size = os.path.getsize(fb_log) if fb_log_exists else 0
+    test_log_size = os.path.getsize(test_log) if test_log_exists else 0
+
+    # Count webhook events
+    fb_event_count = 0
+    if fb_log_exists:
+        with open(fb_log, 'r') as f:
+            fb_event_count = f.read().count('=== WEBHOOK RECEIVED ===')
+
+    test_event_count = 0
+    if test_log_exists:
+        with open(test_log, 'r') as f:
+            test_event_count = f.read().count('WEBHOOK TEST RECEIVED')
+
+    verify_token = getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_VERIFY_TOKEN', 'echodesk_webhook_token_2024')
+
+    return Response({
+        'status': 'configured',
+        'webhook_urls': {
+            'facebook': request.build_absolute_uri('/api/social/facebook/webhook/'),
+            'instagram': request.build_absolute_uri('/api/social/instagram/webhook/'),
+            'test_endpoint': request.build_absolute_uri('/api/social/webhook-test/')
+        },
+        'verify_token': verify_token,
+        'activity': {
+            'facebook_webhooks': {
+                'total_received': fb_event_count,
+                'log_file_exists': fb_log_exists,
+                'log_file_size_bytes': fb_log_size,
+                'log_file_path': fb_log
+            },
+            'test_webhooks': {
+                'total_received': test_event_count,
+                'log_file_exists': test_log_exists,
+                'log_file_size_bytes': test_log_size,
+                'log_file_path': test_log
+            }
+        },
+        'instructions': {
+            'test_webhook': 'Send POST request to /api/social/webhook-test/ with any JSON data',
+            'view_logs': 'GET /api/social/webhook-logs/ to see recent webhook activity',
+            'facebook_setup': 'Configure webhook in Facebook App → Messenger → Settings',
+            'instagram_setup': 'Instagram uses same webhook as Facebook (Pages Messaging API)'
+        }
+    })
