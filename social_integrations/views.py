@@ -1499,7 +1499,7 @@ def instagram_send_message(request):
             }, status=status.HTTP_404_NOT_FOUND)
 
         # Send message using Instagram Graph API
-        # Instagram uses the same endpoint as Facebook Pages Messaging API
+        # Instagram messages are sent through the Facebook Page's access token
         send_url = f"https://graph.facebook.com/v23.0/{instagram_account_id}/messages"
 
         message_data = {
@@ -1511,8 +1511,14 @@ def instagram_send_message(request):
             'Content-Type': 'application/json',
         }
 
+        # Use the Facebook Page's access token (Instagram accounts are linked to Pages)
+        access_token = account_connection.access_token
+        if account_connection.facebook_page:
+            access_token = account_connection.facebook_page.page_access_token
+            print(f"📘 Using Facebook Page token for Instagram messaging")
+
         params = {
-            'access_token': account_connection.access_token
+            'access_token': access_token
         }
 
         print(f"🚀 Sending Instagram message:")
