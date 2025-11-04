@@ -65,7 +65,7 @@ class InstagramMessage(models.Model):
         on_delete=models.CASCADE,
         related_name='messages'
     )
-    message_id = models.CharField(max_length=100, unique=True)
+    message_id = models.CharField(max_length=255, unique=True)  # Instagram IDs are base64 encoded, need more space
     sender_id = models.CharField(max_length=100)
     sender_username = models.CharField(max_length=200, blank=True)
     sender_profile_pic = models.URLField(max_length=500, blank=True, null=True)
