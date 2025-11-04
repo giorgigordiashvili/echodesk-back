@@ -80,4 +80,5 @@ urlpatterns = [
     path('', include('notifications.urls')),
     path('api/ecommerce/', include('ecommerce_crm.urls')),
     path('api/bookings/', include('booking_management.urls')),
+    path('api/leave/', include('leave_management.urls')),
 ]

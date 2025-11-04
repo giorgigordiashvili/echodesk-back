@@ -74,6 +74,7 @@ TENANT_APPS = [
     'notifications',
     'ecommerce_crm',  # E-commerce product management
     'booking_management',  # Booking management for service-based businesses
+    'leave_management',  # Employee leave and absence management
 ]
 
 INSTALLED_APPS = list(SHARED_APPS) + [app for app in TENANT_APPS if app not in SHARED_APPS]
