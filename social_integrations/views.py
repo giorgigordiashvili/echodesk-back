@@ -127,15 +127,15 @@ def facebook_oauth_start(request):
         logger.info(f"Generated raw state parameter: {state_raw}")
         logger.info(f"URL encoded state parameter: {state}")
         
-        # Facebook OAuth URL for business pages with business_management permission
-        # Including Instagram permissions: instagram_basic for account access
-        # instagram_business_manage_messages for sending/receiving Instagram DMs
-        # Note: instagram_business_manage_messages requires app to be in Beta mode or approved
+        # Facebook OAuth URL for business pages with Messenger Platform for Instagram
+        # Using pages_messaging for both Facebook and Instagram messaging
+        # instagram_basic for accessing connected Instagram accounts
+        # https://developers.facebook.com/docs/messenger-platform/instagram/get-started
         oauth_url = (
             f"https://www.facebook.com/v23.0/dialog/oauth?"
             f"client_id={fb_app_id}&"
             f"redirect_uri={quote(redirect_uri)}&"
-            f"scope=business_management,pages_show_list,pages_manage_metadata,pages_messaging,pages_read_engagement,instagram_basic,instagram_business_manage_messages,public_profile,email&"
+            f"scope=business_management,pages_show_list,pages_manage_metadata,pages_messaging,pages_read_engagement,instagram_basic,instagram_manage_messages,public_profile,email&"
             f"state={state}&"
             f"response_type=code&"
             f"auth_type=rerequest"
@@ -1533,14 +1533,15 @@ def instagram_send_message(request):
                 'details': 'Instagram only allows responses within 24 hours of the last message from the user.'
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # Instagram messaging through Facebook Pages requires specific formatting
-        # Use the Instagram account ID in the URL, not the Page ID
-        send_url = f"https://graph.facebook.com/v23.0/{instagram_account_id}/messages"
+        # Instagram messaging through Messenger Platform API
+        # Use Page ID in URL and specify platform=instagram in params
+        # https://developers.facebook.com/docs/messenger-platform/instagram/get-started
+        send_url = f"https://graph.facebook.com/v23.0/me/messages"
 
         message_data = {
             'recipient': {'id': recipient_id},
             'message': {'text': message_text},
-            'messaging_type': 'RESPONSE'  # Instagram requires this
+            'messaging_type': 'RESPONSE'  # Required for Instagram within 24hr window
         }
 
         headers = {
@@ -1551,7 +1552,8 @@ def instagram_send_message(request):
         access_token = account_connection.facebook_page.page_access_token
 
         params = {
-            'access_token': access_token
+            'access_token': access_token,
+            'platform': 'instagram'  # Specify Instagram platform
         }
 
         print(f"🚀 Sending Instagram message:")
