@@ -1499,7 +1499,8 @@ def instagram_send_message(request):
             }, status=status.HTTP_404_NOT_FOUND)
 
         # Send message using Instagram Graph API
-        send_url = f"https://graph.facebook.com/v23.0/me/messages"
+        # Instagram uses the same endpoint as Facebook Pages Messaging API
+        send_url = f"https://graph.facebook.com/v23.0/{instagram_account_id}/messages"
 
         message_data = {
             'recipient': {'id': recipient_id},
@@ -1515,9 +1516,10 @@ def instagram_send_message(request):
         }
 
         print(f"🚀 Sending Instagram message:")
-        print(f"   Account: @{account_connection.username}")
+        print(f"   Account: @{account_connection.username} (ID: {instagram_account_id})")
         print(f"   To: {recipient_id}")
         print(f"   Message: {message_text}")
+        print(f"   URL: {send_url}")
 
         response = requests.post(
             send_url,
@@ -1664,18 +1666,22 @@ def instagram_webhook(request):
                                 message_data = message_event['message']
                                 sender_id = message_event['sender']['id']
 
+                                logger.info(f"📨 Instagram webhook message_event: {message_event}")
+
                                 # Skip if this is an echo (message sent by the business)
                                 if message_data.get('is_echo'):
                                     logger.info("Skipping echo message")
                                     continue
 
-                                # Get sender info
-                                sender_username = 'Unknown'
+                                # Get sender info - use sender_id as fallback username
+                                sender_username = sender_id  # Use the ID as username by default
                                 sender_profile_pic = None
 
                                 # Save the message
                                 message_id = message_data.get('mid', '')
                                 message_text = message_data.get('text', '')
+
+                                logger.info(f"💾 Saving Instagram message from sender_id: {sender_id}")
 
                                 if message_id and not InstagramMessage.objects.filter(message_id=message_id).exists():
                                     try:
@@ -1689,7 +1695,7 @@ def instagram_webhook(request):
                                             timestamp=convert_facebook_timestamp(message_event.get('timestamp', 0)),
                                             is_from_business=False
                                         )
-                                        logger.info(f"✅ Saved Instagram message: {message_text[:50]}")
+                                        logger.info(f"✅ Saved Instagram message from {sender_username}: {message_text[:50]}")
                                     except Exception as e:
                                         logger.error(f"❌ Failed to save Instagram message: {e}")
 
