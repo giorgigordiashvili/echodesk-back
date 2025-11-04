@@ -1508,9 +1508,33 @@ def instagram_send_message(request):
 
         page_id = account_connection.facebook_page.page_id
 
+        # Check if we have any messages from this recipient (to verify they messaged us first)
+        recent_messages = InstagramMessage.objects.filter(
+            account_connection=account_connection,
+            sender_id=recipient_id,
+            is_from_business=False
+        ).order_by('-timestamp')
+
+        if not recent_messages.exists():
+            return Response({
+                'error': 'Cannot send message: No conversation found with this user. The user must message you first on Instagram.',
+                'details': 'Instagram requires the user to initiate the conversation before you can send messages.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check 24-hour window
+        latest_message = recent_messages.first()
+        time_since_message = datetime.now(latest_message.timestamp.tzinfo) - latest_message.timestamp
+        hours_passed = time_since_message.total_seconds() / 3600
+
+        if hours_passed > 24:
+            return Response({
+                'error': f'Cannot send message: 24-hour response window expired ({hours_passed:.1f} hours ago)',
+                'details': 'Instagram only allows responses within 24 hours of the last message from the user.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         # Instagram messaging through Facebook Pages requires specific formatting
-        # The sender must be specified in the request for Instagram
-        send_url = f"https://graph.facebook.com/v23.0/{page_id}/messages"
+        # Use the Instagram account ID in the URL, not the Page ID
+        send_url = f"https://graph.facebook.com/v23.0/{instagram_account_id}/messages"
 
         message_data = {
             'recipient': {'id': recipient_id},
@@ -1529,14 +1553,16 @@ def instagram_send_message(request):
             'access_token': access_token
         }
 
-        print(f"🚀 Sending Instagram message via Facebook Page:")
+        print(f"🚀 Sending Instagram message:")
         print(f"   Instagram Account: @{account_connection.username} (ID: {instagram_account_id})")
         print(f"   Facebook Page ID: {page_id}")
         print(f"   To recipient: {recipient_id}")
+        print(f"   Last message from user: {latest_message.timestamp}")
+        print(f"   Time since last message: {hours_passed:.1f} hours (must be < 24)")
         print(f"   Message: {message_text}")
         print(f"   URL: {send_url}")
-        print(f"   Messaging Type: RESPONSE (24hr window)")
-        print(f"   Using Page access token")
+        print(f"   Messaging Type: RESPONSE")
+        print(f"   Using Page access token: {access_token[:20]}...")
 
         response = requests.post(
             send_url,
