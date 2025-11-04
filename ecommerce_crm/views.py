@@ -696,22 +696,28 @@ def request_password_reset(request):
     if serializer.is_valid():
         client = serializer.context.get('client')
 
-        # Generate reset token
-        token = PasswordResetToken.generate_token()
-        expires_at = timezone.now() + timedelta(hours=24)
+        # Generate 6-digit verification code
+        code = PasswordResetToken.generate_code()
+        expires_at = timezone.now() + timedelta(hours=1)  # Code expires in 1 hour
 
-        # Create password reset token
+        # Invalidate any existing unused codes for this client
+        PasswordResetToken.objects.filter(
+            client=client,
+            is_used=False
+        ).update(is_used=True)
+
+        # Create password reset token with code
         reset_token = PasswordResetToken.objects.create(
             client=client,
-            token=token,
+            token=code,
             expires_at=expires_at
         )
 
-        # Send password reset email
-        send_password_reset_email(client, token)
+        # Send password reset email with code
+        send_password_reset_email(client, code)
 
         return Response({
-            'message': 'Password reset email sent. Please check your inbox.'
+            'message': 'Verification code sent to your email. Please check your inbox.'
         }, status=status.HTTP_200_OK)
 
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -720,18 +726,18 @@ def request_password_reset(request):
 @extend_schema(
     operation_id='password_reset_confirm',
     summary='Confirm password reset',
-    description='Reset password using the token received via email',
+    description='Reset password using the 6-digit verification code received via email',
     request=PasswordResetConfirmSerializer,
     responses={
         200: OpenApiResponse(description='Password reset successful'),
-        400: OpenApiResponse(description='Invalid token or validation error')
+        400: OpenApiResponse(description='Invalid code or validation error')
     },
     tags=['Ecommerce - Client Auth']
 )
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def confirm_password_reset(request):
-    """Confirm password reset with token"""
+    """Confirm password reset with verification code"""
     serializer = PasswordResetConfirmSerializer(data=request.data)
 
     if serializer.is_valid():
@@ -743,7 +749,7 @@ def confirm_password_reset(request):
         client.set_password(new_password)
         client.save()
 
-        # Mark token as used
+        # Mark code as used
         reset_token.mark_as_used()
 
         return Response({

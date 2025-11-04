@@ -1100,6 +1100,12 @@ class PasswordResetToken(models.Model):
         import secrets
         return secrets.token_urlsafe(32)
 
+    @staticmethod
+    def generate_code():
+        """Generate a 6-digit verification code"""
+        import random
+        return ''.join([str(random.randint(0, 9)) for _ in range(6)])
+
     def is_valid(self):
         """Check if token is still valid (not used and not expired)"""
         from django.utils import timezone

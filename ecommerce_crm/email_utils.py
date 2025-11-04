@@ -118,24 +118,20 @@ def send_verification_code_email(email, code, client_name=None):
     )
 
 
-def send_password_reset_email(client, reset_token):
+def send_password_reset_email(client, verification_code):
     """
-    Send password reset email to client
+    Send password reset email to client with 6-digit verification code
 
     Args:
         client: EcommerceClient instance
-        reset_token: Password reset token
+        verification_code: 6-digit verification code
 
     Returns:
         bool: True if email sent successfully
     """
-    # Construct reset URL
-    reset_url = f"https://{settings.FRONTEND_BASE_URL}/reset-password?token={reset_token}"
-
     context = {
         'client_name': client.first_name or 'Valued Customer',
-        'reset_url': reset_url,
-        'reset_token': reset_token,
+        'verification_code': verification_code,
     }
 
     return send_email(

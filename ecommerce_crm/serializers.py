@@ -659,26 +659,37 @@ class PasswordResetRequestSerializer(serializers.Serializer):
 
 class PasswordResetConfirmSerializer(serializers.Serializer):
     """Serializer for confirming password reset"""
-    token = serializers.CharField(required=True)
+    email = serializers.EmailField(required=True)
+    code = serializers.CharField(required=True, max_length=6, min_length=6)
     new_password = serializers.CharField(write_only=True, required=True, min_length=8)
     new_password_confirm = serializers.CharField(write_only=True, required=True)
 
     def validate(self, data):
-        """Validate token and passwords match"""
-        from .models import PasswordResetToken
+        """Validate code and passwords match"""
+        from .models import PasswordResetToken, EcommerceClient
 
         # Validate passwords match
         if data.get('new_password') != data.get('new_password_confirm'):
             raise serializers.ValidationError({"new_password_confirm": "Passwords do not match."})
 
-        # Validate token
+        # Validate client exists
         try:
-            reset_token = PasswordResetToken.objects.get(token=data['token'])
+            client = EcommerceClient.objects.get(email=data['email'], is_active=True)
+        except EcommerceClient.DoesNotExist:
+            raise serializers.ValidationError({"email": "No active account found with this email address."})
+
+        # Validate code
+        try:
+            reset_token = PasswordResetToken.objects.get(
+                client=client,
+                token=data['code'],
+                is_used=False
+            )
         except PasswordResetToken.DoesNotExist:
-            raise serializers.ValidationError({"token": "Invalid or expired reset token."})
+            raise serializers.ValidationError({"code": "Invalid or expired verification code."})
 
         if not reset_token.is_valid():
-            raise serializers.ValidationError({"token": "This reset token has expired or been used."})
+            raise serializers.ValidationError({"code": "This verification code has expired or been used."})
 
         data['reset_token'] = reset_token
         return data
