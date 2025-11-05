@@ -256,13 +256,17 @@ class User(AbstractBaseUser, PermissionsMixin):
         
         if role_permissions.get(permission, False):
             return True
-        
-        # Check group permissions
-        for group in self.tenant_groups.filter(is_active=True):
-            group_permission_field = f'can_{permission}'
-            if hasattr(group, group_permission_field) and getattr(group, group_permission_field, False):
-                return True
-        
+
+        # Check group permissions (skip if we're in public schema / admin context)
+        try:
+            for group in self.tenant_groups.filter(is_active=True):
+                group_permission_field = f'can_{permission}'
+                if hasattr(group, group_permission_field) and getattr(group, group_permission_field, False):
+                    return True
+        except Exception:
+            # Likely in public schema (admin context) where tenant_groups don't exist
+            pass
+
         return False
     
     def get_all_permissions(self):
@@ -290,8 +294,12 @@ class User(AbstractBaseUser, PermissionsMixin):
         """Get feature keys inherited from groups"""
         group_features = set()
 
-        for group in self.tenant_groups.filter(is_active=True):
-            group_features.update(group.get_feature_keys())
+        try:
+            for group in self.tenant_groups.filter(is_active=True):
+                group_features.update(group.get_feature_keys())
+        except Exception:
+            # Likely in public schema (admin context) where tenant_groups don't exist
+            pass
 
         return list(group_features)
 
