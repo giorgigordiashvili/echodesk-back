@@ -425,6 +425,8 @@ class TenantGroupViewSet(viewsets.ModelViewSet):
         try:
             # Get tenant from request
             tenant = request.tenant if hasattr(request, 'tenant') else None
+            # Get optional group_id to include features already assigned to that group
+            group_id = request.query_params.get('group_id')
 
             if tenant and hasattr(tenant, 'schema_name') and tenant.schema_name != 'public':
                 # Get features available to this tenant through their subscription
@@ -433,8 +435,21 @@ class TenantGroupViewSet(viewsets.ModelViewSet):
                     is_active=True
                 ).select_related('feature').values_list('feature_id', flat=True)
 
-                # Return only the features this tenant has access to
-                features = Feature.objects.filter(id__in=tenant_features, is_active=True)
+                # Start with subscription features
+                feature_ids = list(tenant_features)
+
+                # If editing a group, also include features already assigned to it
+                if group_id:
+                    try:
+                        group = TenantGroup.objects.get(id=group_id)
+                        group_feature_ids = group.features.values_list('id', flat=True)
+                        # Combine subscription features and group features (avoiding duplicates)
+                        feature_ids = list(set(feature_ids) | set(group_feature_ids))
+                    except TenantGroup.DoesNotExist:
+                        pass
+
+                # Return only the features this tenant has access to or already has in the group
+                features = Feature.objects.filter(id__in=feature_ids, is_active=True)
             else:
                 # For public schema or no tenant, return all active features
                 features = Feature.objects.filter(is_active=True)
