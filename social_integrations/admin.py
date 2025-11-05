@@ -4,7 +4,7 @@ from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 from django.contrib import messages
 import requests
-from .models import FacebookPageConnection, FacebookMessage, InstagramAccountConnection, InstagramMessage
+from .models import FacebookPageConnection, FacebookMessage, InstagramAccountConnection, InstagramMessage, SocialIntegrationSettings
 
 
 @admin.register(FacebookPageConnection)
@@ -84,3 +84,23 @@ class InstagramMessageAdmin(admin.ModelAdmin):
         """Show first 50 characters of message"""
         return obj.message_text[:50] + '...' if len(obj.message_text) > 50 else obj.message_text
     message_preview.short_description = 'Message Preview'
+
+
+@admin.register(SocialIntegrationSettings)
+class SocialIntegrationSettingsAdmin(admin.ModelAdmin):
+    list_display = ['refresh_interval_display', 'updated_at']
+    fields = ['refresh_interval']
+
+    def refresh_interval_display(self, obj):
+        """Display refresh interval in a more readable format"""
+        seconds = obj.refresh_interval / 1000
+        return f"{obj.refresh_interval}ms ({seconds}s)"
+    refresh_interval_display.short_description = 'Refresh Interval'
+
+    def has_add_permission(self, request):
+        """Only allow one settings object per tenant"""
+        return not SocialIntegrationSettings.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        """Prevent deletion of settings"""
+        return False

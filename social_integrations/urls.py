@@ -39,6 +39,9 @@ urlpatterns = [
     path('webhook-logs/', views.webhook_debug_logs, name='webhook_debug_logs'),
     path('webhook-test/', views.webhook_test_receiver, name='webhook_test'),
 
+    # Settings endpoint
+    path('settings/', views.social_settings, name='social_settings'),
+
     # Admin OAuth endpoints
     path('admin/facebook/oauth/start/', admin_views.facebook_oauth_admin_start, name='admin_facebook_oauth_start'),
     path('admin/facebook/oauth/callback/', admin_views.facebook_oauth_admin_callback, name='admin_facebook_oauth_callback'),

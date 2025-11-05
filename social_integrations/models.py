@@ -79,3 +79,29 @@ class InstagramMessage(models.Model):
 
     def __str__(self):
         return f"Instagram DM from @{self.sender_username} - {self.message_text[:50]}"
+
+
+class SocialIntegrationSettings(models.Model):
+    """Stores tenant-specific settings for social integrations"""
+    # Singleton pattern - only one settings object per tenant
+    refresh_interval = models.IntegerField(
+        default=5000,
+        help_text="Auto-refresh interval in milliseconds for messages page (min: 1000, max: 60000)"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Social Integration Settings"
+        verbose_name_plural = "Social Integration Settings"
+
+    def __str__(self):
+        return f"Social Settings (Refresh: {self.refresh_interval}ms)"
+
+    def save(self, *args, **kwargs):
+        # Enforce min/max limits
+        if self.refresh_interval < 1000:
+            self.refresh_interval = 1000
+        elif self.refresh_interval > 60000:
+            self.refresh_interval = 60000
+        super().save(*args, **kwargs)

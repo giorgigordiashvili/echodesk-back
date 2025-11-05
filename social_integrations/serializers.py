@@ -1,7 +1,8 @@
 from rest_framework import serializers
 from .models import (
     FacebookPageConnection, FacebookMessage,
-    InstagramAccountConnection, InstagramMessage
+    InstagramAccountConnection, InstagramMessage,
+    SocialIntegrationSettings
 )
 
 
@@ -58,3 +59,18 @@ class InstagramSendMessageSerializer(serializers.Serializer):
     recipient_id = serializers.CharField(max_length=255, help_text="Instagram user ID to send message to")
     message = serializers.CharField(help_text="Message text to send")
     instagram_account_id = serializers.CharField(max_length=255, help_text="Instagram account ID to send from")
+
+
+class SocialIntegrationSettingsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SocialIntegrationSettings
+        fields = ['id', 'refresh_interval', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def validate_refresh_interval(self, value):
+        """Ensure refresh interval is within acceptable range"""
+        if value < 1000:
+            raise serializers.ValidationError("Refresh interval must be at least 1000ms (1 second)")
+        if value > 60000:
+            raise serializers.ValidationError("Refresh interval must be at most 60000ms (60 seconds)")
+        return value

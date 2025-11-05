@@ -20,11 +20,13 @@ from rest_framework.permissions import IsAuthenticated
 from drf_spectacular.utils import extend_schema
 from .models import (
     FacebookPageConnection, FacebookMessage,
-    InstagramAccountConnection, InstagramMessage
+    InstagramAccountConnection, InstagramMessage,
+    SocialIntegrationSettings
 )
 from .serializers import (
     FacebookPageConnectionSerializer, FacebookMessageSerializer, FacebookSendMessageSerializer,
-    InstagramAccountConnectionSerializer, InstagramMessageSerializer, InstagramSendMessageSerializer
+    InstagramAccountConnectionSerializer, InstagramMessageSerializer, InstagramSendMessageSerializer,
+    SocialIntegrationSettingsSerializer
 )
 from .permissions import (
     CanManageSocialConnections, CanViewSocialMessages,
@@ -1936,3 +1938,41 @@ def webhook_status(request):
             'instagram_setup': 'Instagram uses same webhook as Facebook (Pages Messaging API)'
         }
     })
+
+
+@api_view(['GET', 'PUT', 'PATCH'])
+@permission_classes([IsAuthenticated, CanManageSocialSettings])
+def social_settings(request):
+    """Get or update social integration settings for the current tenant"""
+    logger = logging.getLogger(__name__)
+
+    try:
+        # Get or create settings for this tenant (singleton pattern)
+        settings_obj, created = SocialIntegrationSettings.objects.get_or_create(
+            defaults={'refresh_interval': 5000}
+        )
+
+        if request.method == 'GET':
+            serializer = SocialIntegrationSettingsSerializer(settings_obj)
+            return Response(serializer.data)
+
+        elif request.method in ['PUT', 'PATCH']:
+            partial = request.method == 'PATCH'
+            serializer = SocialIntegrationSettingsSerializer(
+                settings_obj,
+                data=request.data,
+                partial=partial
+            )
+
+            if serializer.is_valid():
+                serializer.save()
+                logger.info(f"Updated social integration settings: {serializer.data}")
+                return Response(serializer.data)
+            else:
+                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    except Exception as e:
+        logger.error(f"Error managing social settings: {e}")
+        return Response({
+            'error': f'Failed to manage settings: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
