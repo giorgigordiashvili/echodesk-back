@@ -137,27 +137,39 @@ class TypingConsumer(AsyncWebsocketConsumer):
     WebSocket consumer for typing indicators.
     Handles typing start/stop events for conversations.
     """
-    
+
     async def connect(self):
         self.tenant_schema = self.scope['url_route']['kwargs']['tenant_schema']
         self.conversation_id = self.scope['url_route']['kwargs']['conversation_id']
         self.user = self.scope.get('user', AnonymousUser())
-        
+
+        print(f"[TypingWebSocket] Connection attempt - Tenant: {self.tenant_schema}, Conversation: {self.conversation_id}, User: {self.user}, Is Anonymous: {self.user.is_anonymous}")
+
         # Only allow authenticated users
         if self.user.is_anonymous:
-            await self.close()
+            print(f"[TypingWebSocket] Rejecting connection - User not authenticated")
+            # Send error message before closing
+            await self.accept()
+            await self.send(text_data=json.dumps({
+                'type': 'error',
+                'message': 'Authentication required',
+                'code': 'UNAUTHENTICATED'
+            }))
+            await self.close(code=4001)
             return
-        
+
         # Join the typing group for this conversation
         self.typing_group_name = f'typing_{self.tenant_schema}_{self.conversation_id}'
-        
+
         await self.channel_layer.group_add(
             self.typing_group_name,
             self.channel_name
         )
-        
+
         await self.accept()
-        
+
+        print(f"[TypingWebSocket] Connection accepted for user {self.user.email}")
+
         # Send initial connection confirmation
         await self.send(text_data=json.dumps({
             'type': 'connection',
@@ -187,8 +199,16 @@ class TypingConsumer(AsyncWebsocketConsumer):
         try:
             data = json.loads(text_data)
             message_type = data.get('type')
-            
-            if message_type == 'typing_start':
+
+            if message_type == 'ping':
+                # Respond to ping with pong for connection health check
+                await self.send(text_data=json.dumps({
+                    'type': 'pong',
+                    'timestamp': data.get('timestamp')
+                }))
+                print('[TypingWebSocket] Pong sent')
+
+            elif message_type == 'typing_start':
                 # Broadcast typing start to other users in conversation
                 await self.channel_layer.group_send(
                     self.typing_group_name,
@@ -199,7 +219,7 @@ class TypingConsumer(AsyncWebsocketConsumer):
                         'timestamp': asyncio.get_event_loop().time()
                     }
                 )
-            
+
             elif message_type == 'typing_stop':
                 # Broadcast typing stop to other users in conversation
                 await self.channel_layer.group_send(
@@ -210,7 +230,7 @@ class TypingConsumer(AsyncWebsocketConsumer):
                         'timestamp': asyncio.get_event_loop().time()
                     }
                 )
-        
+
         except json.JSONDecodeError:
             await self.send(text_data=json.dumps({
                 'type': 'error',

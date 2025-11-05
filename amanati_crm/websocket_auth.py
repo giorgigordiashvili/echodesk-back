@@ -1,42 +1,71 @@
 """
-WebSocket JWT Authentication Middleware for Django Channels
+WebSocket Authentication Middleware for Django Channels
+Supports both JWT and Django Token authentication
 """
 from channels.db import database_sync_to_async
 from channels.middleware import BaseMiddleware
 from django.contrib.auth.models import AnonymousUser
-from rest_framework_simplejwt.tokens import AccessToken
-from rest_framework_simplejwt.exceptions import TokenError
 from urllib.parse import parse_qs
 from users.models import User
+
+# Try to import JWT support
+try:
+    from rest_framework_simplejwt.tokens import AccessToken
+    from rest_framework_simplejwt.exceptions import TokenError
+    JWT_AVAILABLE = True
+except ImportError:
+    JWT_AVAILABLE = False
+
+# Try to import Django Token authentication
+try:
+    from rest_framework.authtoken.models import Token as DjangoToken
+    DJANGO_TOKEN_AVAILABLE = True
+except ImportError:
+    DJANGO_TOKEN_AVAILABLE = False
 
 
 @database_sync_to_async
 def get_user_from_token(token_string):
     """
-    Get user from JWT access token
+    Get user from token - supports both JWT and Django Token authentication
     """
-    try:
-        # Validate token
-        token = AccessToken(token_string)
-        user_id = token.payload.get('user_id')
+    # Try JWT first if available
+    if JWT_AVAILABLE:
+        try:
+            token = AccessToken(token_string)
+            user_id = token.payload.get('user_id')
+            if user_id:
+                user = User.objects.get(id=user_id)
+                print(f"[WebSocket Auth] JWT authentication successful for user: {user.email}")
+                return user
+        except (TokenError, User.DoesNotExist, Exception) as e:
+            print(f"[WebSocket Auth] JWT validation failed: {e}")
 
-        if user_id:
-            user = User.objects.get(id=user_id)
+    # Try Django Token authentication if available
+    if DJANGO_TOKEN_AVAILABLE:
+        try:
+            token_obj = DjangoToken.objects.select_related('user').get(key=token_string)
+            user = token_obj.user
+            print(f"[WebSocket Auth] Django Token authentication successful for user: {user.email}")
             return user
-    except (TokenError, User.DoesNotExist, Exception) as e:
-        print(f"WebSocket auth error: {e}")
-        pass
+        except (DjangoToken.DoesNotExist, Exception) as e:
+            print(f"[WebSocket Auth] Django Token validation failed: {e}")
 
+    print(f"[WebSocket Auth] No valid authentication found for token")
     return AnonymousUser()
 
 
 class JWTAuthMiddleware(BaseMiddleware):
     """
-    Custom middleware to authenticate WebSocket connections using JWT tokens
+    Custom middleware to authenticate WebSocket connections using JWT or Django Token authentication
 
     Token can be passed via:
-    1. Query parameter: ?token=<jwt_token>
-    2. Cookie: jwt_token=<jwt_token>
+    1. Query parameter: ?token=<token>
+    2. Cookie: jwt_token=<token>
+
+    Supports both:
+    - JWT tokens (rest_framework_simplejwt)
+    - Django Token authentication (rest_framework.authtoken)
     """
 
     async def __call__(self, scope, receive, send):
@@ -68,6 +97,7 @@ class JWTAuthMiddleware(BaseMiddleware):
 
 def JWTAuthMiddlewareStack(inner):
     """
-    Convenience function to wrap URLRouter with JWT auth middleware
+    Convenience function to wrap URLRouter with authentication middleware
+    Supports both JWT and Django Token authentication
     """
     return JWTAuthMiddleware(inner)
