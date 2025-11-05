@@ -73,9 +73,15 @@ class FacebookPageConnectionAdmin(TenantAwareAdminMixin, admin.ModelAdmin):
 
 @admin.register(FacebookMessage)
 class FacebookMessageAdmin(TenantAwareAdminMixin, admin.ModelAdmin):
-    list_display = ['sender_name', 'page_connection', 'timestamp', 'is_from_page']
-    list_filter = ['is_from_page', 'timestamp', 'page_connection']
+    list_display = ['sender_name', 'page_connection', 'message_preview', 'timestamp', 'is_from_page', 'is_delivered', 'is_read']
+    list_filter = ['is_from_page', 'is_delivered', 'is_read', 'timestamp', 'page_connection']
     search_fields = ['sender_name', 'message_text', 'sender_id']
+    readonly_fields = ['message_id', 'sender_id', 'timestamp', 'delivered_at', 'read_at', 'created_at']
+
+    def message_preview(self, obj):
+        """Show first 50 characters of message"""
+        return obj.message_text[:50] + '...' if len(obj.message_text) > 50 else obj.message_text
+    message_preview.short_description = 'Message Preview'
 
 
 @admin.register(InstagramAccountConnection)
@@ -94,10 +100,10 @@ class InstagramAccountConnectionAdmin(TenantAwareAdminMixin, admin.ModelAdmin):
 
 @admin.register(InstagramMessage)
 class InstagramMessageAdmin(TenantAwareAdminMixin, admin.ModelAdmin):
-    list_display = ['sender_username', 'account_connection', 'timestamp', 'is_from_business', 'message_preview']
-    list_filter = ['is_from_business', 'timestamp', 'account_connection']
+    list_display = ['sender_username', 'account_connection', 'message_preview', 'timestamp', 'is_from_business', 'is_delivered', 'is_read']
+    list_filter = ['is_from_business', 'is_delivered', 'is_read', 'timestamp', 'account_connection']
     search_fields = ['sender_username', 'message_text', 'sender_id']
-    readonly_fields = ['message_id', 'sender_id', 'timestamp', 'created_at']
+    readonly_fields = ['message_id', 'sender_id', 'timestamp', 'delivered_at', 'read_at', 'created_at']
 
     def message_preview(self, obj):
         """Show first 50 characters of message"""
