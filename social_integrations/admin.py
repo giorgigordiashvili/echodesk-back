@@ -3,12 +3,31 @@ from django.urls import reverse
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 from django.contrib import messages
+from django.db import connection
+from tenant_schemas.utils import get_public_schema_name
 import requests
 from .models import FacebookPageConnection, FacebookMessage, InstagramAccountConnection, InstagramMessage, SocialIntegrationSettings
 
 
+class TenantAwareAdminMixin:
+    """Mixin to restrict admin models to tenant schemas only"""
+
+    def has_module_permission(self, request):
+        """Only show this admin in tenant schemas, not public schema"""
+        if hasattr(connection, 'schema_name'):
+            schema_name = connection.schema_name
+        else:
+            schema_name = get_public_schema_name()
+
+        # Hide from public schema admin
+        if schema_name == get_public_schema_name():
+            return False
+
+        return super().has_module_permission(request)
+
+
 @admin.register(FacebookPageConnection)
-class FacebookPageConnectionAdmin(admin.ModelAdmin):
+class FacebookPageConnectionAdmin(TenantAwareAdminMixin, admin.ModelAdmin):
     list_display = ['page_name', 'page_id', 'is_active', 'created_at']
     list_filter = ['is_active', 'created_at']
     search_fields = ['page_name', 'page_id']
@@ -53,14 +72,14 @@ class FacebookPageConnectionAdmin(admin.ModelAdmin):
 
 
 @admin.register(FacebookMessage)
-class FacebookMessageAdmin(admin.ModelAdmin):
+class FacebookMessageAdmin(TenantAwareAdminMixin, admin.ModelAdmin):
     list_display = ['sender_name', 'page_connection', 'timestamp', 'is_from_page']
     list_filter = ['is_from_page', 'timestamp', 'page_connection']
     search_fields = ['sender_name', 'message_text', 'sender_id']
 
 
 @admin.register(InstagramAccountConnection)
-class InstagramAccountConnectionAdmin(admin.ModelAdmin):
+class InstagramAccountConnectionAdmin(TenantAwareAdminMixin, admin.ModelAdmin):
     list_display = ['username', 'instagram_account_id', 'facebook_page', 'is_active', 'created_at']
     list_filter = ['is_active', 'created_at']
     search_fields = ['username', 'instagram_account_id']
@@ -74,7 +93,7 @@ class InstagramAccountConnectionAdmin(admin.ModelAdmin):
 
 
 @admin.register(InstagramMessage)
-class InstagramMessageAdmin(admin.ModelAdmin):
+class InstagramMessageAdmin(TenantAwareAdminMixin, admin.ModelAdmin):
     list_display = ['sender_username', 'account_connection', 'timestamp', 'is_from_business', 'message_preview']
     list_filter = ['is_from_business', 'timestamp', 'account_connection']
     search_fields = ['sender_username', 'message_text', 'sender_id']
@@ -87,7 +106,7 @@ class InstagramMessageAdmin(admin.ModelAdmin):
 
 
 @admin.register(SocialIntegrationSettings)
-class SocialIntegrationSettingsAdmin(admin.ModelAdmin):
+class SocialIntegrationSettingsAdmin(TenantAwareAdminMixin, admin.ModelAdmin):
     list_display = ['refresh_interval_display', 'updated_at']
     fields = ['refresh_interval']
 
