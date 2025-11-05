@@ -1076,8 +1076,71 @@ def facebook_webhook(request):
                                             logger.warning(f"⚠️ No message_id provided, skipping save")
                                         else:
                                             logger.warning(f"⚠️ Message {message_id} already exists, skipping save")
+
+                                # Handle read receipts
+                                elif 'read' in message_event:
+                                    read_data = message_event['read']
+                                    sender_id = message_event['sender']['id']
+                                    watermark = int(read_data.get('watermark', 0))
+
+                                    logger.info(f"📖 Read receipt from {sender_id}, watermark: {watermark}")
+                                    print(f"📖 READ RECEIPT: sender={sender_id}, watermark={watermark}")
+
+                                    # Mark all messages from this sender before the watermark as read
+                                    try:
+                                        from django.utils import timezone
+                                        watermark_datetime = convert_facebook_timestamp(watermark)
+
+                                        # Find messages sent by the page to this user before the watermark
+                                        messages_to_mark = FacebookMessage.objects.filter(
+                                            page_connection=page_connection,
+                                            sender_id=page_id,  # Messages sent BY the page
+                                            timestamp__lte=watermark_datetime,
+                                            is_read=False
+                                        )
+
+                                        updated_count = messages_to_mark.update(
+                                            is_read=True,
+                                            read_at=timezone.now()
+                                        )
+
+                                        logger.info(f"✅ Marked {updated_count} messages as read for conversation with {sender_id}")
+                                        print(f"✅ READ RECEIPT: Marked {updated_count} messages as read")
+
+                                        # Send WebSocket notification for read receipts
+                                        if updated_count > 0:
+                                            from django.db import connection
+                                            current_schema = getattr(connection, 'schema_name', None)
+                                            if current_schema:
+                                                # Get the IDs of updated messages
+                                                updated_message_ids = list(FacebookMessage.objects.filter(
+                                                    page_connection=page_connection,
+                                                    sender_id=page_id,
+                                                    timestamp__lte=watermark_datetime,
+                                                    is_read=True
+                                                ).values_list('id', flat=True))
+
+                                                read_receipt_data = {
+                                                    'type': 'read_receipt',
+                                                    'sender_id': sender_id,
+                                                    'watermark': watermark,
+                                                    'message_ids': updated_message_ids,
+                                                    'updated_count': updated_count,
+                                                    'timestamp': timezone.now().isoformat()
+                                                }
+                                                # Conversation ID is the sender_id (the customer who read the messages)
+                                                ws_conversation_id = sender_id
+                                                send_websocket_notification(current_schema, read_receipt_data, ws_conversation_id)
+                                                logger.info(f"📤 Sent read receipt WebSocket notification for conversation {ws_conversation_id}")
+                                            else:
+                                                print(f"⚠️ WebSocket: Could not determine tenant schema - skipping read receipt notification")
+
+                                    except Exception as e:
+                                        logger.error(f"❌ Failed to process read receipt: {e}")
+                                        print(f"❌ READ RECEIPT ERROR: {e}")
+
                                 else:
-                                    logger.info(f"ℹ️ Message event has no 'message' field: {message_event}")
+                                    logger.info(f"ℹ️ Message event has no 'message' or 'read' field: {message_event}")
                         else:
                             logger.info(f"ℹ️ Entry has no 'messaging' field: {entry}")
                 else:
