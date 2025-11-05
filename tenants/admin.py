@@ -646,7 +646,7 @@ class FeaturePermissionInline(admin.TabularInline):
 class FeatureAdminForm(forms.ModelForm):
     """Custom form for Feature admin with permissions selector"""
     permissions = forms.ModelMultipleChoiceField(
-        queryset=Permission.objects.all().select_related('content_type').order_by('content_type__app_label', 'codename'),
+        queryset=Permission.objects.none(),  # Will be set in __init__
         required=False,
         widget=admin.widgets.FilteredSelectMultiple('Permissions', False),
         help_text='Select Django permissions that this feature will grant'
@@ -658,12 +658,39 @@ class FeatureAdminForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+
+        # Set the permissions queryset - do this safely to avoid transaction errors
+        try:
+            self.fields['permissions'].queryset = Permission.objects.all().select_related('content_type').order_by('content_type__app_label', 'codename')
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Failed to load permissions queryset with content_type: {e}")
+            try:
+                self.fields['permissions'].queryset = Permission.objects.all().order_by('codename')
+            except Exception as e2:
+                logger.error(f"Failed to load any permissions: {e2}")
+                self.fields['permissions'].queryset = Permission.objects.none()
+
         if self.instance.pk:
-            # Load existing permissions for this feature
-            # Get the actual Permission objects from FeaturePermission relationships
-            self.initial['permissions'] = Permission.objects.filter(
-                feature_permissions__feature=self.instance
-            )
+            # Load existing permissions for this feature using the reverse relationship
+            try:
+                # Get Permission objects from FeaturePermission junction table
+                # related_name='permissions' gives us FeaturePermission queryset
+                permission_ids = []
+                for fp in self.instance.permissions.all():
+                    try:
+                        permission_ids.append(fp.permission_id)
+                    except Exception:
+                        # Skip FeaturePermissions with invalid permission_id
+                        pass
+                # Now get the actual Permission objects
+                self.initial['permissions'] = Permission.objects.filter(id__in=permission_ids)
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"Failed to load permissions for feature {self.instance.key}: {e}")
+                self.initial['permissions'] = Permission.objects.none()
 
     def save(self, commit=True):
         feature = super().save(commit=False)
@@ -726,8 +753,14 @@ class FeatureAdmin(admin.ModelAdmin):
     @admin.display(description='Permissions')
     def permission_count(self, obj):
         """Display count of permissions"""
-        count = obj.permissions.count()
-        return f"{count} permission{'s' if count != 1 else ''}"
+        try:
+            count = obj.permissions.count()
+            return f"{count} permission{'s' if count != 1 else ''}"
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to count permissions for feature {obj.key}: {e}")
+            return "Error"
 
 
 # Using Django's built-in Permission admin instead of custom Permission model
