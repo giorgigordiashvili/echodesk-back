@@ -657,39 +657,48 @@ class FeatureAdminForm(forms.ModelForm):
         fields = '__all__'
 
     def __init__(self, *args, **kwargs):
+        import logging
+        from django.db import connection
+        logger = logging.getLogger(__name__)
+
+        logger.info("FeatureAdminForm.__init__ called")
+
+        # Check if we're in a bad transaction state before doing anything
+        if connection.connection and connection.connection.get_transaction_status() == 3:  # STATUS_IN_ERROR
+            logger.error("Transaction is already in error state before form init!")
+            connection.rollback()
+
         super().__init__(*args, **kwargs)
 
         # Set the permissions queryset - do this safely to avoid transaction errors
         try:
-            self.fields['permissions'].queryset = Permission.objects.all().select_related('content_type').order_by('content_type__app_label', 'codename')
+            logger.info("Loading permissions queryset...")
+            # Don't use select_related - it might cause issues with orphaned records
+            self.fields['permissions'].queryset = Permission.objects.all().order_by('codename')
+            logger.info(f"✅ Permissions queryset loaded successfully")
         except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.warning(f"Failed to load permissions queryset with content_type: {e}")
-            try:
-                self.fields['permissions'].queryset = Permission.objects.all().order_by('codename')
-            except Exception as e2:
-                logger.error(f"Failed to load any permissions: {e2}")
-                self.fields['permissions'].queryset = Permission.objects.none()
+            logger.error(f"❌ Failed to load permissions queryset: {e}", exc_info=True)
+            self.fields['permissions'].queryset = Permission.objects.none()
 
         if self.instance.pk:
             # Load existing permissions for this feature using the reverse relationship
             try:
+                logger.info(f"Loading existing permissions for feature {self.instance.key}...")
                 # Get Permission objects from FeaturePermission junction table
                 # related_name='permissions' gives us FeaturePermission queryset
                 permission_ids = []
                 for fp in self.instance.permissions.all():
                     try:
                         permission_ids.append(fp.permission_id)
-                    except Exception:
+                    except Exception as e:
+                        logger.warning(f"Skipping invalid FeaturePermission: {e}")
                         # Skip FeaturePermissions with invalid permission_id
                         pass
                 # Now get the actual Permission objects
                 self.initial['permissions'] = Permission.objects.filter(id__in=permission_ids)
+                logger.info(f"✅ Loaded {len(permission_ids)} permissions for feature")
             except Exception as e:
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.warning(f"Failed to load permissions for feature {self.instance.key}: {e}")
+                logger.error(f"❌ Failed to load permissions for feature {self.instance.key}: {e}", exc_info=True)
                 self.initial['permissions'] = Permission.objects.none()
 
     def save(self, commit=True):
