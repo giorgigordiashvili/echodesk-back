@@ -731,10 +731,7 @@ class FeatureAdmin(admin.ModelAdmin):
         ('Basic Information', {
             'fields': ('key', 'name', 'description')
         }),
-        ('Permissions', {
-            'fields': ('permissions',),
-            'description': 'Select permissions that will be granted when this feature is enabled'
-        }),
+        # Permissions fieldset removed - only available with custom form
         ('Pricing for Custom Packages', {
             'fields': ('price_per_user_gel', 'price_unlimited_gel'),
             'description': 'Agent-based uses per-user price, CRM-based uses unlimited price (with 10% discount)'
