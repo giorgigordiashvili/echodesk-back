@@ -306,17 +306,10 @@ class UserCreateSerializer(serializers.ModelSerializer):
         # User is created without a password initially
         user = User.objects.create(**validated_data)
 
-        if group_ids:
-            groups = Group.objects.filter(id__in=group_ids)
-            user.groups.set(groups)
-
+        # Set tenant groups (user.groups and user.user_permissions no longer exist - we removed PermissionsMixin)
         if tenant_group_ids:
             tenant_groups = TenantGroup.objects.filter(id__in=tenant_group_ids)
             user.tenant_groups.set(tenant_groups)
-
-        if user_permission_ids:
-            permissions = Permission.objects.filter(id__in=user_permission_ids)
-            user.user_permissions.set(permissions)
 
         return user
 

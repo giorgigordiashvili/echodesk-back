@@ -225,26 +225,20 @@ def tenant_profile(request):
         )
     
     user = request.user
-    
-    # Get user's groups with permissions
+
+    # Get user's tenant groups with feature keys
     groups_data = []
-    for group in user.groups.all():
-        permissions_data = []
-        for permission in group.permissions.all():
-            permissions_data.append({
-                'id': permission.id,
-                'codename': permission.codename,
-                'name': permission.name,
-                'app_label': permission.content_type.app_label,
-                'model': permission.content_type.model
+    try:
+        for group in user.tenant_groups.filter(is_active=True):
+            groups_data.append({
+                'id': group.id,
+                'name': group.name,
+                'feature_keys': group.get_feature_keys()
             })
-        
-        groups_data.append({
-            'id': group.id,
-            'name': group.name,
-            'permissions': permissions_data
-        })
-    
+    except Exception:
+        # In case of any tenant_groups query issues
+        pass
+
     # Get all user permissions (both from groups and direct permissions)
     all_permissions = user.get_all_permissions()
 

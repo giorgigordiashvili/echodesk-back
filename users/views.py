@@ -91,14 +91,11 @@ class GroupViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        users = User.objects.filter(id__in=user_ids)
-        for user in users:
-            user.groups.add(group)
-        
+        # Note: user.groups no longer exists (removed PermissionsMixin)
+        # Use TenantGroupViewSet for managing user group memberships instead
         return Response({
-            'message': f'Added {len(users)} users to group {group.name}',
-            'added_users': [user.email for user in users]
-        })
+            'error': 'Django auth groups are deprecated. Use TenantGroup instead.'
+        }, status=status.HTTP_400_BAD_REQUEST)
     
     @action(detail=True, methods=['post'])
     def remove_users(self, request, pk=None):
@@ -118,14 +115,11 @@ class GroupViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        users = User.objects.filter(id__in=user_ids)
-        for user in users:
-            user.groups.remove(group)
-        
+        # Note: user.groups no longer exists (removed PermissionsMixin)
+        # Use TenantGroupViewSet for managing user group memberships instead
         return Response({
-            'message': f'Removed {len(users)} users from group {group.name}',
-            'removed_users': [user.email for user in users]
-        })
+            'error': 'Django auth groups are deprecated. Use TenantGroup instead.'
+        }, status=status.HTTP_400_BAD_REQUEST)
     
     @action(detail=False, methods=['get'])
     def available_permissions(self, request):
@@ -282,42 +276,18 @@ class UserViewSet(viewsets.ModelViewSet):
                     )
             
             elif action_type == 'add_to_group':
-                group_id = serializer.validated_data.get('group_id')
-                if group_id:
-                    try:
-                        group = Group.objects.get(id=group_id)
-                        for user in users:
-                            user.groups.add(group)
-                        message = f'Added {len(users)} users to group {group.name}'
-                    except Group.DoesNotExist:
-                        return Response(
-                            {'error': 'Group not found'},
-                            status=status.HTTP_404_NOT_FOUND
-                        )
-                else:
-                    return Response(
-                        {'error': 'group_id is required for add_to_group action'},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-            
+                # Note: user.groups no longer exists (removed PermissionsMixin)
+                return Response(
+                    {'error': 'Django auth groups are deprecated. Use TenantGroup instead.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
             elif action_type == 'remove_from_group':
-                group_id = serializer.validated_data.get('group_id')
-                if group_id:
-                    try:
-                        group = Group.objects.get(id=group_id)
-                        for user in users:
-                            user.groups.remove(group)
-                        message = f'Removed {len(users)} users from group {group.name}'
-                    except Group.DoesNotExist:
-                        return Response(
-                            {'error': 'Group not found'},
-                            status=status.HTTP_404_NOT_FOUND
-                        )
-                else:
-                    return Response(
-                        {'error': 'group_id is required for remove_from_group action'},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
+                # Note: user.groups no longer exists (removed PermissionsMixin)
+                return Response(
+                    {'error': 'Django auth groups are deprecated. Use TenantGroup instead.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
             
             return Response({'message': message})
         
