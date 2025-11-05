@@ -411,8 +411,8 @@ redis_host = config('REDIS_HOST', default='127.0.0.1')
 redis_port = config('REDIS_PORT', default=6379, cast=int)
 
 if redis_password:
-    # Format: redis://:password@hostname:port/0
-    redis_url = f'redis://:{redis_password}@{redis_host}:{redis_port}/0'
+    # Format: rediss:// (with double 's' for SSL) for DigitalOcean managed Redis
+    redis_url = f'rediss://:{redis_password}@{redis_host}:{redis_port}/0'
     CHANNEL_LAYERS = {
         'default': {
             'BACKEND': 'channels_redis.core.RedisChannelLayer',
