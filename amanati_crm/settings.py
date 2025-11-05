@@ -85,6 +85,7 @@ TENANT_MODEL = "tenants.Tenant"
 MIDDLEWARE = [
     'amanati_crm.middleware.EchoDeskTenantMiddleware',  # Custom tenant middleware (must be first)
     'tenants.subscription_middleware.SubscriptionMiddleware',  # Subscription feature middleware
+    'amanati_crm.debug_middleware.TransactionDebugMiddleware',  # Debug transaction errors
     'amanati_crm.middleware.RequestLoggingMiddleware',  # Custom request logging middleware
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',  # Static file serving
