@@ -99,7 +99,11 @@ class SocialIntegrationSettingsAdmin(admin.ModelAdmin):
 
     def has_add_permission(self, request):
         """Only allow one settings object per tenant"""
-        return not SocialIntegrationSettings.objects.exists()
+        try:
+            return not SocialIntegrationSettings.objects.exists()
+        except Exception:
+            # Table doesn't exist yet, allow creation
+            return True
 
     def has_delete_permission(self, request, obj=None):
         """Prevent deletion of settings"""
