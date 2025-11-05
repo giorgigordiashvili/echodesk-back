@@ -1,6 +1,8 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin, GroupAdmin as BaseGroupAdmin
 from django.contrib.auth.models import Group
+from django.db import connection
+from tenant_schemas.utils import get_public_schema_name
 from .models import User, Department, Notification
 
 
@@ -8,15 +10,32 @@ from .models import User, Department, Notification
 admin.site.unregister(Group)
 
 
+class TenantAwareAdminMixin:
+    """Mixin to restrict admin models to tenant schemas only"""
+
+    def has_module_permission(self, request):
+        """Only show this admin in tenant schemas, not public schema"""
+        if hasattr(connection, 'schema_name'):
+            schema_name = connection.schema_name
+        else:
+            schema_name = get_public_schema_name()
+
+        # Hide from public schema admin
+        if schema_name == get_public_schema_name():
+            return False
+
+        return super().has_module_permission(request)
+
+
 @admin.register(Department)
-class DepartmentAdmin(admin.ModelAdmin):
-    """Department admin interface"""
+class DepartmentAdmin(TenantAwareAdminMixin, admin.ModelAdmin):
+    """Department admin interface - Only available in tenant schemas"""
     list_display = ('name', 'description', 'get_employee_count', 'is_active', 'created_at')
     list_filter = ('is_active', 'created_at')
     search_fields = ('name', 'description')
     ordering = ('name',)
     readonly_fields = ('created_at', 'updated_at')
-    
+
     def get_employee_count(self, obj):
         return obj.employees.count()
     get_employee_count.short_description = 'Employees'
@@ -25,23 +44,24 @@ class DepartmentAdmin(admin.ModelAdmin):
 # TenantGroup admin removed - groups are no longer used
 
 
-class CustomGroupAdmin(BaseGroupAdmin):
-    """Custom Group admin with better permission display"""
+class CustomGroupAdmin(TenantAwareAdminMixin, BaseGroupAdmin):
+    """Custom Group admin with better permission display - Only in tenant schemas"""
     list_display = ('name', 'get_user_count', 'get_permissions_count')
     list_filter = ('permissions',)
     search_fields = ('name',)
     filter_horizontal = ('permissions',)
-    
+
     def get_user_count(self, obj):
         return obj.user_set.count()
     get_user_count.short_description = 'Users'
-    
+
     def get_permissions_count(self, obj):
         return obj.permissions.count()
     get_permissions_count.short_description = 'Permissions'
 
 
-class UserAdmin(BaseUserAdmin):
+class UserAdmin(TenantAwareAdminMixin, BaseUserAdmin):
+    """User admin interface - Only available in tenant schemas"""
     model = User
     list_display = ('email', 'first_name', 'last_name', 'department', 'role', 'status', 'is_active', 'is_staff', 'date_joined')
     list_filter = ('role', 'status', 'department', 'is_active', 'is_staff')
@@ -68,8 +88,8 @@ class UserAdmin(BaseUserAdmin):
 
 
 @admin.register(Notification)
-class NotificationAdmin(admin.ModelAdmin):
-    """Notification admin interface"""
+class NotificationAdmin(TenantAwareAdminMixin, admin.ModelAdmin):
+    """Notification admin interface - Only available in tenant schemas"""
     list_display = ('user', 'notification_type', 'title', 'is_read', 'created_at')
     list_filter = ('notification_type', 'is_read', 'created_at')
     search_fields = ('user__email', 'title', 'message')

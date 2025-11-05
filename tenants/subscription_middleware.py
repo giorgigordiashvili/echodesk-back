@@ -64,9 +64,10 @@ class SubscriptionMiddleware:
         if '/admin/tenants/feature/' in request.path:
             logger.info(f"🔍 SubscriptionMiddleware: Schema={schema_name}, Public={public_schema}, Path={request.path}")
 
+        # Skip for public schema - especially important for admin paths
         if schema_name == public_schema:
-            if '/admin/tenants/feature/' in request.path:
-                logger.info(f"🔍 SubscriptionMiddleware: Skipping (public schema)")
+            if '/admin/tenants/feature/' in request.path or request.path.startswith('/admin/'):
+                logger.info(f"🔍 SubscriptionMiddleware: Skipping (public schema) for path: {request.path}")
             return
 
         # Try to get active subscription
