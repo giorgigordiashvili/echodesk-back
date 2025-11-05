@@ -355,7 +355,17 @@ LOGGING = {
         },
         'django.db.backends': {
             'handlers': ['console'],
-            'level': 'DEBUG',  # Log all SQL queries
+            'level': 'WARNING',  # Only log warnings and errors, not all SQL queries
+            'propagate': False,
+        },
+        'channels': {
+            'handlers': ['console'],
+            'level': 'INFO',  # Log WebSocket connection info
+            'propagate': False,
+        },
+        'daphne': {
+            'handlers': ['console'],
+            'level': 'INFO',  # Log Daphne server info
             'propagate': False,
         },
     },
@@ -395,18 +405,32 @@ SOCIAL_INTEGRATIONS = {
 ASGI_APPLICATION = 'amanati_crm.asgi.application'
 
 # Channel Layers configuration for WebSocket support
-CHANNEL_LAYERS = {
-    'default': {
-        'BACKEND': 'channels_redis.core.RedisChannelLayer',
-        'CONFIG': {
-            "hosts": [(
-                config('REDIS_HOST', default='127.0.0.1'),
-                config('REDIS_PORT', default=6379, cast=int)
-            )],
-            "password": config('REDIS_PASSWORD', default=None),
+# Password is included in the hosts tuple format if needed
+redis_password = config('REDIS_PASSWORD', default=None)
+redis_host = config('REDIS_HOST', default='127.0.0.1')
+redis_port = config('REDIS_PORT', default=6379, cast=int)
+
+if redis_password:
+    # Format: redis://:password@hostname:port/0
+    redis_url = f'redis://:{redis_password}@{redis_host}:{redis_port}/0'
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels_redis.core.RedisChannelLayer',
+            'CONFIG': {
+                "hosts": [redis_url],
+            },
         },
-    },
-}
+    }
+else:
+    # Local development without password
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels_redis.core.RedisChannelLayer',
+            'CONFIG': {
+                "hosts": [(redis_host, redis_port)],
+            },
+        },
+    }
 
 # Bank of Georgia (BOG) Payment Gateway Configuration
 # Documentation: https://api.bog.ge/docs/en/payments/introduction
