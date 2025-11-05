@@ -83,7 +83,7 @@ class UserManager(BaseUserManager):
         return self.create_user(email, password, **extra_fields)
 
 
-class User(AbstractBaseUser, PermissionsMixin):
+class User(AbstractBaseUser):
     ROLE_CHOICES = [
         ('admin', 'Administrator'),
         ('manager', 'Manager'),
@@ -113,6 +113,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     # Permission flags
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
+    is_superuser = models.BooleanField(default=False, help_text='Designates that this user has all permissions without explicitly assigning them.')
 
     # Password management
     password_change_required = models.BooleanField(default=False, help_text='Force user to change password on next login')
@@ -437,6 +438,55 @@ class User(AbstractBaseUser, PermissionsMixin):
             'group': group_permissions,
             'all': list(set(individual_permissions + group_permissions))
         }
+
+    # Django admin required methods (replacing PermissionsMixin)
+    def has_perm(self, perm, obj=None):
+        """
+        Django admin permission check.
+        For superusers and staff in public schema (main admin), always return True.
+        For tenant users, use our custom permission system.
+        """
+        if self.is_active and self.is_superuser:
+            return True
+
+        # In public schema (main admin), only check is_staff
+        try:
+            from django.db import connection
+            from tenant_schemas.utils import get_public_schema_name
+            if connection.schema_name == get_public_schema_name():
+                return self.is_staff
+        except Exception:
+            pass
+
+        # In tenant schema, use our custom permission system
+        # Extract permission name from "app_label.permission_name" format
+        if '.' in perm:
+            perm = perm.split('.')[1]
+
+        return self.has_permission(perm)
+
+    def has_perms(self, perm_list, obj=None):
+        """Check if user has all permissions in the list"""
+        return all(self.has_perm(perm, obj) for perm in perm_list)
+
+    def has_module_perms(self, app_label):
+        """
+        Django admin check for module access.
+        Superusers and staff can access all modules in main admin.
+        """
+        if self.is_active and self.is_superuser:
+            return True
+
+        # In public schema (main admin), only check is_staff
+        try:
+            from django.db import connection
+            from tenant_schemas.utils import get_public_schema_name
+            if connection.schema_name == get_public_schema_name():
+                return self.is_staff
+        except Exception:
+            pass
+
+        return True  # In tenant schema, allow access based on individual perms
 
 
 class Notification(models.Model):

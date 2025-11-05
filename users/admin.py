@@ -44,13 +44,13 @@ class CustomGroupAdmin(BaseGroupAdmin):
 class UserAdmin(BaseUserAdmin):
     model = User
     list_display = ('email', 'first_name', 'last_name', 'department', 'role', 'status', 'is_active', 'is_staff', 'date_joined')
-    list_filter = ('role', 'status', 'department', 'is_active', 'is_staff', 'groups')
+    list_filter = ('role', 'status', 'department', 'is_active', 'is_staff')
     fieldsets = (
         (None, {'fields': ('email', 'password')}),
         ('Personal info', {'fields': ('first_name', 'last_name', 'phone_number', 'job_title', 'department')}),
         ('User Management', {'fields': ('role', 'status')}),
         ('Permissions', {
-            'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions'),
+            'fields': ('is_active', 'is_staff', 'is_superuser'),
         }),
         ('Important dates', {'fields': ('last_login', 'date_joined')}),
         ('Invitation tracking', {'fields': ('invited_by', 'invitation_sent_at')}),
@@ -63,8 +63,8 @@ class UserAdmin(BaseUserAdmin):
     )
     search_fields = ('email', 'first_name', 'last_name')
     ordering = ('email',)
-    filter_horizontal = ('groups', 'user_permissions')
     readonly_fields = ('date_joined', 'last_login')
+    filter_horizontal = ()  # No groups or user_permissions fields
 
 
 @admin.register(Notification)
