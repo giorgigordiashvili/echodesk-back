@@ -33,16 +33,26 @@ class TransactionDebugMiddleware:
         if request.path.startswith('/admin/tenants/feature/'):
             logger.info(f"🔍 Transaction Debug - BEFORE VIEW: {view_func.__name__}")
 
-            # Force rollback any existing transaction to start fresh
+            # Force establish connection and rollback any transaction to start fresh
             from django.db import connection
-            if connection.connection:
-                try:
+            try:
+                # Force connection to be established
+                connection.ensure_connection()
+                logger.info(f"   Ensured database connection exists")
+
+                if connection.connection:
                     status = connection.connection.get_transaction_status()
                     logger.info(f"   Transaction status before rollback: {status}")
+
+                    # Always rollback to ensure clean state
                     connection.rollback()
                     logger.info(f"   Forced rollback to start fresh")
-                except Exception as e:
-                    logger.error(f"   Error during forced rollback: {e}")
+
+                    # Verify status after rollback
+                    new_status = connection.connection.get_transaction_status()
+                    logger.info(f"   Transaction status after rollback: {new_status}")
+            except Exception as e:
+                logger.error(f"   Error during forced rollback: {e}", exc_info=True)
 
             self.check_transaction_state(f"BEFORE VIEW {view_func.__name__}")
         return None
