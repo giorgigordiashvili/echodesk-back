@@ -4,6 +4,7 @@ import logging
 from datetime import datetime
 from urllib.parse import urlencode, quote_plus
 from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.db.models import F
@@ -39,15 +40,53 @@ def convert_facebook_timestamp(timestamp):
     try:
         if timestamp == 0:
             return timezone.now()
-        
+
         # Facebook timestamps can be in seconds or milliseconds
         # If timestamp is very large, it's probably in milliseconds
         if timestamp > 10000000000:  # If timestamp is greater than year 2286 in seconds, it's milliseconds
             timestamp = timestamp / 1000
-        
+
         return datetime.fromtimestamp(timestamp, tz=timezone.utc)
     except (ValueError, TypeError):
         return timezone.now()
+
+
+def send_websocket_notification(tenant_schema, message_data, conversation_id):
+    """Send WebSocket notification for new message"""
+    try:
+        from django.db import connection
+
+        # Get current schema name for logging
+        current_schema = getattr(connection, 'schema_name', 'unknown')
+
+        channel_layer = get_channel_layer()
+        if channel_layer is None:
+            print(f"⚠️ WebSocket: Channel layer not configured - skipping notification")
+            return
+
+        # Send to general messages group for this tenant
+        group_name = f'messages_{tenant_schema}'
+
+        print(f"📡 WebSocket: Sending notification to group '{group_name}'")
+        print(f"   Current schema: {current_schema}")
+        print(f"   Message: {message_data.get('message_text', '')[:50]}")
+
+        async_to_sync(channel_layer.group_send)(
+            group_name,
+            {
+                'type': 'new_message',
+                'message': message_data,
+                'conversation_id': conversation_id,
+                'timestamp': message_data.get('timestamp')
+            }
+        )
+
+        print(f"✅ WebSocket: Notification sent successfully to {group_name}")
+
+    except Exception as e:
+        print(f"❌ WebSocket: Failed to send notification: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 def find_tenant_by_page_id(page_id):
@@ -820,9 +859,24 @@ def facebook_webhook(request):
                                     )
                                     print(f"✅ SUCCESSFULLY SAVED MESSAGE TO DATABASE - ID: {message_obj.id}, Text: '{message_text}'")
                                     logger.info(f"✅ SUCCESSFULLY SAVED MESSAGE TO DATABASE - ID: {message_obj.id}, Text: '{message_text}'")
-                                    
-                                    # WebSocket notifications removed - using simple polling instead
-                                    print(f"📧 Message saved successfully. Frontend will pick it up on next refresh.")
+
+                                    # Send WebSocket notification for real-time updates
+                                    from django.db import connection
+                                    current_schema = getattr(connection, 'schema_name', None)
+                                    if current_schema:
+                                        message_data = {
+                                            'id': message_obj.id,
+                                            'message_id': message_obj.message_id,
+                                            'sender_id': message_obj.sender_id,
+                                            'sender_name': message_obj.sender_name,
+                                            'message_text': message_obj.message_text,
+                                            'timestamp': message_obj.timestamp.isoformat() if message_obj.timestamp else None,
+                                            'is_from_page': message_obj.is_from_page,
+                                        }
+                                        conversation_id = sender_id if not message_obj.is_from_page else recipient_id
+                                        send_websocket_notification(current_schema, message_data, conversation_id)
+                                    else:
+                                        print(f"⚠️ WebSocket: Could not determine tenant schema - skipping notification")
                                     
                                     # Write to file for debugging
                                     try:
@@ -974,9 +1028,24 @@ def facebook_webhook(request):
                                             )
                                             logger.info(f"✅ SUCCESSFULLY SAVED MESSAGE TO DATABASE - ID: {message_obj.id}, Text: '{message_text}'")
                                             print(f"✅ SUCCESS: Message saved with ID {message_obj.id}")
-                                            
-                                            # WebSocket notifications removed - using simple polling instead
-                                            print(f"📧 Message saved successfully. Frontend will pick it up on next refresh.")
+
+                                            # Send WebSocket notification for real-time updates
+                                            from django.db import connection
+                                            current_schema = getattr(connection, 'schema_name', None)
+                                            if current_schema:
+                                                message_data = {
+                                                    'id': message_obj.id,
+                                                    'message_id': message_obj.message_id,
+                                                    'sender_id': message_obj.sender_id,
+                                                    'sender_name': message_obj.sender_name,
+                                                    'message_text': message_obj.message_text,
+                                                    'timestamp': message_obj.timestamp.isoformat() if message_obj.timestamp else None,
+                                                    'is_from_page': message_obj.is_from_page,
+                                                }
+                                                conversation_id = sender_id if not message_obj.is_from_page else message_event.get('recipient', {}).get('id', sender_id)
+                                                send_websocket_notification(current_schema, message_data, conversation_id)
+                                            else:
+                                                print(f"⚠️ WebSocket: Could not determine tenant schema - skipping notification")
                                             
                                         except Exception as e:
                                             logger.error(f"❌ FAILED TO SAVE MESSAGE TO DATABASE: {e}")
