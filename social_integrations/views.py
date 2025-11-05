@@ -963,9 +963,30 @@ def facebook_webhook(request):
                                     sender_id = message_event['sender']['id']
                                     logger.info(f"📝 Message from {sender_id}: {message_data}")
                                     
-                                    # Skip if this is an echo (message sent by the page)
+                                    # Handle echo messages (messages sent by the page)
                                     if message_data.get('is_echo'):
-                                        logger.info("⏭️ Skipping echo message")
+                                        logger.info("📤 Processing echo message to update timestamp")
+                                        message_id = message_data.get('mid')
+
+                                        if message_id:
+                                            try:
+                                                # Update the timestamp of the message we saved when sending
+                                                fb_timestamp = message_event.get('timestamp')
+                                                if fb_timestamp:
+                                                    timestamp_dt = convert_facebook_timestamp(fb_timestamp)
+
+                                                    updated = FacebookMessage.objects.filter(
+                                                        page_connection=page_connection,
+                                                        message_id=message_id
+                                                    ).update(timestamp=timestamp_dt)
+
+                                                    if updated > 0:
+                                                        logger.info(f"✅ Updated echo message timestamp to {timestamp_dt}")
+                                                    else:
+                                                        logger.info(f"⚠️ Echo message not found in database: {message_id}")
+                                            except Exception as e:
+                                                logger.error(f"❌ Failed to update echo message timestamp: {e}")
+
                                         continue
                                     
                                     # Get sender profile information including profile picture
@@ -1914,9 +1935,30 @@ def instagram_webhook(request):
 
                                 logger.info(f"📨 Instagram webhook message_event: {message_event}")
 
-                                # Skip if this is an echo (message sent by the business)
+                                # Handle echo messages (messages sent by the business)
                                 if message_data.get('is_echo'):
-                                    logger.info("Skipping echo message")
+                                    logger.info("📤 Processing Instagram echo message to update timestamp")
+                                    message_id = message_data.get('mid')
+
+                                    if message_id:
+                                        try:
+                                            # Update the timestamp of the message we saved when sending
+                                            ig_timestamp = message_event.get('timestamp')
+                                            if ig_timestamp:
+                                                timestamp_dt = convert_facebook_timestamp(ig_timestamp)
+
+                                                updated = InstagramMessage.objects.filter(
+                                                    account_connection=account_connection,
+                                                    message_id=message_id
+                                                ).update(timestamp=timestamp_dt)
+
+                                                if updated > 0:
+                                                    logger.info(f"✅ Updated Instagram echo message timestamp to {timestamp_dt}")
+                                                else:
+                                                    logger.info(f"⚠️ Instagram echo message not found in database: {message_id}")
+                                        except Exception as e:
+                                            logger.error(f"❌ Failed to update Instagram echo message timestamp: {e}")
+
                                     continue
 
                                 # Get sender info - use sender_id as fallback username
