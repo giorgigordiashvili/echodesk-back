@@ -66,15 +66,15 @@ class EchoDeskTenantMiddleware(TenantMiddleware):
         """
         # Get the hostname
         hostname = request.get_host().split(':')[0].lower()
-        
+
         # Log the hostname for debugging
         if settings.DEBUG:
             print(f"[DEBUG] Hostname: {hostname}")
-        
+
         # Use our custom tenant lookup logic
         domain_url = hostname
         path = request.get_full_path()
-        
+
         try:
             tenant = self.get_tenant(domain_url, path)
             if settings.DEBUG:
@@ -87,13 +87,23 @@ class EchoDeskTenantMiddleware(TenantMiddleware):
             tenant = Tenant()
             tenant.schema_name = get_public_schema_name()
             tenant.domain_url = hostname
-        
+
         request.tenant = tenant
-        
+
         # Use parent class method to set up the connection
         from django.db import connection
-        connection.set_tenant(request.tenant)
-        
+        try:
+            connection.set_tenant(request.tenant)
+        except Exception as e:
+            # If setting tenant fails, log and rollback any poisoned transaction
+            logger.error(f"Failed to set tenant {request.tenant.schema_name}: {e}")
+            if connection.connection:
+                status = connection.connection.get_transaction_status()
+                if status == 3:  # IN_ERROR
+                    logger.warning(f"Rolling back poisoned transaction from set_tenant failure")
+                    connection.rollback()
+            raise
+
         # Set URL routing based on tenant
         if tenant.schema_name == get_public_schema_name():
             # Use public schema URLs

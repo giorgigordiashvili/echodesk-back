@@ -112,8 +112,16 @@ class SubscriptionMiddleware:
         except Exception as e:
             # Log error but don't break the request
             import logging
+            from django.db import connection
             logger = logging.getLogger(__name__)
             logger.error(f"Error loading subscription for tenant {request.tenant.schema_name}: {e}")
+
+            # If the transaction is poisoned, roll it back
+            if connection.connection:
+                status = connection.connection.get_transaction_status()
+                if status == 3:  # IN_ERROR
+                    logger.warning(f"Transaction poisoned in subscription middleware, rolling back")
+                    connection.rollback()
 
         # Add helper methods to request
         request.has_feature = lambda feature_name: request.subscription_features.get(feature_name, False)

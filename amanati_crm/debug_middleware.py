@@ -14,7 +14,32 @@ class TransactionDebugMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
-        # Check transaction state at the start of the request
+        # For ALL admin paths, aggressively check and clean transaction state
+        if request.path.startswith('/admin/'):
+            from django.db import connection
+
+            # Ensure connection exists
+            try:
+                connection.ensure_connection()
+            except Exception as e:
+                logger.error(f"Failed to ensure connection: {e}")
+
+            # Check and fix poisoned transactions BEFORE any middleware runs
+            if connection.connection:
+                try:
+                    status = connection.connection.get_transaction_status()
+                    if status == 3:  # IN_ERROR
+                        logger.warning(f"🔧 Found poisoned transaction at start of admin request: {request.path}")
+                        connection.rollback()
+                        logger.info(f"   ✅ Rolled back poisoned transaction")
+                except Exception as e:
+                    logger.error(f"Error checking transaction status: {e}")
+                    try:
+                        connection.rollback()
+                    except:
+                        pass
+
+        # Debug logging for feature admin specifically
         if request.path.startswith('/admin/tenants/feature/'):
             logger.info(f"🔍 Transaction Debug - START of request: {request.path}")
             if hasattr(request, 'tenant'):
@@ -23,8 +48,19 @@ class TransactionDebugMiddleware:
                 logger.info(f"   No tenant set yet")
             self.check_transaction_state("START OF REQUEST")
 
-        # Process the request
-        response = self.get_response(request)
+        # Process the request with exception handling
+        try:
+            response = self.get_response(request)
+        except Exception as e:
+            # If an exception occurs, check if transaction is poisoned
+            logger.error(f"Exception during request processing: {e}", exc_info=True)
+            from django.db import connection
+            if connection.connection:
+                status = connection.connection.get_transaction_status()
+                if status == 3:  # IN_ERROR
+                    logger.warning(f"Transaction poisoned after exception, rolling back")
+                    connection.rollback()
+            raise
 
         return response
 
