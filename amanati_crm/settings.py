@@ -30,6 +30,16 @@ ALLOWED_HOSTS = [
     '127.0.0.1',
 ]
 
+# CSRF trusted origins for cross-origin requests
+CSRF_TRUSTED_ORIGINS = [
+    f'https://{MAIN_DOMAIN}',
+    f'https://*.{MAIN_DOMAIN}',
+    f'https://{API_DOMAIN}',
+    f'https://*.{API_DOMAIN}',
+    'https://*.ondigitalocean.app',
+    'https://*.vercel.app',
+]
+
 # Shared applications - available to all tenants
 SHARED_APPS = [
     'tenant_schemas',  # mandatory, should always be before any django app
