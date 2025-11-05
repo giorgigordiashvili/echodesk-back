@@ -32,6 +32,18 @@ class TransactionDebugMiddleware:
         """Called just before Django calls the view"""
         if request.path.startswith('/admin/tenants/feature/'):
             logger.info(f"🔍 Transaction Debug - BEFORE VIEW: {view_func.__name__}")
+
+            # Force rollback any existing transaction to start fresh
+            from django.db import connection
+            if connection.connection:
+                try:
+                    status = connection.connection.get_transaction_status()
+                    logger.info(f"   Transaction status before rollback: {status}")
+                    connection.rollback()
+                    logger.info(f"   Forced rollback to start fresh")
+                except Exception as e:
+                    logger.error(f"   Error during forced rollback: {e}")
+
             self.check_transaction_state(f"BEFORE VIEW {view_func.__name__}")
         return None
 
