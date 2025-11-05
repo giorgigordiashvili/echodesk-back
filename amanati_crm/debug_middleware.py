@@ -17,6 +17,10 @@ class TransactionDebugMiddleware:
         # Check transaction state at the start of the request
         if request.path.startswith('/admin/tenants/feature/'):
             logger.info(f"🔍 Transaction Debug - START of request: {request.path}")
+            if hasattr(request, 'tenant'):
+                logger.info(f"   Tenant: {request.tenant.schema_name}")
+            else:
+                logger.info(f"   No tenant set yet")
             self.check_transaction_state("START OF REQUEST")
 
         # Process the request

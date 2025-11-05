@@ -44,6 +44,8 @@ class SubscriptionMiddleware:
 
     def _attach_subscription_info(self, request):
         """Attach subscription information to the request"""
+        import logging
+        logger = logging.getLogger(__name__)
 
         # Default values
         request.subscription = None
@@ -52,9 +54,19 @@ class SubscriptionMiddleware:
 
         # Skip if no tenant or if public schema
         if not hasattr(request, 'tenant'):
+            if '/admin/tenants/feature/' in request.path:
+                logger.info(f"🔍 SubscriptionMiddleware: No tenant attribute on request for {request.path}")
             return
 
-        if request.tenant.schema_name == get_public_schema_name():
+        schema_name = request.tenant.schema_name
+        public_schema = get_public_schema_name()
+
+        if '/admin/tenants/feature/' in request.path:
+            logger.info(f"🔍 SubscriptionMiddleware: Schema={schema_name}, Public={public_schema}, Path={request.path}")
+
+        if schema_name == public_schema:
+            if '/admin/tenants/feature/' in request.path:
+                logger.info(f"🔍 SubscriptionMiddleware: Skipping (public schema)")
             return
 
         # Try to get active subscription
