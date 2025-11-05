@@ -864,7 +864,7 @@ def facebook_webhook(request):
                                     from django.db import connection
                                     current_schema = getattr(connection, 'schema_name', None)
                                     if current_schema:
-                                        message_data = {
+                                        ws_message_data = {
                                             'id': message_obj.id,
                                             'message_id': message_obj.message_id,
                                             'sender_id': message_obj.sender_id,
@@ -873,8 +873,9 @@ def facebook_webhook(request):
                                             'timestamp': message_obj.timestamp.isoformat() if message_obj.timestamp else None,
                                             'is_from_page': message_obj.is_from_page,
                                         }
-                                        conversation_id = sender_id if not message_obj.is_from_page else recipient_id
-                                        send_websocket_notification(current_schema, message_data, conversation_id)
+                                        # Conversation ID is the sender_id (the customer)
+                                        ws_conversation_id = sender_id
+                                        send_websocket_notification(current_schema, ws_message_data, ws_conversation_id)
                                     else:
                                         print(f"⚠️ WebSocket: Could not determine tenant schema - skipping notification")
                                     
@@ -1033,7 +1034,7 @@ def facebook_webhook(request):
                                             from django.db import connection
                                             current_schema = getattr(connection, 'schema_name', None)
                                             if current_schema:
-                                                message_data = {
+                                                ws_message_data = {
                                                     'id': message_obj.id,
                                                     'message_id': message_obj.message_id,
                                                     'sender_id': message_obj.sender_id,
@@ -1042,8 +1043,9 @@ def facebook_webhook(request):
                                                     'timestamp': message_obj.timestamp.isoformat() if message_obj.timestamp else None,
                                                     'is_from_page': message_obj.is_from_page,
                                                 }
-                                                conversation_id = sender_id if not message_obj.is_from_page else message_event.get('recipient', {}).get('id', sender_id)
-                                                send_websocket_notification(current_schema, message_data, conversation_id)
+                                                # Conversation ID is the sender_id (the customer)
+                                                ws_conversation_id = sender_id
+                                                send_websocket_notification(current_schema, ws_message_data, ws_conversation_id)
                                             else:
                                                 print(f"⚠️ WebSocket: Could not determine tenant schema - skipping notification")
                                             
@@ -1814,6 +1816,26 @@ def instagram_webhook(request):
                                             is_from_business=False
                                         )
                                         logger.info(f"✅ Saved Instagram message from {sender_username}: {message_text[:50]}")
+
+                                        # Send WebSocket notification for real-time updates
+                                        from django.db import connection
+                                        current_schema = getattr(connection, 'schema_name', None)
+                                        if current_schema:
+                                            ws_message_data = {
+                                                'id': message_obj.id,
+                                                'message_id': message_obj.message_id,
+                                                'sender_id': message_obj.sender_id,
+                                                'sender_username': message_obj.sender_username,
+                                                'message_text': message_obj.message_text,
+                                                'timestamp': message_obj.timestamp.isoformat() if message_obj.timestamp else None,
+                                                'is_from_business': message_obj.is_from_business,
+                                            }
+                                            # Conversation ID is the sender_id (the customer)
+                                            ws_conversation_id = sender_id
+                                            send_websocket_notification(current_schema, ws_message_data, ws_conversation_id)
+                                        else:
+                                            logger.warning(f"⚠️ WebSocket: Could not determine tenant schema - skipping notification")
+
                                     except Exception as e:
                                         logger.error(f"❌ Failed to save Instagram message: {e}")
 
