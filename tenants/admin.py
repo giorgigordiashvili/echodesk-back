@@ -717,7 +717,8 @@ class FeatureAdminForm(forms.ModelForm):
 @admin.register(Feature)
 class FeatureAdmin(admin.ModelAdmin):
     """Admin interface for Feature model"""
-    form = FeatureAdminForm
+    # Temporarily disabled custom form to debug transaction errors
+    # form = FeatureAdminForm
     list_display = [
         'name', 'key', 'category', 'price_per_user_gel', 'price_unlimited_gel',
         'icon_display', 'permission_count', 'sort_order', 'is_active', 'created_at'
