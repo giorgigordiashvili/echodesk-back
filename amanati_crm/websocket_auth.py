@@ -80,8 +80,19 @@ class JWTAuthMiddleware(BaseMiddleware):
     """
 
     async def __call__(self, scope, receive, send):
-        # Get tenant schema from URL route
+        # Get tenant schema from URL route kwargs
         tenant_schema = scope.get('url_route', {}).get('kwargs', {}).get('tenant_schema')
+
+        # Fallback: Extract from path if url_route not available
+        if not tenant_schema:
+            path = scope.get('path', '')
+            # Path format: /ws/messages/groot/ or /ws/typing/groot/conversation_id/
+            path_parts = [p for p in path.split('/') if p]
+            if len(path_parts) >= 2 and path_parts[0] in ['ws']:
+                # path_parts[1] is 'messages' or 'typing', path_parts[2] is tenant_schema
+                if len(path_parts) >= 3:
+                    tenant_schema = path_parts[2]
+                    print(f"[WebSocket Auth] Extracted tenant_schema from path: {tenant_schema}")
 
         # Get token from query string
         query_string = scope.get('query_string', b'').decode()
@@ -106,7 +117,7 @@ class JWTAuthMiddleware(BaseMiddleware):
         else:
             scope['user'] = AnonymousUser()
             if not tenant_schema:
-                print(f"[WebSocket Auth] Warning: No tenant schema found in URL route")
+                print(f"[WebSocket Auth] Warning: No tenant schema found. Path: {scope.get('path')}, URL route: {scope.get('url_route')}")
 
         return await super().__call__(scope, receive, send)
 

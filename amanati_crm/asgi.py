@@ -24,10 +24,8 @@ from amanati_crm.websocket_auth import JWTAuthMiddlewareStack
 
 application = ProtocolTypeRouter({
     "http": django_asgi_app,
-    "websocket": JWTAuthMiddlewareStack(
-        URLRouter([
-            path('ws/messages/<str:tenant_schema>/', consumers.MessagesConsumer.as_asgi()),
-            path('ws/typing/<str:tenant_schema>/<str:conversation_id>/', consumers.TypingConsumer.as_asgi()),
-        ])
-    ),
+    "websocket": URLRouter([
+        path('ws/messages/<str:tenant_schema>/', JWTAuthMiddlewareStack(consumers.MessagesConsumer.as_asgi())),
+        path('ws/typing/<str:tenant_schema>/<str:conversation_id>/', JWTAuthMiddlewareStack(consumers.TypingConsumer.as_asgi())),
+    ]),
 })
