@@ -7,6 +7,9 @@ from rest_framework import permissions
 class CanManageSocialConnections(permissions.BasePermission):
     """
     Permission to manage social media connections (connect/disconnect pages)
+
+    - Read access (GET): Users with social_integrations feature
+    - Write access (POST/PUT/DELETE): Admins only or users with manage_social_connections permission
     """
     message = "You do not have permission to manage social media connections."
 
@@ -14,17 +17,22 @@ class CanManageSocialConnections(permissions.BasePermission):
         if not request.user or not request.user.is_authenticated:
             return False
 
-        # Read-only permissions are allowed for viewing
+        # Read-only permissions: Check if user has social_integrations feature
         if request.method in permissions.SAFE_METHODS:
-            return request.user.has_permission('view_social_messages')
+            return request.user.has_feature('social_integrations')
 
-        # Write permissions require manage_social_connections
-        return request.user.has_permission('manage_social_connections')
+        # Write permissions require admin role or explicit permission
+        return (
+            request.user.role == 'admin' or
+            request.user.has_permission('manage_social_connections')
+        )
 
 
 class CanViewSocialMessages(permissions.BasePermission):
     """
     Permission to view social media messages
+
+    - Users with social_integrations feature can view messages
     """
     message = "You do not have permission to view social media messages."
 
@@ -32,12 +40,15 @@ class CanViewSocialMessages(permissions.BasePermission):
         if not request.user or not request.user.is_authenticated:
             return False
 
-        return request.user.has_permission('view_social_messages')
+        # Check if user has social_integrations feature through their group
+        return request.user.has_feature('social_integrations')
 
 
 class CanSendSocialMessages(permissions.BasePermission):
     """
     Permission to send social media messages
+
+    - Users with social_integrations feature can send messages
     """
     message = "You do not have permission to send social media messages."
 
@@ -45,17 +56,15 @@ class CanSendSocialMessages(permissions.BasePermission):
         if not request.user or not request.user.is_authenticated:
             return False
 
-        # Read-only permissions
-        if request.method in permissions.SAFE_METHODS:
-            return request.user.has_permission('view_social_messages')
-
-        # Write permissions require send_social_messages
-        return request.user.has_permission('send_social_messages')
+        # All users with social_integrations feature can send messages
+        return request.user.has_feature('social_integrations')
 
 
 class CanManageSocialSettings(permissions.BasePermission):
     """
     Permission to manage social media integration settings
+
+    - Only admins or users with explicit permission can manage settings
     """
     message = "You do not have permission to manage social media settings."
 
@@ -63,4 +72,8 @@ class CanManageSocialSettings(permissions.BasePermission):
         if not request.user or not request.user.is_authenticated:
             return False
 
-        return request.user.has_permission('manage_social_settings')
+        # Only admins or users with explicit permission
+        return (
+            request.user.role == 'admin' or
+            request.user.has_permission('manage_social_settings')
+        )
