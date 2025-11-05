@@ -27,6 +27,8 @@ class FacebookMessage(models.Model):
     message_text = models.TextField()
     timestamp = models.DateTimeField()
     is_from_page = models.BooleanField(default=False)  # True if message is from page to user
+    is_delivered = models.BooleanField(default=False)  # True if message was delivered to customer
+    delivered_at = models.DateTimeField(null=True, blank=True)  # When the message was delivered
     is_read = models.BooleanField(default=False)  # True if customer has read the message
     read_at = models.DateTimeField(null=True, blank=True)  # When the message was read
     created_at = models.DateTimeField(auto_now_add=True)
@@ -74,6 +76,8 @@ class InstagramMessage(models.Model):
     message_text = models.TextField(blank=True)  # Can be empty for media-only messages
     timestamp = models.DateTimeField()
     is_from_business = models.BooleanField(default=False)  # True if sent by business
+    is_delivered = models.BooleanField(default=False)  # True if message was delivered to customer
+    delivered_at = models.DateTimeField(null=True, blank=True)  # When the message was delivered
     is_read = models.BooleanField(default=False)  # True if customer has read the message
     read_at = models.DateTimeField(null=True, blank=True)  # When the message was read
     created_at = models.DateTimeField(auto_now_add=True)

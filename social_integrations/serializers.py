@@ -20,9 +20,9 @@ class FacebookMessageSerializer(serializers.ModelSerializer):
         model = FacebookMessage
         fields = [
             'id', 'message_id', 'sender_id', 'sender_name', 'profile_pic_url', 'message_text',
-            'timestamp', 'is_from_page', 'is_read', 'read_at', 'page_name', 'created_at'
+            'timestamp', 'is_from_page', 'is_delivered', 'delivered_at', 'is_read', 'read_at', 'page_name', 'created_at'
         ]
-        read_only_fields = ['id', 'is_read', 'read_at', 'created_at']
+        read_only_fields = ['id', 'is_delivered', 'delivered_at', 'is_read', 'read_at', 'created_at']
 
 
 class FacebookSendMessageSerializer(serializers.Serializer):
@@ -50,9 +50,9 @@ class InstagramMessageSerializer(serializers.ModelSerializer):
         model = InstagramMessage
         fields = [
             'id', 'message_id', 'sender_id', 'sender_username', 'sender_profile_pic',
-            'message_text', 'timestamp', 'is_from_business', 'is_read', 'read_at', 'account_username', 'created_at'
+            'message_text', 'timestamp', 'is_from_business', 'is_delivered', 'delivered_at', 'is_read', 'read_at', 'account_username', 'created_at'
         ]
-        read_only_fields = ['id', 'is_read', 'read_at', 'created_at']
+        read_only_fields = ['id', 'is_delivered', 'delivered_at', 'is_read', 'read_at', 'created_at']
 
 
 class InstagramSendMessageSerializer(serializers.Serializer):

@@ -1139,8 +1139,71 @@ def facebook_webhook(request):
                                         logger.error(f"❌ Failed to process read receipt: {e}")
                                         print(f"❌ READ RECEIPT ERROR: {e}")
 
+                                # Handle delivery receipts
+                                elif 'delivery' in message_event:
+                                    delivery_data = message_event['delivery']
+                                    sender_id = message_event['sender']['id']
+                                    watermark = int(delivery_data.get('watermark', 0))
+                                    message_ids = delivery_data.get('mids', [])
+
+                                    logger.info(f"📬 Delivery receipt from {sender_id}, watermark: {watermark}, mids: {message_ids}")
+                                    print(f"📬 DELIVERY RECEIPT: sender={sender_id}, watermark={watermark}, mids={len(message_ids)}")
+
+                                    # Mark all messages from this sender before the watermark as delivered
+                                    try:
+                                        from django.utils import timezone
+                                        watermark_datetime = convert_facebook_timestamp(watermark)
+
+                                        # Find messages sent by the page to this user before the watermark
+                                        messages_to_mark = FacebookMessage.objects.filter(
+                                            page_connection=page_connection,
+                                            sender_id=page_id,  # Messages sent BY the page
+                                            timestamp__lte=watermark_datetime,
+                                            is_delivered=False
+                                        )
+
+                                        updated_count = messages_to_mark.update(
+                                            is_delivered=True,
+                                            delivered_at=timezone.now()
+                                        )
+
+                                        logger.info(f"✅ Marked {updated_count} messages as delivered for conversation with {sender_id}")
+                                        print(f"✅ DELIVERY RECEIPT: Marked {updated_count} messages as delivered")
+
+                                        # Send WebSocket notification for delivery receipts
+                                        if updated_count > 0:
+                                            from django.db import connection
+                                            current_schema = getattr(connection, 'schema_name', None)
+                                            if current_schema:
+                                                # Get the IDs of updated messages
+                                                updated_message_ids = list(FacebookMessage.objects.filter(
+                                                    page_connection=page_connection,
+                                                    sender_id=page_id,
+                                                    timestamp__lte=watermark_datetime,
+                                                    is_delivered=True
+                                                ).values_list('id', flat=True))
+
+                                                delivery_receipt_data = {
+                                                    'type': 'delivery_receipt',
+                                                    'sender_id': sender_id,
+                                                    'watermark': watermark,
+                                                    'message_ids': updated_message_ids,
+                                                    'updated_count': updated_count,
+                                                    'timestamp': timezone.now().isoformat()
+                                                }
+                                                # Conversation ID is the sender_id (the customer who received the messages)
+                                                ws_conversation_id = sender_id
+                                                send_websocket_notification(current_schema, delivery_receipt_data, ws_conversation_id)
+                                                logger.info(f"📤 Sent delivery receipt WebSocket notification for conversation {ws_conversation_id}")
+                                            else:
+                                                print(f"⚠️ WebSocket: Could not determine tenant schema - skipping delivery receipt notification")
+
+                                    except Exception as e:
+                                        logger.error(f"❌ Failed to process delivery receipt: {e}")
+                                        print(f"❌ DELIVERY RECEIPT ERROR: {e}")
+
                                 else:
-                                    logger.info(f"ℹ️ Message event has no 'message' or 'read' field: {message_event}")
+                                    logger.info(f"ℹ️ Message event has no 'message', 'read', or 'delivery' field: {message_event}")
                         else:
                             logger.info(f"ℹ️ Entry has no 'messaging' field: {entry}")
                 else:
