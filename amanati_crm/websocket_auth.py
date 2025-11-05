@@ -7,6 +7,7 @@ from channels.middleware import BaseMiddleware
 from django.contrib.auth.models import AnonymousUser
 from urllib.parse import parse_qs
 from users.models import User
+from tenant_schemas.utils import schema_context
 
 # Try to import JWT support
 try:
@@ -25,34 +26,44 @@ except ImportError:
 
 
 @database_sync_to_async
-def get_user_from_token(token_string):
+def get_user_from_token(token_string, tenant_schema=None):
     """
     Get user from token - supports both JWT and Django Token authentication
+    Queries within the tenant schema context for multi-tenant support
     """
-    # Try JWT first if available
-    if JWT_AVAILABLE:
-        try:
-            token = AccessToken(token_string)
-            user_id = token.payload.get('user_id')
-            if user_id:
-                user = User.objects.get(id=user_id)
-                print(f"[WebSocket Auth] JWT authentication successful for user: {user.email}")
+    print(f"[WebSocket Auth] Authenticating token for tenant: {tenant_schema}")
+
+    # If no tenant schema provided, cannot authenticate
+    if not tenant_schema:
+        print(f"[WebSocket Auth] No tenant schema provided")
+        return AnonymousUser()
+
+    # Query within tenant schema context
+    with schema_context(tenant_schema):
+        # Try JWT first if available
+        if JWT_AVAILABLE:
+            try:
+                token = AccessToken(token_string)
+                user_id = token.payload.get('user_id')
+                if user_id:
+                    user = User.objects.get(id=user_id)
+                    print(f"[WebSocket Auth] JWT authentication successful for user: {user.email}")
+                    return user
+            except (TokenError, User.DoesNotExist, Exception) as e:
+                print(f"[WebSocket Auth] JWT validation failed: {e}")
+
+        # Try Django Token authentication if available
+        if DJANGO_TOKEN_AVAILABLE:
+            try:
+                token_obj = DjangoToken.objects.select_related('user').get(key=token_string)
+                user = token_obj.user
+                print(f"[WebSocket Auth] Django Token authentication successful for user: {user.email}")
                 return user
-        except (TokenError, User.DoesNotExist, Exception) as e:
-            print(f"[WebSocket Auth] JWT validation failed: {e}")
+            except (DjangoToken.DoesNotExist, Exception) as e:
+                print(f"[WebSocket Auth] Django Token validation failed: {e}")
 
-    # Try Django Token authentication if available
-    if DJANGO_TOKEN_AVAILABLE:
-        try:
-            token_obj = DjangoToken.objects.select_related('user').get(key=token_string)
-            user = token_obj.user
-            print(f"[WebSocket Auth] Django Token authentication successful for user: {user.email}")
-            return user
-        except (DjangoToken.DoesNotExist, Exception) as e:
-            print(f"[WebSocket Auth] Django Token validation failed: {e}")
-
-    print(f"[WebSocket Auth] No valid authentication found for token")
-    return AnonymousUser()
+        print(f"[WebSocket Auth] No valid authentication found for token")
+        return AnonymousUser()
 
 
 class JWTAuthMiddleware(BaseMiddleware):
@@ -69,6 +80,9 @@ class JWTAuthMiddleware(BaseMiddleware):
     """
 
     async def __call__(self, scope, receive, send):
+        # Get tenant schema from URL route
+        tenant_schema = scope.get('url_route', {}).get('kwargs', {}).get('tenant_schema')
+
         # Get token from query string
         query_string = scope.get('query_string', b'').decode()
         query_params = parse_qs(query_string)
@@ -86,11 +100,13 @@ class JWTAuthMiddleware(BaseMiddleware):
                     token = cookie.split('=', 1)[1]
                     break
 
-        # Authenticate user with token
-        if token:
-            scope['user'] = await get_user_from_token(token)
+        # Authenticate user with token within tenant context
+        if token and tenant_schema:
+            scope['user'] = await get_user_from_token(token, tenant_schema)
         else:
             scope['user'] = AnonymousUser()
+            if not tenant_schema:
+                print(f"[WebSocket Auth] Warning: No tenant schema found in URL route")
 
         return await super().__call__(scope, receive, send)
 
