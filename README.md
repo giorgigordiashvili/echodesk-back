@@ -1,4 +1,4 @@
-# 🎯 EchoDesk - Multi-Tenant Customer Support Platform
+# 🎯 EchoDesk - Multi-Tenant Customer Support Platfor
 
 Test 2
 [![Development Hours](https://img.shields.io/badge/Development%20Hours-135%2B-blue.svg)](./TIME_TRACKING.md)
