@@ -392,8 +392,17 @@ SOCIAL_INTEGRATIONS = {
 }
 
 # ASGI Application for WebSocket support
-# Removed ASGI and WebSocket support for simplicity
-# Using simple polling instead of real-time WebSocket connections
+ASGI_APPLICATION = 'amanati_crm.asgi.application'
+
+# Channel Layers configuration for WebSocket support
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {
+            "hosts": [(config('REDIS_HOST', default='127.0.0.1'), config('REDIS_PORT', default=6379, cast=int))],
+        },
+    },
+}
 
 # Bank of Georgia (BOG) Payment Gateway Configuration
 # Documentation: https://api.bog.ge/docs/en/payments/introduction
