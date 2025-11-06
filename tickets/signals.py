@@ -251,14 +251,29 @@ def track_ticket_status_change(sender, instance, **kwargs):
             # Check if column (status) changed
             if old_ticket.column_id != instance.column_id:
                 instance._column_changed = True
+                instance._old_column_id = old_ticket.column_id
                 instance._old_column_name = old_ticket.column.name if old_ticket.column else 'None'
                 instance._new_column_name = instance.column.name if instance.column else 'None'
+
+            # Check if position changed
+            if old_ticket.position_in_column != instance.position_in_column:
+                instance._position_changed = True
+                instance._old_position = old_ticket.position_in_column
 
             # Check if department changed
             if old_ticket.assigned_department_id != instance.assigned_department_id:
                 instance._department_changed = True
                 instance._old_department = old_ticket.assigned_department
                 instance._new_department = instance.assigned_department
+
+            # Track any field changes for broadcasting
+            instance._field_changes = {}
+            for field in ['title', 'priority', 'assigned_department_id']:
+                old_value = getattr(old_ticket, field)
+                new_value = getattr(instance, field)
+                if old_value != new_value:
+                    instance._field_changes[field] = {'old': old_value, 'new': new_value}
+
         except Ticket.DoesNotExist:
             pass
 
@@ -290,8 +305,32 @@ def notify_on_ticket_status_change(sender, instance, created, **kwargs):
                 }
             )
 
+        # Broadcast ticket movement to all users viewing the board
+        if instance.column and instance.column.board_id:
+            try:
+                from users.consumers import broadcast_ticket_moved
+                old_column_id = getattr(instance, '_old_column_id', None)
+
+                # Get tenant schema from connection
+                from django.db import connection
+                tenant_schema = getattr(connection, 'schema_name', 'public')
+
+                async_to_sync(broadcast_ticket_moved)(
+                    tenant_schema=tenant_schema,
+                    board_id=instance.column.board_id,
+                    ticket_id=instance.id,
+                    from_column_id=old_column_id,
+                    to_column_id=instance.column_id,
+                    position=instance.position_in_column,
+                    updated_by=None  # Could get from request context if available
+                )
+                print(f"[Signals] Broadcasted ticket {instance.id} movement to board {instance.column.board_id}")
+            except Exception as e:
+                print(f"[Signals] Error broadcasting ticket movement: {str(e)}")
+
         # Clean up temporary attributes
         delattr(instance, '_column_changed')
+        delattr(instance, '_old_column_id')
         delattr(instance, '_old_column_name')
         delattr(instance, '_new_column_name')
 
@@ -321,5 +360,24 @@ def notify_on_ticket_status_change(sender, instance, created, **kwargs):
         delattr(instance, '_department_changed')
         delattr(instance, '_new_department')
         delattr(instance, '_old_department')
+
+    # Broadcast any field changes to board viewers
+    field_changes = getattr(instance, '_field_changes', {})
+    if field_changes and instance.column and instance.column.board_id:
+        try:
+            from users.consumers import broadcast_ticket_updated
+            from django.db import connection
+            tenant_schema = getattr(connection, 'schema_name', 'public')
+
+            async_to_sync(broadcast_ticket_updated)(
+                tenant_schema=tenant_schema,
+                board_id=instance.column.board_id,
+                ticket_id=instance.id,
+                changes=field_changes,
+                updated_by=None
+            )
+            print(f"[Signals] Broadcasted ticket {instance.id} field updates to board {instance.column.board_id}")
+        except Exception as e:
+            print(f"[Signals] Error broadcasting ticket updates: {str(e)}")
 
 
