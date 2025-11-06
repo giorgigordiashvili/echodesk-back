@@ -924,6 +924,9 @@ def facebook_webhook(request):
                                     customer_email = None
                                     customer_phone = None
 
+                                    # Get message_id for API calls
+                                    message_id = message_data.get('mid', '')
+
                                     if sender_id != page_id:  # Don't fetch profile for page itself
                                         # First try: Extract customer information from webhook
                                         customer_info = extract_customer_information(message_event)
@@ -938,37 +941,28 @@ def facebook_webhook(request):
                                                 logger.info(f"   Email: {customer_email}")
                                             if customer_phone:
                                                 logger.info(f"   Phone: {customer_phone}")
-                                        else:
-                                            # Fallback: Try to fetch profile from Graph API
+                                        elif message_id:
+                                            # Second try: Fetch sender info from message object (works in Live Mode!)
                                             try:
-                                                profile_url = f"https://graph.facebook.com/v23.0/{sender_id}"
-                                                profile_params = {
-                                                    'fields': 'name,profile_pic',
+                                                message_url = f"https://graph.facebook.com/v23.0/{message_id}"
+                                                message_params = {
+                                                    'fields': 'from',
                                                     'access_token': page_connection.page_access_token
                                                 }
-                                                profile_response = requests.get(profile_url, params=profile_params, timeout=10)
+                                                message_response = requests.get(message_url, params=message_params, timeout=10)
 
-                                                if profile_response.status_code == 200:
-                                                    profile_data = profile_response.json()
-                                                    sender_name = profile_data.get('name', '').strip()
+                                                if message_response.status_code == 200:
+                                                    message_api_data = message_response.json()
+                                                    from_data = message_api_data.get('from', {})
 
-                                                    if not sender_name:
-                                                        first_name = profile_data.get('first_name', '')
-                                                        last_name = profile_data.get('last_name', '')
-                                                        sender_name = f"{first_name} {last_name}".strip()
+                                                    sender_name = from_data.get('name', '').strip() or 'Messenger User'
+                                                    # Note: from_data.get('email') is usually a fake email like "psid@facebook.com"
 
-                                                    if not sender_name:
-                                                        sender_name = 'Messenger User'
-
-                                                    profile_pic_url = profile_data.get('profile_pic')
-
-                                                    # Validate URL length
-                                                    if profile_pic_url and len(profile_pic_url) > 500:
-                                                        profile_pic_url = None
+                                                    logger.info(f"👤 Fetched sender name from message object: {sender_name}")
                                                 else:
-                                                    logger.warning(f"Could not fetch profile for {sender_id}: status={profile_response.status_code}")
+                                                    logger.warning(f"Could not fetch message info: status={message_response.status_code}")
                                             except Exception as e:
-                                                logger.warning(f"Exception fetching profile for {sender_id}: {e}")
+                                                logger.warning(f"Exception fetching message info: {e}")
                                     
                                     # Save the message (avoid duplicates)
                                     message_id = message_data.get('mid', '')
