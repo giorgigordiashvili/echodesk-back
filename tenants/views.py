@@ -549,9 +549,16 @@ def register_tenant_with_payment(request):
                 feature_ids = validated_data['feature_ids']
                 pricing_model = validated_data['pricing_model']
 
-                # Get the features and calculate price
+                # Get the features and calculate price based on pricing model
                 features = Feature.objects.filter(id__in=feature_ids, is_active=True)
-                total_price = sum(f.base_price_gel for f in features)
+
+                # Calculate total price based on pricing model
+                if pricing_model == 'agent':
+                    # For agent-based pricing, use price_per_user_gel
+                    total_price = sum(f.price_per_user_gel for f in features)
+                else:
+                    # For CRM-based pricing, use price_unlimited_gel
+                    total_price = sum(f.price_unlimited_gel for f in features)
 
                 # Create a custom package (or get if exists)
                 package_name = f"Custom Package - {validated_data['company_name']}"
