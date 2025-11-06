@@ -990,7 +990,7 @@ def facebook_webhook(request):
                                         continue
                                     
                                     # Get sender profile information including profile picture
-                                    sender_name = 'Unknown'
+                                    sender_name = f'Facebook User {sender_id[-4:]}'  # Use last 4 digits as fallback
                                     profile_pic_url = None
                                     
                                     if sender_id != page_id:  # Don't fetch profile for page itself
