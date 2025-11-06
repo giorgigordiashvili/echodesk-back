@@ -238,8 +238,8 @@ class Tenant(TenantMixin):
     
     # Auto-created schema name is available as self.schema_name
     # domain_url inherited from TenantMixin
-    
-    auto_create_schema = True
+
+    auto_create_schema = False  # Handle schema creation manually to avoid webhook timeouts
     auto_drop_schema = False
     
     class Meta:

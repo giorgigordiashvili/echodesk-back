@@ -485,72 +485,15 @@ def bog_webhook(request):
                             next_billing_date=timezone.now() + timedelta(days=30)
                         )
 
-                    # Create admin user in tenant schema (use savepoint to handle IntegrityError)
-                    with schema_context(tenant.schema_name):
-                        from django.db import IntegrityError
-                        try:
-                            # Use a savepoint so IntegrityError doesn't break the outer transaction
-                            with transaction.atomic():
-                                # Create user without password first
-                                admin_user = User.objects.create(
-                                    email=pending_registration.admin_email,
-                                    first_name=pending_registration.admin_first_name,
-                                    last_name=pending_registration.admin_last_name,
-                                    is_staff=True,
-                                    is_superuser=True,
-                                    is_active=True
-                                )
-                                # Set the already-hashed password directly
-                                admin_user.password = pending_registration.admin_password
-                                admin_user.save()
-                                logger.info(f'Admin user created: {admin_user.email}')
-                        except IntegrityError as user_error:
-                            # If user already exists, retrieve it instead
-                            logger.warning(f'User creation failed (may already exist): {user_error}')
-                            admin_user = User.objects.filter(email=pending_registration.admin_email).first()
-                            if admin_user:
-                                logger.info(f'Using existing admin user: {admin_user.email}')
-                            else:
-                                # This shouldn't happen, but log and continue
-                                logger.error(f'User lookup failed after IntegrityError: {user_error}')
-                                # Don't raise - we can continue without the user being in the tenant schema
-
-                    # Setup frontend access
-                    deployment_service = SingleFrontendDeploymentService()
-                    deployment_result = deployment_service.setup_tenant_frontend(tenant)
-
-                    # Manually sync features now that migrations are complete
-                    try:
-                        from .subscription_service import SubscriptionService
-                        logger.info(f'Manually syncing features for {tenant.schema_name} after migrations')
-                        result = SubscriptionService.sync_tenant_features(subscription)
-                        logger.info(f'Feature sync completed: {result}')
-                    except Exception as sync_error:
-                        logger.error(f'Error manually syncing features: {sync_error}', exc_info=True)
-                        # Don't fail the registration if feature sync fails
-
                     # Mark registration as processed
+                    # Schema creation and migrations will be handled by a background task
                     pending_registration.is_processed = True
                     pending_registration.save()
 
-                    logger.info(f'Tenant created from registration payment: {tenant.schema_name}')
-
-                    # Send welcome email to tenant admin
-                    try:
-                        frontend_url = tenant.frontend_url or f"https://{tenant.schema_name}.echodesk.ge"
-                        email_sent = email_service.send_tenant_created_email(
-                            tenant_email=pending_registration.admin_email,
-                            tenant_name=pending_registration.name,
-                            admin_name=f"{pending_registration.admin_first_name} {pending_registration.admin_last_name}",
-                            frontend_url=frontend_url,
-                            schema_name=tenant.schema_name
-                        )
-                        if email_sent:
-                            logger.info(f'Welcome email sent to {pending_registration.admin_email}')
-                        else:
-                            logger.warning(f'Failed to send welcome email to {pending_registration.admin_email}')
-                    except Exception as e:
-                        logger.error(f'Error sending welcome email: {str(e)}')
+                    logger.info(
+                        f'Tenant record created: {tenant.schema_name}. '
+                        f'Schema creation and migrations will be handled asynchronously.'
+                    )
 
                     return Response({
                         'status': 'success',
