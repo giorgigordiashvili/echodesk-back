@@ -51,25 +51,49 @@ def convert_facebook_timestamp(timestamp):
         return timezone.now()
 
 
+def extract_customer_information(message_event):
+    """
+    Extract customer information from messaging_customer_information field in webhook.
+
+    Facebook Messenger can include customer information collected through instant forms
+    or customer information features. This extracts that data when available.
+
+    Args:
+        message_event: The messaging event dict from Facebook webhook
+
+    Returns:
+        dict with keys like: name, email, phone, address_line_1, address_line_2,
+        locality, administrative_area, country, zipcode, etc.
+    """
+    customer_info = {}
+
+    messaging_customer_info = message_event.get('messaging_customer_information', {})
+    if not messaging_customer_info:
+        return customer_info
+
+    # Extract responses from all screens
+    screens = messaging_customer_info.get('screens', [])
+    for screen in screens:
+        responses = screen.get('responses', [])
+        for response in responses:
+            key = response.get('key')
+            value = response.get('value')
+            if key and value:
+                customer_info[key] = value
+
+    return customer_info
+
+
 def send_websocket_notification(tenant_schema, message_data, conversation_id):
     """Send WebSocket notification for new message"""
     try:
-        from django.db import connection
-
-        # Get current schema name for logging
-        current_schema = getattr(connection, 'schema_name', 'unknown')
-
         channel_layer = get_channel_layer()
         if channel_layer is None:
-            print(f"⚠️ WebSocket: Channel layer not configured - skipping notification")
+            logger.warning("WebSocket channel layer not configured")
             return
 
         # Send to general messages group for this tenant
         group_name = f'messages_{tenant_schema}'
-
-        print(f"📡 WebSocket: Sending notification to group '{group_name}'")
-        print(f"   Current schema: {current_schema}")
-        print(f"   Message: {message_data.get('message_text', '')[:50]}")
 
         async_to_sync(channel_layer.group_send)(
             group_name,
@@ -81,12 +105,8 @@ def send_websocket_notification(tenant_schema, message_data, conversation_id):
             }
         )
 
-        print(f"✅ WebSocket: Notification sent successfully to {group_name}")
-
     except Exception as e:
-        print(f"❌ WebSocket: Failed to send notification: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Failed to send WebSocket notification: {e}")
 
 
 def find_tenant_by_page_id(page_id):
@@ -649,20 +669,15 @@ def facebook_send_message(request):
         params = {
             'access_token': page_connection.page_access_token
         }
-        
-        print(f"🚀 Sending Facebook message:")
-        print(f"   Page: {page_connection.page_name}")
-        print(f"   To: {recipient_id}")
-        print(f"   Message: {message_text}")
-        
+
+        logger.info(f"Sending message to {recipient_id} via {page_connection.page_name}")
+
         response = requests.post(
             send_url,
             json=message_data,
             headers=headers,
             params=params
         )
-        
-        print(f"📤 Facebook API Response: {response.status_code} - {response.text}")
         
         if response.status_code == 200:
             response_data = response.json()
@@ -679,9 +694,8 @@ def facebook_send_message(request):
                     timestamp=datetime.now(),
                     is_from_page=True
                 )
-                print(f"✅ Saved sent message to database")
             except Exception as e:
-                print(f"⚠️ Failed to save sent message to database: {e}")
+                logger.warning(f"Failed to save sent message: {e}")
             
             return Response({
                 'status': 'sent',
@@ -696,9 +710,9 @@ def facebook_send_message(request):
                 'error': f'Failed to send message: {error_message}',
                 'facebook_error': error_data
             }, status=status.HTTP_400_BAD_REQUEST)
-            
+
     except Exception as e:
-        print(f"❌ Exception in facebook_send_message: {e}")
+        logger.error(f"Exception in facebook_send_message: {e}")
         return Response({
             'error': f'Failed to send message: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -735,68 +749,40 @@ def facebook_webhook(request):
             from tenant_schemas.utils import schema_context
             logger = logging.getLogger(__name__)
             
-            print(f"🔵 WEBHOOK POST PROCESSING STARTED at {datetime.now()}")
-            
-            # Simple file logging to verify we're receiving callbacks
-            try:
-                import os
-                log_file = os.path.join(os.getcwd(), 'facebook_webhook_log.txt')
-                with open(log_file, 'a') as f:
-                    f.write(f"\n=== WEBHOOK RECEIVED ===\n")
-                    f.write(f"Time: {datetime.now()}\n")
-                    f.write(f"Method: {request.method}\n")
-                    f.write(f"Headers: {dict(request.headers)}\n")
-                    f.write(f"Body: {request.body.decode('utf-8')}\n")
-                    f.write("=" * 50 + "\n")
-                print(f"WEBHOOK: Logged to {log_file}")
-            except Exception as e:
-                print(f"WEBHOOK: Failed to write to log file: {e}")
-                # Also try to write to stdout as fallback
-                print(f"WEBHOOK RECEIVED at {datetime.now()}: {request.body.decode('utf-8')}")
-            
+            # Parse webhook data
             data = json.loads(request.body)
-            print(f"🔍 PARSED WEBHOOK DATA: {data}")
-            logger.info(f"Webhook received data: {data}")
+
+            # Log webhook data for debugging
+            logger.info(f"📩 FACEBOOK WEBHOOK RECEIVED:")
+            logger.info(f"   Raw data: {json.dumps(data, indent=2)}")
+            logger.info(f"   Headers: User-Agent={request.headers.get('User-Agent')}, X-Hub-Signature={request.headers.get('X-Hub-Signature')}")
             
-            # First, extract page_id to determine which tenant to use
+            # Extract page_id to determine which tenant to use
             page_id = None
-            print(f"🔍 EXTRACTING PAGE_ID from data: {data}")
-            
+
             # Handle Facebook Developer Console test format
             if 'field' in data and 'value' in data and data['field'] == 'messages':
                 test_value = data['value']
-                # Try multiple places where Facebook might put the page ID
-                page_id = (test_value.get('metadata', {}).get('page_id') or 
-                          test_value.get('page_id') or 
+                page_id = (test_value.get('metadata', {}).get('page_id') or
+                          test_value.get('page_id') or
                           test_value.get('recipient', {}).get('id'))
-                print(f"🔍 TEST FORMAT - Extracted page_id: {page_id}")
-            
-            # Handle standard webhook format (real messages)  
+
+            # Handle standard webhook format (real messages)
             elif 'entry' in data and len(data['entry']) > 0:
                 page_id = data['entry'][0].get('id')
-                print(f"🔍 STANDARD FORMAT - Extracted page_id: {page_id}")
-            
+
             if not page_id:
-                print(f"❌ NO PAGE_ID FOUND in webhook data: {data}")
                 logger.error("No page_id found in webhook data")
                 return JsonResponse({'error': 'No page_id found'}, status=400)
-            
+
             # Find which tenant this page belongs to
-            print(f"🔍 FINDING TENANT for page_id: {page_id}")
             tenant_schema = find_tenant_by_page_id(page_id)
-            print(f"🔍 TENANT RESULT: {tenant_schema}")
-            
+
             if not tenant_schema:
-                print(f"❌ NO TENANT FOUND for page_id: {page_id}")
                 logger.error(f"No tenant found for page_id: {page_id}")
                 return JsonResponse({'error': f'No tenant found for page_id: {page_id}'}, status=404)
-            
+
             logger.info(f"Processing webhook for page_id {page_id} in tenant: {tenant_schema}")
-            
-            # Enhanced debug logging
-            logger.info(f"🔍 WEBHOOK DEBUG - Data structure: {data}")
-            logger.info(f"🔍 WEBHOOK DEBUG - Looking for tenant with page_id: {page_id}")
-            logger.info(f"🔍 WEBHOOK DEBUG - Found tenant: {tenant_schema}")
             
             # Process webhook within the correct tenant context
             with schema_context(tenant_schema):
@@ -810,24 +796,7 @@ def facebook_webhook(request):
                     message_data = test_value.get('message', {})
                     timestamp = test_value.get('timestamp', 0)
                     
-                    logger.info(f"Processing test message - page_id: {page_id}, sender_id: {sender_id}")
-                    logger.info(f"Test value structure: {test_value}")
-                    
-                    # Log to file for debugging
-                    try:
-                        import os
-                        log_file = os.path.join(os.getcwd(), 'facebook_webhook_log.txt')
-                        with open(log_file, 'a') as f:
-                            f.write(f"\n=== FACEBOOK TEST MESSAGE ===\n")
-                            f.write(f"Time: {datetime.now()}\n")
-                            f.write(f"Tenant: {tenant_schema}\n")
-                            f.write(f"Page ID: {page_id}\n")
-                            f.write(f"Sender ID: {sender_id}\n")
-                            f.write(f"Message Data: {message_data}\n")
-                            f.write(f"Full Test Value: {test_value}\n")
-                            f.write("=" * 50 + "\n")
-                    except Exception as log_error:
-                        logger.error(f"Failed to write test log: {log_error}")
+                    logger.info(f"Processing test message from sender {sender_id}")
                     
                     if page_id and sender_id and message_data:
                         # Find the page connection
@@ -841,30 +810,18 @@ def facebook_webhook(request):
                             # Process the test message
                             message_id = message_data.get('mid', f'test_mid_{timestamp}')
                             message_text = message_data.get('text', 'Test message from Facebook')
-                            
-                            logger.info(f"Processing message - ID: {message_id}, Text: {message_text}")
-                            
+
                             # Skip if this is an echo (message sent by the page)
                             if message_data.get('is_echo'):
-                                logger.info("Skipping echo message")
                                 return JsonResponse({'status': 'received'})
-                            
+
                             # For test messages, use simple sender info
                             sender_name = f"Test User {sender_id}"
                             profile_pic_url = None
-                            
+
                             # Save the message (avoid duplicates)
                             if message_id and not FacebookMessage.objects.filter(message_id=message_id).exists():
                                 try:
-                                    # Debug field lengths before saving
-                                    print(f"🔍 FIELD LENGTHS DEBUG:")
-                                    print(f"   message_id: '{message_id}' (length: {len(message_id)})")
-                                    print(f"   sender_id: '{sender_id}' (length: {len(sender_id)})")
-                                    print(f"   sender_name: '{sender_name}' (length: {len(sender_name)})")
-                                    print(f"   message_text: '{message_text}' (length: {len(message_text)})")
-                                    if profile_pic_url:
-                                        print(f"   profile_pic_url: '{profile_pic_url}' (length: {len(profile_pic_url)})")
-                                    
                                     message_obj = FacebookMessage.objects.create(
                                         page_connection=page_connection,
                                         message_id=message_id,
@@ -875,8 +832,7 @@ def facebook_webhook(request):
                                         is_from_page=(sender_id == page_id),
                                         profile_pic_url=profile_pic_url
                                     )
-                                    print(f"✅ SUCCESSFULLY SAVED MESSAGE TO DATABASE - ID: {message_obj.id}, Text: '{message_text}'")
-                                    logger.info(f"✅ SUCCESSFULLY SAVED MESSAGE TO DATABASE - ID: {message_obj.id}, Text: '{message_text}'")
+                                    logger.info(f"✅ Saved test message: {message_text}")
 
                                     # Send WebSocket notification for real-time updates
                                     from django.db import connection
@@ -894,54 +850,12 @@ def facebook_webhook(request):
                                         # Conversation ID is the sender_id (the customer)
                                         ws_conversation_id = sender_id
                                         send_websocket_notification(current_schema, ws_message_data, ws_conversation_id)
-                                    else:
-                                        print(f"⚠️ WebSocket: Could not determine tenant schema - skipping notification")
-                                    
-                                    # Write to file for debugging
-                                    try:
-                                        with open(log_file, 'a') as f:
-                                            f.write(f"✅ SAVED TO DATABASE: Message ID {message_obj.id} - '{message_text}'\n")
-                                    except:
-                                        pass
-                                            
+
                                 except Exception as e:
-                                    print(f"❌ FAILED TO SAVE MESSAGE TO DATABASE: {e}")
-                                    print(f"❌ Error details: {e}")
-                                    logger.error(f"❌ FAILED TO SAVE MESSAGE TO DATABASE: {e}")
-                                    try:
-                                        with open(log_file, 'a') as f:
-                                            f.write(f"❌ DATABASE SAVE FAILED: {e}\n")
-                                    except:
-                                        pass
-                            else:
-                                reason = "No message_id provided" if not message_id else f"Message {message_id} already exists"
-                                logger.info(f"⚠️ SKIPPED SAVING MESSAGE: {reason}")
-                                try:
-                                    with open(log_file, 'a') as f:
-                                        f.write(f"⚠️ SKIPPED: {reason}\n")
-                                except:
-                                    pass
-                            
+                                    logger.error(f"Failed to save test message: {e}")
+
                         except FacebookPageConnection.DoesNotExist:
                             logger.warning(f"No active page connection found for page_id: {page_id}")
-                            # List available connections for debugging
-                            all_connections = FacebookPageConnection.objects.filter(is_active=True)
-                            logger.warning(f"Available connections: {[(conn.page_id, conn.page_name) for conn in all_connections]}")
-                            
-                            # Log to file for debugging
-                            try:
-                                import os
-                                log_file = os.path.join(os.getcwd(), 'facebook_webhook_log.txt')
-                                with open(log_file, 'a') as f:
-                                    f.write(f"\n❌ NO PAGE CONNECTION FOUND ❌\n")
-                                    f.write(f"Time: {datetime.now()}\n")
-                                    f.write(f"Looking for page_id: {page_id}\n")
-                                    f.write(f"Available pages: {[(conn.page_id, conn.page_name) for conn in all_connections]}\n")
-                                    f.write(f"Test value structure: {test_value}\n")
-                                    f.write("=" * 50 + "\n")
-                            except Exception as log_error:
-                                logger.error(f"Failed to write error log: {log_error}")
-                            
                             return JsonResponse({'error': f'No page connection found for page_id: {page_id}'}, status=404)
                     
                     return JsonResponse({'status': 'received'})
@@ -972,14 +886,11 @@ def facebook_webhook(request):
                         # Process messaging events
                         if 'messaging' in entry:
                             logger.info(f"📨 Found {len(entry['messaging'])} messaging events")
-                            print(f"🔍 DEBUG: Processing {len(entry['messaging'])} messaging events for page {page_id}")
                             for message_event in entry['messaging']:
-                                logger.info(f"🔍 Processing message event: {message_event}")
                                 
                                 if 'message' in message_event:
                                     message_data = message_event['message']
                                     sender_id = message_event['sender']['id']
-                                    logger.info(f"📝 Message from {sender_id}: {message_data}")
                                     
                                     # Handle echo messages (messages sent by the page)
                                     if message_data.get('is_echo'):
@@ -1007,63 +918,64 @@ def facebook_webhook(request):
 
                                         continue
                                     
-                                    # Get sender profile information including profile picture
-                                    sender_name = f'Facebook User {sender_id[-4:]}'  # Use last 4 digits as fallback
+                                    # Get sender information
+                                    sender_name = 'Messenger User'  # Fallback name
                                     profile_pic_url = None
-                                    
+                                    customer_email = None
+                                    customer_phone = None
+
                                     if sender_id != page_id:  # Don't fetch profile for page itself
-                                        try:
-                                            # Use the page access token to get user profile
-                                            # For Messenger PSIDs, must use 'first_name,last_name' (not 'name')
-                                            profile_url = f"https://graph.facebook.com/v23.0/{sender_id}"
-                                            profile_params = {
-                                                'fields': 'first_name,last_name,profile_pic',
-                                                'access_token': page_connection.page_access_token
-                                            }
-                                            logger.info(f"👤 Fetching profile for sender {sender_id} from Facebook Graph API")
-                                            profile_response = requests.get(profile_url, params=profile_params, timeout=10)
+                                        # First try: Extract customer information from webhook
+                                        customer_info = extract_customer_information(message_event)
 
-                                            logger.info(f"👤 Profile fetch response: status={profile_response.status_code}")
-                                            if profile_response.status_code == 200:
-                                                profile_data = profile_response.json()
-                                                logger.info(f"👤 Profile data received: {profile_data}")
-                                                first_name = profile_data.get('first_name', '')
-                                                last_name = profile_data.get('last_name', '')
-                                                sender_name = f"{first_name} {last_name}".strip() or f'Facebook User {sender_id[-4:]}'
-                                                profile_pic_url = profile_data.get('profile_pic')
-                                                logger.info(f"👤 Set sender_name to: {sender_name}")
+                                        if customer_info:
+                                            # Use customer information from webhook (most reliable)
+                                            sender_name = customer_info.get('name', '').strip() or 'Messenger User'
+                                            customer_email = customer_info.get('email')
+                                            customer_phone = customer_info.get('phone')
+                                            logger.info(f"👤 Using customer info from webhook: {sender_name}")
+                                            if customer_email:
+                                                logger.info(f"   Email: {customer_email}")
+                                            if customer_phone:
+                                                logger.info(f"   Phone: {customer_phone}")
+                                        else:
+                                            # Fallback: Try to fetch profile from Graph API
+                                            try:
+                                                profile_url = f"https://graph.facebook.com/v23.0/{sender_id}"
+                                                profile_params = {
+                                                    'fields': 'name,profile_pic',
+                                                    'access_token': page_connection.page_access_token
+                                                }
+                                                profile_response = requests.get(profile_url, params=profile_params, timeout=10)
 
-                                                # Validate URL length to prevent database errors
-                                                if profile_pic_url and len(profile_pic_url) > 500:
-                                                    logger.warning(f"Profile pic URL too long ({len(profile_pic_url)} chars), truncating: {profile_pic_url[:50]}...")
-                                                    profile_pic_url = None  # Don't save extremely long URLs
-                                            else:
-                                                error_data = profile_response.json() if profile_response.content else {}
-                                                logger.error(f"❌ Failed to fetch profile for {sender_id}: status={profile_response.status_code}, error={error_data}")
+                                                if profile_response.status_code == 200:
+                                                    profile_data = profile_response.json()
+                                                    sender_name = profile_data.get('name', '').strip()
 
-                                        except Exception as e:
-                                            logger.error(f"❌ Exception fetching profile for {sender_id}: {type(e).__name__}: {e}")
+                                                    if not sender_name:
+                                                        first_name = profile_data.get('first_name', '')
+                                                        last_name = profile_data.get('last_name', '')
+                                                        sender_name = f"{first_name} {last_name}".strip()
+
+                                                    if not sender_name:
+                                                        sender_name = 'Messenger User'
+
+                                                    profile_pic_url = profile_data.get('profile_pic')
+
+                                                    # Validate URL length
+                                                    if profile_pic_url and len(profile_pic_url) > 500:
+                                                        profile_pic_url = None
+                                                else:
+                                                    logger.warning(f"Could not fetch profile for {sender_id}: status={profile_response.status_code}")
+                                            except Exception as e:
+                                                logger.warning(f"Exception fetching profile for {sender_id}: {e}")
                                     
                                     # Save the message (avoid duplicates)
                                     message_id = message_data.get('mid', '')
                                     message_text = message_data.get('text', '')
-                                    logger.info(f"💾 Attempting to save message: ID={message_id}, Text='{message_text}'")
-                                    
-                                    # Enhanced debugging - check field lengths
-                                    print(f"🔍 FIELD LENGTH DEBUG:")
-                                    print(f"   message_id length: {len(message_id)} chars - '{message_id}'")
-                                    print(f"   sender_id length: {len(sender_id)} chars - '{sender_id}'")
-                                    print(f"   sender_name length: {len(sender_name)} chars - '{sender_name}'")
-                                    print(f"   message_text length: {len(message_text)} chars - '{message_text}'")
-                                    print(f"   page_id length: {len(str(page_id))} chars - '{page_id}'")
-                                    if profile_pic_url:
-                                        print(f"   profile_pic_url length: {len(profile_pic_url)} chars - '{profile_pic_url[:50]}...'")
-                                    else:
-                                        print(f"   profile_pic_url: None")
-                                    
+
                                     if message_id and not FacebookMessage.objects.filter(message_id=message_id).exists():
                                         try:
-                                            print(f"🔄 Creating FacebookMessage object...")
                                             message_obj = FacebookMessage.objects.create(
                                                 page_connection=page_connection,
                                                 message_id=message_id,
@@ -1074,8 +986,7 @@ def facebook_webhook(request):
                                                 is_from_page=(sender_id == page_id),
                                                 profile_pic_url=profile_pic_url
                                             )
-                                            logger.info(f"✅ SUCCESSFULLY SAVED MESSAGE TO DATABASE - ID: {message_obj.id}, Text: '{message_text}'")
-                                            print(f"✅ SUCCESS: Message saved with ID {message_obj.id}")
+                                            logger.info(f"✅ Saved message from {sender_name}: {message_text[:50]}")
 
                                             # Send WebSocket notification for real-time updates
                                             from django.db import connection
@@ -1093,31 +1004,9 @@ def facebook_webhook(request):
                                                 # Conversation ID is the sender_id (the customer)
                                                 ws_conversation_id = sender_id
                                                 send_websocket_notification(current_schema, ws_message_data, ws_conversation_id)
-                                            else:
-                                                print(f"⚠️ WebSocket: Could not determine tenant schema - skipping notification")
-                                            
+
                                         except Exception as e:
-                                            logger.error(f"❌ FAILED TO SAVE MESSAGE TO DATABASE: {e}")
-                                            logger.error(f"❌ Error details: {str(e)}")
-                                            print(f"❌ SAVE FAILED: {e}")
-                                            print(f"❌ Error type: {type(e).__name__}")
-                                            
-                                            # Log to file for debugging
-                                            try:
-                                                import os
-                                                log_file = os.path.join(os.getcwd(), 'facebook_webhook_log.txt')
-                                                with open(log_file, 'a') as f:
-                                                    f.write(f"\n❌ STANDARD FORMAT SAVE FAILED ❌\n")
-                                                    f.write(f"Time: {datetime.now()}\n")
-                                                    f.write(f"Error: {e}\n")
-                                                    f.write(f"Error type: {type(e).__name__}\n")
-                                                    f.write(f"Page ID: {page_id}\n")
-                                                    f.write(f"Message ID: {message_id}\n")
-                                                    f.write(f"Sender ID: {sender_id}\n")
-                                                    f.write(f"Message text: {message_text}\n")
-                                                    f.write("=" * 50 + "\n")
-                                            except Exception as log_error:
-                                                logger.error(f"Failed to write error log: {log_error}")
+                                            logger.error(f"❌ Failed to save message: {e}")
                                     else:
                                         if not message_id:
                                             logger.warning(f"⚠️ No message_id provided, skipping save")
@@ -1131,7 +1020,6 @@ def facebook_webhook(request):
                                     watermark = int(read_data.get('watermark', 0))
 
                                     logger.info(f"📖 Read receipt from {sender_id}, watermark: {watermark}")
-                                    print(f"📖 READ RECEIPT: sender={sender_id}, watermark={watermark}")
 
                                     # Mark all messages from this sender before the watermark as read
                                     try:
@@ -1152,7 +1040,6 @@ def facebook_webhook(request):
                                         )
 
                                         logger.info(f"✅ Marked {updated_count} messages as read for conversation with {sender_id}")
-                                        print(f"✅ READ RECEIPT: Marked {updated_count} messages as read")
 
                                         # Send WebSocket notification for read receipts
                                         if updated_count > 0:
@@ -1178,13 +1065,9 @@ def facebook_webhook(request):
                                                 # Conversation ID is the sender_id (the customer who read the messages)
                                                 ws_conversation_id = sender_id
                                                 send_websocket_notification(current_schema, read_receipt_data, ws_conversation_id)
-                                                logger.info(f"📤 Sent read receipt WebSocket notification for conversation {ws_conversation_id}")
-                                            else:
-                                                print(f"⚠️ WebSocket: Could not determine tenant schema - skipping read receipt notification")
 
                                     except Exception as e:
                                         logger.error(f"❌ Failed to process read receipt: {e}")
-                                        print(f"❌ READ RECEIPT ERROR: {e}")
 
                                 # Handle delivery receipts
                                 elif 'delivery' in message_event:
@@ -1193,8 +1076,7 @@ def facebook_webhook(request):
                                     watermark = int(delivery_data.get('watermark', 0))
                                     message_ids = delivery_data.get('mids', [])
 
-                                    logger.info(f"📬 Delivery receipt from {sender_id}, watermark: {watermark}, mids: {message_ids}")
-                                    print(f"📬 DELIVERY RECEIPT: sender={sender_id}, watermark={watermark}, mids={len(message_ids)}")
+                                    logger.info(f"📬 Delivery receipt from {sender_id}, watermark: {watermark}")
 
                                     # Mark all messages from this sender before the watermark as delivered
                                     try:
@@ -1215,7 +1097,6 @@ def facebook_webhook(request):
                                         )
 
                                         logger.info(f"✅ Marked {updated_count} messages as delivered for conversation with {sender_id}")
-                                        print(f"✅ DELIVERY RECEIPT: Marked {updated_count} messages as delivered")
 
                                         # Send WebSocket notification for delivery receipts
                                         if updated_count > 0:
@@ -1241,13 +1122,9 @@ def facebook_webhook(request):
                                                 # Conversation ID is the sender_id (the customer who received the messages)
                                                 ws_conversation_id = sender_id
                                                 send_websocket_notification(current_schema, delivery_receipt_data, ws_conversation_id)
-                                                logger.info(f"📤 Sent delivery receipt WebSocket notification for conversation {ws_conversation_id}")
-                                            else:
-                                                print(f"⚠️ WebSocket: Could not determine tenant schema - skipping delivery receipt notification")
 
                                     except Exception as e:
                                         logger.error(f"❌ Failed to process delivery receipt: {e}")
-                                        print(f"❌ DELIVERY RECEIPT ERROR: {e}")
 
                                 else:
                                     logger.info(f"ℹ️ Message event has no 'message', 'read', or 'delivery' field: {message_event}")
