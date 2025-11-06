@@ -300,7 +300,7 @@ def facebook_oauth_callback(request):
         token_params = {
             'client_id': getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_APP_ID'),
             'client_secret': getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_APP_SECRET'),
-            'redirect_uri': request.build_absolute_uri(reverse('social_integrations:facebook_oauth_callback')),
+            'redirect_uri': 'https://api.echodesk.ge/api/social/facebook/oauth/callback/',  # Must match OAuth URL exactly
             'code': code
         }
         
