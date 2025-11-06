@@ -519,6 +519,16 @@ def bog_webhook(request):
                     deployment_service = SingleFrontendDeploymentService()
                     deployment_result = deployment_service.setup_tenant_frontend(tenant)
 
+                    # Manually sync features now that migrations are complete
+                    try:
+                        from .subscription_service import SubscriptionService
+                        logger.info(f'Manually syncing features for {tenant.schema_name} after migrations')
+                        result = SubscriptionService.sync_tenant_features(subscription)
+                        logger.info(f'Feature sync completed: {result}')
+                    except Exception as sync_error:
+                        logger.error(f'Error manually syncing features: {sync_error}', exc_info=True)
+                        # Don't fail the registration if feature sync fails
+
                     # Mark registration as processed
                     pending_registration.is_processed = True
                     pending_registration.save()

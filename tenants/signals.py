@@ -41,4 +41,12 @@ def sync_subscription_features(sender, instance, created, **kwargs):
             logger.info(f"Subscription {instance} is inactive, skipping feature sync")
 
     except Exception as e:
-        logger.error(f"Error syncing features for subscription {instance}: {e}", exc_info=True)
+        # Handle case where tenant schema migrations haven't completed yet
+        error_msg = str(e).lower()
+        if 'does not exist' in error_msg or 'relation' in error_msg:
+            logger.warning(
+                f"Tenant schema tables not ready yet for {instance.tenant.schema_name}, "
+                f"skipping feature sync. This is normal during initial tenant creation."
+            )
+        else:
+            logger.error(f"Error syncing features for subscription {instance}: {e}", exc_info=True)
