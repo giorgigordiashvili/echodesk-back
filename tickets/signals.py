@@ -58,6 +58,7 @@ def create_notification(user, notification_type, title, message, ticket_id=None,
         tenant_schema = getattr(connection, 'schema_name', 'public')
 
         # Prepare notification data for WebSocket
+        from django.utils.timesince import timesince
         notification_data = {
             'id': notification.id,
             'notification_type': notification.notification_type,
@@ -67,6 +68,10 @@ def create_notification(user, notification_type, title, message, ticket_id=None,
             'metadata': notification.metadata,
             'is_read': notification.is_read,
             'created_at': notification.created_at.isoformat(),
+            'read_at': notification.read_at.isoformat() if notification.read_at else None,
+            'time_ago': timesince(notification.created_at),
+            'user': notification.user.id,
+            'user_name': notification.user.get_full_name() or notification.user.email,
         }
 
         # Send via WebSocket (async_to_sync to call async function from sync context)
@@ -80,6 +85,33 @@ def create_notification(user, notification_type, title, message, ticket_id=None,
         except Exception as e:
             # Log error but don't fail the notification creation
             print(f"[Signals] Error broadcasting notification via WebSocket: {str(e)}")
+
+        # Send Web Push notification (for when app is closed)
+        try:
+            from notifications.utils import send_notification_to_user as send_push
+
+            # Build ticket URL if ticket_id exists
+            ticket_url = f'/tickets/{ticket_id}' if ticket_id else '/'
+
+            # Send push notification to all user's devices
+            send_push(
+                user=user,
+                title=title,
+                body=message,
+                data={
+                    'ticket_id': ticket_id,
+                    'notification_type': notification_type,
+                    'notification_id': notification.id,
+                    'url': ticket_url
+                },
+                icon='/favicon.ico',
+                url=ticket_url,
+                tag=f'echodesk-{ticket_id or notification.id}'
+            )
+            print(f"[Signals] Web Push sent for notification {notification.id}")
+        except Exception as e:
+            # Log error but don't fail - Web Push is optional
+            print(f"[Signals] Error sending Web Push notification: {str(e)}")
 
 
 def extract_mentions(text):
