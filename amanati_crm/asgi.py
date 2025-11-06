@@ -29,5 +29,6 @@ application = ProtocolTypeRouter({
         path('ws/messages/<str:tenant_schema>/', JWTAuthMiddlewareStack(consumers.MessagesConsumer.as_asgi())),
         path('ws/typing/<str:tenant_schema>/<str:conversation_id>/', JWTAuthMiddlewareStack(consumers.TypingConsumer.as_asgi())),
         path('ws/notifications/<str:tenant_schema>/', JWTAuthMiddlewareStack(users_consumers.NotificationConsumer.as_asgi())),
+        path('ws/boards/<str:tenant_schema>/<str:board_id>/', JWTAuthMiddlewareStack(users_consumers.TicketBoardConsumer.as_asgi())),
     ]),
 })
