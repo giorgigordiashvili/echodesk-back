@@ -410,6 +410,24 @@ def facebook_oauth_callback(request):
                     logger.info(f"✅ Created Facebook page connection: {page_name} ({page_id}) in schema {tenant_schema}")
                     saved_pages += 1
 
+                    # Subscribe page to webhooks
+                    try:
+                        subscribe_url = f"https://graph.facebook.com/v23.0/{page_id}/subscribed_apps"
+                        subscribe_params = {
+                            'subscribed_fields': 'messages,messaging_postbacks,message_reads,message_deliveries',
+                            'access_token': page_access_token
+                        }
+                        logger.info(f"📡 Subscribing page {page_name} ({page_id}) to webhooks...")
+                        subscribe_response = requests.post(subscribe_url, params=subscribe_params)
+                        subscribe_data = subscribe_response.json()
+
+                        if subscribe_response.status_code == 200 and subscribe_data.get('success'):
+                            logger.info(f"✅ Subscribed page {page_name} ({page_id}) to webhooks")
+                        else:
+                            logger.error(f"❌ Failed to subscribe page {page_name} to webhooks: {subscribe_data}")
+                    except Exception as subscribe_error:
+                        logger.error(f"❌ Error subscribing page {page_name} to webhooks: {subscribe_error}")
+
                     # Try to fetch Instagram Business Account connected to this page
                     try:
                         instagram_url = f"https://graph.facebook.com/v23.0/{page_id}"
