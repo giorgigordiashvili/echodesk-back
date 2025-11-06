@@ -46,7 +46,7 @@ class Package(models.Model):
     
     # Limits
     max_users = models.IntegerField(null=True, blank=True, help_text="Maximum users (null = unlimited for agent-based)")
-    max_whatsapp_messages = models.IntegerField(help_text="WhatsApp messages per month")
+    max_whatsapp_messages = models.IntegerField(null=True, blank=True, help_text="WhatsApp messages per month (deprecated)")
     max_storage_gb = models.IntegerField(default=5, help_text="Storage limit in GB")
     
     # Features
@@ -123,7 +123,8 @@ class Package(models.Model):
         # Add limits info
         if self.max_users:
             features.insert(0, f"Up to {self.max_users} Users")
-        features.append(f"Up to {self.max_whatsapp_messages:,} WhatsApp messages/month")
+        if self.max_whatsapp_messages:
+            features.append(f"Up to {self.max_whatsapp_messages:,} WhatsApp messages/month")
         features.append(f"{self.max_storage_gb}GB Storage")
 
         return features
@@ -328,6 +329,8 @@ class TenantSubscription(models.Model):
     @property
     def is_over_whatsapp_limit(self):
         """Check if tenant is over WhatsApp message limit"""
+        if not self.package.max_whatsapp_messages:
+            return False  # No limit set
         return self.whatsapp_messages_used > self.package.max_whatsapp_messages
     
     @property
@@ -342,8 +345,8 @@ class TenantSubscription(models.Model):
         return self.current_users < self.package.max_users
     
     def can_send_whatsapp_message(self):
-        """Check if tenant can send WhatsApp message"""
-        return self.whatsapp_messages_used < self.package.max_whatsapp_messages
+        """Check if tenant can send WhatsApp message (deprecated - always returns True)"""
+        return True  # WhatsApp limits removed
 
 
 class UsageLog(models.Model):
