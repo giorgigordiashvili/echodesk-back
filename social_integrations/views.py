@@ -1967,15 +1967,46 @@ def instagram_webhook(request):
 
                                     continue
 
-                                # Get sender info - use sender_id as fallback username
+                                # Get sender info - fetch from Instagram Graph API
                                 sender_username = sender_id  # Use the ID as username by default
                                 sender_profile_pic = None
+
+                                # Try to fetch the sender's Instagram username and profile pic
+                                if sender_id != instagram_account_id:  # Don't fetch profile for business account itself
+                                    try:
+                                        # Use Instagram Graph API to get user info
+                                        profile_url = f"https://graph.facebook.com/v23.0/{sender_id}"
+                                        profile_params = {
+                                            'fields': 'username,profile_pic',
+                                            'access_token': account_connection.access_token
+                                        }
+                                        logger.info(f"👤 Fetching Instagram profile for sender {sender_id}")
+                                        profile_response = requests.get(profile_url, params=profile_params, timeout=10)
+
+                                        logger.info(f"👤 Instagram profile fetch response: status={profile_response.status_code}")
+                                        if profile_response.status_code == 200:
+                                            profile_data = profile_response.json()
+                                            logger.info(f"👤 Instagram profile data received: {profile_data}")
+                                            sender_username = profile_data.get('username', sender_id)
+                                            sender_profile_pic = profile_data.get('profile_pic')
+                                            logger.info(f"👤 Set sender_username to: {sender_username}")
+
+                                            # Validate URL length to prevent database errors
+                                            if sender_profile_pic and len(sender_profile_pic) > 500:
+                                                logger.warning(f"Instagram profile pic URL too long ({len(sender_profile_pic)} chars), truncating")
+                                                sender_profile_pic = None
+                                        else:
+                                            error_data = profile_response.json() if profile_response.content else {}
+                                            logger.error(f"❌ Failed to fetch Instagram profile for {sender_id}: status={profile_response.status_code}, error={error_data}")
+
+                                    except Exception as e:
+                                        logger.error(f"❌ Exception fetching Instagram profile for {sender_id}: {type(e).__name__}: {e}")
 
                                 # Save the message
                                 message_id = message_data.get('mid', '')
                                 message_text = message_data.get('text', '')
 
-                                logger.info(f"💾 Saving Instagram message from sender_id: {sender_id}")
+                                logger.info(f"💾 Saving Instagram message from sender_id: {sender_id}, username: {sender_username}")
 
                                 if message_id and not InstagramMessage.objects.filter(message_id=message_id).exists():
                                     try:
