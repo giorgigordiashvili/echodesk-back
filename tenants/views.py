@@ -545,7 +545,7 @@ def register_tenant_with_payment(request):
 
             if is_custom:
                 # Custom package: create or get package for the selected features
-                from .models import Feature, PricingModel
+                from .models import Feature, PricingModel, PackageFeature
                 feature_ids = validated_data['feature_ids']
                 pricing_model = validated_data['pricing_model']
 
@@ -560,10 +560,15 @@ def register_tenant_with_payment(request):
                     # For CRM-based pricing, use price_unlimited_gel
                     total_price = sum(f.price_unlimited_gel for f in features)
 
-                # Create a custom package (or get if exists)
-                package_name = f"Custom Package - {validated_data['company_name']}"
+                # Create a custom package
+                import uuid
+                unique_suffix = uuid.uuid4().hex[:8]
+                package_name = f"custom_package_{validated_data['domain']}_{unique_suffix}"
+                package_display_name = f"Custom Package - {validated_data['company_name']}"
+
                 package = Package.objects.create(
                     name=package_name,
+                    display_name=package_display_name,
                     description=f"Custom package with {len(feature_ids)} features",
                     pricing_model=PricingModel.AGENT_BASED if pricing_model == 'agent' else PricingModel.CRM_BASED,
                     price_gel=total_price,
@@ -571,8 +576,13 @@ def register_tenant_with_payment(request):
                     is_custom=True
                 )
 
-                # Add features to the package
-                package.features.set(features)
+                # Add features to the package using PackageFeature
+                for feature in features:
+                    PackageFeature.objects.create(
+                        package=package,
+                        feature=feature,
+                        is_highlighted=False
+                    )
             else:
                 # Standard package
                 package = Package.objects.get(id=validated_data['package_id'], is_active=True)
