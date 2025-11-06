@@ -20,6 +20,7 @@ django_asgi_app = get_asgi_application()
 
 # Import consumers and custom auth middleware AFTER Django initialization
 from social_integrations import consumers
+from users import consumers as users_consumers
 from amanati_crm.websocket_auth import JWTAuthMiddlewareStack
 
 application = ProtocolTypeRouter({
@@ -27,5 +28,6 @@ application = ProtocolTypeRouter({
     "websocket": URLRouter([
         path('ws/messages/<str:tenant_schema>/', JWTAuthMiddlewareStack(consumers.MessagesConsumer.as_asgi())),
         path('ws/typing/<str:tenant_schema>/<str:conversation_id>/', JWTAuthMiddlewareStack(consumers.TypingConsumer.as_asgi())),
+        path('ws/notifications/<str:tenant_schema>/', JWTAuthMiddlewareStack(users_consumers.NotificationConsumer.as_asgi())),
     ]),
 })

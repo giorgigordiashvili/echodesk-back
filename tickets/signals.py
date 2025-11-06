@@ -10,15 +10,18 @@ from .models import (
     TicketAssignment,
 )
 import re
+from asgiref.sync import async_to_sync
+from django.db import connection
 
 User = get_user_model()
 
 
 def create_notification(user, notification_type, title, message, ticket_id=None, metadata=None):
     """
-    Helper function to create notifications.
+    Helper function to create notifications and broadcast them via WebSocket.
     """
     from users.models import Notification
+    from users.consumers import send_notification_to_user
 
     if metadata is None:
         metadata = {}
@@ -35,7 +38,7 @@ def create_notification(user, notification_type, title, message, ticket_id=None,
     ).first()
 
     if not recent_notification:
-        Notification.objects.create(
+        notification = Notification.objects.create(
             user=user,
             notification_type=notification_type,
             title=title,
@@ -43,6 +46,40 @@ def create_notification(user, notification_type, title, message, ticket_id=None,
             ticket_id=ticket_id,
             metadata=metadata
         )
+
+        # Get updated unread count
+        unread_count = Notification.objects.filter(
+            user=user,
+            is_read=False
+        ).count()
+
+        # Broadcast notification via WebSocket
+        # Get tenant schema from current database connection
+        tenant_schema = getattr(connection, 'schema_name', 'public')
+
+        # Prepare notification data for WebSocket
+        notification_data = {
+            'id': notification.id,
+            'notification_type': notification.notification_type,
+            'title': notification.title,
+            'message': notification.message,
+            'ticket_id': notification.ticket_id,
+            'metadata': notification.metadata,
+            'is_read': notification.is_read,
+            'created_at': notification.created_at.isoformat(),
+        }
+
+        # Send via WebSocket (async_to_sync to call async function from sync context)
+        try:
+            async_to_sync(send_notification_to_user)(
+                tenant_schema=tenant_schema,
+                user_id=user.id,
+                notification_data=notification_data,
+                unread_count=unread_count
+            )
+        except Exception as e:
+            # Log error but don't fail the notification creation
+            print(f"[Signals] Error broadcasting notification via WebSocket: {str(e)}")
 
 
 def extract_mentions(text):
