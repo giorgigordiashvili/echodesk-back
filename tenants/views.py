@@ -539,6 +539,7 @@ def register_tenant_with_payment(request):
     validated_data = serializer.validated_data
 
     try:
+        import uuid
         with transaction.atomic():
             # Handle custom package or standard package
             is_custom = validated_data.get('is_custom', False)
@@ -561,7 +562,6 @@ def register_tenant_with_payment(request):
                     total_price = sum(f.price_unlimited_gel for f in features)
 
                 # Create a custom package
-                import uuid
                 unique_suffix = uuid.uuid4().hex[:8]
                 package_name = f"custom_package_{validated_data['domain']}_{unique_suffix}"
                 package_display_name = f"Custom Package - {validated_data['company_name']}"
