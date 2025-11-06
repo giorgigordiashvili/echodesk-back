@@ -1001,22 +1001,29 @@ def facebook_webhook(request):
                                                 'fields': 'first_name,last_name,profile_pic',
                                                 'access_token': page_connection.page_access_token
                                             }
+                                            logger.info(f"👤 Fetching profile for sender {sender_id} from Facebook Graph API")
                                             profile_response = requests.get(profile_url, params=profile_params, timeout=10)
-                                            
+
+                                            logger.info(f"👤 Profile fetch response: status={profile_response.status_code}")
                                             if profile_response.status_code == 200:
                                                 profile_data = profile_response.json()
+                                                logger.info(f"👤 Profile data received: {profile_data}")
                                                 first_name = profile_data.get('first_name', '')
                                                 last_name = profile_data.get('last_name', '')
                                                 sender_name = f"{first_name} {last_name}".strip() or 'Unknown'
                                                 profile_pic_url = profile_data.get('profile_pic')
-                                                
+                                                logger.info(f"👤 Set sender_name to: {sender_name}")
+
                                                 # Validate URL length to prevent database errors
                                                 if profile_pic_url and len(profile_pic_url) > 500:
                                                     logger.warning(f"Profile pic URL too long ({len(profile_pic_url)} chars), truncating: {profile_pic_url[:50]}...")
                                                     profile_pic_url = None  # Don't save extremely long URLs
-                                            
+                                            else:
+                                                error_data = profile_response.json() if profile_response.content else {}
+                                                logger.error(f"❌ Failed to fetch profile for {sender_id}: status={profile_response.status_code}, error={error_data}")
+
                                         except Exception as e:
-                                            logger.error(f"Failed to fetch profile for {sender_id}: {e}")
+                                            logger.error(f"❌ Exception fetching profile for {sender_id}: {type(e).__name__}: {e}")
                                     
                                     # Save the message (avoid duplicates)
                                     message_id = message_data.get('mid', '')
