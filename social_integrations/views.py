@@ -996,10 +996,10 @@ def facebook_webhook(request):
                                     if sender_id != page_id:  # Don't fetch profile for page itself
                                         try:
                                             # Use the page access token to get user profile
-                                            # For PSIDs (Page-Scoped IDs), use 'name' instead of 'first_name,last_name'
+                                            # For Messenger PSIDs, must use 'first_name,last_name' (not 'name')
                                             profile_url = f"https://graph.facebook.com/v23.0/{sender_id}"
                                             profile_params = {
-                                                'fields': 'name,profile_pic',
+                                                'fields': 'first_name,last_name,profile_pic',
                                                 'access_token': page_connection.page_access_token
                                             }
                                             logger.info(f"👤 Fetching profile for sender {sender_id} from Facebook Graph API")
@@ -1009,7 +1009,9 @@ def facebook_webhook(request):
                                             if profile_response.status_code == 200:
                                                 profile_data = profile_response.json()
                                                 logger.info(f"👤 Profile data received: {profile_data}")
-                                                sender_name = profile_data.get('name', 'Unknown')
+                                                first_name = profile_data.get('first_name', '')
+                                                last_name = profile_data.get('last_name', '')
+                                                sender_name = f"{first_name} {last_name}".strip() or f'Facebook User {sender_id[-4:]}'
                                                 profile_pic_url = profile_data.get('profile_pic')
                                                 logger.info(f"👤 Set sender_name to: {sender_name}")
 
