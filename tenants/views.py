@@ -540,8 +540,35 @@ def register_tenant_with_payment(request):
 
     try:
         with transaction.atomic():
-            # Get selected package
-            package = Package.objects.get(id=validated_data['package_id'], is_active=True)
+            # Handle custom package or standard package
+            is_custom = validated_data.get('is_custom', False)
+
+            if is_custom:
+                # Custom package: create or get package for the selected features
+                from .models import Feature, PricingModel
+                feature_ids = validated_data['feature_ids']
+                pricing_model = validated_data['pricing_model']
+
+                # Get the features and calculate price
+                features = Feature.objects.filter(id__in=feature_ids, is_active=True)
+                total_price = sum(f.base_price_gel for f in features)
+
+                # Create a custom package (or get if exists)
+                package_name = f"Custom Package - {validated_data['company_name']}"
+                package = Package.objects.create(
+                    name=package_name,
+                    description=f"Custom package with {len(feature_ids)} features",
+                    pricing_model=PricingModel.AGENT_BASED if pricing_model == 'agent' else PricingModel.CRM_BASED,
+                    price_gel=total_price,
+                    is_active=True,
+                    is_custom=True
+                )
+
+                # Add features to the package
+                package.features.set(features)
+            else:
+                # Standard package
+                package = Package.objects.get(id=validated_data['package_id'], is_active=True)
 
             # Generate schema name
             domain_name = validated_data['domain']

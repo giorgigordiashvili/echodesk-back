@@ -82,14 +82,20 @@ class TenantRegistrationSerializer(serializers.Serializer):
     description = serializers.CharField(max_length=500, required=False, help_text="Brief description of your organization")
     
     # Package selection
-    package_id = serializers.IntegerField(help_text="Selected package ID")
+    package_id = serializers.IntegerField(required=False, help_text="Selected package ID (required if is_custom=false)")
+    is_custom = serializers.BooleanField(default=False, help_text="Whether this is a custom package")
+    feature_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        required=False,
+        help_text="List of feature IDs for custom package (required if is_custom=true)"
+    )
     pricing_model = serializers.ChoiceField(
         choices=[('agent', 'Agent-based'), ('crm', 'CRM-based')],
         help_text="Pricing model preference"
     )
     agent_count = serializers.IntegerField(
-        default=1, 
-        min_value=1, 
+        default=1,
+        min_value=1,
         help_text="Number of agents (required for agent-based pricing)"
     )
     
@@ -111,42 +117,66 @@ class TenantRegistrationSerializer(serializers.Serializer):
     )
     
     def validate_package_id(self, value):
-        """Validate that package exists and is active"""
+        """Validate that package exists and is active (only if provided)"""
+        if value is None:
+            return value
         from .models import Package
         try:
             package = Package.objects.get(id=value, is_active=True)
             return value
         except Package.DoesNotExist:
             raise serializers.ValidationError("Invalid or inactive package selected")
-    
+
     def validate(self, attrs):
         """Cross-field validation"""
-        from .models import Package, PricingModel
-        
+        from .models import Package, Feature
+
+        is_custom = attrs.get('is_custom', False)
         package_id = attrs.get('package_id')
+        feature_ids = attrs.get('feature_ids')
         pricing_model = attrs.get('pricing_model')
         agent_count = attrs.get('agent_count', 1)
-        
-        # Validate package matches pricing model
-        try:
-            package = Package.objects.get(id=package_id, is_active=True)
-            if package.pricing_model != pricing_model:
-                raise serializers.ValidationError(
-                    f"Selected package uses {package.get_pricing_model_display()} pricing, "
-                    f"but you selected {dict(self.fields['pricing_model'].choices)[pricing_model]} pricing"
-                )
-            
-            # For agent-based pricing, validate agent count
-            if pricing_model == 'agent' and agent_count < 1:
-                raise serializers.ValidationError("Agent count must be at least 1 for agent-based pricing")
-            
-            # For CRM-based pricing, agent_count is not used
-            if pricing_model == 'crm':
-                attrs['agent_count'] = 1  # Set default for CRM-based
-                
-        except Package.DoesNotExist:
-            raise serializers.ValidationError("Invalid package selected")
-        
+
+        # Validate based on is_custom flag
+        if is_custom:
+            # Custom package: feature_ids is required
+            if not feature_ids:
+                raise serializers.ValidationError({
+                    'feature_ids': 'This field is required when is_custom is true'
+                })
+
+            # Validate all features exist
+            valid_features = Feature.objects.filter(id__in=feature_ids, is_active=True)
+            if valid_features.count() != len(feature_ids):
+                raise serializers.ValidationError({
+                    'feature_ids': 'One or more invalid or inactive features selected'
+                })
+        else:
+            # Standard package: package_id is required
+            if not package_id:
+                raise serializers.ValidationError({
+                    'package_id': 'This field is required when is_custom is false'
+                })
+
+            # Validate package matches pricing model
+            try:
+                package = Package.objects.get(id=package_id, is_active=True)
+                if package.pricing_model != pricing_model:
+                    raise serializers.ValidationError(
+                        f"Selected package uses {package.get_pricing_model_display()} pricing, "
+                        f"but you selected {dict(self.fields['pricing_model'].choices)[pricing_model]} pricing"
+                    )
+            except Package.DoesNotExist:
+                raise serializers.ValidationError("Invalid package selected")
+
+        # Validate agent count for agent-based pricing
+        if pricing_model == 'agent' and agent_count < 1:
+            raise serializers.ValidationError("Agent count must be at least 1 for agent-based pricing")
+
+        # For CRM-based pricing, agent_count is not used
+        if pricing_model == 'crm':
+            attrs['agent_count'] = 1  # Set default for CRM-based
+
         return attrs
     
     def validate_domain(self, value):
