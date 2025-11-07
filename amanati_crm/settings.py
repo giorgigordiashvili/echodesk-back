@@ -250,6 +250,13 @@ SPECTACULAR_SETTINGS = {
     'PREPROCESSING_HOOKS': [
         'amanati_crm.schema.feature_based_preprocessing_hook',
     ],
+    'SECURITY': [
+        {
+            'tokenAuth': [],
+        }
+    ],
+    'COMPONENT_SPLIT_REQUEST': True,
+    'SCHEMA_PATH_PREFIX': '/api',
 }
 
 # CORS settings - Allow wildcard subdomains for multi-tenant frontend
