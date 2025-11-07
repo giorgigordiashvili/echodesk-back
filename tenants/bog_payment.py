@@ -367,9 +367,12 @@ class BOGPaymentService:
         external_order_id: str = None
     ) -> Dict:
         """
-        Charge a saved card using recurrent payment endpoint
+        Charge a saved card using recurrent payment
 
         Documentation: https://api.bog.ge/docs/en/payments/saved-card/recurrent-payment
+
+        Note: Uses the same endpoint as create_payment but with parent_order_id in the path.
+        BOG automatically charges the saved card associated with the parent order.
 
         Args:
             parent_order_id: The original order ID where card was saved
@@ -390,11 +393,18 @@ class BOGPaymentService:
             # Format amount to 2 decimal places
             amount = round(float(amount), 2)
 
-            # Build payload according to BOG recurrent payment API
+            # Build payload according to BOG API - same structure as create_payment
             payload = {
                 'purchase_units': {
                     'currency': currency,
-                    'total_amount': amount
+                    'total_amount': amount,
+                    'basket': [
+                        {
+                            'product_id': external_order_id or 'recurring_payment',
+                            'quantity': 1,
+                            'unit_price': amount
+                        }
+                    ]
                 }
             }
 
@@ -405,12 +415,13 @@ class BOGPaymentService:
 
             headers = {
                 'Content-Type': 'application/json',
-                'Authorization': f'Bearer {access_token}'
+                'Authorization': f'Bearer {access_token}',
+                'Accept-Language': 'en'
             }
 
-            # Use the correct recurrent payment endpoint
+            # POST to /ecommerce/orders/{parent_order_id} to charge saved card
             response = requests.post(
-                f'{self.base_url}/ecommerce/orders/{parent_order_id}/recurrent',
+                f'{self.base_url}/ecommerce/orders/{parent_order_id}',
                 json=payload,
                 headers=headers,
                 timeout=30
