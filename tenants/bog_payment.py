@@ -322,7 +322,9 @@ class BOGPaymentService:
     def enable_card_saving(self, order_id: str) -> bool:
         """
         Enable card saving for recurring payments on an order
-        Must be called BEFORE redirecting user to payment page
+        Must be called AFTER creating the order but BEFORE redirecting user to payment page
+
+        Documentation: https://api.bog.ge/docs/payments/saved-card/recurrent
 
         Args:
             order_id: BOG order ID (their internal ID, not our external_order_id)
@@ -337,12 +339,12 @@ class BOGPaymentService:
             access_token = self._get_access_token()
 
             headers = {
-                'Authorization': f'Bearer {access_token}',
-                'Content-Type': 'application/json'
+                'Authorization': f'Bearer {access_token}'
             }
 
+            # Use the correct endpoint: PUT /orders/{order_id}/cards
             response = requests.put(
-                f'{self.base_url}/orders/{order_id}/subscriptions',
+                f'{self.base_url}/orders/{order_id}/cards',
                 headers=headers,
                 timeout=30
             )
@@ -471,8 +473,9 @@ class BOGPaymentService:
                 'Authorization': f'Bearer {access_token}'
             }
 
+            # Use the correct endpoint: DELETE /orders/{order_id}/cards
             response = requests.delete(
-                f'{self.base_url}/orders/{parent_order_id}/subscriptions',
+                f'{self.base_url}/orders/{parent_order_id}/cards',
                 headers=headers,
                 timeout=30
             )
