@@ -1623,19 +1623,26 @@ def ecommerce_payment_webhook(request):
                     from .models import EcommerceClient, ClientCard
                     client = EcommerceClient.objects.get(id=client_id)
 
-                    # Extract card details from payment response
-                    card_data = body.get('card_data', {})
-                    masked_card = card_data.get('masked_card_number', '')
-                    card_type = card_data.get('card_type', '')
-                    card_expiry = card_data.get('card_expiry', '')
+                    # Extract card details from payment_detail
+                    payment_detail = body.get('payment_detail', {})
+                    payer_identifier = payment_detail.get('payer_identifier', '')  # e.g., "531125***1450"
+                    card_type = payment_detail.get('card_type', '')  # e.g., "mc" or "visa"
+                    card_expiry = payment_detail.get('card_expiry_date', '')  # e.g., "05/27"
+
+                    # Format card type for display
+                    card_type_display = {
+                        'mc': 'Mastercard',
+                        'visa': 'Visa',
+                        'amex': 'American Express'
+                    }.get(card_type.lower(), card_type.upper())
 
                     # Create or update saved card
                     card, created = ClientCard.objects.update_or_create(
                         parent_order_id=bog_order_id,
                         defaults={
                             'client': client,
-                            'card_type': card_type,
-                            'masked_card_number': masked_card,
+                            'card_type': card_type_display,
+                            'masked_card_number': payer_identifier,
                             'card_expiry': card_expiry,
                             'is_active': True,
                             'is_default': not ClientCard.objects.filter(client=client, is_active=True).exists()  # First card is default
@@ -1643,7 +1650,7 @@ def ecommerce_payment_webhook(request):
                     )
 
                     action = 'created' if created else 'updated'
-                    logger.info(f'Card {action} for client {client_id}: {masked_card}')
+                    logger.info(f'Card {action} for client {client_id}: {payer_identifier} ({card_type_display})')
 
                     return Response({
                         'status': 'success',

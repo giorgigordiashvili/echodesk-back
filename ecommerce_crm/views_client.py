@@ -691,15 +691,15 @@ def add_client_card(request):
             # Get OAuth token first
             access_token = bog_service._get_access_token()
 
-            # Prepare payment data
+            # Prepare payment data for recurring payment (NOT subscription)
             payment_data = {
                 'callback_url': callback_url,
                 'purchase_units': {
                     'currency': 'GEL',
-                    'total_amount': 0.00,  # 0 GEL for card validation
+                    'total_amount': 0.01,  # Minimum 0.01 GEL for card validation (BOG requirement)
                     'basket': [{
                         'quantity': 1,
-                        'unit_price': 0.00,
+                        'unit_price': 0.01,
                         'product_id': 'card_validation',
                         'description': 'Card validation'
                     }]
@@ -709,7 +709,9 @@ def add_client_card(request):
                     'fail': return_url
                 },
                 'external_order_id': order_id,
-                'payment_method': ['card']
+                'payment_method': ['card'],
+                'industry': 'ecommerce',
+                'capture': 'automatic'
             }
 
             # Make API request with Bearer token
@@ -731,10 +733,9 @@ def add_client_card(request):
                 bog_order_id = bog_response['id']
                 payment_url = bog_response['_links']['redirect']['href']
 
-                # Enable card saving on this order
-                bog_service.enable_card_saving(bog_order_id)
-
-                logger.info(f'Card validation initiated for client {client.id}: {order_id}')
+                # For recurring payments, the order_id itself will be the parent_order_id
+                # Don't call enable_card_saving() - that's for subscriptions
+                logger.info(f'Card validation initiated for client {client.id}: {order_id}, bog_order_id: {bog_order_id}')
 
                 return Response({
                     'order_id': order_id,
