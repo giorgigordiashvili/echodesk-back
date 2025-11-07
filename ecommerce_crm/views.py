@@ -581,6 +581,81 @@ def login_client(request):
 
 
 @extend_schema(
+    operation_id='refresh_client_token',
+    summary='Refresh client access token',
+    description='Use refresh token to get a new access token',
+    request={
+        'application/json': {
+            'type': 'object',
+            'properties': {
+                'refresh': {'type': 'string', 'description': 'Refresh token'}
+            },
+            'required': ['refresh']
+        }
+    },
+    responses={
+        200: {
+            'type': 'object',
+            'properties': {
+                'access': {'type': 'string', 'description': 'New access token'},
+                'refresh': {'type': 'string', 'description': 'New refresh token'}
+            }
+        },
+        401: {'description': 'Invalid or expired refresh token'}
+    },
+    tags=['Ecommerce - Auth']
+)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def refresh_client_token(request):
+    """Refresh client access token using refresh token"""
+    from rest_framework_simplejwt.tokens import RefreshToken
+    from rest_framework_simplejwt.exceptions import TokenError, InvalidToken
+
+    refresh_token = request.data.get('refresh')
+
+    if not refresh_token:
+        return Response({
+            'error': 'Refresh token is required'
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        # Validate the refresh token
+        refresh = RefreshToken(refresh_token)
+
+        # Check if it contains client_id (ecommerce client token)
+        client_id = refresh.get('client_id')
+        if not client_id:
+            return Response({
+                'error': 'Invalid token type'
+            }, status=status.HTTP_401_UNAUTHORIZED)
+
+        # Verify client still exists and is active
+        try:
+            from .models import EcommerceClient
+            client = EcommerceClient.objects.get(id=client_id, is_active=True)
+        except EcommerceClient.DoesNotExist:
+            return Response({
+                'error': 'Client not found or inactive'
+            }, status=status.HTTP_401_UNAUTHORIZED)
+
+        # Generate new tokens
+        new_refresh = RefreshToken()
+        new_refresh['client_id'] = client.id
+        new_refresh['email'] = client.email
+
+        return Response({
+            'access': str(new_refresh.access_token),
+            'refresh': str(new_refresh)
+        }, status=status.HTTP_200_OK)
+
+    except (TokenError, InvalidToken) as e:
+        return Response({
+            'error': 'Invalid or expired refresh token'
+        }, status=status.HTTP_401_UNAUTHORIZED)
+
+
+@extend_schema(
     operation_id='verify_email',
     summary='Verify email with code',
     description='Verify client email using the verification token and code sent via email. Returns JWT tokens upon successful verification.',
