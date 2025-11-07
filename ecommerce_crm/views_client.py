@@ -526,7 +526,7 @@ class ClientOrderViewSet(viewsets.ModelViewSet):
         if cart and cart.selected_card and cart.selected_card.is_active:
             # Use saved card to charge
             try:
-                callback_url = f"{request.scheme}://{request.get_host()}/api/ecommerce/payment-webhook/"
+                callback_url = f"https://{request.get_host()}/api/ecommerce/payment-webhook/"
 
                 payment_result = bog_service_instance.charge_saved_card(
                     parent_order_id=cart.selected_card.parent_order_id,
@@ -560,7 +560,7 @@ class ClientOrderViewSet(viewsets.ModelViewSet):
 
         # Create BOG payment (new payment or fallback from failed saved card charge)
         try:
-            callback_url = f"{request.scheme}://{request.get_host()}/api/ecommerce/payment-webhook/"
+            callback_url = f"https://{request.get_host()}/api/ecommerce/payment-webhook/"
 
             # Use return URLs from EcommerceSettings if configured, otherwise from request
             try:
