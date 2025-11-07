@@ -159,9 +159,10 @@ class AdminLeaveBalanceViewSet(viewsets.ModelViewSet):
         tags=['Leave Management - Admin'],
         summary='Initialize balances for user',
         parameters=[
-            OpenApiParameter('user_id', int, description='User ID'),
+            OpenApiParameter('user_id', int, description='User ID', required=True),
             OpenApiParameter('year', int, description='Year (optional, defaults to current year)')
-        ]
+        ],
+        request=None  # No request body needed, params are in query/URL
     )
     @action(detail=False, methods=['post'])
     def initialize_user(self, request):
