@@ -197,9 +197,10 @@ class AdminLeaveBalanceViewSet(viewsets.ModelViewSet):
         tags=['Leave Management - Admin'],
         summary='Carry forward balances',
         parameters=[
-            OpenApiParameter('from_year', int, description='Year to carry forward from'),
-            OpenApiParameter('to_year', int, description='Year to carry forward to')
-        ]
+            OpenApiParameter('from_year', int, description='Year to carry forward from', required=True),
+            OpenApiParameter('to_year', int, description='Year to carry forward to', required=True)
+        ],
+        request=None  # No request body needed, params are in query/URL
     )
     @action(detail=False, methods=['post'])
     def carry_forward(self, request):
