@@ -638,77 +638,124 @@ def add_client_card(request):
     """
     Initiate 0 GEL payment to validate and save a new card for the client
     """
+    from django.conf import settings
+    from tenants.bog_payment import BOGPaymentService
+    import uuid
+    import logging
+
+    logger = logging.getLogger(__name__)
     client = request.user
 
     try:
         # Get ecommerce settings
         ecommerce_settings = EcommerceSettings.objects.get(tenant=request.tenant)
 
+        # Configure BOG service with tenant credentials
+        bog_service = BOGPaymentService()
+
+        if ecommerce_settings.has_bog_credentials:
+            # Use tenant's own BOG credentials
+            bog_service.client_id = ecommerce_settings.bog_client_id
+            bog_service.client_secret = ecommerce_settings.get_bog_secret()
+            bog_service.auth_url = settings.BOG_AUTH_URL
+            bog_service.base_url = settings.BOG_API_BASE_URL
+        else:
+            # Use credentials from environment variables
+            bog_service.client_id = settings.BOG_CLIENT_ID
+            bog_service.client_secret = settings.BOG_CLIENT_SECRET
+            bog_service.auth_url = settings.BOG_AUTH_URL
+            bog_service.base_url = settings.BOG_API_BASE_URL
+
+        if not bog_service.is_configured():
+            return Response({
+                'error': 'Payment gateway not configured'
+            }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
         # Generate unique order ID for card validation
-        import uuid
         order_id = f'card_{client.id}_{uuid.uuid4().hex[:12]}'
 
-        # Prepare BOG payment request for 0 GEL (card validation)
-        bog_api_url = 'https://api.bog.ge/payments/v1/ecommerce/orders'
+        # Get callback and return URLs
+        callback_url = f"https://{request.get_host()}/api/ecommerce/payment-webhook/"
+        return_url = ecommerce_settings.payment_return_url or f'https://{request.tenant.schema_name}.echodesk.ge/payment/success'
 
-        # Use return URL from ecommerce settings
-        callback_url = ecommerce_settings.payment_return_url or f'https://{request.tenant.schema_name}.echodesk.ge/payment/success'
+        # Create 0 GEL payment for card validation
+        try:
+            # Get OAuth token first
+            access_token = bog_service._get_access_token()
 
-        payment_data = {
-            'callback_url': callback_url,
-            'purchase_units': {
-                'currency': 'GEL',
-                'total_amount': 0.00,  # 0 GEL for card validation
-                'basket': [{
-                    'quantity': 1,
-                    'unit_price': 0.00,
-                    'product_id': 'card_validation'
-                }]
-            },
-            'redirect_url': callback_url,
-            'shop_order_id': order_id,
-            'locale': 'ka',
-            'save_card': True,  # Important: save card for future use
-            'show_shop_order_id_on_extract': False
-        }
+            # Prepare payment data
+            payment_data = {
+                'callback_url': callback_url,
+                'purchase_units': {
+                    'currency': 'GEL',
+                    'total_amount': 0.00,  # 0 GEL for card validation
+                    'basket': [{
+                        'quantity': 1,
+                        'unit_price': 0.00,
+                        'product_id': 'card_validation',
+                        'description': 'Card validation'
+                    }]
+                },
+                'redirect_urls': {
+                    'success': return_url,
+                    'fail': return_url
+                },
+                'external_order_id': order_id,
+                'payment_method': ['card']
+            }
 
-        headers = {
-            'Content-Type': 'application/json',
-            'Authorization': f'Basic {ecommerce_settings.get_decrypted_bog_secret_key()}'
-        }
+            # Make API request with Bearer token
+            headers = {
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {access_token}',
+                'Accept-Language': 'en'
+            }
 
-        response = requests.post(
-            bog_api_url,
-            json=payment_data,
-            headers=headers,
-            timeout=30
-        )
+            response = requests.post(
+                f'{bog_service.base_url}/ecommerce/orders',
+                json=payment_data,
+                headers=headers,
+                timeout=30
+            )
 
-        if response.status_code in [200, 201]:
-            bog_response = response.json()
+            if response.status_code in [200, 201]:
+                bog_response = response.json()
+                bog_order_id = bog_response['id']
+                payment_url = bog_response['_links']['redirect']['href']
 
-            return Response({
-                'order_id': order_id,
-                'payment_url': bog_response.get('redirect_url') or bog_response.get('_links', {}).get('redirect', {}).get('href'),
-                'message': 'Please complete card validation'
-            })
-        else:
+                # Enable card saving on this order
+                bog_service.enable_card_saving(bog_order_id)
+
+                logger.info(f'Card validation initiated for client {client.id}: {order_id}')
+
+                return Response({
+                    'order_id': order_id,
+                    'payment_url': payment_url,
+                    'message': 'Please complete card validation'
+                }, status=status.HTTP_200_OK)
+            else:
+                error_details = response.text
+                logger.error(f'BOG API error for card validation: {response.status_code} - {error_details}')
+                return Response({
+                    'error': 'Failed to initiate card validation',
+                    'details': error_details
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        except Exception as e:
+            logger.error(f'Card validation request failed for client {client.id}: {str(e)}')
             return Response({
                 'error': 'Failed to initiate card validation',
-                'details': response.json()
-            }, status=status.HTTP_400_BAD_REQUEST)
+                'message': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     except EcommerceSettings.DoesNotExist:
         return Response({
             'error': 'Payment gateway not configured'
         }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
     except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.error(f'Card validation failed for client {client.id}: {str(e)}')
-
+        logger.error(f'Unexpected error in add_client_card for client {client.id}: {str(e)}')
         return Response({
-            'error': 'Failed to initiate card validation',
+            'error': 'An unexpected error occurred',
             'message': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
