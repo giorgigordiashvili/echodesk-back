@@ -58,42 +58,42 @@ class LanguageViewSet(viewsets.ModelViewSet):
     ordering = ['sort_order', 'code']
 
     @extend_schema(
-        tags=['Ecommerce - Languages'],
+        tags=['Ecommerce Admin - Languages'],
         summary='List all languages'
     )
     def list(self, request, *args, **kwargs):
         return super().list(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Languages'],
+        tags=['Ecommerce Admin - Languages'],
         summary='Get language details'
     )
     def retrieve(self, request, *args, **kwargs):
         return super().retrieve(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Languages'],
+        tags=['Ecommerce Admin - Languages'],
         summary='Create new language'
     )
     def create(self, request, *args, **kwargs):
         return super().create(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Languages'],
+        tags=['Ecommerce Admin - Languages'],
         summary='Update language'
     )
     def update(self, request, *args, **kwargs):
         return super().update(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Languages'],
+        tags=['Ecommerce Admin - Languages'],
         summary='Partially update language'
     )
     def partial_update(self, request, *args, **kwargs):
         return super().partial_update(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Languages'],
+        tags=['Ecommerce Admin - Languages'],
         summary='Delete language'
     )
     def destroy(self, request, *args, **kwargs):
@@ -114,42 +114,42 @@ class AttributeDefinitionViewSet(viewsets.ModelViewSet):
     ordering = ['sort_order', 'id']
 
     @extend_schema(
-        tags=['Ecommerce - Attributes'],
+        tags=['Ecommerce Admin - Attributes'],
         summary='List all product attributes'
     )
     def list(self, request, *args, **kwargs):
         return super().list(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Attributes'],
+        tags=['Ecommerce Admin - Attributes'],
         summary='Get attribute details'
     )
     def retrieve(self, request, *args, **kwargs):
         return super().retrieve(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Attributes'],
+        tags=['Ecommerce Admin - Attributes'],
         summary='Create new attribute'
     )
     def create(self, request, *args, **kwargs):
         return super().create(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Attributes'],
+        tags=['Ecommerce Admin - Attributes'],
         summary='Update attribute'
     )
     def update(self, request, *args, **kwargs):
         return super().update(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Attributes'],
+        tags=['Ecommerce Admin - Attributes'],
         summary='Partially update attribute'
     )
     def partial_update(self, request, *args, **kwargs):
         return super().partial_update(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Attributes'],
+        tags=['Ecommerce Admin - Attributes'],
         summary='Delete attribute'
     )
     def destroy(self, request, *args, **kwargs):
@@ -238,7 +238,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         return context
 
     @extend_schema(
-        tags=['Ecommerce - Products'],
+        tags=['Ecommerce Admin - Products'],
         summary='List all products',
         description='Get a list of products with advanced filtering by price, category, status, and stock levels'
     )
@@ -246,7 +246,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         return super().list(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Products'],
+        tags=['Ecommerce Admin - Products'],
         summary='Get product details',
         description='Retrieve detailed information about a specific product including variants and attributes'
     )
@@ -254,7 +254,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         return super().retrieve(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Products'],
+        tags=['Ecommerce Admin - Products'],
         summary='Create new product',
         description='Create a new product with multilingual support'
     )
@@ -262,7 +262,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         return super().create(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Products'],
+        tags=['Ecommerce Admin - Products'],
         summary='Update product',
         description='Update all fields of an existing product'
     )
@@ -270,7 +270,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         return super().update(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Products'],
+        tags=['Ecommerce Admin - Products'],
         summary='Partially update product',
         description='Update specific fields of an existing product'
     )
@@ -278,14 +278,14 @@ class ProductViewSet(viewsets.ModelViewSet):
         return super().partial_update(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Products'],
+        tags=['Ecommerce Admin - Products'],
         summary='Delete product'
     )
     def destroy(self, request, *args, **kwargs):
         return super().destroy(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Products'],
+        tags=['Ecommerce Admin - Products'],
         summary='Get featured products',
         description='Retrieve all products marked as featured'
     )
@@ -301,7 +301,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
     @extend_schema(
-        tags=['Ecommerce - Products'],
+        tags=['Ecommerce Admin - Products'],
         summary='Get low stock products',
         description='Retrieve all products with stock levels at or below their low stock threshold'
     )
@@ -321,7 +321,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
     @extend_schema(
-        tags=['Ecommerce - Products'],
+        tags=['Ecommerce Admin - Products'],
         summary='Add image to product',
         description='Upload and attach an image to a specific product'
     )
@@ -336,7 +336,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     @extend_schema(
-        tags=['Ecommerce - Products'],
+        tags=['Ecommerce Admin - Products'],
         summary='Remove image from product',
         description='Delete a specific image from a product'
     )
@@ -355,7 +355,7 @@ class ProductViewSet(viewsets.ModelViewSet):
             )
 
     @extend_schema(
-        tags=['Ecommerce - Products'],
+        tags=['Ecommerce Admin - Products'],
         summary='Update product attributes',
         description='Update all attributes for a specific product'
     )
@@ -433,35 +433,35 @@ class EcommerceClientViewSet(viewsets.ModelViewSet):
     ordering = ['-created_at']
 
     @extend_schema(
-        tags=['Ecommerce - Clients'],
+        tags=['Ecommerce Admin - Clients'],
         summary='List all ecommerce clients'
     )
     def list(self, request, *args, **kwargs):
         return super().list(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Clients'],
+        tags=['Ecommerce Admin - Clients'],
         summary='Get client details'
     )
     def retrieve(self, request, *args, **kwargs):
         return super().retrieve(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Clients'],
+        tags=['Ecommerce Admin - Clients'],
         summary='Update client'
     )
     def update(self, request, *args, **kwargs):
         return super().update(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Clients'],
+        tags=['Ecommerce Admin - Clients'],
         summary='Partially update client'
     )
     def partial_update(self, request, *args, **kwargs):
         return super().partial_update(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Clients'],
+        tags=['Ecommerce Admin - Clients'],
         summary='Delete client'
     )
     def destroy(self, request, *args, **kwargs):
@@ -672,6 +672,107 @@ def verify_email(request):
 
 
 @extend_schema(
+    operation_id='resend_verification_code',
+    summary='Resend verification code',
+    description='Resend verification code to client email. Use this if the client did not receive the initial verification email.',
+    request=inline_serializer(
+        'ResendVerificationCodeRequest',
+        fields={
+            'email': serializers.EmailField(help_text='Email address used during registration'),
+        }
+    ),
+    responses={
+        200: OpenApiResponse(
+            description='Verification code resent successfully',
+            response=inline_serializer(
+                'ResendVerificationCodeResponse',
+                fields={
+                    'verification_token': serializers.CharField(help_text='New verification token to use'),
+                    'message': serializers.CharField(),
+                }
+            )
+        ),
+        400: OpenApiResponse(description='Email already verified or client not found'),
+        429: OpenApiResponse(description='Too many requests - please wait before requesting another code')
+    },
+    tags=['Ecommerce - Client Auth']
+)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def resend_verification_code(request):
+    """Resend verification code to client email"""
+    import random
+    import secrets
+    from datetime import timedelta
+    from django.utils import timezone
+    from .email_utils import send_verification_code_email
+    from .models import ClientVerificationCode, EcommerceClient
+
+    email = request.data.get('email')
+
+    if not email:
+        return Response({
+            'error': 'Email is required'
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        # Check if client exists
+        client = EcommerceClient.objects.get(email=email)
+
+        # Check if already verified
+        if client.is_verified:
+            return Response({
+                'error': 'Email is already verified'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Rate limiting: Check if a code was sent recently (within last 1 minute)
+        recent_code = ClientVerificationCode.objects.filter(
+            email=email,
+            created_at__gte=timezone.now() - timedelta(minutes=1)
+        ).order_by('-created_at').first()
+
+        if recent_code:
+            return Response({
+                'error': 'A verification code was recently sent. Please wait before requesting another one.',
+                'retry_after': 60  # seconds
+            }, status=status.HTTP_429_TOO_MANY_REQUESTS)
+
+        # Generate new 6-digit verification code
+        verification_code = ''.join([str(random.randint(0, 9)) for _ in range(6)])
+
+        # Generate unique verification token
+        verification_token = secrets.token_urlsafe(32)
+
+        # Set expiration time (15 minutes from now)
+        expires_at = timezone.now() + timedelta(minutes=15)
+
+        # Store verification code
+        ClientVerificationCode.objects.create(
+            email=client.email,
+            code=verification_code,
+            token=verification_token,
+            expires_at=expires_at
+        )
+
+        # Send verification code email
+        send_verification_code_email(
+            email=client.email,
+            code=verification_code,
+            client_name=client.first_name
+        )
+
+        return Response({
+            'verification_token': verification_token,
+            'message': 'Verification code has been resent. Please check your email.'
+        }, status=status.HTTP_200_OK)
+
+    except EcommerceClient.DoesNotExist:
+        return Response({
+            'error': 'No account found with this email address'
+        }, status=status.HTTP_404_NOT_FOUND)
+
+
+@extend_schema(
     operation_id='password_reset_request',
     summary='Request password reset',
     description='Send a password reset email to the client',
@@ -832,7 +933,7 @@ class ClientAddressViewSet(viewsets.ModelViewSet):
     ordering = ['-is_default', '-created_at']
 
     @extend_schema(
-        tags=['Ecommerce - Client Addresses'],
+        tags=['Ecommerce Admin - Client Addresses'],
         summary='List client addresses',
         description='Get all delivery addresses (admin only)'
     )
@@ -840,7 +941,7 @@ class ClientAddressViewSet(viewsets.ModelViewSet):
         return super().list(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Client Addresses'],
+        tags=['Ecommerce Admin - Client Addresses'],
         summary='Get address details',
         description='Retrieve detailed information about a specific address'
     )
@@ -848,7 +949,7 @@ class ClientAddressViewSet(viewsets.ModelViewSet):
         return super().retrieve(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Client Addresses'],
+        tags=['Ecommerce Admin - Client Addresses'],
         summary='Create new address',
         description='Add a new delivery address (admin only, client ID required)'
     )
@@ -856,7 +957,7 @@ class ClientAddressViewSet(viewsets.ModelViewSet):
         return super().create(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Client Addresses'],
+        tags=['Ecommerce Admin - Client Addresses'],
         summary='Update address',
         description='Update all fields of an existing address'
     )
@@ -864,7 +965,7 @@ class ClientAddressViewSet(viewsets.ModelViewSet):
         return super().update(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Client Addresses'],
+        tags=['Ecommerce Admin - Client Addresses'],
         summary='Partially update address',
         description='Update specific fields of an existing address'
     )
@@ -872,7 +973,7 @@ class ClientAddressViewSet(viewsets.ModelViewSet):
         return super().partial_update(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Client Addresses'],
+        tags=['Ecommerce Admin - Client Addresses'],
         summary='Delete address',
         description='Remove an address from a client'
     )
@@ -880,7 +981,7 @@ class ClientAddressViewSet(viewsets.ModelViewSet):
         return super().destroy(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Client Addresses'],
+        tags=['Ecommerce Admin - Client Addresses'],
         summary='Set address as default',
         description='Mark a specific address as the default delivery address for the client'
     )
@@ -916,7 +1017,7 @@ class FavoriteProductViewSet(viewsets.ModelViewSet):
         return context
 
     @extend_schema(
-        tags=['Ecommerce - Favorites'],
+        tags=['Ecommerce Admin - Favorites'],
         summary='List favorite products',
         description='Get all favorite products with optional filtering by client or product'
     )
@@ -924,7 +1025,7 @@ class FavoriteProductViewSet(viewsets.ModelViewSet):
         return super().list(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Favorites'],
+        tags=['Ecommerce Admin - Favorites'],
         summary='Get favorite details',
         description='Retrieve details of a specific favorite item'
     )
@@ -932,7 +1033,7 @@ class FavoriteProductViewSet(viewsets.ModelViewSet):
         return super().retrieve(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Favorites'],
+        tags=['Ecommerce Admin - Favorites'],
         summary='Add product to favorites',
         description='Add a product to client\'s favorites/wishlist'
     )
@@ -940,7 +1041,7 @@ class FavoriteProductViewSet(viewsets.ModelViewSet):
         return super().create(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Favorites'],
+        tags=['Ecommerce Admin - Favorites'],
         summary='Remove from favorites',
         description='Remove a product from favorites/wishlist'
     )
@@ -948,7 +1049,7 @@ class FavoriteProductViewSet(viewsets.ModelViewSet):
         return super().destroy(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Favorites'],
+        tags=['Ecommerce Admin - Favorites'],
         summary='Check if product is favorited',
         description='Check if a specific product is in client\'s favorites',
         parameters=[
@@ -976,7 +1077,7 @@ class FavoriteProductViewSet(viewsets.ModelViewSet):
         return Response({'is_favorited': is_favorited})
 
     @extend_schema(
-        tags=['Ecommerce - Favorites'],
+        tags=['Ecommerce Admin - Favorites'],
         summary='Toggle favorite',
         description='Add or remove a product from favorites',
         request={
@@ -1034,7 +1135,7 @@ class CartViewSet(viewsets.ModelViewSet):
     ordering = ['-updated_at']
 
     @extend_schema(
-        tags=['Ecommerce - Cart'],
+        tags=['Ecommerce Admin - Cart'],
         summary='List all carts',
         description='Get all shopping carts with optional filtering'
     )
@@ -1042,7 +1143,7 @@ class CartViewSet(viewsets.ModelViewSet):
         return super().list(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Cart'],
+        tags=['Ecommerce Admin - Cart'],
         summary='Get cart details',
         description='Retrieve cart with all items and totals'
     )
@@ -1050,14 +1151,14 @@ class CartViewSet(viewsets.ModelViewSet):
         return super().retrieve(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Cart'],
+        tags=['Ecommerce Admin - Cart'],
         summary='Create new cart'
     )
     def create(self, request, *args, **kwargs):
         return super().create(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Cart'],
+        tags=['Ecommerce Admin - Cart'],
         summary='Update cart',
         description='Update cart details (e.g., delivery address, notes)'
     )
@@ -1065,14 +1166,14 @@ class CartViewSet(viewsets.ModelViewSet):
         return super().update(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Cart'],
+        tags=['Ecommerce Admin - Cart'],
         summary='Delete cart'
     )
     def destroy(self, request, *args, **kwargs):
         return super().destroy(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Cart'],
+        tags=['Ecommerce Admin - Cart'],
         summary='Set delivery address',
         description='Set or update delivery address for cart'
     )
@@ -1095,7 +1196,7 @@ class CartViewSet(viewsets.ModelViewSet):
             return Response({'error': 'Address not found'}, status=status.HTTP_404_NOT_FOUND)
 
     @extend_schema(
-        tags=['Ecommerce - Cart'],
+        tags=['Ecommerce Admin - Cart'],
         summary='Clear cart',
         description='Remove all items from cart'
     )
@@ -1121,14 +1222,14 @@ class CartItemViewSet(viewsets.ModelViewSet):
         return CartItemSerializer
 
     @extend_schema(
-        tags=['Ecommerce - Cart Items'],
+        tags=['Ecommerce Admin - Cart Items'],
         summary='List cart items'
     )
     def list(self, request, *args, **kwargs):
         return super().list(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Cart Items'],
+        tags=['Ecommerce Admin - Cart Items'],
         summary='Add item to cart',
         description='Add a product to shopping cart'
     )
@@ -1136,7 +1237,7 @@ class CartItemViewSet(viewsets.ModelViewSet):
         return super().create(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Cart Items'],
+        tags=['Ecommerce Admin - Cart Items'],
         summary='Update cart item',
         description='Update quantity or variant'
     )
@@ -1144,7 +1245,7 @@ class CartItemViewSet(viewsets.ModelViewSet):
         return super().update(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Cart Items'],
+        tags=['Ecommerce Admin - Cart Items'],
         summary='Remove item from cart'
     )
     def destroy(self, request, *args, **kwargs):
@@ -1167,7 +1268,7 @@ class OrderViewSet(viewsets.ModelViewSet):
         return OrderSerializer
 
     @extend_schema(
-        tags=['Ecommerce - Orders'],
+        tags=['Ecommerce Admin - Orders'],
         summary='List all orders',
         description='Get all orders with filtering and search'
     )
@@ -1175,7 +1276,7 @@ class OrderViewSet(viewsets.ModelViewSet):
         return super().list(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Orders'],
+        tags=['Ecommerce Admin - Orders'],
         summary='Get order details',
         description='Retrieve order with all items and client info'
     )
@@ -1183,7 +1284,7 @@ class OrderViewSet(viewsets.ModelViewSet):
         return super().retrieve(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Orders'],
+        tags=['Ecommerce Admin - Orders'],
         summary='Create order from cart',
         description='Submit cart and create order with automatic BOG payment URL generation'
     )
@@ -1295,7 +1396,7 @@ class OrderViewSet(viewsets.ModelViewSet):
             return Response(response_data, status=status.HTTP_201_CREATED)
 
     @extend_schema(
-        tags=['Ecommerce - Orders'],
+        tags=['Ecommerce Admin - Orders'],
         summary='Update order',
         description='Update order status, notes, etc.'
     )
@@ -1303,7 +1404,7 @@ class OrderViewSet(viewsets.ModelViewSet):
         return super().update(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Orders'],
+        tags=['Ecommerce Admin - Orders'],
         summary='Update order status',
         description='Change order status (pending, confirmed, shipped, etc.)'
     )
@@ -1335,7 +1436,7 @@ class OrderViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
     @extend_schema(
-        tags=['Ecommerce - Orders'],
+        tags=['Ecommerce Admin - Orders'],
         summary='Initiate payment for order',
         description='Create BOG payment session for an order'
     )
@@ -1458,7 +1559,7 @@ class OrderViewSet(viewsets.ModelViewSet):
         200: OpenApiResponse(description='Webhook processed successfully'),
         400: OpenApiResponse(description='Invalid payload')
     },
-    tags=['Ecommerce - Orders']
+    tags=['Ecommerce Admin - Orders']
 )
 @api_view(['POST'])
 @permission_classes([AllowAny])  # Webhook from BOG, no auth
@@ -1634,7 +1735,7 @@ class EcommerceSettingsViewSet(viewsets.ModelViewSet):
         serializer.save(tenant=self.request.tenant)
 
     @extend_schema(
-        tags=['Ecommerce - Settings'],
+        tags=['Ecommerce Admin - Settings'],
         summary='Get ecommerce settings',
         description='Retrieve ecommerce settings for current tenant including BOG configuration'
     )
@@ -1642,7 +1743,7 @@ class EcommerceSettingsViewSet(viewsets.ModelViewSet):
         return super().list(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Settings'],
+        tags=['Ecommerce Admin - Settings'],
         summary='Get settings detail',
         description='Retrieve detailed ecommerce settings'
     )
@@ -1650,7 +1751,7 @@ class EcommerceSettingsViewSet(viewsets.ModelViewSet):
         return super().retrieve(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Settings'],
+        tags=['Ecommerce Admin - Settings'],
         summary='Create ecommerce settings',
         description='Create ecommerce settings for tenant including BOG credentials and return URLs'
     )
@@ -1658,7 +1759,7 @@ class EcommerceSettingsViewSet(viewsets.ModelViewSet):
         return super().create(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Settings'],
+        tags=['Ecommerce Admin - Settings'],
         summary='Update ecommerce settings',
         description='Update ecommerce settings including BOG configuration'
     )
@@ -1666,7 +1767,7 @@ class EcommerceSettingsViewSet(viewsets.ModelViewSet):
         return super().update(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Ecommerce - Settings'],
+        tags=['Ecommerce Admin - Settings'],
         summary='Partial update settings',
         description='Partially update ecommerce settings'
     )
