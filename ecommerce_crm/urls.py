@@ -29,6 +29,10 @@ from .views_client import (
     ClientCartViewSet,
     ClientCartItemViewSet,
     ClientOrderViewSet,
+    add_client_card,
+    list_client_cards,
+    delete_client_card,
+    set_default_client_card,
 )
 
 # Admin router - requires admin JWT authentication
@@ -69,6 +73,11 @@ urlpatterns = [
     path('clients/password-reset/confirm/', confirm_password_reset, name='password-reset-confirm'),
     # Payment webhook (public access - called by BOG)
     path('payment-webhook/', ecommerce_payment_webhook, name='payment-webhook'),
+    # Client-facing card management endpoints (requires client JWT)
+    path('client/cards/add/', add_client_card, name='client-add-card'),
+    path('client/cards/', list_client_cards, name='client-list-cards'),
+    path('client/cards/<int:card_id>/delete/', delete_client_card, name='client-delete-card'),
+    path('client/cards/<int:card_id>/set-default/', set_default_client_card, name='client-set-default-card'),
     # Client-facing endpoints (requires client JWT)
     path('client/', include(client_router.urls)),
     # Admin endpoints (requires admin JWT)

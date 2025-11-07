@@ -1511,7 +1511,49 @@ def ecommerce_payment_webhook(request):
             if not external_order_id:
                 logger.error('Missing external_order_id in webhook payload')
                 return Response({'error': 'Invalid payload'}, status=status.HTTP_400_BAD_REQUEST)
-            
+
+            # Check if this is a card validation transaction (order_id starts with 'card_')
+            if external_order_id.startswith('card_'):
+                # Extract client ID from order_id format: card_{client_id}_{random}
+                try:
+                    parts = external_order_id.split('_')
+                    client_id = int(parts[1])
+
+                    from .models import EcommerceClient, ClientCard
+                    client = EcommerceClient.objects.get(id=client_id)
+
+                    # Extract card details from payment response
+                    card_data = body.get('card_data', {})
+                    masked_card = card_data.get('masked_card_number', '')
+                    card_type = card_data.get('card_type', '')
+                    card_expiry = card_data.get('card_expiry', '')
+
+                    # Create or update saved card
+                    card, created = ClientCard.objects.update_or_create(
+                        parent_order_id=bog_order_id,
+                        defaults={
+                            'client': client,
+                            'card_type': card_type,
+                            'masked_card_number': masked_card,
+                            'card_expiry': card_expiry,
+                            'is_active': True,
+                            'is_default': not ClientCard.objects.filter(client=client, is_active=True).exists()  # First card is default
+                        }
+                    )
+
+                    action = 'created' if created else 'updated'
+                    logger.info(f'Card {action} for client {client_id}: {masked_card}')
+
+                    return Response({
+                        'status': 'success',
+                        'action': f'card_{action}',
+                        'card_id': card.id
+                    })
+
+                except (IndexError, ValueError, EcommerceClient.DoesNotExist) as e:
+                    logger.error(f'Error processing card validation: {e}')
+                    return Response({'error': 'Invalid card validation order'}, status=status.HTTP_400_BAD_REQUEST)
+
             try:
                 order = Order.objects.get(order_number=external_order_id)
             except Order.DoesNotExist:

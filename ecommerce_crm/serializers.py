@@ -14,7 +14,8 @@ from .models import (
     CartItem,
     Order,
     OrderItem,
-    EcommerceSettings
+    EcommerceSettings,
+    ClientCard
 )
 
 
@@ -693,3 +694,26 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
 
         data['reset_token'] = reset_token
         return data
+
+
+class ClientCardSerializer(serializers.ModelSerializer):
+    """Serializer for client saved payment cards"""
+
+    class Meta:
+        model = ClientCard
+        fields = [
+            'id',
+            'card_type',
+            'masked_card_number',
+            'card_expiry',
+            'is_default',
+            'is_active',
+            'created_at'
+        ]
+        read_only_fields = [
+            'id',
+            'card_type',
+            'masked_card_number',
+            'card_expiry',
+            'created_at'
+        ]

@@ -4,8 +4,9 @@ Client-facing ecommerce API endpoints
 These ViewSets are designed for ecommerce clients (customers) to access their own data.
 Uses EcommerceClientJWTAuthentication for client-specific access control.
 """
+import requests
 from rest_framework import viewsets, filters, status, serializers
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes, authentication_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from drf_spectacular.utils import extend_schema, OpenApiResponse
@@ -19,6 +20,8 @@ from .models import (
     Cart,
     CartItem,
     Order,
+    ClientCard,
+    EcommerceSettings,
 )
 from .serializers import (
     EcommerceClientSerializer,
@@ -31,6 +34,7 @@ from .serializers import (
     CartItemCreateSerializer,
     OrderSerializer,
     OrderCreateSerializer,
+    ClientCardSerializer,
 )
 
 
@@ -338,6 +342,36 @@ class ClientCartViewSet(viewsets.ModelViewSet):
         except ClientAddress.DoesNotExist:
             return Response({'error': 'Address not found'}, status=status.HTTP_404_NOT_FOUND)
 
+    @extend_schema(
+        tags=['Client - Cart'],
+        summary='Set payment card',
+        description='Set or update payment card for authenticated client\'s active cart'
+    )
+    @action(detail=False, methods=['post'])
+    def set_card(self, request):
+        """Set payment card for authenticated client's active cart"""
+        client = request.user
+        card_id = request.data.get('card_id')
+
+        if not card_id:
+            return Response({'error': 'Card ID required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Get or create active cart
+        cart, created = Cart.objects.get_or_create(
+            client=client,
+            status='active',
+            defaults={'status': 'active'}
+        )
+
+        try:
+            card = ClientCard.objects.get(id=card_id, client=client, is_active=True)
+            cart.selected_card = card
+            cart.save()
+            serializer = self.get_serializer(cart)
+            return Response(serializer.data)
+        except ClientCard.DoesNotExist:
+            return Response({'error': 'Card not found'}, status=status.HTTP_404_NOT_FOUND)
+
 
 class ClientCartItemViewSet(viewsets.ModelViewSet):
     """
@@ -428,7 +462,7 @@ class ClientOrderViewSet(viewsets.ModelViewSet):
     @extend_schema(
         tags=['Client - Orders'],
         summary='Create order from cart',
-        description='Submit cart and create order with automatic BOG payment URL generation'
+        description='Submit cart and create order with automatic BOG payment URL generation or saved card charge'
     )
     def create(self, request, *args, **kwargs):
         from tenants.bog_payment import bog_service
@@ -487,7 +521,44 @@ class ClientOrderViewSet(viewsets.ModelViewSet):
         bog_service_instance.auth_url = auth_url
         bog_service_instance.base_url = api_base_url
 
-        # Create BOG payment
+        # Check if cart has a selected card for charging
+        cart = order.cart
+        if cart and cart.selected_card and cart.selected_card.is_active:
+            # Use saved card to charge
+            try:
+                callback_url = f"{request.scheme}://{request.get_host()}/api/ecommerce/payment-webhook/"
+
+                payment_result = bog_service_instance.charge_saved_card(
+                    parent_order_id=cart.selected_card.parent_order_id,
+                    amount=float(order.total_amount),
+                    currency='GEL',
+                    callback_url=callback_url,
+                    external_order_id=order.order_number
+                )
+
+                # Update order with payment info
+                order.bog_order_id = payment_result['order_id']
+                order.payment_status = 'processing'
+                order.payment_method = 'saved_card'
+                order.payment_metadata = payment_result
+                order.save()
+
+                # Return order data with payment info
+                output_serializer = OrderSerializer(order)
+                response_data = output_serializer.data
+                response_data['payment_method'] = 'saved_card'
+                response_data['bog_order_id'] = payment_result['order_id']
+                response_data['message'] = 'Order charged to saved card'
+                return Response(response_data, status=status.HTTP_201_CREATED)
+
+            except Exception as e:
+                # If saved card charge fails, fall back to creating new payment
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f'Saved card charge failed for order {order.order_number}: {str(e)}')
+                # Continue to create regular payment below
+
+        # Create BOG payment (new payment or fallback from failed saved card charge)
         try:
             callback_url = f"{request.scheme}://{request.get_host()}/api/ecommerce/payment-webhook/"
 
@@ -553,3 +624,170 @@ class ClientOrderViewSet(viewsets.ModelViewSet):
             response_data['payment_error'] = str(e)
             response_data['message'] = 'Order created but payment initialization failed'
             return Response(response_data, status=status.HTTP_201_CREATED)
+
+
+@extend_schema(
+    tags=['Client - Cards'],
+    summary='Add new payment card',
+    description='Initiate 0 GEL card validation payment to save a new card for future orders'
+)
+@api_view(['POST'])
+@authentication_classes([EcommerceClientJWTAuthentication])
+@permission_classes([IsAuthenticated])
+def add_client_card(request):
+    """
+    Initiate 0 GEL payment to validate and save a new card for the client
+    """
+    client = request.user
+
+    try:
+        # Get ecommerce settings
+        ecommerce_settings = EcommerceSettings.objects.get(tenant=request.tenant)
+
+        # Generate unique order ID for card validation
+        import uuid
+        order_id = f'card_{client.id}_{uuid.uuid4().hex[:12]}'
+
+        # Prepare BOG payment request for 0 GEL (card validation)
+        bog_api_url = 'https://api.bog.ge/payments/v1/ecommerce/orders'
+
+        # Use return URL from ecommerce settings
+        callback_url = ecommerce_settings.payment_return_url or f'https://{request.tenant.schema_name}.echodesk.ge/payment/success'
+
+        payment_data = {
+            'callback_url': callback_url,
+            'purchase_units': {
+                'currency': 'GEL',
+                'total_amount': 0.00,  # 0 GEL for card validation
+                'basket': [{
+                    'quantity': 1,
+                    'unit_price': 0.00,
+                    'product_id': 'card_validation'
+                }]
+            },
+            'redirect_url': callback_url,
+            'shop_order_id': order_id,
+            'locale': 'ka',
+            'save_card': True,  # Important: save card for future use
+            'show_shop_order_id_on_extract': False
+        }
+
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': f'Basic {ecommerce_settings.get_decrypted_bog_secret_key()}'
+        }
+
+        response = requests.post(
+            bog_api_url,
+            json=payment_data,
+            headers=headers,
+            timeout=30
+        )
+
+        if response.status_code in [200, 201]:
+            bog_response = response.json()
+
+            return Response({
+                'order_id': order_id,
+                'payment_url': bog_response.get('redirect_url') or bog_response.get('_links', {}).get('redirect', {}).get('href'),
+                'message': 'Please complete card validation'
+            })
+        else:
+            return Response({
+                'error': 'Failed to initiate card validation',
+                'details': response.json()
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+    except EcommerceSettings.DoesNotExist:
+        return Response({
+            'error': 'Payment gateway not configured'
+        }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f'Card validation failed for client {client.id}: {str(e)}')
+
+        return Response({
+            'error': 'Failed to initiate card validation',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@extend_schema(
+    tags=['Client - Cards'],
+    summary='List saved payment cards',
+    description='Get all saved payment cards for the authenticated client'
+)
+@api_view(['GET'])
+@authentication_classes([EcommerceClientJWTAuthentication])
+@permission_classes([IsAuthenticated])
+def list_client_cards(request):
+    """
+    List all saved payment cards for the authenticated client
+    """
+    client = request.user
+
+    cards = ClientCard.objects.filter(client=client, is_active=True)
+    serializer = ClientCardSerializer(cards, many=True)
+
+    return Response(serializer.data)
+
+
+@extend_schema(
+    tags=['Client - Cards'],
+    summary='Delete payment card',
+    description='Soft-delete a saved payment card'
+)
+@api_view(['DELETE'])
+@authentication_classes([EcommerceClientJWTAuthentication])
+@permission_classes([IsAuthenticated])
+def delete_client_card(request, card_id):
+    """
+    Delete a saved payment card
+    """
+    client = request.user
+
+    try:
+        card = ClientCard.objects.get(id=card_id, client=client)
+        card.is_active = False
+        card.save()
+
+        return Response({
+            'message': 'Card deleted successfully'
+        }, status=status.HTTP_200_OK)
+
+    except ClientCard.DoesNotExist:
+        return Response({
+            'error': 'Card not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+
+
+@extend_schema(
+    tags=['Client - Cards'],
+    summary='Set default payment card',
+    description='Set a card as the default payment method for the authenticated client'
+)
+@api_view(['POST'])
+@authentication_classes([EcommerceClientJWTAuthentication])
+@permission_classes([IsAuthenticated])
+def set_default_client_card(request, card_id):
+    """
+    Set a card as the default payment method
+    """
+    client = request.user
+
+    try:
+        card = ClientCard.objects.get(id=card_id, client=client, is_active=True)
+
+        # Set this card as default (the model's save method handles unsetting others)
+        card.is_default = True
+        card.save()
+
+        return Response({
+            'message': 'Default card updated successfully'
+        }, status=status.HTTP_200_OK)
+
+    except ClientCard.DoesNotExist:
+        return Response({
+            'error': 'Card not found'
+        }, status=status.HTTP_404_NOT_FOUND)

@@ -683,6 +683,14 @@ class Cart(models.Model):
         related_name='carts',
         help_text="Selected delivery address for this cart"
     )
+    selected_card = models.ForeignKey(
+        'ClientCard',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='carts',
+        help_text="Selected payment card for this cart"
+    )
     status = models.CharField(
         max_length=20,
         choices=STATUS_CHOICES,
@@ -1117,3 +1125,77 @@ class PasswordResetToken(models.Model):
         self.is_used = True
         self.used_at = timezone.now()
         self.save(update_fields=['is_used', 'used_at'])
+
+
+class ClientCard(models.Model):
+    """
+    Store saved payment card details for ecommerce clients
+    Cards are validated with 0 GEL transactions and saved for future purchases
+    """
+    client = models.ForeignKey(
+        EcommerceClient,
+        on_delete=models.CASCADE,
+        related_name='saved_cards',
+        help_text='Client who owns this saved card'
+    )
+
+    # BOG order ID for recurring charges
+    parent_order_id = models.CharField(
+        max_length=100,
+        unique=True,
+        help_text='BOG parent order ID used for charging this card'
+    )
+
+    # Card details (masked/safe to store)
+    card_type = models.CharField(
+        max_length=20,
+        blank=True,
+        help_text='Card type (e.g., mc, visa)'
+    )
+    masked_card_number = models.CharField(
+        max_length=20,
+        blank=True,
+        help_text='Masked card number (e.g., 531125***1450)'
+    )
+    card_expiry = models.CharField(
+        max_length=7,
+        blank=True,
+        help_text='Card expiry date (MM/YY format)'
+    )
+
+    # Default card flag
+    is_default = models.BooleanField(
+        default=False,
+        help_text='Whether this is the default payment card for this client'
+    )
+
+    # Status
+    is_active = models.BooleanField(
+        default=True,
+        help_text='Whether this card can be used for payments'
+    )
+
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-is_default', '-created_at']
+        verbose_name = 'Client Payment Card'
+        verbose_name_plural = 'Client Payment Cards'
+        indexes = [
+            models.Index(fields=['client', 'is_active']),
+            models.Index(fields=['parent_order_id']),
+        ]
+
+    def __str__(self):
+        return f"{self.client.email} - {self.masked_card_number}"
+
+    def save(self, *args, **kwargs):
+        # If this card is being set as default, unset other defaults for this client
+        if self.is_default:
+            ClientCard.objects.filter(
+                client=self.client,
+                is_default=True
+            ).exclude(pk=self.pk).update(is_default=False)
+        super().save(*args, **kwargs)
