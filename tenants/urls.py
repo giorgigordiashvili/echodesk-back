@@ -15,6 +15,9 @@ from .payment_views import (
     create_subscription_payment, check_payment_status, bog_webhook, cancel_subscription,
     get_saved_card, remove_saved_card, set_default_card, manual_payment, add_new_card, list_invoices
 )
+from .upgrade_views import (
+    upgrade_preview, upgrade_immediate, upgrade_scheduled, cancel_scheduled_upgrade
+)
 from .cron_views import (
     cron_recurring_payments, cron_subscription_check, cron_health_check,
     cron_process_trial_expirations
@@ -63,6 +66,12 @@ urlpatterns = [
     path('api/payments/saved-card/add/', add_new_card, name='add_new_card'),
     path('api/payments/manual/', manual_payment, name='manual_payment'),
     path('api/payments/invoices/', list_invoices, name='list_invoices'),
+
+    # Package upgrade endpoints (authenticated access)
+    path('api/upgrade/preview/', upgrade_preview, name='upgrade_preview'),
+    path('api/upgrade/immediate/', upgrade_immediate, name='upgrade_immediate'),
+    path('api/upgrade/scheduled/', upgrade_scheduled, name='upgrade_scheduled'),
+    path('api/upgrade/cancel-scheduled/', cancel_scheduled_upgrade, name='cancel_scheduled_upgrade'),
 
     # Cron job endpoints (called by DigitalOcean Functions)
     path('api/cron/recurring-payments/', cron_recurring_payments, name='cron_recurring_payments'),
