@@ -47,7 +47,7 @@ class Command(BaseCommand):
             is_active=True,
             next_billing_date__lte=cutoff_date,
             tenant__is_active=True
-        ).select_related('tenant', 'package')
+        ).select_related('tenant', 'package', 'pending_package')
 
         self.stdout.write(f'Found {subscriptions_to_renew.count()} subscriptions to process')
 
@@ -60,70 +60,75 @@ class Command(BaseCommand):
             package = subscription.package
 
             try:
-                # Find the original payment order with saved card
-                payment_order = PaymentOrder.objects.filter(
-                    tenant=tenant,
-                    card_saved=True,
-                    bog_order_id__isnull=False,
-                    status='paid'
-                ).order_by('-paid_at').first()
+                # Check for scheduled upgrades that should take effect now
+                if subscription.pending_package and subscription.upgrade_scheduled_for:
+                    if subscription.upgrade_scheduled_for <= timezone.now():
+                        self.stdout.write(
+                            f'🔄 {tenant.schema_name}: Processing scheduled upgrade to {subscription.pending_package.display_name}'
+                        )
+                        # Update package for this billing cycle
+                        package = subscription.pending_package
 
-                if not payment_order:
+                # Check if tenant has saved card
+                if not subscription.parent_order_id:
                     self.stdout.write(self.style.WARNING(
-                        f'⚠️  {tenant.schema_name}: No saved card found, skipping'
+                        f'⚠️  {tenant.schema_name}: No saved card (parent_order_id), skipping'
                     ))
                     skipped_count += 1
                     continue
 
-                # Calculate amount
-                from tenants.models import PricingModel
-                if package.pricing_model == PricingModel.AGENT_BASED:
-                    amount = float(package.price_gel) * subscription.agent_count
-                else:
-                    amount = float(package.price_gel)
+                # Get package price (flat CRM-based pricing only)
+                amount = float(package.price_gel)
 
                 self.stdout.write(
-                    f'📋 {tenant.schema_name}: Charging {amount} GEL '
-                    f'(expires: {subscription.expires_at.date()})'
+                    f'📋 {tenant.schema_name}: Charging {amount} GEL for {package.display_name} '
+                    f'(expires: {subscription.expires_at.date() if subscription.expires_at else "N/A"})'
                 )
 
                 if dry_run:
-                    self.stdout.write(self.style.WARNING('   [DRY RUN] Would charge saved card'))
+                    self.stdout.write(self.style.WARNING('   [DRY RUN] Would charge subscription'))
                     success_count += 1
                     continue
 
                 # Generate new order ID for this charge
                 new_order_id = f"REC-{uuid.uuid4().hex[:12].upper()}"
 
-                # Charge the saved card
-                charge_result = bog_service.charge_saved_card(
-                    parent_order_id=payment_order.bog_order_id,
-                    amount=amount,
-                    currency='GEL',
+                # Charge the subscription (same amount as original payment)
+                charge_result = bog_service.charge_subscription(
+                    parent_order_id=subscription.parent_order_id,
                     callback_url=f"https://api.echodesk.ge/api/payments/webhook/",
                     external_order_id=new_order_id
                 )
 
                 # Create new payment order for tracking
+                metadata = {
+                    'type': 'recurring',
+                    'parent_order_id': subscription.parent_order_id,
+                    'subscription_id': subscription.id
+                }
+
+                # Track if this was an upgrade
+                if subscription.pending_package and subscription.upgrade_scheduled_for:
+                    metadata['scheduled_upgrade'] = True
+                    metadata['previous_package_id'] = subscription.package.id
+
                 new_payment_order = PaymentOrder.objects.create(
                     order_id=new_order_id,
                     bog_order_id=charge_result['order_id'],
                     tenant=tenant,
                     package=package,
+                    previous_package=subscription.package if subscription.pending_package else None,
                     amount=amount,
                     currency='GEL',
-                    agent_count=subscription.agent_count,
+                    agent_count=1,  # Deprecated field
                     status='pending',
                     card_saved=False,  # This is a charge, not a new card save
-                    metadata={
-                        'type': 'recurring',
-                        'parent_order_id': payment_order.bog_order_id,
-                        'subscription_id': subscription.id
-                    }
+                    is_immediate_upgrade=False,  # This is scheduled/recurring, not immediate
+                    metadata=metadata
                 )
 
                 self.stdout.write(self.style.SUCCESS(
-                    f'   ✓ Charged saved card: new_order_id={new_order_id}'
+                    f'   ✓ Charged subscription: new_order_id={new_order_id}'
                 ))
                 success_count += 1
 
