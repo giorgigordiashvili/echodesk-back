@@ -367,7 +367,9 @@ class BOGPaymentService:
         external_order_id: str = None
     ) -> Dict:
         """
-        Charge a saved card using parent_order_id
+        Charge a saved card using recurrent payment endpoint
+
+        Documentation: https://api.bog.ge/docs/en/payments/saved-card/recurrent-payment
 
         Args:
             parent_order_id: The original order ID where card was saved
@@ -385,7 +387,17 @@ class BOGPaymentService:
         try:
             access_token = self._get_access_token()
 
-            payload = {}
+            # Format amount to 2 decimal places
+            amount = round(float(amount), 2)
+
+            # Build payload according to BOG recurrent payment API
+            payload = {
+                'purchase_units': {
+                    'currency': currency,
+                    'total_amount': amount
+                }
+            }
+
             if callback_url:
                 payload['callback_url'] = callback_url
             if external_order_id:
@@ -396,9 +408,10 @@ class BOGPaymentService:
                 'Authorization': f'Bearer {access_token}'
             }
 
+            # Use the correct recurrent payment endpoint
             response = requests.post(
-                f'{self.base_url}/ecommerce/orders/{parent_order_id}/subscribe',
-                json=payload if payload else None,
+                f'{self.base_url}/ecommerce/orders/{parent_order_id}/recurrent',
+                json=payload,
                 headers=headers,
                 timeout=30
             )
@@ -408,7 +421,7 @@ class BOGPaymentService:
                 order_id = data['id']
                 details_url = data['_links']['details']['href']
 
-                logger.info(f'Saved card charged: new_order_id={order_id}, parent={parent_order_id}')
+                logger.info(f'Saved card charged: new_order_id={order_id}, parent={parent_order_id}, amount={amount}{currency}')
 
                 return {
                     'order_id': order_id,
