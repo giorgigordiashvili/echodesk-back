@@ -695,9 +695,12 @@ def add_client_card(request):
                 bog_order_id = bog_response['id']
                 payment_url = bog_response['_links']['redirect']['href']
 
-                # For recurring payments, the order_id itself will be the parent_order_id
-                # Don't call enable_card_saving() - that's for subscriptions
-                logger.info(f'Card validation initiated for client {client.id}: {order_id}, bog_order_id: {bog_order_id}')
+                # Enable card saving for this order
+                enable_result = bog_service.enable_card_saving(bog_order_id)
+                if not enable_result:
+                    logger.warning(f'Failed to enable card saving for order {bog_order_id}')
+
+                logger.info(f'Card validation initiated for client {client.id}: {order_id}, bog_order_id: {bog_order_id}, card_saving_enabled: {enable_result}')
 
                 return Response({
                     'order_id': order_id,
