@@ -465,7 +465,8 @@ def bog_webhook(request):
                                     'masked_card_number': masked_card,
                                     'card_expiry': card_expiry,
                                     'transaction_id': transaction_id,
-                                    'is_active': True
+                                    'is_active': True,
+                                    'card_save_type': 'subscription'  # Fixed amount recurring
                                 }
                             )
                             logger.info(f'Saved card details for tenant {tenant.schema_name}: {card_type} {masked_card}')
@@ -525,7 +526,8 @@ def bog_webhook(request):
                         masked_card_number=masked_card_number,
                         card_expiry=card_expiry,
                         is_active=True,
-                        is_default=make_default
+                        is_default=make_default,
+                        card_save_type='subscription'  # Fixed amount recurring
                     )
 
                     logger.info(f'Card saved for tenant {tenant.schema_name}: {saved_card.id}, default: {make_default}')
@@ -545,19 +547,161 @@ def bog_webhook(request):
             package = payment_order.package
             agent_count = payment_order.agent_count
 
-            # Create or update subscription
-            subscription, created = TenantSubscription.objects.update_or_create(
-                tenant=tenant,
-                defaults={
-                    'package': package,
-                    'is_active': True,
-                    'starts_at': timezone.now(),
-                    'expires_at': timezone.now() + timedelta(days=30),  # 30 days subscription
-                    'agent_count': agent_count,
-                    'last_billed_at': timezone.now(),
-                    'next_billing_date': timezone.now() + timedelta(days=30)
-                }
-            )
+            # Check if this is an immediate upgrade
+            if payment_order.is_immediate_upgrade:
+                logger.info(f'Processing immediate upgrade for tenant {tenant.schema_name} to {package.display_name}')
+
+                with transaction.atomic():
+                    # Get existing subscription
+                    try:
+                        subscription = TenantSubscription.objects.select_for_update().get(
+                            tenant=tenant,
+                            is_active=True
+                        )
+
+                        # Deactivate old subscription (forfeiting remaining time)
+                        subscription.is_active = False
+                        subscription.save()
+
+                        logger.info(f'Deactivated old subscription for {tenant.schema_name} (package: {subscription.package.display_name})')
+                    except TenantSubscription.DoesNotExist:
+                        logger.warning(f'No active subscription found for immediate upgrade, creating new one')
+
+                    # Determine parent_order_id for future recurring charges
+                    parent_order_id_for_subscription = bog_order_id if card_saved_for_recurring else None
+
+                    # Create new subscription with upgraded package
+                    new_subscription = TenantSubscription.objects.create(
+                        tenant=tenant,
+                        package=package,
+                        is_active=True,
+                        starts_at=timezone.now(),
+                        expires_at=timezone.now() + timedelta(days=30),
+                        agent_count=1,  # Flat CRM pricing (agent_count deprecated)
+                        current_users=1,
+                        whatsapp_messages_used=0,
+                        storage_used_gb=0,
+                        parent_order_id=parent_order_id_for_subscription,
+                        last_billed_at=timezone.now(),
+                        next_billing_date=timezone.now() + timedelta(days=30),
+                        subscription_type='paid',
+                        pending_package=None,  # Clear any pending upgrade
+                        upgrade_scheduled_for=None
+                    )
+
+                    logger.info(f'Created new subscription for {tenant.schema_name}: {package.display_name}')
+
+                    # Save card if card saving was enabled
+                    if card_saved_for_recurring and parent_order_id_for_subscription:
+                        card_type = payment_detail.get('card_type', '')
+                        masked_card = payment_detail.get('payer_identifier', '')
+                        card_expiry = payment_detail.get('card_expiry_date', '')
+
+                        SavedCard.objects.update_or_create(
+                            tenant=tenant,
+                            defaults={
+                                'parent_order_id': parent_order_id_for_subscription,
+                                'card_type': card_type,
+                                'masked_card_number': masked_card,
+                                'card_expiry': card_expiry,
+                                'transaction_id': transaction_id,
+                                'is_active': True,
+                                'is_default': True,
+                                'card_save_type': 'subscription'
+                            }
+                        )
+                        logger.info(f'Saved card for immediate upgrade: {card_type} {masked_card}')
+
+                    # Generate invoice
+                    generate_invoice_for_payment(
+                        payment_order=payment_order,
+                        tenant=tenant,
+                        package=package,
+                        agent_count=1
+                    )
+
+                    return Response({
+                        'status': 'success',
+                        'action': 'immediate_upgrade',
+                        'new_package': package.display_name
+                    })
+
+            # Check if this is a scheduled upgrade from recurring payment
+            payment_metadata = payment_order.metadata or {}
+            if payment_metadata.get('scheduled_upgrade'):
+                logger.info(f'Processing scheduled upgrade completion for tenant {tenant.schema_name}')
+
+                with transaction.atomic():
+                    try:
+                        subscription = TenantSubscription.objects.select_for_update().get(
+                            tenant=tenant,
+                            is_active=True
+                        )
+
+                        # Update to new package
+                        previous_package = subscription.package
+                        subscription.package = package
+                        subscription.pending_package = None
+                        subscription.upgrade_scheduled_for = None
+                        subscription.subscription_type = 'paid'
+                        subscription.last_billed_at = timezone.now()
+                        subscription.next_billing_date = timezone.now() + timedelta(days=30)
+                        subscription.expires_at = timezone.now() + timedelta(days=30)
+                        subscription.save()
+
+                        logger.info(f'Scheduled upgrade completed: {tenant.schema_name} upgraded from {previous_package.display_name} to {package.display_name}')
+
+                        # Generate invoice
+                        generate_invoice_for_payment(
+                            payment_order=payment_order,
+                            tenant=tenant,
+                            package=package,
+                            agent_count=1
+                        )
+
+                        return Response({
+                            'status': 'success',
+                            'action': 'scheduled_upgrade_completed',
+                            'previous_package': previous_package.display_name,
+                            'new_package': package.display_name
+                        })
+
+                    except TenantSubscription.DoesNotExist:
+                        logger.error(f'No subscription found for scheduled upgrade: {tenant.schema_name}')
+                        return Response({'error': 'Subscription not found'}, status=status.HTTP_404_NOT_FOUND)
+
+            # Regular recurring payment (not an upgrade)
+            try:
+                subscription = TenantSubscription.objects.get(tenant=tenant)
+                # Renewal: Update existing subscription
+                subscription.package = package
+                subscription.is_active = True
+                subscription.expires_at = timezone.now() + timedelta(days=30)
+                subscription.agent_count = 1  # Flat CRM pricing (agent_count deprecated)
+                subscription.last_billed_at = timezone.now()
+                subscription.next_billing_date = timezone.now() + timedelta(days=30)
+                subscription.subscription_type = 'paid'
+                subscription.save()
+                created = False
+                action = 'renewed'
+            except TenantSubscription.DoesNotExist:
+                # New subscription
+                subscription = TenantSubscription.objects.create(
+                    tenant=tenant,
+                    package=package,
+                    is_active=True,
+                    starts_at=timezone.now(),
+                    expires_at=timezone.now() + timedelta(days=30),
+                    agent_count=1,  # Flat CRM pricing (agent_count deprecated)
+                    current_users=1,
+                    whatsapp_messages_used=0,
+                    storage_used_gb=0,
+                    last_billed_at=timezone.now(),
+                    next_billing_date=timezone.now() + timedelta(days=30),
+                    subscription_type='paid'
+                )
+                created = True
+                action = 'created'
 
             # Log the event
             UsageLog.objects.create(
@@ -570,21 +714,21 @@ def bog_webhook(request):
                     'bog_order_id': bog_order_id,
                     'transaction_id': transaction_id,
                     'amount': payment_detail.get('transfer_amount'),
-                    'action': 'created' if created else 'renewed'
+                    'action': action
                 }
             )
 
-            logger.info(f'Subscription {"created" if created else "updated"} for tenant {tenant.schema_name}')
+            logger.info(f'Subscription {action} for tenant {tenant.schema_name}')
 
             # Generate invoice for the payment
             generate_invoice_for_payment(
                 payment_order=payment_order,
                 tenant=tenant,
                 package=package,
-                agent_count=agent_count
+                agent_count=1
             )
 
-            return Response({'status': 'success', 'action': 'created' if created else 'renewed'})
+            return Response({'status': 'success', 'action': action})
 
         except Tenant.DoesNotExist:
             logger.error(f'Tenant not found: {tenant_id}')
