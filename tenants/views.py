@@ -541,51 +541,8 @@ def register_tenant_with_payment(request):
     try:
         import uuid
         with transaction.atomic():
-            # Handle custom package or standard package
-            is_custom = validated_data.get('is_custom', False)
-
-            if is_custom:
-                # Custom package: create or get package for the selected features
-                from .models import Feature, PricingModel, PackageFeature
-                feature_ids = validated_data['feature_ids']
-                pricing_model = validated_data['pricing_model']
-
-                # Get the features and calculate price based on pricing model
-                features = Feature.objects.filter(id__in=feature_ids, is_active=True)
-
-                # Calculate total price based on pricing model
-                if pricing_model == 'agent':
-                    # For agent-based pricing, use price_per_user_gel
-                    total_price = sum(f.price_per_user_gel for f in features)
-                else:
-                    # For CRM-based pricing, use price_unlimited_gel
-                    total_price = sum(f.price_unlimited_gel for f in features)
-
-                # Create a custom package
-                unique_suffix = uuid.uuid4().hex[:8]
-                package_name = f"custom_package_{validated_data['domain']}_{unique_suffix}"
-                package_display_name = f"Custom Package - {validated_data['company_name']}"
-
-                package = Package.objects.create(
-                    name=package_name,
-                    display_name=package_display_name,
-                    description=f"Custom package with {len(feature_ids)} features",
-                    pricing_model=PricingModel.AGENT_BASED if pricing_model == 'agent' else PricingModel.CRM_BASED,
-                    price_gel=total_price,
-                    is_active=True,
-                    is_custom=True
-                )
-
-                # Add features to the package using PackageFeature
-                for feature in features:
-                    PackageFeature.objects.create(
-                        package=package,
-                        feature=feature,
-                        is_highlighted=False
-                    )
-            else:
-                # Standard package
-                package = Package.objects.get(id=validated_data['package_id'], is_active=True)
+            # Only allow standard package selection (custom packages removed)
+            package = Package.objects.get(id=validated_data['package_id'], is_active=True, is_custom=False)
 
             # Generate schema name
             domain_name = validated_data['domain']
@@ -605,13 +562,8 @@ def register_tenant_with_payment(request):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            # Calculate full subscription amount (for metadata)
-            agent_count = validated_data.get('agent_count', 1)
-            from .models import PricingModel
-            if package.pricing_model == PricingModel.AGENT_BASED:
-                subscription_amount = float(package.price_gel) * agent_count
-            else:
-                subscription_amount = float(package.price_gel)
+            # Get subscription amount (flat CRM-based pricing only)
+            subscription_amount = float(package.price_gel)
 
             # Generate unique order ID
             order_id = f"TRIAL-{uuid.uuid4().hex[:12].upper()}"
@@ -625,7 +577,7 @@ def register_tenant_with_payment(request):
                 admin_first_name=validated_data['admin_first_name'],
                 admin_last_name=validated_data['admin_last_name'],
                 package=package,
-                agent_count=agent_count,
+                agent_count=1,  # Default to 1 (deprecated field, kept for backward compatibility)
                 order_id=order_id
             )
 
@@ -636,7 +588,7 @@ def register_tenant_with_payment(request):
                 package=package,
                 amount=0.0,  # 0 GEL for trial
                 currency='GEL',
-                agent_count=agent_count,
+                agent_count=1,  # Default to 1 (deprecated field)
                 status='pending',
                 is_trial_payment=True,
                 metadata={
@@ -649,10 +601,10 @@ def register_tenant_with_payment(request):
                 }
             )
 
-            # Create trial payment with card saving using BOG
+            # Create trial payment with card saving using BOG subscription endpoint
             payment_result = bog_service.create_trial_payment_with_card_save(
                 package=package,
-                agent_count=agent_count,
+                agent_count=1,  # Default to 1 (deprecated parameter)
                 customer_email=validated_data['admin_email'],
                 customer_name=f"{validated_data['admin_first_name']} {validated_data['admin_last_name']}",
                 company_name=validated_data['company_name'],
