@@ -587,6 +587,7 @@ class OrderCreateSerializer(serializers.Serializer):
     """Serializer for creating an order from cart"""
     cart_id = serializers.IntegerField(required=True)
     delivery_address_id = serializers.IntegerField(required=True)
+    card_id = serializers.IntegerField(required=False, allow_null=True)
     notes = serializers.CharField(required=False, allow_blank=True)
 
     def validate_cart_id(self, value):
@@ -606,6 +607,16 @@ class OrderCreateSerializer(serializers.Serializer):
             return value
         except ClientAddress.DoesNotExist:
             raise serializers.ValidationError("Delivery address not found")
+
+    def validate_card_id(self, value):
+        """Validate card exists and belongs to client (if provided)"""
+        if value is None:
+            return value
+        try:
+            card = ClientCard.objects.get(id=value, is_active=True)
+            return value
+        except ClientCard.DoesNotExist:
+            raise serializers.ValidationError("Card not found or inactive")
 
     def create(self, validated_data):
         """Create order from cart"""

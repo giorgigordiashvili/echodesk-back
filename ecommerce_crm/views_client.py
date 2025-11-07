@@ -312,66 +312,6 @@ class ClientCartViewSet(viewsets.ModelViewSet):
             'created': created
         })
 
-    @extend_schema(
-        tags=['Ecommerce Client - Cart'],
-        summary='Set delivery address',
-        description='Set or update delivery address for authenticated client\'s active cart'
-    )
-    @action(detail=False, methods=['post'])
-    def set_address(self, request):
-        """Set delivery address for authenticated client's active cart"""
-        client = request.user
-        address_id = request.data.get('address_id')
-
-        if not address_id:
-            return Response({'error': 'Address ID required'}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Get or create active cart
-        cart, created = Cart.objects.get_or_create(
-            client=client,
-            status='active',
-            defaults={'status': 'active'}
-        )
-
-        try:
-            address = ClientAddress.objects.get(id=address_id, client=client)
-            cart.delivery_address = address
-            cart.save()
-            serializer = self.get_serializer(cart)
-            return Response(serializer.data)
-        except ClientAddress.DoesNotExist:
-            return Response({'error': 'Address not found'}, status=status.HTTP_404_NOT_FOUND)
-
-    @extend_schema(
-        tags=['Ecommerce Client - Cart'],
-        summary='Set payment card',
-        description='Set or update payment card for authenticated client\'s active cart'
-    )
-    @action(detail=False, methods=['post'])
-    def set_card(self, request):
-        """Set payment card for authenticated client's active cart"""
-        client = request.user
-        card_id = request.data.get('card_id')
-
-        if not card_id:
-            return Response({'error': 'Card ID required'}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Get or create active cart
-        cart, created = Cart.objects.get_or_create(
-            client=client,
-            status='active',
-            defaults={'status': 'active'}
-        )
-
-        try:
-            card = ClientCard.objects.get(id=card_id, client=client, is_active=True)
-            cart.selected_card = card
-            cart.save()
-            serializer = self.get_serializer(cart)
-            return Response(serializer.data)
-        except ClientCard.DoesNotExist:
-            return Response({'error': 'Card not found'}, status=status.HTTP_404_NOT_FOUND)
-
 
 class ClientCartItemViewSet(viewsets.ModelViewSet):
     """
@@ -462,7 +402,10 @@ class ClientOrderViewSet(viewsets.ModelViewSet):
     @extend_schema(
         tags=['Ecommerce Client - Orders'],
         summary='Create order from cart',
-        description='Submit cart and create order with automatic BOG payment URL generation or saved card charge'
+        description='''Submit cart and create order.
+        - If card_id is provided: Charges the saved card directly
+        - If card_id is null/not provided: Returns a BOG payment URL for new payment
+        - If payment_method is "cash_on_delivery": Creates order without payment processing'''
     )
     def create(self, request, *args, **kwargs):
         from tenants.bog_payment import bog_service
@@ -521,15 +464,16 @@ class ClientOrderViewSet(viewsets.ModelViewSet):
         bog_service_instance.auth_url = auth_url
         bog_service_instance.base_url = api_base_url
 
-        # Check if cart has a selected card for charging
-        cart = order.cart
-        if cart and cart.selected_card and cart.selected_card.is_active:
-            # Use saved card to charge
+        # Check if a card_id was provided in the request for charging
+        card_id = request.data.get('card_id')
+        if card_id:
+            # Use provided saved card to charge
             try:
+                card = ClientCard.objects.get(id=card_id, client=request.user, is_active=True)
                 callback_url = f"https://{request.get_host()}/api/ecommerce/payment-webhook/"
 
                 payment_result = bog_service_instance.charge_saved_card(
-                    parent_order_id=cart.selected_card.parent_order_id,
+                    parent_order_id=card.parent_order_id,
                     amount=float(order.total_amount),
                     currency='GEL',
                     callback_url=callback_url,
@@ -551,12 +495,23 @@ class ClientOrderViewSet(viewsets.ModelViewSet):
                 response_data['message'] = 'Order charged to saved card'
                 return Response(response_data, status=status.HTTP_201_CREATED)
 
+            except ClientCard.DoesNotExist:
+                # Card not found, return error
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f'Card {card_id} not found for order {order.order_number}')
+                return Response({
+                    'error': 'Card not found or inactive'
+                }, status=status.HTTP_400_BAD_REQUEST)
             except Exception as e:
-                # If saved card charge fails, fall back to creating new payment
+                # If saved card charge fails, return error instead of falling back
                 import logging
                 logger = logging.getLogger(__name__)
                 logger.error(f'Saved card charge failed for order {order.order_number}: {str(e)}')
-                # Continue to create regular payment below
+                return Response({
+                    'error': 'Failed to charge saved card',
+                    'details': str(e)
+                }, status=status.HTTP_400_BAD_REQUEST)
 
         # Create BOG payment (new payment or fallback from failed saved card charge)
         try:
