@@ -1,11 +1,11 @@
-from rest_framework import viewsets, filters, status
+from rest_framework import viewsets, filters, status, serializers
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
 from django.db.models import Q
-from drf_spectacular.utils import extend_schema, OpenApiParameter
+from drf_spectacular.utils import extend_schema, OpenApiParameter, inline_serializer
 
 from .models import (
     LeaveSettings, LeaveType, LeaveBalance, LeaveRequest,
@@ -158,11 +158,14 @@ class AdminLeaveBalanceViewSet(viewsets.ModelViewSet):
     @extend_schema(
         tags=['Leave Management - Admin'],
         summary='Initialize balances for user',
-        parameters=[
-            OpenApiParameter('user_id', int, description='User ID', required=True),
-            OpenApiParameter('year', int, description='Year (optional, defaults to current year)')
-        ],
-        request=None  # No request body needed, params are in query/URL
+        request=inline_serializer(
+            name='InitializeUserRequest',
+            fields={
+                'user_id': serializers.IntegerField(required=True, help_text='User ID'),
+                'year': serializers.IntegerField(required=False, help_text='Year (optional, defaults to current year)'),
+            }
+        ),
+        responses={200: LeaveBalanceDetailSerializer}
     )
     @action(detail=False, methods=['post'])
     def initialize_user(self, request):
@@ -197,11 +200,20 @@ class AdminLeaveBalanceViewSet(viewsets.ModelViewSet):
     @extend_schema(
         tags=['Leave Management - Admin'],
         summary='Carry forward balances',
-        parameters=[
-            OpenApiParameter('from_year', int, description='Year to carry forward from', required=True),
-            OpenApiParameter('to_year', int, description='Year to carry forward to', required=True)
-        ],
-        request=None  # No request body needed, params are in query/URL
+        request=inline_serializer(
+            name='CarryForwardRequest',
+            fields={
+                'from_year': serializers.IntegerField(required=True, help_text='Year to carry forward from'),
+                'to_year': serializers.IntegerField(required=True, help_text='Year to carry forward to'),
+            }
+        ),
+        responses={200: inline_serializer(
+            name='CarryForwardResponse',
+            fields={
+                'success': serializers.BooleanField(),
+                'message': serializers.CharField(),
+            }
+        )}
     )
     @action(detail=False, methods=['post'])
     def carry_forward(self, request):
