@@ -492,7 +492,14 @@ class ClientOrderViewSet(viewsets.ModelViewSet):
                 response_data = output_serializer.data
                 response_data['payment_method'] = 'saved_card'
                 response_data['bog_order_id'] = payment_result['order_id']
-                response_data['message'] = 'Order charged to saved card'
+
+                # Check if user authentication is required (3D Secure)
+                if payment_result.get('requires_authentication'):
+                    response_data['payment_url'] = payment_result['payment_url']
+                    response_data['message'] = 'Please complete payment authentication'
+                else:
+                    response_data['message'] = 'Order charged to saved card'
+
                 return Response(response_data, status=status.HTTP_201_CREATED)
 
             except ClientCard.DoesNotExist:

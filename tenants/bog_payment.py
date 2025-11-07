@@ -434,9 +434,12 @@ class BOGPaymentService:
                 order_id = data['id']
                 details_url = data['_links']['details']['href']
 
-                logger.info(f'Saved card charged: new_order_id={order_id}, parent={parent_order_id}, amount={amount}{currency}')
+                # Check if BOG requires user authentication (3D Secure, etc.)
+                payment_url = data.get('_links', {}).get('redirect', {}).get('href')
 
-                return {
+                logger.info(f'Saved card charged: new_order_id={order_id}, parent={parent_order_id}, amount={amount}{currency}, payment_url={payment_url}')
+
+                result = {
                     'order_id': order_id,
                     'parent_order_id': parent_order_id,
                     'details_url': details_url,
@@ -444,6 +447,15 @@ class BOGPaymentService:
                     'currency': currency,
                     'status': 'processing'
                 }
+
+                # If payment URL is provided, user needs to authenticate
+                if payment_url:
+                    result['payment_url'] = payment_url
+                    result['requires_authentication'] = True
+                else:
+                    result['requires_authentication'] = False
+
+                return result
             else:
                 error_msg = f'Saved card charge failed: {response.status_code} - {response.text}'
                 logger.error(error_msg)
