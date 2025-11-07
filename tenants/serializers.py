@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model, authenticate
 from rest_framework.authtoken.models import Token
-from .models import Tenant, SavedCard
+from .models import Tenant, SavedCard, TenantSubscription, Package
 
 User = get_user_model()
 
@@ -400,6 +400,40 @@ class SavedCardSerializer(serializers.ModelSerializer):
         model = SavedCard
         fields = (
             'id', 'card_type', 'masked_card_number', 'card_expiry',
-            'saved_at', 'is_active', 'is_default'
+            'saved_at', 'is_active', 'is_default', 'card_save_type'
         )
-        read_only_fields = ('id', 'card_type', 'masked_card_number', 'card_expiry', 'saved_at')
+        read_only_fields = ('id', 'card_type', 'masked_card_number', 'card_expiry', 'saved_at', 'card_save_type')
+
+
+class PackageSerializer(serializers.ModelSerializer):
+    """Serializer for Package model"""
+
+    class Meta:
+        model = Package
+        fields = (
+            'id', 'name', 'display_name', 'description', 'pricing_model',
+            'price_gel', 'is_active', 'is_custom', 'max_users',
+            'max_storage_gb', 'max_whatsapp_messages'
+        )
+        read_only_fields = ('id',)
+
+
+class TenantSubscriptionSerializer(serializers.ModelSerializer):
+    """Serializer for TenantSubscription model with upgrade information"""
+
+    package = PackageSerializer(read_only=True)
+    pending_package = PackageSerializer(read_only=True)
+
+    class Meta:
+        model = TenantSubscription
+        fields = (
+            'id', 'tenant', 'package', 'is_active', 'starts_at', 'expires_at',
+            'current_users', 'whatsapp_messages_used', 'storage_used_gb',
+            'last_billed_at', 'next_billing_date', 'is_trial', 'trial_ends_at',
+            'subscription_type', 'pending_package', 'upgrade_scheduled_for',
+            'created_at', 'updated_at'
+        )
+        read_only_fields = (
+            'id', 'tenant', 'starts_at', 'current_users', 'whatsapp_messages_used',
+            'storage_used_gb', 'created_at', 'updated_at'
+        )

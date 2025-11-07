@@ -163,6 +163,30 @@ def get_subscription_info(request):
 
     package = subscription.package
 
+    # Build subscription info with upgrade details
+    subscription_data = {
+        'is_active': subscription.is_active,
+        'starts_at': subscription.starts_at,
+        'expires_at': subscription.expires_at,
+        'monthly_cost': float(subscription.monthly_cost),
+        'agent_count': subscription.agent_count,
+        'subscription_type': subscription.subscription_type,
+        'is_trial': subscription.is_trial,
+        'trial_ends_at': subscription.trial_ends_at,
+        'next_billing_date': subscription.next_billing_date,
+    }
+
+    # Add pending upgrade information if exists
+    if subscription.pending_package:
+        subscription_data['pending_upgrade'] = {
+            'package_id': subscription.pending_package.id,
+            'package_name': subscription.pending_package.display_name,
+            'scheduled_for': subscription.upgrade_scheduled_for,
+            'new_monthly_cost': float(subscription.pending_package.price_gel)
+        }
+    else:
+        subscription_data['pending_upgrade'] = None
+
     return {
         'has_subscription': True,
         'package': {
@@ -170,13 +194,7 @@ def get_subscription_info(request):
             'name': package.display_name,
             'pricing_model': package.get_pricing_model_display(),
         },
-        'subscription': {
-            'is_active': subscription.is_active,
-            'starts_at': subscription.starts_at,
-            'expires_at': subscription.expires_at,
-            'monthly_cost': float(subscription.monthly_cost),
-            'agent_count': subscription.agent_count,
-        },
+        'subscription': subscription_data,
         'features': {
             'ticket_management': package.ticket_management,
             'email_integration': package.email_integration,
