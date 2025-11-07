@@ -74,7 +74,7 @@ class ClientProfileViewSet(viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
-        tags=['Client - Profile'],
+        tags=['Ecommerce Client - Profile'],
         summary='Get authenticated client profile',
         description='Get the profile information of the authenticated client'
     )
@@ -85,7 +85,7 @@ class ClientProfileViewSet(viewsets.GenericViewSet):
         return Response(serializer.data)
 
     @extend_schema(
-        tags=['Client - Profile'],
+        tags=['Ecommerce Client - Profile'],
         summary='Update authenticated client profile',
         description='Update the profile information of the authenticated client'
     )
@@ -124,7 +124,7 @@ class ClientProductViewSet(viewsets.ReadOnlyModelViewSet):
         return context
 
     @extend_schema(
-        tags=['Client - Products'],
+        tags=['Ecommerce Client - Products'],
         summary='List products',
         description='Browse active products'
     )
@@ -132,7 +132,7 @@ class ClientProductViewSet(viewsets.ReadOnlyModelViewSet):
         return super().list(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Client - Products'],
+        tags=['Ecommerce Client - Products'],
         summary='Get product details',
         description='View detailed product information'
     )
@@ -162,7 +162,7 @@ class ClientAddressViewSet(viewsets.ModelViewSet):
         serializer.save(client=self.request.user)
 
     @extend_schema(
-        tags=['Client - Addresses'],
+        tags=['Ecommerce Client - Addresses'],
         summary='List my addresses',
         description='Get all delivery addresses for authenticated client'
     )
@@ -170,7 +170,7 @@ class ClientAddressViewSet(viewsets.ModelViewSet):
         return super().list(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Client - Addresses'],
+        tags=['Ecommerce Client - Addresses'],
         summary='Get address details',
         description='View details of a specific address'
     )
@@ -178,7 +178,7 @@ class ClientAddressViewSet(viewsets.ModelViewSet):
         return super().retrieve(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Client - Addresses'],
+        tags=['Ecommerce Client - Addresses'],
         summary='Create new address',
         description='Add a new delivery address (client auto-set from token)'
     )
@@ -186,28 +186,28 @@ class ClientAddressViewSet(viewsets.ModelViewSet):
         return super().create(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Client - Addresses'],
+        tags=['Ecommerce Client - Addresses'],
         summary='Update address'
     )
     def update(self, request, *args, **kwargs):
         return super().update(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Client - Addresses'],
+        tags=['Ecommerce Client - Addresses'],
         summary='Partially update address'
     )
     def partial_update(self, request, *args, **kwargs):
         return super().partial_update(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Client - Addresses'],
+        tags=['Ecommerce Client - Addresses'],
         summary='Delete address'
     )
     def destroy(self, request, *args, **kwargs):
         return super().destroy(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Client - Addresses'],
+        tags=['Ecommerce Client - Addresses'],
         summary='Set address as default'
     )
     @action(detail=True, methods=['post'])
@@ -252,7 +252,7 @@ class ClientFavoriteViewSet(viewsets.ModelViewSet):
         serializer.save(client=self.request.user)
 
     @extend_schema(
-        tags=['Client - Favorites'],
+        tags=['Ecommerce Client - Favorites'],
         summary='List my favorites',
         description='Get all favorite products for authenticated client'
     )
@@ -260,14 +260,14 @@ class ClientFavoriteViewSet(viewsets.ModelViewSet):
         return super().list(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Client - Favorites'],
+        tags=['Ecommerce Client - Favorites'],
         summary='Add to favorites'
     )
     def create(self, request, *args, **kwargs):
         return super().create(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Client - Favorites'],
+        tags=['Ecommerce Client - Favorites'],
         summary='Remove from favorites'
     )
     def destroy(self, request, *args, **kwargs):
@@ -292,7 +292,7 @@ class ClientCartViewSet(viewsets.ModelViewSet):
         return Cart.objects.filter(client=self.request.user)
 
     @extend_schema(
-        tags=['Client - Cart'],
+        tags=['Ecommerce Client - Cart'],
         summary='Get or create active cart',
         description='Get authenticated client\'s active cart or create new one'
     )
@@ -313,7 +313,7 @@ class ClientCartViewSet(viewsets.ModelViewSet):
         })
 
     @extend_schema(
-        tags=['Client - Cart'],
+        tags=['Ecommerce Client - Cart'],
         summary='Set delivery address',
         description='Set or update delivery address for authenticated client\'s active cart'
     )
@@ -343,7 +343,7 @@ class ClientCartViewSet(viewsets.ModelViewSet):
             return Response({'error': 'Address not found'}, status=status.HTTP_404_NOT_FOUND)
 
     @extend_schema(
-        tags=['Client - Cart'],
+        tags=['Ecommerce Client - Cart'],
         summary='Set payment card',
         description='Set or update payment card for authenticated client\'s active cart'
     )
@@ -393,7 +393,7 @@ class ClientCartItemViewSet(viewsets.ModelViewSet):
         return CartItemSerializer
 
     @extend_schema(
-        tags=['Client - Cart Items'],
+        tags=['Ecommerce Client - Cart Items'],
         summary='List cart items',
         description='Get items in authenticated client\'s carts'
     )
@@ -401,21 +401,21 @@ class ClientCartItemViewSet(viewsets.ModelViewSet):
         return super().list(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Client - Cart Items'],
+        tags=['Ecommerce Client - Cart Items'],
         summary='Add item to cart'
     )
     def create(self, request, *args, **kwargs):
         return super().create(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Client - Cart Items'],
+        tags=['Ecommerce Client - Cart Items'],
         summary='Update cart item quantity'
     )
     def update(self, request, *args, **kwargs):
         return super().update(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Client - Cart Items'],
+        tags=['Ecommerce Client - Cart Items'],
         summary='Remove item from cart'
     )
     def destroy(self, request, *args, **kwargs):
@@ -444,7 +444,7 @@ class ClientOrderViewSet(viewsets.ModelViewSet):
         return OrderSerializer
 
     @extend_schema(
-        tags=['Client - Orders'],
+        tags=['Ecommerce Client - Orders'],
         summary='List my orders',
         description='Get all orders for authenticated client'
     )
@@ -452,7 +452,7 @@ class ClientOrderViewSet(viewsets.ModelViewSet):
         return super().list(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Client - Orders'],
+        tags=['Ecommerce Client - Orders'],
         summary='Get order details',
         description='View detailed order information'
     )
@@ -460,7 +460,7 @@ class ClientOrderViewSet(viewsets.ModelViewSet):
         return super().retrieve(request, *args, **kwargs)
 
     @extend_schema(
-        tags=['Client - Orders'],
+        tags=['Ecommerce Client - Orders'],
         summary='Create order from cart',
         description='Submit cart and create order with automatic BOG payment URL generation or saved card charge'
     )
@@ -627,7 +627,7 @@ class ClientOrderViewSet(viewsets.ModelViewSet):
 
 
 @extend_schema(
-    tags=['Client - Cards'],
+    tags=['Ecommerce Client - Cards'],
     summary='Add new payment card',
     description='Initiate 0 GEL card validation payment to save a new card for future orders'
 )
@@ -714,7 +714,7 @@ def add_client_card(request):
 
 
 @extend_schema(
-    tags=['Client - Cards'],
+    tags=['Ecommerce Client - Cards'],
     summary='List saved payment cards',
     description='Get all saved payment cards for the authenticated client'
 )
@@ -734,7 +734,7 @@ def list_client_cards(request):
 
 
 @extend_schema(
-    tags=['Client - Cards'],
+    tags=['Ecommerce Client - Cards'],
     summary='Delete payment card',
     description='Soft-delete a saved payment card'
 )
@@ -763,7 +763,7 @@ def delete_client_card(request, card_id):
 
 
 @extend_schema(
-    tags=['Client - Cards'],
+    tags=['Ecommerce Client - Cards'],
     summary='Set default payment card',
     description='Set a card as the default payment method for the authenticated client'
 )
