@@ -275,21 +275,21 @@ class TenantSubscription(models.Model):
     Tracks tenant's current subscription and usage
     """
     tenant = models.OneToOneField(Tenant, on_delete=models.CASCADE, related_name='subscription')
-    package = models.ForeignKey(Package, on_delete=models.CASCADE)
-    
+    package = models.ForeignKey(Package, on_delete=models.CASCADE, related_name='subscriptions')
+
     # Subscription status
     is_active = models.BooleanField(default=True)
     starts_at = models.DateTimeField()
     expires_at = models.DateTimeField(null=True, blank=True)
-    
-    # Agent-based pricing info
-    agent_count = models.IntegerField(default=1, help_text="Number of agents for agent-based pricing")
-    
+
+    # Agent-based pricing info (DEPRECATED - keeping for backward compatibility)
+    agent_count = models.IntegerField(default=1, help_text="DEPRECATED: Number of agents for agent-based pricing")
+
     # Usage tracking
     current_users = models.IntegerField(default=0)
     whatsapp_messages_used = models.IntegerField(default=0)
     storage_used_gb = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    
+
     # Billing
     last_billed_at = models.DateTimeField(null=True, blank=True)
     next_billing_date = models.DateTimeField(null=True, blank=True)
@@ -301,6 +301,31 @@ class TenantSubscription(models.Model):
 
     # Saved card for recurring payments
     parent_order_id = models.CharField(max_length=100, blank=True, null=True, help_text='BOG order ID with saved card')
+
+    # Package upgrade tracking
+    pending_package = models.ForeignKey(
+        Package,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='pending_upgrades',
+        help_text='Package to upgrade to at next billing cycle'
+    )
+    upgrade_scheduled_for = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text='Date when scheduled upgrade will take effect'
+    )
+    subscription_type = models.CharField(
+        max_length=20,
+        choices=[
+            ('trial', 'Trial'),
+            ('paid', 'Paid'),
+            ('upgrading', 'Upgrading'),
+        ],
+        default='paid',
+        help_text='Current subscription type'
+    )
 
     # Metadata
     created_at = models.DateTimeField(auto_now_add=True)
@@ -397,6 +422,17 @@ class SavedCard(models.Model):
         help_text='BOG parent order ID used for recurring payments'
     )
 
+    # Card save type - determines which BOG endpoint was used
+    card_save_type = models.CharField(
+        max_length=20,
+        choices=[
+            ('subscription', 'Subscription (fixed amount)'),
+            ('ecommerce', 'Ecommerce (variable amount)'),
+        ],
+        default='subscription',
+        help_text='Type of card save: subscription (BOG /subscriptions endpoint - fixed recurring amount) or ecommerce (BOG /cards endpoint - variable amounts)'
+    )
+
     # Card details (masked/safe to store)
     card_type = models.CharField(
         max_length=20,
@@ -465,11 +501,11 @@ class PaymentOrder(models.Model):
     order_id = models.CharField(max_length=100, unique=True, db_index=True)
     bog_order_id = models.CharField(max_length=100, blank=True, null=True, help_text='BOG internal order ID for saved card charging')
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, null=True, blank=True)
-    package = models.ForeignKey(Package, on_delete=models.CASCADE, null=True, blank=True, help_text='Package for subscription payments. Null for card-only payments.')
+    package = models.ForeignKey(Package, on_delete=models.CASCADE, null=True, blank=True, related_name='payment_orders', help_text='Package for subscription payments. Null for card-only payments.')
 
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     currency = models.CharField(max_length=3, default='GEL')
-    agent_count = models.IntegerField(default=1)
+    agent_count = models.IntegerField(default=1, help_text='DEPRECATED: Agent count for old pricing model')
 
     status = models.CharField(
         max_length=20,
@@ -485,6 +521,21 @@ class PaymentOrder(models.Model):
     payment_url = models.URLField(max_length=500, blank=True)
     card_saved = models.BooleanField(default=False, help_text='Whether card was saved for recurring payments')
     is_trial_payment = models.BooleanField(default=False, help_text='Whether this is a 0 GEL trial payment')
+
+    # Package upgrade tracking
+    is_immediate_upgrade = models.BooleanField(
+        default=False,
+        help_text='Whether this payment is for an immediate package upgrade'
+    )
+    previous_package = models.ForeignKey(
+        Package,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='upgrade_from_orders',
+        help_text='Previous package before upgrade (for audit trail)'
+    )
+
     metadata = models.JSONField(default=dict, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)

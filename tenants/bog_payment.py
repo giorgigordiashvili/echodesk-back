@@ -503,6 +503,133 @@ class BOGPaymentService:
             logger.error(f'Error deleting saved card: {e}')
             return False
 
+    def enable_subscription_card_saving(self, order_id: str) -> bool:
+        """
+        Enable card saving for subscription recurring payments (fixed amount)
+
+        Uses BOG /subscriptions endpoint which allows charging the same amount repeatedly.
+        Different from enable_card_saving() which uses /cards and allows variable amounts.
+
+        Documentation: https://api.bog.ge/docs/en/payments/saved-card/offline-payment
+
+        Args:
+            order_id: The BOG order ID from create_payment()
+
+        Returns:
+            True if card saving enabled successfully, False otherwise
+        """
+        if not self.is_configured():
+            raise ValueError('BOG payment gateway is not configured')
+
+        try:
+            access_token = self._get_access_token()
+
+            headers = {
+                'Authorization': f'Bearer {access_token}'
+            }
+
+            # Use subscription endpoint: PUT /orders/{order_id}/subscriptions
+            response = requests.put(
+                f'{self.base_url}/orders/{order_id}/subscriptions',
+                headers=headers,
+                timeout=30
+            )
+
+            if response.status_code == 202:  # 202 Accepted
+                logger.info(f'Subscription card saving enabled for order: {order_id}')
+                return True
+            else:
+                logger.error(f'Failed to enable subscription card saving: {response.status_code} - {response.text}')
+                return False
+
+        except requests.RequestException as e:
+            logger.error(f'Error enabling subscription card saving: {e}')
+            return False
+
+    def charge_subscription(
+        self,
+        parent_order_id: str,
+        callback_url: str = '',
+        external_order_id: str = None
+    ) -> Dict:
+        """
+        Charge a saved subscription card with the SAME amount as the original payment
+
+        Uses BOG /subscribe endpoint which automatically charges the same amount.
+        Different from charge_saved_card() which allows specifying different amounts.
+
+        Documentation: https://api.bog.ge/docs/en/payments/saved-card/offline-payment
+
+        Args:
+            parent_order_id: The original order ID where card was saved with /subscriptions
+            callback_url: Webhook URL for payment updates
+            external_order_id: Optional custom order ID for tracking
+
+        Returns:
+            Dict with order_id and details_url
+        """
+        if not self.is_configured():
+            raise ValueError('BOG payment gateway is not configured')
+
+        try:
+            access_token = self._get_access_token()
+
+            # Build minimal payload - amount is not specified, BOG charges same amount as original
+            payload = {}
+
+            if callback_url:
+                payload['callback_url'] = callback_url
+            if external_order_id:
+                payload['external_order_id'] = external_order_id
+
+            headers = {
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {access_token}',
+                'Accept-Language': 'en'
+            }
+
+            # POST to /ecommerce/orders/{parent_order_id}/subscribe
+            response = requests.post(
+                f'{self.base_url}/ecommerce/orders/{parent_order_id}/subscribe',
+                json=payload,
+                headers=headers,
+                timeout=30
+            )
+
+            if response.status_code in [200, 201]:
+                data = response.json()
+                order_id = data['id']
+                details_url = data['_links']['details']['href']
+
+                # Check if payment URL is provided (requires authentication)
+                payment_url = data.get('_links', {}).get('redirect', {}).get('href')
+
+                logger.info(f'Subscription charged: new_order_id={order_id}, parent={parent_order_id}, payment_url={payment_url}')
+
+                result = {
+                    'order_id': order_id,
+                    'parent_order_id': parent_order_id,
+                    'details_url': details_url,
+                    'status': 'processing'
+                }
+
+                # If payment URL is provided, user needs to authenticate
+                if payment_url:
+                    result['payment_url'] = payment_url
+                    result['requires_authentication'] = True
+                else:
+                    result['requires_authentication'] = False
+
+                return result
+            else:
+                error_msg = f'Subscription charge failed: {response.status_code} - {response.text}'
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+
+        except requests.RequestException as e:
+            logger.error(f'Error charging subscription: {e}')
+            raise ValueError(f'Subscription charge error: {str(e)}')
+
     def create_trial_payment_with_card_save(
         self,
         package,
@@ -574,12 +701,13 @@ class BOGPaymentService:
             }
         )
 
-        # Enable card saving on this order (MUST be called before user pays)
+        # Enable card saving on this order using subscription endpoint (MUST be called before user pays)
+        # Uses /subscriptions endpoint which allows recurring charges of the same amount
         bog_order_id = payment_result['order_id']
-        card_saving_enabled = self.enable_card_saving(bog_order_id)
+        card_saving_enabled = self.enable_subscription_card_saving(bog_order_id)
 
         if not card_saving_enabled:
-            logger.warning(f'Failed to enable card saving for trial payment: {bog_order_id}')
+            logger.warning(f'Failed to enable subscription card saving for trial payment: {bog_order_id}')
 
         payment_result['card_saving_enabled'] = card_saving_enabled
         payment_result['subscription_amount'] = subscription_amount
