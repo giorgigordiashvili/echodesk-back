@@ -647,28 +647,36 @@ def add_client_card(request):
     client = request.user
 
     try:
-        # Get ecommerce settings
-        ecommerce_settings = EcommerceSettings.objects.get(tenant=request.tenant)
+        # Try to get ecommerce settings
+        try:
+            ecommerce_settings = EcommerceSettings.objects.get(tenant=request.tenant)
+            logger.info(f'Ecommerce settings found for tenant {request.tenant.schema_name}')
+        except EcommerceSettings.DoesNotExist:
+            ecommerce_settings = None
+            logger.info(f'No ecommerce settings for tenant {request.tenant.schema_name}, will use environment credentials')
 
-        # Configure BOG service with tenant credentials
+        # Configure BOG service with tenant or environment credentials
         bog_service = BOGPaymentService()
 
-        if ecommerce_settings.has_bog_credentials:
+        if ecommerce_settings and ecommerce_settings.has_bog_credentials:
             # Use tenant's own BOG credentials
+            logger.info(f'Using tenant BOG credentials for {request.tenant.schema_name}')
             bog_service.client_id = ecommerce_settings.bog_client_id
             bog_service.client_secret = ecommerce_settings.get_bog_secret()
             bog_service.auth_url = settings.BOG_AUTH_URL
             bog_service.base_url = settings.BOG_API_BASE_URL
         else:
             # Use credentials from environment variables
+            logger.info(f'Using environment BOG credentials for {request.tenant.schema_name}')
             bog_service.client_id = settings.BOG_CLIENT_ID
             bog_service.client_secret = settings.BOG_CLIENT_SECRET
             bog_service.auth_url = settings.BOG_AUTH_URL
             bog_service.base_url = settings.BOG_API_BASE_URL
 
         if not bog_service.is_configured():
+            logger.error(f'BOG service not configured properly. client_id: {bool(bog_service.client_id)}, client_secret: {bool(bog_service.client_secret)}')
             return Response({
-                'error': 'Payment gateway not configured'
+                'error': 'Payment gateway not configured - missing BOG credentials'
             }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
         # Generate unique order ID for card validation
@@ -676,7 +684,7 @@ def add_client_card(request):
 
         # Get callback and return URLs
         callback_url = f"https://{request.get_host()}/api/ecommerce/payment-webhook/"
-        return_url = ecommerce_settings.payment_return_url or f'https://{request.tenant.schema_name}.echodesk.ge/payment/success'
+        return_url = ecommerce_settings.payment_return_url if ecommerce_settings else f'https://{request.tenant.schema_name}.echodesk.ge/payment/success'
 
         # Create 0 GEL payment for card validation
         try:
@@ -748,10 +756,6 @@ def add_client_card(request):
                 'message': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    except EcommerceSettings.DoesNotExist:
-        return Response({
-            'error': 'Payment gateway not configured'
-        }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
     except Exception as e:
         logger.error(f'Unexpected error in add_client_card for client {client.id}: {str(e)}')
         return Response({
