@@ -34,6 +34,9 @@ from .permissions import (
     CanSendSocialMessages, CanManageSocialSettings
 )
 
+# Initialize logger
+logger = logging.getLogger(__name__)
+
 
 def convert_facebook_timestamp(timestamp):
     """Convert Facebook timestamp (Unix timestamp in milliseconds or seconds) to datetime object"""
