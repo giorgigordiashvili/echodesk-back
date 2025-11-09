@@ -19,10 +19,40 @@ from tenant_schemas.utils import schema_context
 from django.contrib.auth import get_user_model
 from django.db import transaction
 import logging
+import subprocess
+import sys
 
 User = get_user_model()
 
 logger = logging.getLogger(__name__)
+
+
+def trigger_tenant_processing(schema_name):
+    """
+    Trigger the tenant processing command in the background
+
+    This runs the process_pending_tenants command for a specific tenant
+    without blocking the webhook response.
+    """
+    try:
+        # Run the management command in the background
+        # Using subprocess.Popen to not wait for completion
+        subprocess.Popen(
+            [
+                sys.executable,  # Current Python interpreter
+                'manage.py',
+                'process_pending_tenants',
+                '--schema-name', schema_name
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            # Don't wait for the process to complete
+            close_fds=True
+        )
+        logger.info(f'Triggered background processing for tenant: {schema_name}')
+    except Exception as e:
+        logger.error(f'Failed to trigger tenant processing for {schema_name}: {e}')
+        # Don't fail the webhook if background trigger fails
 
 
 @extend_schema(
@@ -534,14 +564,16 @@ def bog_webhook(request):
                             logger.info(f'Saved card details for tenant {tenant.schema_name}: {card_type} {masked_card}')
 
                     # Mark registration as processed
-                    # Schema creation and migrations will be handled by a background task
                     pending_registration.is_processed = True
                     pending_registration.save()
 
                     logger.info(
                         f'Tenant record created: {tenant.schema_name}. '
-                        f'Schema creation and migrations will be handled asynchronously.'
+                        f'Triggering background processing for schema creation and migrations.'
                     )
+
+                    # Trigger the tenant processing command in the background
+                    trigger_tenant_processing(tenant.schema_name)
 
                     return Response({
                         'status': 'success',

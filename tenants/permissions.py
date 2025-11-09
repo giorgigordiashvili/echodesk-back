@@ -121,15 +121,27 @@ def check_subscription_limit(request, limit_type):
 
     if limit_type == 'users':
         current = subscription.current_users
-        limit = subscription.package.max_users or float('inf')
+        if subscription.package:
+            limit = subscription.package.max_users or float('inf')
+        else:
+            # Feature-based subscription: use agent_count as limit
+            limit = subscription.agent_count or float('inf')
         within_limit = subscription.can_add_user()
     elif limit_type == 'whatsapp':
         current = subscription.whatsapp_messages_used
-        limit = subscription.package.max_whatsapp_messages
+        if subscription.package:
+            limit = subscription.package.max_whatsapp_messages
+        else:
+            # Feature-based subscription: default limit
+            limit = 10000
         within_limit = subscription.can_send_whatsapp_message()
     elif limit_type == 'storage':
         current = float(subscription.storage_used_gb)
-        limit = subscription.package.max_storage_gb
+        if subscription.package:
+            limit = subscription.package.max_storage_gb
+        else:
+            # Feature-based subscription: default 100GB
+            limit = 100
         within_limit = not subscription.is_over_storage_limit
     else:
         return {
