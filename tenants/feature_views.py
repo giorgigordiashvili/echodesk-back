@@ -5,7 +5,7 @@ API views for Feature and Permission management
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.shortcuts import get_object_or_404
 
 from .models import (
@@ -28,7 +28,7 @@ class FeatureViewSet(viewsets.ReadOnlyModelViewSet):
     """
     queryset = Feature.objects.filter(is_active=True).prefetch_related('permissions__permission')
     serializer_class = FeatureSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]  # Public endpoint for pricing calculator and registration
 
     def get_queryset(self):
         """Filter features by category if provided"""
