@@ -364,32 +364,49 @@ class User(AbstractBaseUser):
             list: List of feature keys the user can access
 
         Logic:
-            - Features come from tenant's subscription package (what's available)
+            - Features come from tenant's subscription (package-based OR feature-based)
             - User's tenant groups determine which features they can actually use
-            - Returns intersection of package features and group features
+            - Returns intersection of subscription features and group features
             - If user has no groups, returns empty list (except superadmin)
-            - Superuser gets all package features regardless of groups
+            - Superuser gets all subscription features regardless of groups
         """
         from django.db import connection
         from tenants.models import Tenant
         from tenants.feature_models import PackageFeature
 
         try:
-            # Superuser gets all package features
-            if self.is_superuser:
-                tenant = Tenant.objects.get(schema_name=connection.schema_name)
-                subscription = tenant.current_subscription
-                if not subscription or not subscription.is_active:
-                    return []
-                package = subscription.package
-                if not package:
-                    return []
-                return list(
+            # Get tenant's subscription
+            tenant = Tenant.objects.get(schema_name=connection.schema_name)
+            subscription = tenant.current_subscription
+            if not subscription or not subscription.is_active:
+                return []
+
+            # Determine available features from subscription
+            subscription_feature_keys = set()
+
+            # Check if this is a feature-based subscription
+            if subscription.selected_features.exists():
+                # Feature-based subscription: get features from selected_features
+                subscription_feature_keys = set(
+                    subscription.selected_features.filter(
+                        is_active=True
+                    ).values_list('key', flat=True)
+                )
+            elif subscription.package:
+                # Package-based subscription: get features from package
+                subscription_feature_keys = set(
                     PackageFeature.objects.filter(
-                        package=package,
+                        package=subscription.package,
                         feature__is_active=True
                     ).values_list('feature__key', flat=True)
                 )
+            else:
+                # No package and no selected features = no access
+                return []
+
+            # Superuser gets all subscription features
+            if self.is_superuser:
+                return list(subscription_feature_keys)
 
             # Get feature keys from user's tenant groups
             group_feature_keys = set()
@@ -400,25 +417,8 @@ class User(AbstractBaseUser):
             if not group_feature_keys:
                 return []
 
-            # Get tenant's available features from package
-            tenant = Tenant.objects.get(schema_name=connection.schema_name)
-            subscription = tenant.current_subscription
-            if not subscription or not subscription.is_active:
-                return []
-
-            package = subscription.package
-            if not package:
-                return []
-
-            package_feature_keys = set(
-                PackageFeature.objects.filter(
-                    package=package,
-                    feature__is_active=True
-                ).values_list('feature__key', flat=True)
-            )
-
-            # Return intersection: features that are both in package AND in user's groups
-            available_features = list(group_feature_keys & package_feature_keys)
+            # Return intersection: features that are both in subscription AND in user's groups
+            available_features = list(group_feature_keys & subscription_feature_keys)
             return available_features
 
         except Exception as e:
