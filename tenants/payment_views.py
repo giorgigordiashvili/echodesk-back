@@ -392,6 +392,16 @@ def bog_webhook(request):
 
                 # Create tenant in a transaction
                 with transaction.atomic():
+                    # Determine max_users and max_storage based on package or feature-based pricing
+                    if pending_registration.package:
+                        # Legacy package-based
+                        max_users = pending_registration.package.max_users or 1000
+                        max_storage = pending_registration.package.max_storage_gb * 1024
+                    else:
+                        # Feature-based pricing - use agent_count or default limits
+                        max_users = pending_registration.agent_count or 1000
+                        max_storage = 100 * 1024  # Default 100 GB
+
                     # Create tenant
                     tenant = Tenant.objects.create(
                         schema_name=pending_registration.schema_name,
@@ -400,8 +410,8 @@ def bog_webhook(request):
                         admin_email=pending_registration.admin_email,
                         admin_name=f"{pending_registration.admin_first_name} {pending_registration.admin_last_name}",
                         plan='paid',
-                        max_users=pending_registration.package.max_users or 1000,
-                        max_storage=pending_registration.package.max_storage_gb * 1024,
+                        max_users=max_users,
+                        max_storage=max_storage,
                         deployment_status='deploying',
                         is_active=True
                     )
@@ -471,10 +481,12 @@ def bog_webhook(request):
                             )
                             logger.info(f'Saved card details for tenant {tenant.schema_name}: {card_type} {masked_card}')
                     else:
-                        # Regular paid subscription
+                        # Regular paid subscription (no trial)
+                        parent_order_id_for_subscription = bog_order_id if card_saved_for_recurring else None
+
                         subscription = TenantSubscription.objects.create(
                             tenant=tenant,
-                            package=pending_registration.package,
+                            package=pending_registration.package,  # Can be None for feature-based
                             is_active=True,
                             starts_at=timezone.now(),
                             expires_at=timezone.now() + timedelta(days=30),
@@ -483,8 +495,43 @@ def bog_webhook(request):
                             whatsapp_messages_used=0,
                             storage_used_gb=0,
                             last_billed_at=timezone.now(),
-                            next_billing_date=timezone.now() + timedelta(days=30)
+                            next_billing_date=timezone.now() + timedelta(days=30),
+                            parent_order_id=parent_order_id_for_subscription  # Save BOG order ID for recurring charges
                         )
+
+                        # Add selected features for feature-based subscriptions
+                        if pending_registration.selected_features.exists():
+                            subscription.selected_features.set(pending_registration.selected_features.all())
+                            logger.info(f'Added {pending_registration.selected_features.count()} features to subscription for {tenant.schema_name}')
+
+                        # Generate invoice
+                        if payment_order.amount > 0:
+                            generate_invoice_for_payment(
+                                payment_order=payment_order,
+                                tenant=tenant,
+                                package=pending_registration.package,
+                                agent_count=pending_registration.agent_count
+                            )
+
+                        # Save card details if card was saved for recurring payments
+                        if card_saved_for_recurring and parent_order_id_for_subscription:
+                            card_type = payment_detail.get('card_type', '')
+                            masked_card = payment_detail.get('payer_identifier', '')
+                            card_expiry = payment_detail.get('card_expiry_date', '')
+
+                            SavedCard.objects.update_or_create(
+                                tenant=tenant,
+                                defaults={
+                                    'parent_order_id': parent_order_id_for_subscription,
+                                    'card_type': card_type,
+                                    'masked_card_number': masked_card,
+                                    'card_expiry': card_expiry,
+                                    'transaction_id': transaction_id,
+                                    'is_active': True,
+                                    'card_save_type': 'subscription'  # Fixed amount recurring
+                                }
+                            )
+                            logger.info(f'Saved card details for tenant {tenant.schema_name}: {card_type} {masked_card}')
 
                     # Mark registration as processed
                     # Schema creation and migrations will be handled by a background task
