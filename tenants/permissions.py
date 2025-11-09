@@ -81,8 +81,15 @@ def has_subscription_feature(request, feature_name):
     if not subscription:
         return False
 
-    package = subscription.package
-    return getattr(package, feature_name, False)
+    # New feature-based model: check selected_features
+    if subscription.selected_features.exists():
+        return subscription.selected_features.filter(key=feature_name).exists()
+
+    # Legacy package-based model: check package boolean fields
+    if subscription.package:
+        return getattr(subscription.package, feature_name, False)
+
+    return False
 
 
 def check_subscription_limit(request, limit_type):

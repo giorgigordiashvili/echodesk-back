@@ -275,15 +275,31 @@ class TenantSubscription(models.Model):
     Tracks tenant's current subscription and usage
     """
     tenant = models.OneToOneField(Tenant, on_delete=models.CASCADE, related_name='subscription')
-    package = models.ForeignKey(Package, on_delete=models.CASCADE, related_name='subscriptions')
+    package = models.ForeignKey(
+        Package,
+        on_delete=models.CASCADE,
+        related_name='subscriptions',
+        null=True,
+        blank=True,
+        help_text="DEPRECATED: Legacy package reference (kept for backward compatibility)"
+    )
+
+    # Feature-based subscription
+    selected_features = models.ManyToManyField(
+        Feature,
+        related_name='subscriptions',
+        blank=True,
+        help_text="Features selected for this subscription"
+    )
+    agent_count = models.IntegerField(
+        default=10,
+        help_text="Number of agents (in increments of 10: 10, 20, 30... 200)"
+    )
 
     # Subscription status
     is_active = models.BooleanField(default=True)
     starts_at = models.DateTimeField()
     expires_at = models.DateTimeField(null=True, blank=True)
-
-    # Agent-based pricing info (DEPRECATED - keeping for backward compatibility)
-    agent_count = models.IntegerField(default=1, help_text="DEPRECATED: Number of agents for agent-based pricing")
 
     # Usage tracking
     current_users = models.IntegerField(default=0)
@@ -335,21 +351,43 @@ class TenantSubscription(models.Model):
         db_table = 'tenants_tenant_subscription'
     
     def __str__(self):
-        return f"{self.tenant.name} - {self.package.display_name}"
+        if self.package:
+            return f"{self.tenant.name} - {self.package.display_name}"
+        feature_count = self.selected_features.count()
+        return f"{self.tenant.name} - {self.agent_count} agents, {feature_count} features"
     
     @property
     def monthly_cost(self):
-        """Calculate monthly cost based on package and agent count"""
-        if self.package.pricing_model == PricingModel.AGENT_BASED:
-            return self.package.price_gel * self.agent_count
-        return self.package.price_gel
+        """Calculate monthly cost based on selected features and agent count"""
+        # New feature-based pricing model
+        if self.selected_features.exists():
+            total_cost_per_agent = sum(
+                feature.price_per_user_gel
+                for feature in self.selected_features.all()
+            )
+            return total_cost_per_agent * self.agent_count
+
+        # Legacy package-based pricing (for backward compatibility)
+        if self.package:
+            if self.package.pricing_model == PricingModel.AGENT_BASED:
+                return self.package.price_gel * self.agent_count
+            return self.package.price_gel
+
+        # No package and no features = free
+        return 0
     
     @property
     def is_over_user_limit(self):
         """Check if tenant is over user limit"""
-        if not self.package.max_users:
-            return False
-        return self.current_users > self.package.max_users
+        # New model: check against agent_count
+        if self.selected_features.exists():
+            return self.current_users > self.agent_count
+
+        # Legacy model: check against package max_users
+        if self.package and self.package.max_users:
+            return self.current_users > self.package.max_users
+
+        return False
     
     @property
     def is_over_whatsapp_limit(self):
@@ -365,9 +403,15 @@ class TenantSubscription(models.Model):
     
     def can_add_user(self):
         """Check if tenant can add another user"""
-        if not self.package.max_users:
-            return True
-        return self.current_users < self.package.max_users
+        # New model: check against agent_count
+        if self.selected_features.exists():
+            return self.current_users < self.agent_count
+
+        # Legacy model: check against package max_users
+        if self.package and self.package.max_users:
+            return self.current_users < self.package.max_users
+
+        return True  # No limit
     
     def can_send_whatsapp_message(self):
         """Check if tenant can send WhatsApp message (deprecated - always returns True)"""

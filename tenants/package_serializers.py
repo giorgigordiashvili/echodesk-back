@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from .models import Package, TenantSubscription, PricingModel
+from .feature_models import Feature
 from .feature_serializers import FeatureSerializer
 
 
@@ -116,18 +117,26 @@ class PackageListSerializer(serializers.ModelSerializer):
 class TenantSubscriptionSerializer(serializers.ModelSerializer):
     """Serializer for TenantSubscription model"""
     package_details = PackageSerializer(source='package', read_only=True)
+    selected_features = FeatureSerializer(many=True, read_only=True)
+    selected_feature_ids = serializers.PrimaryKeyRelatedField(
+        many=True,
+        queryset=Feature.objects.filter(is_active=True),
+        source='selected_features',
+        write_only=True,
+        required=False
+    )
     monthly_cost = serializers.ReadOnlyField()
     is_over_user_limit = serializers.ReadOnlyField()
     is_over_whatsapp_limit = serializers.ReadOnlyField()
     is_over_storage_limit = serializers.ReadOnlyField()
-    
+
     class Meta:
         model = TenantSubscription
         fields = [
-            'id', 'package', 'package_details', 'is_active', 'starts_at',
-            'expires_at', 'agent_count', 'current_users', 'whatsapp_messages_used',
-            'storage_used_gb', 'last_billed_at', 'next_billing_date',
-            'monthly_cost', 'is_over_user_limit', 'is_over_whatsapp_limit',
-            'is_over_storage_limit', 'created_at', 'updated_at'
+            'id', 'package', 'package_details', 'selected_features', 'selected_feature_ids',
+            'agent_count', 'is_active', 'starts_at', 'expires_at', 'current_users',
+            'whatsapp_messages_used', 'storage_used_gb', 'last_billed_at',
+            'next_billing_date', 'monthly_cost', 'is_over_user_limit',
+            'is_over_whatsapp_limit', 'is_over_storage_limit', 'created_at', 'updated_at'
         ]
         read_only_fields = ['created_at', 'updated_at']
