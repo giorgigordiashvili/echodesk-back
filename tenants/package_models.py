@@ -202,11 +202,25 @@ class TenantSubscription(models.Model):
     @property
     def is_over_whatsapp_limit(self):
         """Check if tenant is over WhatsApp message limit"""
+        # Feature-based subscriptions: default 10k limit
+        if self.selected_features.exists():
+            return self.whatsapp_messages_used > 10000
+
+        # Package-based subscriptions
+        if not self.package or not self.package.max_whatsapp_messages:
+            return False  # No limit set
         return self.whatsapp_messages_used > self.package.max_whatsapp_messages
-    
+
     @property
     def is_over_storage_limit(self):
         """Check if tenant is over storage limit"""
+        # Feature-based subscriptions: default 100GB limit
+        if self.selected_features.exists():
+            return self.storage_used_gb > 100
+
+        # Package-based subscriptions
+        if not self.package:
+            return False  # No limit set
         return self.storage_used_gb > self.package.max_storage_gb
     
     def can_add_user(self):
