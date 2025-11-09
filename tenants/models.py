@@ -669,9 +669,12 @@ class PendingRegistration(models.Model):
     admin_password = models.CharField(max_length=255)  # Will be hashed
     admin_first_name = models.CharField(max_length=100)
     admin_last_name = models.CharField(max_length=100)
+    preferred_language = models.CharField(max_length=5, default='en', help_text='User preferred language (en, ka, ru)')
 
-    package = models.ForeignKey(Package, on_delete=models.CASCADE)
-    agent_count = models.IntegerField(default=1)
+    # Legacy package-based or new feature-based
+    package = models.ForeignKey(Package, on_delete=models.CASCADE, null=True, blank=True)
+    selected_features = models.ManyToManyField(Feature, blank=True, help_text='Selected features for feature-based pricing')
+    agent_count = models.IntegerField(default=10, help_text='Number of agents (10-200 in increments of 10)')
     order_id = models.CharField(max_length=100, unique=True, db_index=True, blank=True, default='')
 
     # Status tracking

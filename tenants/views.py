@@ -541,9 +541,6 @@ def register_tenant_with_payment(request):
     try:
         import uuid
         with transaction.atomic():
-            # Only allow standard package selection (custom packages removed)
-            package = Package.objects.get(id=validated_data['package_id'], is_active=True, is_custom=False)
-
             # Generate schema name
             domain_name = validated_data['domain']
             schema_name = domain_name.lower().replace('-', '_')
@@ -562,8 +559,38 @@ def register_tenant_with_payment(request):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            # Get subscription amount (flat CRM-based pricing only)
-            subscription_amount = float(package.price_gel)
+            # Determine if this is feature-based or legacy package-based
+            is_custom = validated_data.get('is_custom', False)
+            package = None
+            selected_features = []
+            agent_count = validated_data.get('agent_count', 10)
+
+            if is_custom:
+                # Feature-based pricing
+                feature_ids = validated_data.get('feature_ids', [])
+                selected_features = Feature.objects.filter(id__in=feature_ids, is_active=True)
+
+                if not selected_features.exists():
+                    return Response(
+                        {'error': 'At least one valid feature must be selected'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+                # Calculate monthly subscription amount from features
+                subscription_amount = sum(
+                    float(feature.price_per_user_gel) * agent_count
+                    for feature in selected_features
+                )
+            else:
+                # Legacy package-based pricing
+                package_id = validated_data.get('package_id')
+                if not package_id:
+                    return Response(
+                        {'error': 'package_id is required when is_custom=false'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                package = Package.objects.get(id=package_id, is_active=True, is_custom=False)
+                subscription_amount = float(package.price_gel)
 
             # Generate unique order ID
             order_id = f"TRIAL-{uuid.uuid4().hex[:12].upper()}"
@@ -576,19 +603,24 @@ def register_tenant_with_payment(request):
                 admin_password=make_password(validated_data['admin_password']),
                 admin_first_name=validated_data['admin_first_name'],
                 admin_last_name=validated_data['admin_last_name'],
-                package=package,
-                agent_count=1,  # Default to 1 (deprecated field, kept for backward compatibility)
+                preferred_language=validated_data.get('preferred_language', 'en'),
+                package=package,  # Will be None for feature-based
+                agent_count=agent_count,
                 order_id=order_id
             )
+
+            # Add selected features for feature-based model
+            if is_custom and selected_features:
+                pending_registration.selected_features.set(selected_features)
 
             # Create payment order for 0 GEL trial (without tenant)
             payment_order = PaymentOrder.objects.create(
                 order_id=order_id,
                 tenant=None,  # No tenant yet
-                package=package,
+                package=package,  # Will be None for feature-based
                 amount=0.0,  # 0 GEL for trial
                 currency='GEL',
-                agent_count=1,  # Default to 1 (deprecated field)
+                agent_count=agent_count,
                 status='pending',
                 is_trial_payment=True,
                 metadata={
@@ -597,21 +629,25 @@ def register_tenant_with_payment(request):
                     'company_name': validated_data['company_name'],
                     'admin_email': validated_data['admin_email'],
                     'subscription_amount': subscription_amount,
-                    'trial_days': 14
+                    'trial_days': 14,
+                    'is_custom': is_custom,
+                    'feature_ids': list(selected_features.values_list('id', flat=True)) if is_custom else [],
+                    'agent_count': agent_count
                 }
             )
 
             # Create trial payment with card saving using BOG subscription endpoint
             payment_result = bog_service.create_trial_payment_with_card_save(
-                package=package,
-                agent_count=1,  # Default to 1 (deprecated parameter)
+                package=package,  # Can be None for feature-based
+                agent_count=agent_count,
                 customer_email=validated_data['admin_email'],
                 customer_name=f"{validated_data['admin_first_name']} {validated_data['admin_last_name']}",
                 company_name=validated_data['company_name'],
                 return_url_success=f"https://echodesk.ge/registration/success",
                 return_url_fail=f"https://echodesk.ge/registration/failed",
                 callback_url=f"https://api.echodesk.ge/api/payments/webhook/",
-                external_order_id=order_id
+                external_order_id=order_id,
+                subscription_amount=subscription_amount  # Pass the calculated amount
             )
 
             # Update payment order with payment details
@@ -623,7 +659,7 @@ def register_tenant_with_payment(request):
             payment_order.card_saved = card_saving_enabled
             payment_order.save()
 
-            logger.info(f"Trial registration initiated for {schema_name}: {order_id}, card_saving={card_saving_enabled}")
+            logger.info(f"Trial registration initiated for {schema_name}: {order_id}, is_custom={is_custom}, features={len(selected_features) if is_custom else 0}, agents={agent_count}, subscription_amount={subscription_amount}")
 
             return Response({
                 'payment_url': payment_result['payment_url'],
