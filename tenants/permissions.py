@@ -194,15 +194,18 @@ def get_subscription_info(request):
     else:
         subscription_data['pending_upgrade'] = None
 
-    return {
-        'has_subscription': True,
-        'package': {
+    # Determine if this is feature-based or package-based subscription
+    is_feature_based = package is None and subscription.selected_features.exists()
+
+    # Build package info
+    if package:
+        # Legacy package-based subscription
+        package_info = {
             'id': package.id,
             'name': package.display_name,
             'pricing_model': package.get_pricing_model_display(),
-        },
-        'subscription': subscription_data,
-        'features': {
+        }
+        features_dict = {
             'ticket_management': package.ticket_management,
             'email_integration': package.email_integration,
             'sip_calling': package.sip_calling,
@@ -214,12 +217,58 @@ def get_subscription_info(request):
             'custom_integrations': package.custom_integrations,
             'priority_support': package.priority_support,
             'dedicated_account_manager': package.dedicated_account_manager,
-        },
-        'limits': {
+            'ecommerce_crm': getattr(package, 'ecommerce_crm', False),
+            'order_management': getattr(package, 'order_management', False),
+            'user_management': getattr(package, 'user_management', False),
+            'settings': getattr(package, 'settings', True),
+        }
+        limits = {
             'max_users': package.max_users,
             'max_whatsapp_messages': package.max_whatsapp_messages,
             'max_storage_gb': package.max_storage_gb,
-        },
+        }
+    else:
+        # Feature-based subscription
+        package_info = {
+            'id': None,
+            'name': 'Custom Feature Package',
+            'pricing_model': 'Feature-based',
+        }
+
+        # Build features dict from selected_features
+        selected_feature_keys = list(subscription.selected_features.values_list('key', flat=True))
+        features_dict = {
+            'ticket_management': 'ticket_management' in selected_feature_keys,
+            'email_integration': 'email_integration' in selected_feature_keys,
+            'sip_calling': 'sip_calling' in selected_feature_keys,
+            'facebook_integration': 'facebook_integration' in selected_feature_keys,
+            'instagram_integration': 'instagram_integration' in selected_feature_keys,
+            'whatsapp_integration': 'whatsapp_integration' in selected_feature_keys,
+            'advanced_analytics': 'advanced_analytics' in selected_feature_keys,
+            'api_access': 'api_access' in selected_feature_keys,
+            'custom_integrations': 'custom_integrations' in selected_feature_keys,
+            'priority_support': 'priority_support' in selected_feature_keys,
+            'dedicated_account_manager': 'dedicated_account_manager' in selected_feature_keys,
+            'ecommerce_crm': 'ecommerce_crm' in selected_feature_keys,
+            'order_management': 'order_management' in selected_feature_keys,
+            'user_management': 'user_management' in selected_feature_keys,
+            'settings': 'settings' in selected_feature_keys,
+        }
+
+        # For feature-based, use agent_count as max_users
+        limits = {
+            'max_users': subscription.agent_count,
+            'max_whatsapp_messages': 10000,  # Default limit
+            'max_storage_gb': 100,  # Default 100GB
+        }
+
+    return {
+        'has_subscription': True,
+        'package': package_info,
+        'subscription': subscription_data,
+        'features': features_dict,
+        'selected_features': list(subscription.selected_features.values('id', 'key', 'name', 'price_per_user_gel')) if is_feature_based else [],
+        'limits': limits,
         'usage': {
             'current_users': subscription.current_users,
             'whatsapp_messages_used': subscription.whatsapp_messages_used,
