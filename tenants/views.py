@@ -593,7 +593,7 @@ def register_tenant_with_payment(request):
                 subscription_amount = float(package.price_gel)
 
             # Generate unique order ID
-            order_id = f"TRIAL-{uuid.uuid4().hex[:12].upper()}"
+            order_id = f"REG-{uuid.uuid4().hex[:12].upper()}"
 
             # Create pending registration
             pending_registration = PendingRegistration.objects.create(
@@ -613,31 +613,30 @@ def register_tenant_with_payment(request):
             if is_custom and selected_features:
                 pending_registration.selected_features.set(selected_features)
 
-            # Create payment order for 0 GEL trial (without tenant)
+            # Create payment order for first month subscription (without tenant)
             payment_order = PaymentOrder.objects.create(
                 order_id=order_id,
                 tenant=None,  # No tenant yet
                 package=package,  # Will be None for feature-based
-                amount=0.0,  # 0 GEL for trial
+                amount=subscription_amount,  # Charge first month upfront
                 currency='GEL',
                 agent_count=agent_count,
                 status='pending',
-                is_trial_payment=True,
+                is_trial_payment=False,
                 metadata={
                     'registration': True,
                     'schema_name': schema_name,
                     'company_name': validated_data['company_name'],
                     'admin_email': validated_data['admin_email'],
                     'subscription_amount': subscription_amount,
-                    'trial_days': 14,
                     'is_custom': is_custom,
                     'feature_ids': list(selected_features.values_list('id', flat=True)) if is_custom else [],
                     'agent_count': agent_count
                 }
             )
 
-            # Create trial payment with card saving using BOG subscription endpoint
-            payment_result = bog_service.create_trial_payment_with_card_save(
+            # Create subscription payment with card saving using BOG subscription endpoint
+            payment_result = bog_service.create_subscription_payment_with_card_save(
                 package=package,  # Can be None for feature-based
                 agent_count=agent_count,
                 customer_email=validated_data['admin_email'],
@@ -659,16 +658,14 @@ def register_tenant_with_payment(request):
             payment_order.card_saved = card_saving_enabled
             payment_order.save()
 
-            logger.info(f"Trial registration initiated for {schema_name}: {order_id}, is_custom={is_custom}, features={len(selected_features) if is_custom else 0}, agents={agent_count}, subscription_amount={subscription_amount}")
+            logger.info(f"Registration payment initiated for {schema_name}: {order_id}, is_custom={is_custom}, features={len(selected_features) if is_custom else 0}, agents={agent_count}, amount={subscription_amount}")
 
             return Response({
                 'payment_url': payment_result['payment_url'],
                 'order_id': order_id,
-                'amount': 0.0,
-                'subscription_amount': subscription_amount,
-                'trial_days': 14,
+                'amount': subscription_amount,
                 'currency': 'GEL',
-                'message': '14-day free trial initiated - card will be saved for automatic billing'
+                'message': 'Subscription payment initiated - card will be saved for automatic recurring billing'
             }, status=status.HTTP_200_OK)
 
     except Package.DoesNotExist:

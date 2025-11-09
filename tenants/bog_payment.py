@@ -630,6 +630,98 @@ class BOGPaymentService:
             logger.error(f'Error charging subscription: {e}')
             raise ValueError(f'Subscription charge error: {str(e)}')
 
+    def create_subscription_payment_with_card_save(
+        self,
+        package=None,
+        agent_count: int = 1,
+        customer_email: str = '',
+        customer_name: str = '',
+        company_name: str = '',
+        return_url_success: str = '',
+        return_url_fail: str = '',
+        callback_url: str = '',
+        external_order_id: str = None,
+        subscription_amount: float = None
+    ) -> Dict:
+        """
+        Create a subscription payment that charges the first month and saves card for recurring charges
+
+        Flow:
+        1. Charge the actual subscription amount upfront
+        2. Enable card saving for future recurring payments
+        3. Use the saved BOG order_id to charge for subsequent months
+
+        Args:
+            package: Package instance (optional for feature-based pricing)
+            agent_count: Number of agents (for agent-based pricing)
+            customer_email: Customer email
+            customer_name: Customer name
+            company_name: Company name
+            return_url_success: URL to redirect after successful payment
+            return_url_fail: URL to redirect after failed payment
+            callback_url: Webhook URL for payment updates
+            external_order_id: Optional custom order ID
+            subscription_amount: Pre-calculated subscription amount (for feature-based pricing)
+
+        Returns:
+            Dict with payment details including payment_url and order_id
+        """
+        from .models import PricingModel
+
+        # Calculate subscription amount
+        if subscription_amount is not None:
+            # Use provided subscription amount (feature-based pricing)
+            calculated_subscription_amount = subscription_amount
+            package_name = "Custom Feature Package"
+        elif package:
+            # Calculate from package (legacy)
+            if package.pricing_model == PricingModel.AGENT_BASED:
+                calculated_subscription_amount = float(package.price_gel) * agent_count
+            else:
+                calculated_subscription_amount = float(package.price_gel)
+            package_name = package.display_name
+        else:
+            raise ValueError("Either package or subscription_amount must be provided")
+
+        # Format description
+        description = f"EchoDesk Subscription - {package_name} - {company_name}"
+
+        # Create payment with actual subscription amount
+        payment_result = self.create_payment(
+            amount=calculated_subscription_amount,
+            currency='GEL',
+            description=description,
+            customer_email=customer_email,
+            customer_name=customer_name,
+            return_url_success=return_url_success,
+            return_url_fail=return_url_fail,
+            callback_url=callback_url,
+            external_order_id=external_order_id,
+            metadata={
+                'package_id': package.id if package else None,
+                'package_name': package.name if package else 'custom',
+                'agent_count': agent_count,
+                'subscription_amount': calculated_subscription_amount,
+                'payment_type': 'subscription',
+                'company_name': company_name
+            }
+        )
+
+        # Enable card saving on this order using subscription endpoint (MUST be called before user pays)
+        # Uses /subscriptions endpoint which allows recurring charges of the same amount
+        bog_order_id = payment_result['order_id']
+        card_saving_enabled = self.enable_subscription_card_saving(bog_order_id)
+
+        if not card_saving_enabled:
+            logger.warning(f'Failed to enable subscription card saving for payment: {bog_order_id}')
+
+        payment_result['card_saving_enabled'] = card_saving_enabled
+        payment_result['subscription_amount'] = calculated_subscription_amount
+
+        logger.info(f'Subscription payment created: {bog_order_id}, amount={calculated_subscription_amount}, card_saving={card_saving_enabled}')
+
+        return payment_result
+
     def create_trial_payment_with_card_save(
         self,
         package=None,
@@ -644,6 +736,8 @@ class BOGPaymentService:
         subscription_amount: float = None
     ) -> Dict:
         """
+        DEPRECATED: Use create_subscription_payment_with_card_save instead
+
         Create a 0 GEL trial payment that saves the card for future recurring charges
 
         For 14-day free trial:
