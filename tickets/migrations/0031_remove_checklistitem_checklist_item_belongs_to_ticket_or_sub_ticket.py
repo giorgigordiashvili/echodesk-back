@@ -3,6 +3,16 @@
 from django.db import migrations
 
 
+def remove_constraint_if_exists(apps, schema_editor):
+    """Safely remove constraint if it exists (idempotent)"""
+    with schema_editor.connection.cursor() as cursor:
+        # Use IF EXISTS to avoid errors on fresh schemas
+        cursor.execute("""
+            ALTER TABLE tickets_checklistitem
+            DROP CONSTRAINT IF EXISTS checklist_item_belongs_to_ticket_or_sub_ticket
+        """)
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -10,8 +20,5 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RemoveConstraint(
-            model_name='checklistitem',
-            name='checklist_item_belongs_to_ticket_or_sub_ticket',
-        ),
+        migrations.RunPython(remove_constraint_if_exists, migrations.RunPython.noop),
     ]
