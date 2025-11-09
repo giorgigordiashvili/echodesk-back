@@ -11,7 +11,7 @@ from tenant_schemas.utils import get_public_schema_name, schema_context
 from django.contrib.auth import get_user_model
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse
 from drf_spectacular.openapi import OpenApiTypes
-from .models import Tenant, Package, PendingRegistration, PaymentOrder
+from .models import Tenant, Package, PendingRegistration, PaymentOrder, Feature
 from .serializers import (
     TenantSerializer, TenantCreateSerializer, TenantRegistrationSerializer,
     TenantLoginSerializer, TenantDashboardDataSerializer
