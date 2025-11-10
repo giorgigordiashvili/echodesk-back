@@ -2517,6 +2517,10 @@ def whatsapp_disconnect(request):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@extend_schema(
+    request=WhatsAppSendMessageSerializer,
+    responses={200: dict, 400: dict, 404: dict}
+)
 @api_view(['POST'])
 @permission_classes([IsAuthenticated, CanSendSocialMessages])
 def whatsapp_send_message(request):
