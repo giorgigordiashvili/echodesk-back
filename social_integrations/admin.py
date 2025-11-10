@@ -148,7 +148,7 @@ class WhatsAppBusinessAccountAdmin(TenantAwareAdminMixin, admin.ModelAdmin):
     def get_readonly_fields(self, request, obj=None):
         """Make access_token readonly to prevent accidental exposure"""
         if obj:  # Editing an existing object
-            return self.readonly_fields + ('access_token',)
+            return list(self.readonly_fields) + ['access_token']
         return self.readonly_fields
 
 
