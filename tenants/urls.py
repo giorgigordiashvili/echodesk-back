@@ -26,7 +26,6 @@ from .feature_views import (
     FeatureViewSet, PermissionViewSet, TenantFeatureViewSet,
     TenantPermissionViewSet
 )
-from .cors_test_views import cors_test, preflight_test
 from .cors_views import simple_cors_test
 
 router = DefaultRouter()
@@ -104,9 +103,7 @@ urlpatterns = [
     path('api/upload/image/', upload_image, name='upload_image'),
 
     # CORS testing endpoints
-    path('api/cors-test/', cors_test, name='cors_test'),
     path('api/cors-simple/', simple_cors_test, name='simple_cors_test'),
-    path('api/preflight-test/', preflight_test, name='preflight_test'),
     
     # Admin API endpoints
     path('api/', include(router.urls)),
