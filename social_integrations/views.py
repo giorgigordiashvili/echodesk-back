@@ -2197,30 +2197,66 @@ def social_settings(request):
 # WHATSAPP BUSINESS API VIEWS
 # ===========================
 
-@api_view(['POST'])
+@api_view(['GET', 'POST'])
 @permission_classes([])  # No authentication required for embedded signup callback
 def whatsapp_embedded_signup_callback(request):
     """
-    Handle WhatsApp Embedded Signup callback from Facebook SDK.
+    Handle WhatsApp Embedded Signup callback from Facebook OAuth redirect.
     This receives the authorization code and exchanges it for access tokens,
     then retrieves WhatsApp Business Account details and saves them.
     """
     logger.info("📱 WhatsApp Embedded Signup callback received")
 
     try:
-        # Get data from request body (sent by frontend after Facebook SDK flow)
-        code = request.data.get('code')
-        tenant_name = request.data.get('tenant')
+        # Handle both GET (OAuth redirect) and POST (API call)
+        if request.method == 'GET':
+            # OAuth redirect from Facebook
+            code = request.GET.get('code')
+            state = request.GET.get('state', '')
+            error = request.GET.get('error')
+            error_description = request.GET.get('error_description')
+
+            # Parse tenant from state
+            tenant_name = None
+            if state:
+                from urllib.parse import unquote
+                decoded_state = unquote(state)
+                # State format: "tenant=amanati"
+                try:
+                    for param in decoded_state.split('&'):
+                        if param.startswith('tenant='):
+                            tenant_name = param.split('=', 1)[1]
+                except (ValueError, IndexError):
+                    pass
+        else:
+            # POST request from API
+            code = request.data.get('code')
+            tenant_name = request.data.get('tenant')
+
+        # Handle Facebook errors
+        if request.method == 'GET' and error:
+            error_msg = error_description or error
+            logger.error(f"Facebook OAuth error: {error_msg}")
+            # Redirect to frontend with error
+            frontend_url = f"https://{tenant_name}.echodesk.ge" if tenant_name else "https://amanati.echodesk.ge"
+            from urllib.parse import quote_plus
+            return redirect(f"{frontend_url}/social/connections?whatsapp_status=error&message={quote_plus(error_msg)}")
 
         if not code:
-            return Response({
-                'error': 'Authorization code is required'
-            }, status=status.HTTP_400_BAD_REQUEST)
+            error_msg = 'Authorization code is required'
+            if request.method == 'GET':
+                frontend_url = f"https://{tenant_name}.echodesk.ge" if tenant_name else "https://amanati.echodesk.ge"
+                from urllib.parse import quote_plus
+                return redirect(f"{frontend_url}/social/connections?whatsapp_status=error&message={quote_plus(error_msg)}")
+            return Response({'error': error_msg}, status=status.HTTP_400_BAD_REQUEST)
 
         if not tenant_name:
-            return Response({
-                'error': 'Tenant name is required'
-            }, status=status.HTTP_400_BAD_REQUEST)
+            error_msg = 'Tenant name is required'
+            if request.method == 'GET':
+                frontend_url = "https://amanati.echodesk.ge"
+                from urllib.parse import quote_plus
+                return redirect(f"{frontend_url}/social/connections?whatsapp_status=error&message={quote_plus(error_msg)}")
+            return Response({'error': error_msg}, status=status.HTTP_400_BAD_REQUEST)
 
         logger.info(f"Processing WhatsApp signup for tenant: {tenant_name}")
 
@@ -2356,9 +2392,19 @@ def whatsapp_embedded_signup_callback(request):
                         logger.error(f"❌ Error subscribing to webhooks: {e}")
 
         if not saved_accounts:
-            return Response({
-                'error': 'No WhatsApp phone numbers could be configured'
-            }, status=status.HTTP_400_BAD_REQUEST)
+            error_msg = 'No WhatsApp phone numbers could be configured'
+            if request.method == 'GET':
+                frontend_url = f"https://{tenant_name}.echodesk.ge"
+                from urllib.parse import quote_plus
+                return redirect(f"{frontend_url}/social/connections?whatsapp_status=error&message={quote_plus(error_msg)}")
+            return Response({'error': error_msg}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Success! Redirect back to frontend
+        if request.method == 'GET':
+            frontend_url = f"https://{tenant_name}.echodesk.ge"
+            from urllib.parse import quote_plus
+            success_msg = f'Successfully connected {len(saved_accounts)} WhatsApp Business Account(s)'
+            return redirect(f"{frontend_url}/social/connections?whatsapp_status=connected&accounts={len(saved_accounts)}&message={quote_plus(success_msg)}")
 
         return Response({
             'status': 'success',
@@ -2368,8 +2414,13 @@ def whatsapp_embedded_signup_callback(request):
 
     except Exception as e:
         logger.error(f"WhatsApp embedded signup callback failed: {e}")
+        error_msg = f'Failed to process WhatsApp signup: {str(e)}'
+        if request.method == 'GET':
+            frontend_url = f"https://{tenant_name if 'tenant_name' in locals() else 'amanati'}.echodesk.ge"
+            from urllib.parse import quote_plus
+            return redirect(f"{frontend_url}/social/connections?whatsapp_status=error&message={quote_plus(error_msg)}")
         return Response({
-            'error': f'Failed to process WhatsApp signup: {str(e)}'
+            'error': error_msg
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
