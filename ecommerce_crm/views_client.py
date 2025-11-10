@@ -100,12 +100,12 @@ class ClientProfileViewSet(viewsets.GenericViewSet):
 
 class ClientProductViewSet(viewsets.ReadOnlyModelViewSet):
     """
-    Client-facing product browsing (read-only)
-    Clients can view active products only
+    Client-facing product browsing (read-only, public access)
+    Anyone can view active products without authentication
     """
     queryset = Product.objects.filter(status='active')
-    authentication_classes = [EcommerceClientJWTAuthentication]
-    permission_classes = [IsAuthenticated]
+    authentication_classes = []
+    permission_classes = [AllowAny]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['is_featured']
     search_fields = ['sku', 'slug']
