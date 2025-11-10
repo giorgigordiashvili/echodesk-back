@@ -2519,7 +2519,31 @@ def whatsapp_disconnect(request):
 
 @extend_schema(
     request=WhatsAppSendMessageSerializer,
-    responses={200: dict, 400: dict, 404: dict}
+    responses={
+        200: {
+            'type': 'object',
+            'properties': {
+                'success': {'type': 'boolean'},
+                'message': {'type': 'string'},
+                'whatsapp_message_id': {'type': 'string'}
+            }
+        },
+        400: {
+            'type': 'object',
+            'properties': {
+                'error': {'type': 'string'},
+                'details': {'type': 'object'}
+            }
+        },
+        404: {
+            'type': 'object',
+            'properties': {
+                'error': {'type': 'string'}
+            }
+        }
+    },
+    description="Send a WhatsApp message",
+    summary="Send WhatsApp Message"
 )
 @api_view(['POST'])
 @permission_classes([IsAuthenticated, CanSendSocialMessages])
