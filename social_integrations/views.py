@@ -2197,6 +2197,26 @@ def social_settings(request):
 # WHATSAPP BUSINESS API VIEWS
 # ===========================
 
+class WhatsAppBusinessAccountViewSet(viewsets.ModelViewSet):
+    serializer_class = WhatsAppBusinessAccountSerializer
+    permission_classes = [IsAuthenticated, CanManageSocialConnections]
+
+    def get_queryset(self):
+        return WhatsAppBusinessAccount.objects.all()  # Tenant schema provides isolation
+
+    def perform_create(self, serializer):
+        serializer.save()  # No user assignment needed in multi-tenant setup
+
+
+class WhatsAppMessageViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = WhatsAppMessageSerializer
+    permission_classes = [IsAuthenticated, CanViewSocialMessages]
+
+    def get_queryset(self):
+        tenant_accounts = WhatsAppBusinessAccount.objects.all()  # All accounts for this tenant
+        return WhatsAppMessage.objects.filter(business_account__in=tenant_accounts)
+
+
 @api_view(['GET', 'POST'])
 @permission_classes([])  # No authentication required for embedded signup callback
 def whatsapp_embedded_signup_callback(request):

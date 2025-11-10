@@ -75,6 +75,7 @@ class WhatsAppBusinessAccountSerializer(serializers.ModelSerializer):
 class WhatsAppMessageSerializer(serializers.ModelSerializer):
     business_name = serializers.CharField(source='business_account.business_name', read_only=True)
     business_phone = serializers.CharField(source='business_account.display_phone_number', read_only=True)
+    waba_id = serializers.CharField(source='business_account.waba_id', read_only=True)
 
     class Meta:
         model = WhatsAppMessage
@@ -82,7 +83,7 @@ class WhatsAppMessageSerializer(serializers.ModelSerializer):
             'id', 'message_id', 'from_number', 'to_number', 'contact_name', 'profile_pic_url',
             'message_text', 'message_type', 'media_url', 'media_mime_type', 'timestamp',
             'is_from_business', 'status', 'is_delivered', 'delivered_at', 'is_read', 'read_at',
-            'error_message', 'business_name', 'business_phone', 'created_at'
+            'error_message', 'business_name', 'business_phone', 'waba_id', 'created_at'
         ]
         read_only_fields = ['id', 'status', 'is_delivered', 'delivered_at', 'is_read', 'read_at', 'created_at']
 

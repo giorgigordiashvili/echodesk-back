@@ -8,6 +8,8 @@ router.register(r'facebook-pages', views.FacebookPageConnectionViewSet, basename
 router.register(r'facebook-messages', views.FacebookMessageViewSet, basename='facebook_messages')
 router.register(r'instagram-accounts', views.InstagramAccountConnectionViewSet, basename='instagram_accounts')
 router.register(r'instagram-messages', views.InstagramMessageViewSet, basename='instagram_messages')
+router.register(r'whatsapp-accounts', views.WhatsAppBusinessAccountViewSet, basename='whatsapp_accounts')
+router.register(r'whatsapp-messages', views.WhatsAppMessageViewSet, basename='whatsapp_messages')
 
 # URL patterns for the social integrations app
 urlpatterns = [
