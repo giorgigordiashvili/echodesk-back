@@ -6,7 +6,12 @@ from django.contrib import messages
 from django.db import connection
 from tenant_schemas.utils import get_public_schema_name
 import requests
-from .models import FacebookPageConnection, FacebookMessage, InstagramAccountConnection, InstagramMessage, SocialIntegrationSettings
+from .models import (
+    FacebookPageConnection, FacebookMessage,
+    InstagramAccountConnection, InstagramMessage,
+    WhatsAppBusinessAccount, WhatsAppMessage,
+    SocialIntegrationSettings
+)
 
 
 class TenantAwareAdminMixin:
@@ -108,6 +113,93 @@ class InstagramMessageAdmin(TenantAwareAdminMixin, admin.ModelAdmin):
     def message_preview(self, obj):
         """Show first 50 characters of message"""
         return obj.message_text[:50] + '...' if len(obj.message_text) > 50 else obj.message_text
+    message_preview.short_description = 'Message Preview'
+
+
+@admin.register(WhatsAppBusinessAccount)
+class WhatsAppBusinessAccountAdmin(TenantAwareAdminMixin, admin.ModelAdmin):
+    list_display = ['business_name', 'phone_number', 'display_phone_number', 'quality_rating', 'is_active', 'connected_at']
+    list_filter = ['is_active', 'quality_rating', 'created_at']
+    search_fields = ['business_name', 'waba_id', 'phone_number', 'display_phone_number']
+    readonly_fields = ['waba_id', 'phone_number_id', 'created_at', 'updated_at']
+
+    fieldsets = (
+        ('Business Information', {
+            'fields': ('business_name', 'waba_id', 'phone_number_id')
+        }),
+        ('Phone Details', {
+            'fields': ('phone_number', 'display_phone_number')
+        }),
+        ('Status', {
+            'fields': ('quality_rating', 'is_active')
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+
+    def connected_at(self, obj):
+        """Display created_at as connected_at"""
+        return obj.created_at
+    connected_at.short_description = 'Connected At'
+    connected_at.admin_order_field = 'created_at'
+
+    def get_readonly_fields(self, request, obj=None):
+        """Make access_token readonly to prevent accidental exposure"""
+        if obj:  # Editing an existing object
+            return self.readonly_fields + ('access_token',)
+        return self.readonly_fields
+
+
+@admin.register(WhatsAppMessage)
+class WhatsAppMessageAdmin(TenantAwareAdminMixin, admin.ModelAdmin):
+    list_display = ['contact_name_or_number', 'business_account_name', 'message_preview', 'message_type', 'timestamp', 'is_from_business', 'status']
+    list_filter = ['is_from_business', 'status', 'message_type', 'timestamp', 'business_account']
+    search_fields = ['contact_name', 'from_number', 'to_number', 'message_text', 'message_id']
+    readonly_fields = ['message_id', 'from_number', 'to_number', 'timestamp', 'delivered_at', 'read_at', 'failed_at', 'created_at']
+    date_hierarchy = 'timestamp'
+
+    fieldsets = (
+        ('Message Information', {
+            'fields': ('message_id', 'business_account', 'message_type', 'status')
+        }),
+        ('Contact Details', {
+            'fields': ('contact_name', 'from_number', 'to_number')
+        }),
+        ('Message Content', {
+            'fields': ('message_text',)
+        }),
+        ('Media Information', {
+            'fields': ('media_url', 'media_mime_type', 'media_id', 'caption'),
+            'classes': ('collapse',)
+        }),
+        ('Status Tracking', {
+            'fields': ('timestamp', 'delivered_at', 'read_at', 'failed_at', 'error_code', 'error_message'),
+            'classes': ('collapse',)
+        }),
+    )
+
+    def contact_name_or_number(self, obj):
+        """Display contact name or phone number"""
+        if obj.contact_name:
+            return f"{obj.contact_name} ({obj.from_number if not obj.is_from_business else obj.to_number})"
+        return obj.from_number if not obj.is_from_business else obj.to_number
+    contact_name_or_number.short_description = 'Contact'
+
+    def business_account_name(self, obj):
+        """Display business account name"""
+        return obj.business_account.business_name
+    business_account_name.short_description = 'WhatsApp Account'
+    business_account_name.admin_order_field = 'business_account__business_name'
+
+    def message_preview(self, obj):
+        """Show first 50 characters of message"""
+        if obj.message_text:
+            return obj.message_text[:50] + '...' if len(obj.message_text) > 50 else obj.message_text
+        elif obj.media_url:
+            return f"[{obj.message_type.upper()}] {obj.caption[:30] if obj.caption else 'No caption'}"
+        return "[No content]"
     message_preview.short_description = 'Message Preview'
 
 
