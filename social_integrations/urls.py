@@ -34,6 +34,13 @@ urlpatterns = [
     path('instagram/send-message/', views.instagram_send_message, name='instagram_send_message'),
     path('instagram/webhook/', views.instagram_webhook, name='instagram_webhook'),
 
+    # WhatsApp endpoints
+    path('whatsapp/embedded-signup/callback/', views.whatsapp_embedded_signup_callback, name='whatsapp_embedded_signup_callback'),
+    path('whatsapp/status/', views.whatsapp_connection_status, name='whatsapp_status'),
+    path('whatsapp/disconnect/', views.whatsapp_disconnect, name='whatsapp_disconnect'),
+    path('whatsapp/send-message/', views.whatsapp_send_message, name='whatsapp_send_message'),
+    path('whatsapp/webhook/', views.whatsapp_webhook, name='whatsapp_webhook'),
+
     # Webhook debugging endpoints
     path('webhook-status/', views.webhook_status, name='webhook_status'),
     path('webhook-logs/', views.webhook_debug_logs, name='webhook_debug_logs'),

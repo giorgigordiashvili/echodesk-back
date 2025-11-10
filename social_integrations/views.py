@@ -22,11 +22,13 @@ from drf_spectacular.utils import extend_schema
 from .models import (
     FacebookPageConnection, FacebookMessage,
     InstagramAccountConnection, InstagramMessage,
+    WhatsAppBusinessAccount, WhatsAppMessage,
     SocialIntegrationSettings
 )
 from .serializers import (
     FacebookPageConnectionSerializer, FacebookMessageSerializer, FacebookSendMessageSerializer,
     InstagramAccountConnectionSerializer, InstagramMessageSerializer, InstagramSendMessageSerializer,
+    WhatsAppBusinessAccountSerializer, WhatsAppMessageSerializer, WhatsAppSendMessageSerializer,
     SocialIntegrationSettingsSerializer
 )
 from .permissions import (
@@ -117,10 +119,10 @@ def find_tenant_by_page_id(page_id):
     from django.db import connection
     from tenants.models import Tenant
     from tenant_schemas.utils import schema_context
-    
+
     # Get all tenant schemas
     tenants = Tenant.objects.all()
-    
+
     for tenant in tenants:
         try:
             # Switch to tenant schema and check if page exists
@@ -131,7 +133,30 @@ def find_tenant_by_page_id(page_id):
         except Exception as e:
             # Skip tenant if there's an error (e.g., table doesn't exist)
             continue
-    
+
+    return None
+
+
+def find_tenant_by_whatsapp_phone_number_id(phone_number_id):
+    """Find which tenant schema contains the given WhatsApp phone number ID"""
+    from django.db import connection
+    from tenants.models import Tenant
+    from tenant_schemas.utils import schema_context
+
+    # Get all tenant schemas
+    tenants = Tenant.objects.all()
+
+    for tenant in tenants:
+        try:
+            # Switch to tenant schema and check if WhatsApp account exists
+            with schema_context(tenant.schema_name):
+                from social_integrations.models import WhatsAppBusinessAccount
+                if WhatsAppBusinessAccount.objects.filter(phone_number_id=phone_number_id, is_active=True).exists():
+                    return tenant.schema_name
+        except Exception as e:
+            # Skip tenant if there's an error (e.g., table doesn't exist)
+            continue
+
     return None
 
 
@@ -2166,3 +2191,509 @@ def social_settings(request):
         return Response({
             'error': f'Failed to manage settings: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ===========================
+# WHATSAPP BUSINESS API VIEWS
+# ===========================
+
+@api_view(['POST'])
+@permission_classes([])  # No authentication required for embedded signup callback
+def whatsapp_embedded_signup_callback(request):
+    """
+    Handle WhatsApp Embedded Signup callback from Facebook SDK.
+    This receives the authorization code and exchanges it for access tokens,
+    then retrieves WhatsApp Business Account details and saves them.
+    """
+    logger.info("📱 WhatsApp Embedded Signup callback received")
+
+    try:
+        # Get data from request body (sent by frontend after Facebook SDK flow)
+        code = request.data.get('code')
+        tenant_name = request.data.get('tenant')
+
+        if not code:
+            return Response({
+                'error': 'Authorization code is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if not tenant_name:
+            return Response({
+                'error': 'Tenant name is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        logger.info(f"Processing WhatsApp signup for tenant: {tenant_name}")
+
+        # Exchange code for access token
+        fb_app_id = getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_APP_ID')
+        fb_app_secret = getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_APP_SECRET')
+        fb_api_version = getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v23.0')
+
+        token_url = f"https://graph.facebook.com/{fb_api_version}/oauth/access_token"
+        token_params = {
+            'client_id': fb_app_id,
+            'client_secret': fb_app_secret,
+            'code': code
+        }
+
+        logger.info(f"Exchanging code for access token...")
+        token_response = requests.get(token_url, params=token_params)
+        token_data = token_response.json()
+
+        if 'error' in token_data:
+            error_msg = token_data.get('error', {}).get('message', 'Unknown error')
+            logger.error(f"Token exchange failed: {error_msg}")
+            return Response({
+                'error': f'Token exchange failed: {error_msg}'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        access_token = token_data.get('access_token')
+        if not access_token:
+            return Response({
+                'error': 'No access token received from Facebook'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        logger.info("✅ Successfully obtained access token")
+
+        # Get WhatsApp Business Accounts
+        waba_url = f"https://graph.facebook.com/{fb_api_version}/me/businesses"
+        waba_params = {
+            'access_token': access_token,
+            'fields': 'owned_whatsapp_business_accounts{id,name,timezone_id,message_template_namespace}'
+        }
+
+        logger.info("Fetching WhatsApp Business Accounts...")
+        waba_response = requests.get(waba_url, params=waba_params)
+        waba_data = waba_response.json()
+
+        if 'error' in waba_data:
+            error_msg = waba_data.get('error', {}).get('message', 'Unknown error')
+            logger.error(f"Failed to fetch WABA: {error_msg}")
+            return Response({
+                'error': f'Failed to fetch WhatsApp Business Accounts: {error_msg}'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Extract WhatsApp Business Accounts
+        businesses = waba_data.get('data', [])
+        if not businesses:
+            return Response({
+                'error': 'No businesses found for this account'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        # Get the first business and its WhatsApp accounts
+        business = businesses[0]
+        whatsapp_accounts = business.get('owned_whatsapp_business_accounts', {}).get('data', [])
+
+        if not whatsapp_accounts:
+            return Response({
+                'error': 'No WhatsApp Business Accounts found'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        # Process WhatsApp accounts and save to tenant database
+        from tenant_schemas.utils import schema_context
+
+        saved_accounts = []
+        with schema_context(tenant_name):
+            for wa_account in whatsapp_accounts:
+                waba_id = wa_account.get('id')
+
+                # Get phone numbers for this WABA
+                phone_url = f"https://graph.facebook.com/{fb_api_version}/{waba_id}/phone_numbers"
+                phone_params = {
+                    'access_token': access_token,
+                    'fields': 'id,verified_name,display_phone_number,quality_rating'
+                }
+
+                phone_response = requests.get(phone_url, params=phone_params)
+                phone_data = phone_response.json()
+
+                phones = phone_data.get('data', [])
+                if not phones:
+                    logger.warning(f"No phone numbers found for WABA {waba_id}")
+                    continue
+
+                # Save each phone number as a separate business account
+                for phone in phones:
+                    phone_number_id = phone.get('id')
+                    display_phone_number = phone.get('display_phone_number', '')
+                    verified_name = phone.get('verified_name', wa_account.get('name', 'WhatsApp Business'))
+                    quality_rating = phone.get('quality_rating', '')
+
+                    # Create or update WhatsApp Business Account
+                    account, created = WhatsAppBusinessAccount.objects.update_or_create(
+                        waba_id=waba_id,
+                        phone_number_id=phone_number_id,
+                        defaults={
+                            'business_name': verified_name,
+                            'phone_number': display_phone_number.replace(' ', ''),
+                            'display_phone_number': display_phone_number,
+                            'access_token': access_token,
+                            'quality_rating': quality_rating,
+                            'is_active': True
+                        }
+                    )
+
+                    action = "Created" if created else "Updated"
+                    logger.info(f"✅ {action} WhatsApp Business Account: {verified_name} ({display_phone_number})")
+
+                    saved_accounts.append({
+                        'id': account.id,
+                        'waba_id': account.waba_id,
+                        'business_name': account.business_name,
+                        'phone_number': account.display_phone_number,
+                        'quality_rating': account.quality_rating
+                    })
+
+                    # Subscribe to webhooks
+                    try:
+                        webhook_url = f"https://graph.facebook.com/{fb_api_version}/{waba_id}/subscribed_apps"
+                        webhook_response = requests.post(webhook_url, params={'access_token': access_token})
+                        if webhook_response.status_code == 200:
+                            logger.info(f"✅ Subscribed WABA {waba_id} to webhooks")
+                        else:
+                            logger.warning(f"⚠️ Failed to subscribe WABA {waba_id} to webhooks")
+                    except Exception as e:
+                        logger.error(f"❌ Error subscribing to webhooks: {e}")
+
+        if not saved_accounts:
+            return Response({
+                'error': 'No WhatsApp phone numbers could be configured'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({
+            'status': 'success',
+            'message': f'Successfully connected {len(saved_accounts)} WhatsApp Business Account(s)',
+            'accounts': saved_accounts
+        }, status=status.HTTP_201_CREATED)
+
+    except Exception as e:
+        logger.error(f"WhatsApp embedded signup callback failed: {e}")
+        return Response({
+            'error': f'Failed to process WhatsApp signup: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def whatsapp_connection_status(request):
+    """Check WhatsApp connection status for current tenant"""
+    try:
+        accounts = WhatsAppBusinessAccount.objects.filter(is_active=True)
+        accounts_data = []
+
+        for account in accounts:
+            accounts_data.append({
+                'id': account.id,
+                'waba_id': account.waba_id,
+                'business_name': account.business_name,
+                'phone_number': account.display_phone_number or account.phone_number,
+                'quality_rating': account.quality_rating,
+                'is_active': account.is_active,
+                'connected_at': account.created_at.isoformat()
+            })
+
+        return Response({
+            'connected': accounts.exists(),
+            'accounts_count': accounts.count(),
+            'accounts': accounts_data
+        })
+    except Exception as e:
+        logger.error(f"Failed to get WhatsApp connection status: {e}")
+        return Response({
+            'error': f'Failed to get connection status: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, CanManageSocialConnections])
+def whatsapp_disconnect(request):
+    """Disconnect WhatsApp Business Account(s)"""
+    try:
+        waba_id = request.data.get('waba_id')
+
+        if waba_id:
+            # Disconnect specific account
+            account = WhatsAppBusinessAccount.objects.filter(waba_id=waba_id).first()
+            if account:
+                account.is_active = False
+                account.save()
+                logger.info(f"Disconnected WhatsApp Business Account: {account.business_name}")
+                return Response({
+                    'status': 'success',
+                    'message': f'Disconnected WhatsApp Business Account: {account.business_name}'
+                })
+            else:
+                return Response({
+                    'error': 'WhatsApp Business Account not found'
+                }, status=status.HTTP_404_NOT_FOUND)
+        else:
+            # Disconnect all accounts
+            accounts = WhatsAppBusinessAccount.objects.all()
+            count = accounts.count()
+            accounts.update(is_active=False)
+            logger.info(f"Disconnected all {count} WhatsApp Business Account(s)")
+            return Response({
+                'status': 'success',
+                'message': f'Disconnected {count} WhatsApp Business Account(s)'
+            })
+
+    except Exception as e:
+        logger.error(f"Failed to disconnect WhatsApp: {e}")
+        return Response({
+            'error': f'Failed to disconnect: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, CanSendSocialMessages])
+def whatsapp_send_message(request):
+    """Send a WhatsApp message"""
+    try:
+        serializer = WhatsAppSendMessageSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        to_number = serializer.validated_data['to_number']
+        message_text = serializer.validated_data['message']
+        waba_id = serializer.validated_data['waba_id']
+
+        # Get WhatsApp Business Account
+        try:
+            account = WhatsAppBusinessAccount.objects.get(waba_id=waba_id, is_active=True)
+        except WhatsAppBusinessAccount.DoesNotExist:
+            return Response({
+                'error': 'WhatsApp Business Account not found or inactive'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        # Send message via WhatsApp Cloud API
+        fb_api_version = getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('WHATSAPP_API_VERSION', 'v23.0')
+        send_url = f"https://graph.facebook.com/{fb_api_version}/{account.phone_number_id}/messages"
+
+        message_payload = {
+            'messaging_product': 'whatsapp',
+            'to': to_number,
+            'type': 'text',
+            'text': {
+                'body': message_text
+            }
+        }
+
+        headers = {
+            'Authorization': f'Bearer {account.access_token}',
+            'Content-Type': 'application/json'
+        }
+
+        logger.info(f"Sending WhatsApp message to {to_number} from {account.display_phone_number}")
+        response = requests.post(send_url, json=message_payload, headers=headers)
+        response_data = response.json()
+
+        if response.status_code != 200 or 'error' in response_data:
+            error_msg = response_data.get('error', {}).get('message', 'Unknown error')
+            logger.error(f"Failed to send WhatsApp message: {error_msg}")
+            return Response({
+                'error': f'Failed to send message: {error_msg}'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Save sent message to database
+        message_id = response_data.get('messages', [{}])[0].get('id', '')
+        if message_id:
+            WhatsAppMessage.objects.create(
+                business_account=account,
+                message_id=message_id,
+                from_number=account.phone_number,
+                to_number=to_number,
+                message_text=message_text,
+                message_type='text',
+                timestamp=timezone.now(),
+                is_from_business=True,
+                status='sent'
+            )
+            logger.info(f"✅ Saved sent WhatsApp message: {message_id}")
+
+        return Response({
+            'status': 'success',
+            'message': 'Message sent successfully',
+            'message_id': message_id
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to send WhatsApp message: {e}")
+        return Response({
+            'error': f'Failed to send message: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@csrf_exempt
+@require_http_methods(["GET", "POST"])
+def whatsapp_webhook(request):
+    """Handle WhatsApp webhook events for messages"""
+    if request.method == 'GET':
+        # Webhook verification
+        mode = request.GET.get('hub.mode')
+        token = request.GET.get('hub.verify_token')
+        challenge = request.GET.get('hub.challenge')
+
+        verify_token = getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('WHATSAPP_VERIFY_TOKEN', 'echodesk_whatsapp_webhook_token_2024')
+
+        if mode == 'subscribe' and token == verify_token:
+            logger.info("✅ WhatsApp webhook verified successfully")
+            return HttpResponse(challenge, content_type='text/plain')
+        else:
+            logger.warning(f"❌ WhatsApp webhook verification failed - invalid token")
+            return JsonResponse({
+                'error': 'Invalid verify token or mode'
+            }, status=403)
+
+    elif request.method == 'POST':
+        # Handle webhook events
+        try:
+            import json
+            from tenant_schemas.utils import schema_context
+
+            data = json.loads(request.body)
+            logger.info(f"📱 WhatsApp webhook received: {json.dumps(data, indent=2)}")
+
+            # Extract phone number ID to determine which tenant
+            entry = data.get('entry', [{}])[0]
+            changes = entry.get('changes', [{}])[0]
+            value = changes.get('value', {})
+            metadata = value.get('metadata', {})
+            phone_number_id = metadata.get('phone_number_id')
+
+            if not phone_number_id:
+                logger.error("No phone_number_id found in webhook data")
+                return JsonResponse({'status': 'error', 'message': 'No phone_number_id found'}, status=400)
+
+            # Find tenant for this phone number
+            tenant_schema = find_tenant_by_whatsapp_phone_number_id(phone_number_id)
+            if not tenant_schema:
+                logger.error(f"No tenant found for phone_number_id: {phone_number_id}")
+                return JsonResponse({'status': 'error', 'message': 'No tenant found'}, status=404)
+
+            logger.info(f"Processing WhatsApp webhook for tenant: {tenant_schema}")
+
+            # Process webhook within tenant context
+            with schema_context(tenant_schema):
+                # Get business account
+                try:
+                    account = WhatsAppBusinessAccount.objects.get(
+                        phone_number_id=phone_number_id,
+                        is_active=True
+                    )
+                except WhatsAppBusinessAccount.DoesNotExist:
+                    logger.error(f"No active WhatsApp Business Account found for phone_number_id: {phone_number_id}")
+                    return JsonResponse({'status': 'error', 'message': 'Account not found'}, status=404)
+
+                # Handle messages
+                messages = value.get('messages', [])
+                for message in messages:
+                    message_id = message.get('id')
+                    from_number = message.get('from')
+                    timestamp = message.get('timestamp', '')
+                    message_type = message.get('type', 'text')
+
+                    # Skip if message already exists
+                    if WhatsAppMessage.objects.filter(message_id=message_id).exists():
+                        logger.info(f"Skipping duplicate message: {message_id}")
+                        continue
+
+                    # Extract message content based on type
+                    message_text = ''
+                    media_url = ''
+                    media_mime_type = ''
+
+                    if message_type == 'text':
+                        message_text = message.get('text', {}).get('body', '')
+                    elif message_type == 'image':
+                        message_text = message.get('image', {}).get('caption', '')
+                        media_url = message.get('image', {}).get('link', '')
+                        media_mime_type = message.get('image', {}).get('mime_type', '')
+                    elif message_type == 'video':
+                        message_text = message.get('video', {}).get('caption', '')
+                        media_url = message.get('video', {}).get('link', '')
+                        media_mime_type = message.get('video', {}).get('mime_type', '')
+                    elif message_type == 'document':
+                        message_text = message.get('document', {}).get('filename', '')
+                        media_url = message.get('document', {}).get('link', '')
+                        media_mime_type = message.get('document', {}).get('mime_type', '')
+                    elif message_type == 'audio':
+                        media_url = message.get('audio', {}).get('link', '')
+                        media_mime_type = message.get('audio', {}).get('mime_type', '')
+
+                    # Get contact name
+                    contacts = value.get('contacts', [])
+                    contact_name = ''
+                    if contacts:
+                        profile = contacts[0].get('profile', {})
+                        contact_name = profile.get('name', '')
+
+                    # Save message
+                    message_timestamp = datetime.fromtimestamp(int(timestamp), tz=timezone.utc) if timestamp else timezone.now()
+
+                    message_obj = WhatsAppMessage.objects.create(
+                        business_account=account,
+                        message_id=message_id,
+                        from_number=from_number,
+                        to_number=account.phone_number,
+                        contact_name=contact_name,
+                        message_text=message_text,
+                        message_type=message_type,
+                        media_url=media_url,
+                        media_mime_type=media_mime_type,
+                        timestamp=message_timestamp,
+                        is_from_business=False,
+                        status='delivered',
+                        is_delivered=True,
+                        delivered_at=timezone.now()
+                    )
+
+                    logger.info(f"✅ Saved WhatsApp message from {contact_name or from_number}: {message_text[:50]}")
+
+                    # Send WebSocket notification
+                    ws_message_data = {
+                        'id': message_obj.id,
+                        'message_id': message_obj.message_id,
+                        'from_number': message_obj.from_number,
+                        'contact_name': message_obj.contact_name,
+                        'message_text': message_obj.message_text,
+                        'message_type': message_obj.message_type,
+                        'timestamp': message_obj.timestamp.isoformat(),
+                        'is_from_business': message_obj.is_from_business,
+                    }
+                    send_websocket_notification(tenant_schema, ws_message_data, from_number)
+
+                # Handle message status updates
+                statuses = value.get('statuses', [])
+                for status_update in statuses:
+                    message_id = status_update.get('id')
+                    status_value = status_update.get('status')  # sent, delivered, read, failed
+                    timestamp_value = status_update.get('timestamp', '')
+
+                    # Update message status
+                    try:
+                        message_obj = WhatsAppMessage.objects.get(message_id=message_id)
+                        message_obj.status = status_value
+
+                        if status_value == 'delivered':
+                            message_obj.is_delivered = True
+                            message_obj.delivered_at = datetime.fromtimestamp(int(timestamp_value), tz=timezone.utc) if timestamp_value else timezone.now()
+                        elif status_value == 'read':
+                            message_obj.is_read = True
+                            message_obj.read_at = datetime.fromtimestamp(int(timestamp_value), tz=timezone.utc) if timestamp_value else timezone.now()
+                        elif status_value == 'failed':
+                            error_info = status_update.get('errors', [{}])[0]
+                            message_obj.error_message = error_info.get('message', 'Failed to deliver')
+
+                        message_obj.save()
+                        logger.info(f"✅ Updated WhatsApp message status: {message_id} -> {status_value}")
+                    except WhatsAppMessage.DoesNotExist:
+                        logger.warning(f"Message not found for status update: {message_id}")
+
+            return JsonResponse({'status': 'success'})
+
+        except Exception as e:
+            logger.error(f"WhatsApp webhook processing failed: {e}")
+            return JsonResponse({
+                'status': 'error',
+                'message': str(e)
+            }, status=500)

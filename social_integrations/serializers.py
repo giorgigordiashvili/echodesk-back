@@ -2,6 +2,7 @@ from rest_framework import serializers
 from .models import (
     FacebookPageConnection, FacebookMessage,
     InstagramAccountConnection, InstagramMessage,
+    WhatsAppBusinessAccount, WhatsAppMessage,
     SocialIntegrationSettings
 )
 
@@ -59,6 +60,43 @@ class InstagramSendMessageSerializer(serializers.Serializer):
     recipient_id = serializers.CharField(max_length=255, help_text="Instagram user ID to send message to")
     message = serializers.CharField(help_text="Message text to send")
     instagram_account_id = serializers.CharField(max_length=255, help_text="Instagram account ID to send from")
+
+
+class WhatsAppBusinessAccountSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = WhatsAppBusinessAccount
+        fields = [
+            'id', 'waba_id', 'business_name', 'phone_number_id', 'phone_number',
+            'display_phone_number', 'quality_rating', 'is_active', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class WhatsAppMessageSerializer(serializers.ModelSerializer):
+    business_name = serializers.CharField(source='business_account.business_name', read_only=True)
+    business_phone = serializers.CharField(source='business_account.display_phone_number', read_only=True)
+
+    class Meta:
+        model = WhatsAppMessage
+        fields = [
+            'id', 'message_id', 'from_number', 'to_number', 'contact_name', 'profile_pic_url',
+            'message_text', 'message_type', 'media_url', 'media_mime_type', 'timestamp',
+            'is_from_business', 'status', 'is_delivered', 'delivered_at', 'is_read', 'read_at',
+            'error_message', 'business_name', 'business_phone', 'created_at'
+        ]
+        read_only_fields = ['id', 'status', 'is_delivered', 'delivered_at', 'is_read', 'read_at', 'created_at']
+
+
+class WhatsAppSendMessageSerializer(serializers.Serializer):
+    to_number = serializers.CharField(max_length=20, help_text="Recipient's phone number (E.164 format, e.g., +1234567890)")
+    message = serializers.CharField(help_text="Message text to send")
+    waba_id = serializers.CharField(max_length=100, help_text="WhatsApp Business Account ID to send from")
+
+    def validate_to_number(self, value):
+        """Ensure phone number starts with +"""
+        if not value.startswith('+'):
+            raise serializers.ValidationError("Phone number must be in E.164 format (start with +)")
+        return value
 
 
 class SocialIntegrationSettingsSerializer(serializers.ModelSerializer):
