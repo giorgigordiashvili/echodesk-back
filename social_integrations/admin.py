@@ -157,7 +157,7 @@ class WhatsAppMessageAdmin(TenantAwareAdminMixin, admin.ModelAdmin):
     list_display = ['contact_name_or_number', 'business_account_name', 'message_preview', 'message_type', 'timestamp', 'is_from_business', 'status']
     list_filter = ['is_from_business', 'status', 'message_type', 'timestamp', 'business_account']
     search_fields = ['contact_name', 'from_number', 'to_number', 'message_text', 'message_id']
-    readonly_fields = ['message_id', 'from_number', 'to_number', 'timestamp', 'delivered_at', 'read_at', 'failed_at', 'created_at']
+    readonly_fields = ['message_id', 'from_number', 'to_number', 'timestamp', 'delivered_at', 'read_at', 'created_at']
     date_hierarchy = 'timestamp'
 
     fieldsets = (
@@ -171,11 +171,11 @@ class WhatsAppMessageAdmin(TenantAwareAdminMixin, admin.ModelAdmin):
             'fields': ('message_text',)
         }),
         ('Media Information', {
-            'fields': ('media_url', 'media_mime_type', 'media_id', 'caption'),
+            'fields': ('media_url', 'media_mime_type'),
             'classes': ('collapse',)
         }),
         ('Status Tracking', {
-            'fields': ('timestamp', 'delivered_at', 'read_at', 'failed_at', 'error_code', 'error_message'),
+            'fields': ('timestamp', 'delivered_at', 'read_at', 'error_message'),
             'classes': ('collapse',)
         }),
     )
@@ -198,7 +198,7 @@ class WhatsAppMessageAdmin(TenantAwareAdminMixin, admin.ModelAdmin):
         if obj.message_text:
             return obj.message_text[:50] + '...' if len(obj.message_text) > 50 else obj.message_text
         elif obj.media_url:
-            return f"[{obj.message_type.upper()}] {obj.caption[:30] if obj.caption else 'No caption'}"
+            return f"[{obj.message_type.upper()}] Media message"
         return "[No content]"
     message_preview.short_description = 'Message Preview'
 
