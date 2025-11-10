@@ -2266,9 +2266,11 @@ def whatsapp_embedded_signup_callback(request):
         fb_api_version = getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v23.0')
 
         token_url = f"https://graph.facebook.com/{fb_api_version}/oauth/access_token"
+        redirect_uri = 'https://api.echodesk.ge/api/social/whatsapp/embedded-signup/callback/'
         token_params = {
             'client_id': fb_app_id,
             'client_secret': fb_app_secret,
+            'redirect_uri': redirect_uri,
             'code': code
         }
 
