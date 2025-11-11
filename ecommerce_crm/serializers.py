@@ -582,6 +582,36 @@ class EcommerceSettingsSerializer(serializers.ModelSerializer):
             instance.save()
         return instance
 
+    def validate(self, attrs):
+        """Validate that return URLs are provided when card payment is enabled"""
+        # Get enable_card_payment value from attrs or existing instance
+        enable_card_payment = attrs.get('enable_card_payment')
+        if enable_card_payment is None and self.instance:
+            enable_card_payment = self.instance.enable_card_payment
+
+        # Only validate if card payment is being enabled
+        if enable_card_payment:
+            # Get return URL values from attrs or existing instance
+            bog_return_url_success = attrs.get('bog_return_url_success')
+            if bog_return_url_success is None and self.instance:
+                bog_return_url_success = self.instance.bog_return_url_success
+
+            bog_return_url_fail = attrs.get('bog_return_url_fail')
+            if bog_return_url_fail is None and self.instance:
+                bog_return_url_fail = self.instance.bog_return_url_fail
+
+            # Validate URLs are provided
+            if not bog_return_url_success:
+                raise serializers.ValidationError({
+                    'bog_return_url_success': 'Success return URL is required when card payment is enabled'
+                })
+            if not bog_return_url_fail:
+                raise serializers.ValidationError({
+                    'bog_return_url_fail': 'Failure return URL is required when card payment is enabled'
+                })
+
+        return attrs
+
 
 class OrderCreateSerializer(serializers.Serializer):
     """Serializer for creating an order from cart"""

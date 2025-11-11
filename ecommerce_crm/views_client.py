@@ -646,7 +646,7 @@ def add_client_card(request):
 
         # Get callback and return URLs
         callback_url = f"https://{request.get_host()}/api/ecommerce/payment-webhook/"
-        return_url = ecommerce_settings.payment_return_url if ecommerce_settings else f'https://{request.tenant.schema_name}.echodesk.ge/payment/success'
+        return_url = ecommerce_settings.bog_return_url_success if (ecommerce_settings and ecommerce_settings.bog_return_url_success) else f'https://{request.tenant.schema_name}.echodesk.ge/payment/success'
 
         # Create 0 GEL payment for card validation
         try:
