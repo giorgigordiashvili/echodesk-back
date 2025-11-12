@@ -621,6 +621,76 @@ def bog_webhook(request):
                     'card_id': saved_card.id
                 })
 
+            # Check if this is a reactivation payment
+            if payment_type == 'reactivation':
+                logger.info(f'Processing reactivation payment for order {external_order_id}')
+
+                tenant = payment_order.tenant
+                subscription_id = payment_order.metadata.get('subscription_id')
+
+                with transaction.atomic():
+                    try:
+                        subscription = TenantSubscription.objects.select_for_update().get(id=subscription_id)
+
+                        # Reactivate the subscription
+                        subscription.is_active = True
+                        subscription.expires_at = timezone.now() + timedelta(days=30)
+                        subscription.last_billed_at = timezone.now()
+                        subscription.next_billing_date = timezone.now() + timedelta(days=30)
+                        subscription.subscription_type = 'paid'
+
+                        # Save the card for recurring payments if card was saved
+                        if card_saved_for_recurring:
+                            subscription.parent_order_id = bog_order_id
+                            logger.info(f'Saved card reference for recurring payments: {bog_order_id}')
+
+                        subscription.save()
+
+                        # Save card details to SavedCard model
+                        if card_saved_for_recurring:
+                            card_type = payment_detail.get('card_type', '')
+                            masked_card = payment_detail.get('payer_identifier', '')
+                            card_expiry = payment_detail.get('card_expiry_date', '')
+
+                            SavedCard.objects.update_or_create(
+                                tenant=tenant,
+                                defaults={
+                                    'parent_order_id': bog_order_id,
+                                    'card_type': card_type,
+                                    'masked_card_number': masked_card,
+                                    'card_expiry': card_expiry,
+                                    'transaction_id': transaction_id,
+                                    'is_active': True,
+                                    'is_default': True,
+                                    'card_save_type': 'subscription'
+                                }
+                            )
+                            logger.info(f'Saved card for reactivation: {card_type} {masked_card}')
+
+                        # Mark payment order as complete
+                        payment_order.card_saved = card_saved_for_recurring
+                        payment_order.save()
+
+                        # Generate invoice
+                        generate_invoice_for_payment(
+                            payment_order=payment_order,
+                            tenant=tenant,
+                            package=payment_order.package,
+                            agent_count=subscription.agent_count
+                        )
+
+                        logger.info(f'Subscription reactivated for tenant {tenant.schema_name}')
+
+                        return Response({
+                            'status': 'success',
+                            'action': 'reactivated',
+                            'subscription_id': subscription.id
+                        })
+
+                    except TenantSubscription.DoesNotExist:
+                        logger.error(f'Subscription {subscription_id} not found for reactivation')
+                        return Response({'error': 'Subscription not found'}, status=status.HTTP_404_NOT_FOUND)
+
             # Regular subscription payment for existing tenant
             tenant = payment_order.tenant
             package = payment_order.package
@@ -1111,6 +1181,157 @@ def manual_payment(request):
         )
     except Exception as e:
         logger.error(f'Error creating manual payment for {request.tenant.schema_name}: {e}')
+        return Response(
+            {'error': f'Failed to create payment: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@extend_schema(
+    operation_id='reactivate_subscription_payment',
+    summary='Reactivate Subscription with Payment',
+    description='Create a payment to reactivate an inactive subscription and save card for recurring payments',
+    responses={
+        200: OpenApiResponse(
+            description='Payment created',
+            response={
+                'type': 'object',
+                'properties': {
+                    'payment_url': {'type': 'string'},
+                    'order_id': {'type': 'string'},
+                    'amount': {'type': 'number'},
+                    'currency': {'type': 'string'}
+                }
+            }
+        ),
+        404: OpenApiResponse(description='No subscription found')
+    },
+    tags=['Payments']
+)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def reactivate_subscription_payment(request):
+    """
+    Create a payment to reactivate an inactive subscription
+
+    This endpoint:
+    - Works with inactive subscriptions
+    - Charges the full subscription amount
+    - Saves the card for future recurring payments
+    - Activates the subscription when payment succeeds
+    """
+    if not hasattr(request, 'tenant'):
+        return Response(
+            {'error': 'This endpoint is only available from tenant subdomains'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    try:
+        # Get subscription (even if inactive)
+        subscription = TenantSubscription.objects.get(tenant=request.tenant)
+
+        # Calculate amount based on subscription type
+        if subscription.selected_features.exists():
+            # Feature-based pricing
+            total_per_user = sum(f.price_per_user_gel for f in subscription.selected_features.all())
+            amount = float(total_per_user * subscription.agent_count)
+        elif subscription.package:
+            # Package-based pricing
+            from .models import PricingModel
+            if subscription.package.pricing_model == PricingModel.AGENT_BASED:
+                amount = float(subscription.package.price_gel) * subscription.agent_count
+            else:
+                amount = float(subscription.package.price_gel)
+        else:
+            return Response(
+                {'error': 'Invalid subscription configuration'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Check if BOG is configured
+        if not bog_service.is_configured():
+            return Response(
+                {
+                    'error': 'Payment gateway not configured',
+                    'message': 'Please contact support to set up payment processing'
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
+
+        # Generate URLs
+        api_host = request.get_host()
+        frontend_host = api_host.replace('api.', '')
+        frontend_url = f"https://{frontend_host}"
+        return_url_success = f"{frontend_url}/settings/subscription?payment=success"
+        return_url_fail = f"{frontend_url}/settings/subscription?payment=failed"
+
+        # Ensure callback_url starts with https://
+        api_domain = settings.API_DOMAIN
+        if not api_domain.startswith('http'):
+            api_domain = f"https://{api_domain}"
+        callback_url = f"{api_domain}/api/payments/webhook/"
+
+        # Generate external order ID
+        import uuid
+        external_order_id = f"REACT-{uuid.uuid4().hex[:12].upper()}"
+
+        # Create payment with card saving enabled
+        payment_result = bog_service.create_payment(
+            amount=amount,
+            currency='GEL',
+            external_order_id=external_order_id,
+            description=f"EchoDesk Subscription Reactivation - {request.tenant.name}",
+            customer_email=request.tenant.admin_email,
+            customer_name=request.tenant.admin_name or request.tenant.name,
+            return_url_success=return_url_success,
+            return_url_fail=return_url_fail,
+            callback_url=callback_url
+        )
+
+        bog_order_id = payment_result.get('order_id')
+
+        # Enable subscription card saving on this order
+        try:
+            bog_service.enable_subscription_card_saving(bog_order_id)
+            logger.info(f'Enabled subscription card saving for order {bog_order_id}')
+        except Exception as e:
+            logger.error(f'Failed to enable card saving for order {bog_order_id}: {e}')
+
+        # Create payment order
+        payment_order = PaymentOrder.objects.create(
+            order_id=external_order_id,
+            bog_order_id=bog_order_id,
+            tenant=request.tenant,
+            package=subscription.package,
+            amount=amount,
+            currency='GEL',
+            agent_count=subscription.agent_count,
+            payment_url=payment_result['payment_url'],
+            status='pending',
+            card_saved=False,  # Will be updated by webhook
+            metadata={
+                'type': 'reactivation',
+                'subscription_id': subscription.id,
+                'save_card': True
+            }
+        )
+
+        logger.info(f'Reactivation payment created for tenant {request.tenant.schema_name}: {external_order_id}, amount: {amount}₾')
+
+        return Response({
+            'payment_url': payment_result['payment_url'],
+            'order_id': external_order_id,
+            'amount': amount,
+            'currency': 'GEL'
+        })
+
+    except TenantSubscription.DoesNotExist:
+        return Response(
+            {'error': 'No subscription found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        logger.error(f'Error creating reactivation payment for {request.tenant.schema_name}: {e}')
         return Response(
             {'error': f'Failed to create payment: {str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR

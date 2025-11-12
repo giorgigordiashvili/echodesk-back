@@ -13,7 +13,8 @@ from .package_views import (
 )
 from .payment_views import (
     create_subscription_payment, check_payment_status, bog_webhook, cancel_subscription,
-    get_saved_card, remove_saved_card, set_default_card, manual_payment, add_new_card, list_invoices
+    get_saved_card, remove_saved_card, set_default_card, manual_payment, add_new_card, list_invoices,
+    reactivate_subscription_payment
 )
 from .upgrade_views import (
     upgrade_preview, upgrade_immediate, upgrade_scheduled, cancel_scheduled_upgrade
@@ -64,6 +65,7 @@ urlpatterns = [
     path('api/payments/saved-card/set-default/', set_default_card, name='set_default_card'),
     path('api/payments/saved-card/add/', add_new_card, name='add_new_card'),
     path('api/payments/manual/', manual_payment, name='manual_payment'),
+    path('api/payments/reactivate/', reactivate_subscription_payment, name='reactivate_subscription_payment'),
     path('api/payments/invoices/', list_invoices, name='list_invoices'),
 
     # Package upgrade endpoints (authenticated access)
