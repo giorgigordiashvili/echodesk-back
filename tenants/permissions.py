@@ -40,7 +40,7 @@ class SubscriptionFeature:
 
 def get_tenant_subscription(request):
     """
-    Get the tenant's active subscription from the request
+    Get the tenant's subscription from the request (active or inactive)
 
     Args:
         request: Django request object with tenant attached
@@ -57,8 +57,9 @@ def get_tenant_subscription(request):
 
     try:
         subscription = request.tenant.subscription
-        if subscription.is_active:
-            return subscription
+        # Return subscription regardless of is_active status
+        # Let the caller handle inactive subscriptions
+        return subscription
     except Exception:
         pass
 
