@@ -476,7 +476,8 @@ CRON_SECRET_TOKEN = config('CRON_SECRET_TOKEN', default='')
 
 # Test Mode for Billing Intervals
 # When True, subscriptions renew every 2 minutes instead of 30 days (for testing)
-# Set TEST_BILLING_INTERVAL=true in .env to enable test mode
+# PRODUCTION: Set TEST_BILLING_INTERVAL=false or remove from .env
+# TEST: Set TEST_BILLING_INTERVAL=true in .env to enable test mode
 TEST_BILLING_INTERVAL = config('TEST_BILLING_INTERVAL', default=False, cast=bool)
 
 # SendGrid Email Configuration
