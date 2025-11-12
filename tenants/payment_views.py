@@ -27,6 +27,21 @@ User = get_user_model()
 logger = logging.getLogger(__name__)
 
 
+def get_next_billing_date():
+    """
+    Calculate next billing date based on TEST_BILLING_INTERVAL setting
+
+    Returns:
+        datetime: Next billing date (5 minutes for testing, 30 days for production)
+    """
+    if getattr(settings, 'TEST_BILLING_INTERVAL', False):
+        # Test mode: 5 minutes
+        return timezone.now() + timedelta(minutes=5)
+    else:
+        # Production mode: 30 days
+        return timezone.now() + timedelta(days=30)
+
+
 def trigger_tenant_processing(schema_name):
     """
     Trigger the tenant processing command in the background
@@ -519,13 +534,13 @@ def bog_webhook(request):
                             package=pending_registration.package,  # Can be None for feature-based
                             is_active=True,
                             starts_at=timezone.now(),
-                            expires_at=timezone.now() + timedelta(days=30),
+                            expires_at=get_next_billing_date(),
                             agent_count=pending_registration.agent_count,
                             current_users=1,
                             whatsapp_messages_used=0,
                             storage_used_gb=0,
                             last_billed_at=timezone.now(),
-                            next_billing_date=timezone.now() + timedelta(days=30),
+                            next_billing_date=get_next_billing_date(),
                             parent_order_id=parent_order_id_for_subscription  # Save BOG order ID for recurring charges
                         )
 
@@ -634,9 +649,9 @@ def bog_webhook(request):
 
                         # Reactivate the subscription
                         subscription.is_active = True
-                        subscription.expires_at = timezone.now() + timedelta(days=30)
+                        subscription.expires_at = get_next_billing_date()
                         subscription.last_billed_at = timezone.now()
-                        subscription.next_billing_date = timezone.now() + timedelta(days=30)
+                        subscription.next_billing_date = get_next_billing_date()
                         subscription.subscription_type = 'paid'
 
                         # Save the card for recurring payments if card was saved
@@ -725,14 +740,14 @@ def bog_webhook(request):
                         package=package,
                         is_active=True,
                         starts_at=timezone.now(),
-                        expires_at=timezone.now() + timedelta(days=30),
+                        expires_at=get_next_billing_date(),
                         agent_count=1,  # Flat CRM pricing (agent_count deprecated)
                         current_users=1,
                         whatsapp_messages_used=0,
                         storage_used_gb=0,
                         parent_order_id=parent_order_id_for_subscription,
                         last_billed_at=timezone.now(),
-                        next_billing_date=timezone.now() + timedelta(days=30),
+                        next_billing_date=get_next_billing_date(),
                         subscription_type='paid',
                         pending_package=None,  # Clear any pending upgrade
                         upgrade_scheduled_for=None
@@ -794,8 +809,8 @@ def bog_webhook(request):
                         subscription.upgrade_scheduled_for = None
                         subscription.subscription_type = 'paid'
                         subscription.last_billed_at = timezone.now()
-                        subscription.next_billing_date = timezone.now() + timedelta(days=30)
-                        subscription.expires_at = timezone.now() + timedelta(days=30)
+                        subscription.next_billing_date = get_next_billing_date()
+                        subscription.expires_at = get_next_billing_date()
                         subscription.save()
 
                         logger.info(f'Scheduled upgrade completed: {tenant.schema_name} upgraded from {previous_package.display_name} to {package.display_name}')
@@ -825,10 +840,10 @@ def bog_webhook(request):
                 # Renewal: Update existing subscription
                 subscription.package = package
                 subscription.is_active = True
-                subscription.expires_at = timezone.now() + timedelta(days=30)
+                subscription.expires_at = get_next_billing_date()
                 subscription.agent_count = 1  # Flat CRM pricing (agent_count deprecated)
                 subscription.last_billed_at = timezone.now()
-                subscription.next_billing_date = timezone.now() + timedelta(days=30)
+                subscription.next_billing_date = get_next_billing_date()
                 subscription.subscription_type = 'paid'
                 subscription.save()
                 created = False
@@ -840,13 +855,13 @@ def bog_webhook(request):
                     package=package,
                     is_active=True,
                     starts_at=timezone.now(),
-                    expires_at=timezone.now() + timedelta(days=30),
+                    expires_at=get_next_billing_date(),
                     agent_count=1,  # Flat CRM pricing (agent_count deprecated)
                     current_users=1,
                     whatsapp_messages_used=0,
                     storage_used_gb=0,
                     last_billed_at=timezone.now(),
-                    next_billing_date=timezone.now() + timedelta(days=30),
+                    next_billing_date=get_next_billing_date(),
                     subscription_type='paid'
                 )
                 created = True

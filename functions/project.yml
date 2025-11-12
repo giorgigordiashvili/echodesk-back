@@ -13,14 +13,17 @@ packages:
 
     functions:
       # Recurring payment processing - charges saved cards daily
+      # TEST MODE: Currently set to run every 5 minutes for testing
+      # PRODUCTION: Change to "0 2 * * *" for daily at 2:00 AM UTC
       - name: recurring-payments
         runtime: python:3.11
         triggers:
           - name: daily-recurring-payments
             sourceType: scheduler
             sourceDetails:
-              # Run daily at 2:00 AM UTC
-              cron: "0 2 * * *"
+              # TEST MODE: Run every 5 minutes for testing
+              # PRODUCTION: Run daily at 2:00 AM UTC with "0 2 * * *"
+              cron: "*/5 * * * *"
 
       # Subscription status check - monitors and suspends overdue accounts
       - name: subscription-check

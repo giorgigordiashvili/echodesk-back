@@ -474,6 +474,11 @@ BOG_API_BASE_URL = config('BOG_API_BASE_URL', default='https://api.bog.ge/paymen
 # Cron Job Security Token (for scheduled task HTTP endpoints)
 CRON_SECRET_TOKEN = config('CRON_SECRET_TOKEN', default='')
 
+# Test Mode for Billing Intervals
+# When True, subscriptions renew every 5 minutes instead of 30 days (for testing)
+# Set TEST_BILLING_INTERVAL=true in .env to enable test mode
+TEST_BILLING_INTERVAL = config('TEST_BILLING_INTERVAL', default=False, cast=bool)
+
 # SendGrid Email Configuration
 SENDGRID_API_KEY = config('SENDGRID_API_KEY', default='')
 SENDGRID_FROM_EMAIL = config('SENDGRID_FROM_EMAIL', default='noreply@email.echodesk.ge')
