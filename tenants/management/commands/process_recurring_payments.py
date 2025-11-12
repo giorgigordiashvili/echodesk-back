@@ -77,11 +77,14 @@ class Command(BaseCommand):
                     skipped_count += 1
                     continue
 
-                # Get package price (flat CRM-based pricing only)
-                amount = float(package.price_gel)
+                # Calculate amount based on subscription type
+                # Use subscription.monthly_cost which handles both feature-based and package-based pricing
+                amount = float(subscription.monthly_cost)
+
+                package_name = package.display_name if package else "Feature-based"
 
                 self.stdout.write(
-                    f'📋 {tenant.schema_name}: Charging {amount} GEL for {package.display_name} '
+                    f'📋 {tenant.schema_name}: Charging {amount} GEL for {package_name} '
                     f'(expires: {subscription.expires_at.date() if subscription.expires_at else "N/A"})'
                 )
 
@@ -120,7 +123,7 @@ class Command(BaseCommand):
                     previous_package=subscription.package if subscription.pending_package else None,
                     amount=amount,
                     currency='GEL',
-                    agent_count=1,  # Deprecated field
+                    agent_count=subscription.agent_count,  # Use actual agent count from subscription
                     status='pending',
                     card_saved=False,  # This is a charge, not a new card save
                     is_immediate_upgrade=False,  # This is scheduled/recurring, not immediate
