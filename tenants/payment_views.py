@@ -32,11 +32,11 @@ def get_next_billing_date():
     Calculate next billing date based on TEST_BILLING_INTERVAL setting
 
     Returns:
-        datetime: Next billing date (5 minutes for testing, 30 days for production)
+        datetime: Next billing date (2 minutes for testing, 30 days for production)
     """
     if getattr(settings, 'TEST_BILLING_INTERVAL', False):
-        # Test mode: 5 minutes
-        return timezone.now() + timedelta(minutes=5)
+        # Test mode: 2 minutes
+        return timezone.now() + timedelta(minutes=2)
     else:
         # Production mode: 30 days
         return timezone.now() + timedelta(days=30)
