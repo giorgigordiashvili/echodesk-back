@@ -15,6 +15,8 @@ from .authentication import EcommerceClientJWTAuthentication
 from .models import (
     EcommerceClient,
     Product,
+    ProductAttributeValue,
+    AttributeDefinition,
     ClientAddress,
     FavoriteProduct,
     Cart,
@@ -27,6 +29,7 @@ from .serializers import (
     EcommerceClientSerializer,
     ProductListSerializer,
     ProductDetailSerializer,
+    AttributeDefinitionSerializer,
     FavoriteProductSerializer,
     FavoriteProductCreateSerializer,
     CartSerializer,
@@ -98,6 +101,178 @@ class ClientProfileViewSet(viewsets.GenericViewSet):
         return Response(serializer.data)
 
 
+class ClientAttributeViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    Client-facing attribute browsing (read-only, public access)
+    Returns only filterable attributes for product filtering
+    """
+    queryset = AttributeDefinition.objects.filter(is_active=True, is_filterable=True)
+    serializer_class = AttributeDefinitionSerializer
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['attribute_type', 'is_variant_attribute']
+    ordering_fields = ['sort_order', 'key']
+    ordering = ['sort_order', 'id']
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        language = self.request.query_params.get('language', 'en')
+        context['language'] = language
+        return context
+
+    @extend_schema(
+        tags=['Ecommerce Client - Attributes'],
+        summary='List filterable attributes',
+        description='Get all filterable attributes for product filtering'
+    )
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce Client - Attributes'],
+        summary='Get attribute details',
+        description='View detailed attribute information including options'
+    )
+    def retrieve(self, request, *args, **kwargs):
+        return super().retrieve(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce Client - Attributes'],
+        summary='Get faceted search data',
+        description='''Get attribute filter options with product counts.
+        Returns available filter values and their product counts for each attribute.
+        Supports existing filter selections to show refined counts.'''
+    )
+    @action(detail=False, methods=['get'])
+    def facets(self, request):
+        """
+        Get faceted search data for all filterable attributes
+        Returns option values with product counts
+        """
+        from django.db.models import Count, Q, Min, Max
+
+        # Get query parameters for existing filters
+        existing_filters = {}
+        for key, value in request.GET.items():
+            if key.startswith('attr_'):
+                attr_key = key[5:]  # Remove 'attr_' prefix
+                existing_filters[attr_key] = value.split(',')  # Support multiple values
+
+        # Base product queryset (only active products)
+        products_qs = Product.objects.filter(status='active')
+
+        # Apply existing filters to narrow down products
+        for attr_key, values in existing_filters.items():
+            try:
+                attribute = AttributeDefinition.objects.get(key=attr_key, is_filterable=True)
+                q_filter = Q()
+                for value in values:
+                    if attribute.attribute_type == 'select':
+                        q_filter |= Q(
+                            attribute_values__attribute=attribute,
+                            attribute_values__value_text=value
+                        )
+                    elif attribute.attribute_type == 'multiselect':
+                        q_filter |= Q(
+                            attribute_values__attribute=attribute,
+                            attribute_values__value_json__contains=value
+                        )
+                    elif attribute.attribute_type == 'boolean':
+                        q_filter |= Q(
+                            attribute_values__attribute=attribute,
+                            attribute_values__value_boolean=(value.lower() == 'true')
+                        )
+                    elif attribute.attribute_type == 'number':
+                        # Support range: min-max format
+                        if '-' in value:
+                            min_val, max_val = value.split('-')
+                            q_filter |= Q(
+                                attribute_values__attribute=attribute,
+                                attribute_values__value_number__gte=float(min_val),
+                                attribute_values__value_number__lte=float(max_val)
+                            )
+                products_qs = products_qs.filter(q_filter).distinct()
+            except AttributeDefinition.DoesNotExist:
+                continue
+
+        # Get all filterable attributes
+        attributes = AttributeDefinition.objects.filter(is_active=True, is_filterable=True).order_by('sort_order')
+
+        facet_data = []
+        language = request.query_params.get('language', 'en')
+
+        for attribute in attributes:
+            facet = {
+                'attribute_key': attribute.key,
+                'attribute_name': attribute.get_name(language),
+                'attribute_type': attribute.attribute_type,
+                'options': []
+            }
+
+            if attribute.attribute_type in ['select', 'multiselect']:
+                # For select types, count products per option value
+                for option in attribute.options:
+                    value = option.get('value', '')
+                    label = option.get(language, option.get('en', value))
+
+                    # Count products with this option value
+                    count = products_qs.filter(
+                        attribute_values__attribute=attribute,
+                        attribute_values__value_text=value
+                    ).distinct().count()
+
+                    if count > 0:  # Only include options that have products
+                        facet['options'].append({
+                            'value': value,
+                            'label': label,
+                            'count': count
+                        })
+
+            elif attribute.attribute_type == 'number':
+                # For number types, return min and max range
+                value_range = products_qs.filter(
+                    attribute_values__attribute=attribute
+                ).aggregate(
+                    min_value=Min('attribute_values__value_number'),
+                    max_value=Max('attribute_values__value_number')
+                )
+
+                if value_range['min_value'] is not None:
+                    facet['range'] = {
+                        'min': float(value_range['min_value']),
+                        'max': float(value_range['max_value']),
+                        'unit': attribute.unit
+                    }
+
+            elif attribute.attribute_type == 'boolean':
+                # For boolean types, count true/false
+                true_count = products_qs.filter(
+                    attribute_values__attribute=attribute,
+                    attribute_values__value_boolean=True
+                ).distinct().count()
+
+                false_count = products_qs.filter(
+                    attribute_values__attribute=attribute,
+                    attribute_values__value_boolean=False
+                ).distinct().count()
+
+                if true_count > 0 or false_count > 0:
+                    facet['options'] = [
+                        {'value': 'true', 'label': 'Yes', 'count': true_count},
+                        {'value': 'false', 'label': 'No', 'count': false_count}
+                    ]
+
+            # Only include facets that have data
+            if facet.get('options') or facet.get('range'):
+                facet_data.append(facet)
+
+        return Response({
+            'facets': facet_data,
+            'total_products': products_qs.distinct().count()
+        })
+
+
 class ClientProductViewSet(viewsets.ReadOnlyModelViewSet):
     """
     Client-facing product browsing (read-only, public access)
@@ -111,6 +286,77 @@ class ClientProductViewSet(viewsets.ReadOnlyModelViewSet):
     search_fields = ['sku', 'slug']
     ordering_fields = ['price', 'created_at']
     ordering = ['-created_at']
+
+    def get_queryset(self):
+        """
+        Filter products by attributes using query params like: ?attr_color=red,blue&attr_size=large
+        Also supports price range: ?min_price=10&max_price=100
+        """
+        from django.db.models import Q
+
+        queryset = super().get_queryset()
+
+        # Price range filtering
+        min_price = self.request.query_params.get('min_price')
+        max_price = self.request.query_params.get('max_price')
+        if min_price:
+            queryset = queryset.filter(price__gte=min_price)
+        if max_price:
+            queryset = queryset.filter(price__lte=max_price)
+
+        # Attribute-based filtering
+        for key, value in self.request.GET.items():
+            if key.startswith('attr_'):
+                attr_key = key[5:]  # Remove 'attr_' prefix
+                values = value.split(',')  # Support multiple values (OR logic)
+
+                try:
+                    attribute = AttributeDefinition.objects.get(key=attr_key, is_filterable=True)
+                    q_filter = Q()
+
+                    for val in values:
+                        if attribute.attribute_type == 'select':
+                            q_filter |= Q(
+                                attribute_values__attribute=attribute,
+                                attribute_values__value_text=val
+                            )
+                        elif attribute.attribute_type == 'multiselect':
+                            q_filter |= Q(
+                                attribute_values__attribute=attribute,
+                                attribute_values__value_json__contains=val
+                            )
+                        elif attribute.attribute_type == 'boolean':
+                            q_filter |= Q(
+                                attribute_values__attribute=attribute,
+                                attribute_values__value_boolean=(val.lower() == 'true')
+                            )
+                        elif attribute.attribute_type == 'number':
+                            # Support range: min-max format
+                            if '-' in val:
+                                min_val, max_val = val.split('-')
+                                q_filter |= Q(
+                                    attribute_values__attribute=attribute,
+                                    attribute_values__value_number__gte=float(min_val),
+                                    attribute_values__value_number__lte=float(max_val)
+                                )
+                            else:
+                                q_filter |= Q(
+                                    attribute_values__attribute=attribute,
+                                    attribute_values__value_number=float(val)
+                                )
+                        elif attribute.attribute_type == 'text':
+                            q_filter |= Q(
+                                attribute_values__attribute=attribute,
+                                attribute_values__value_text__icontains=val
+                            )
+
+                    if q_filter:
+                        queryset = queryset.filter(q_filter).distinct()
+
+                except AttributeDefinition.DoesNotExist:
+                    continue
+
+        return queryset
 
     def get_serializer_class(self):
         if self.action == 'retrieve':
@@ -126,7 +372,13 @@ class ClientProductViewSet(viewsets.ReadOnlyModelViewSet):
     @extend_schema(
         tags=['Ecommerce Client - Products'],
         summary='List products',
-        description='Browse active products'
+        description='''Browse active products with filtering options:
+        - Basic filters: ?is_featured=true
+        - Search: ?search=laptop
+        - Price range: ?min_price=100&max_price=500
+        - Attribute filters: ?attr_color=red,blue&attr_size=large
+        - Ordering: ?ordering=-price (price descending) or ?ordering=created_at
+        - Language: ?language=ka (for multilingual content)'''
     )
     def list(self, request, *args, **kwargs):
         return super().list(request, *args, **kwargs)

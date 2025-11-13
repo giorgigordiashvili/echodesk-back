@@ -25,6 +25,7 @@ from .views import (
 )
 from .views_client import (
     ClientProfileViewSet,
+    ClientAttributeViewSet,
     ClientProductViewSet,
     ClientAddressViewSet as ClientClientAddressViewSet,
     ClientFavoriteViewSet,
@@ -52,9 +53,10 @@ admin_router.register(r'cart-items', CartItemViewSet, basename='cart-item')
 admin_router.register(r'orders', OrderViewSet, basename='order')
 admin_router.register(r'settings', EcommerceSettingsViewSet, basename='ecommerce-settings')
 
-# Client router - requires client JWT authentication
+# Client router - public and authenticated client access
 client_router = DefaultRouter()
 client_router.register(r'profile', ClientProfileViewSet, basename='client-profile')
+client_router.register(r'attributes', ClientAttributeViewSet, basename='client-attribute')
 client_router.register(r'products', ClientProductViewSet, basename='client-product')
 client_router.register(r'addresses', ClientClientAddressViewSet, basename='client-address')
 client_router.register(r'favorites', ClientFavoriteViewSet, basename='client-favorite')
