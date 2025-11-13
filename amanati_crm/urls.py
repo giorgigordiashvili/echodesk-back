@@ -71,13 +71,11 @@ urlpatterns = [
         generator_class=EcommerceClientSchemaGenerator
     ), name='ecommerce-client-schema'),
 
-    # Swagger UI with multiple schemas (dropdown selector)
-    path('api/docs/', SpectacularSwaggerView.as_view(
-        urls=[
-            {'url': '/api/schema/', 'name': 'Main API'},
-            {'url': '/api/ecommerce-client-schema/', 'name': 'Ecommerce Client API'},
-        ]
-    ), name='swagger-ui'),
+    # Swagger UI - Main API
+    path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
+
+    # Swagger UI - Ecommerce Client API
+    path('api/ecommerce-client-docs/', SpectacularSwaggerView.as_view(url_name='ecommerce-client-schema'), name='ecommerce-client-swagger-ui'),
 
     # WebSocket diagnostic endpoint
     path('websocket-diagnostic/', websocket_diagnostic, name='websocket_diagnostic'),
