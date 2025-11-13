@@ -6,6 +6,7 @@ from django.contrib import admin
 from django.urls import path, include
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from django.http import JsonResponse
+from ecommerce_crm.schema import EcommerceClientSchemaGenerator
 
 def websocket_diagnostic(request):
     """
@@ -61,11 +62,25 @@ def websocket_diagnostic(request):
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    
-    # API Documentation
+
+    # API Documentation - Main API
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
-    path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
-    
+
+    # API Documentation - Ecommerce Client API (separate schema for client endpoints only)
+    path('api/ecommerce-client-schema/', SpectacularAPIView.as_view(
+        generator_class=EcommerceClientSchemaGenerator,
+        title='EchoDesk Ecommerce Client API',
+        description='Public and authenticated client endpoints for ecommerce functionality'
+    ), name='ecommerce-client-schema'),
+
+    # Swagger UI with multiple schemas (dropdown selector)
+    path('api/docs/', SpectacularSwaggerView.as_view(
+        urls=[
+            {'url': '/api/schema/', 'name': 'Main API'},
+            {'url': '/api/ecommerce-client-schema/', 'name': 'Ecommerce Client API'},
+        ]
+    ), name='swagger-ui'),
+
     # WebSocket diagnostic endpoint
     path('websocket-diagnostic/', websocket_diagnostic, name='websocket_diagnostic'),
     

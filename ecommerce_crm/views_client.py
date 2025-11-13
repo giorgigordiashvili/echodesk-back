@@ -25,6 +25,8 @@ from .models import (
     ClientCard,
     EcommerceSettings,
 )
+from tickets.models import ItemList, ListItem
+from tickets.serializers import ItemListMinimalSerializer, ListItemSerializer
 from .serializers import (
     EcommerceClientSerializer,
     ProductListSerializer,
@@ -1060,3 +1062,62 @@ def set_default_client_card(request, card_id):
         return Response({
             'error': 'Card not found'
         }, status=status.HTTP_404_NOT_FOUND)
+
+
+class ClientItemListViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    Ecommerce clients can access public item lists
+    No authentication required - public access
+    """
+    permission_classes = [AllowAny]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['title', 'description']
+    ordering = ['title']
+
+    def get_queryset(self):
+        """Return only public and active item lists"""
+        return ItemList.objects.filter(is_public=True, is_active=True)
+
+    def get_serializer_class(self):
+        return ItemListMinimalSerializer
+
+    @extend_schema(
+        tags=['Ecommerce Client - Item Lists'],
+        summary='List public item lists',
+        description='Get all public item lists accessible to ecommerce clients (no authentication required)'
+    )
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce Client - Item Lists'],
+        summary='Get item list details',
+        description='Get details of a specific public item list (no authentication required)'
+    )
+    def retrieve(self, request, *args, **kwargs):
+        return super().retrieve(request, *args, **kwargs)
+
+    @action(detail=True, methods=['get'], permission_classes=[AllowAny])
+    @extend_schema(
+        tags=['Ecommerce Client - Item Lists'],
+        summary='Get items from list',
+        description='Get all items from a public item list (no authentication required)',
+        responses={
+            200: ListItemSerializer(many=True),
+            404: OpenApiResponse(description='Item list not found or not public')
+        }
+    )
+    def items(self, request, pk=None):
+        """Get all items from a public item list"""
+        try:
+            item_list = ItemList.objects.get(pk=pk, is_public=True, is_active=True)
+        except ItemList.DoesNotExist:
+            return Response(
+                {'error': 'Public item list not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Get all active items from the list
+        items = item_list.items.filter(is_active=True)
+        serializer = ListItemSerializer(items, many=True, context={'request': request})
+        return Response(serializer.data)
