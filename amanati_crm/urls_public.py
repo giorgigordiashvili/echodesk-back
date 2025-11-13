@@ -5,6 +5,7 @@ This handles routes for the public schema (tenant management).
 from django.contrib import admin
 from django.urls import path, include
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
+from ecommerce_crm.schema import EcommerceClientSchemaGenerator
 from social_integrations import legal_views
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
@@ -96,11 +97,17 @@ def test_polling_system(request):
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    
-    # API Documentation
+
+    # API Documentation - Main API
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
     path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
-    
+
+    # API Documentation - Ecommerce Client API
+    path('api/ecommerce-client-schema/', SpectacularAPIView.as_view(
+        generator_class=EcommerceClientSchemaGenerator
+    ), name='ecommerce-client-schema'),
+    path('api/ecommerce-client-docs/', SpectacularSwaggerView.as_view(url_name='ecommerce-client-schema'), name='ecommerce-client-swagger-ui'),
+
     # Testing endpoints
     path('websocket-diagnostic/', websocket_diagnostic, name='websocket_diagnostic'),
     path('test-polling/', test_polling_system, name='test_polling'),
