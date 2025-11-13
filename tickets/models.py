@@ -644,6 +644,10 @@ class ItemList(models.Model):
         default=True,
         help_text='Whether this list is currently active'
     )
+    is_public = models.BooleanField(
+        default=False,
+        help_text='Whether this list is accessible to ecommerce clients (public)'
+    )
 
     # Parent list relationship - allows creating child lists
     parent_list = models.ForeignKey(

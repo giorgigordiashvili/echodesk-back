@@ -1152,6 +1152,29 @@ class ItemListViewSet(viewsets.ModelViewSet):
         serializer = ListItemSerializer(root_items, many=True, context={'request': request})
         return Response(serializer.data)
 
+    @action(detail=False, methods=['get'], permission_classes=[permissions.AllowAny])
+    def public(self, request):
+        """Get all public item lists accessible to ecommerce clients."""
+        queryset = ItemList.objects.filter(is_public=True, is_active=True)
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['get'], permission_classes=[permissions.AllowAny])
+    def public_items(self, request, pk=None):
+        """Get items from a public list (only if the list is public)."""
+        try:
+            item_list = ItemList.objects.get(pk=pk, is_public=True, is_active=True)
+        except ItemList.DoesNotExist:
+            return Response(
+                {'error': 'Public list not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Get all items from the list (with hierarchy)
+        items = item_list.items.filter(is_active=True)
+        serializer = ListItemSerializer(items, many=True, context={'request': request})
+        return Response(serializer.data)
+
 
 class ListItemViewSet(viewsets.ModelViewSet):
     """ViewSet for managing list items."""
