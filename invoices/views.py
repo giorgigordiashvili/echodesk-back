@@ -163,9 +163,11 @@ class InvoiceSettingsViewSet(viewsets.ModelViewSet):
     def available_itemlists(self, request):
         """Get list of available item lists that can be used for clients"""
         from tickets.models import ItemList
+        from tickets.serializers import ItemListMinimalSerializer
 
-        item_lists = ItemList.objects.filter(is_active=True).values('id', 'title', 'description')
-        return Response(list(item_lists))
+        item_lists = ItemList.objects.filter(is_active=True)
+        serializer = ItemListMinimalSerializer(item_lists, many=True)
+        return Response(serializer.data)
 
 
 class InvoiceViewSet(viewsets.ModelViewSet):
