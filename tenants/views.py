@@ -1298,7 +1298,6 @@ def upload_image(request):
 
     try:
         from django.core.files.storage import default_storage
-        from django.core.files.base import ContentFile
         import os
         from datetime import datetime
 
@@ -1306,9 +1305,13 @@ def upload_image(request):
         ext = os.path.splitext(image_file.name)[1]
         filename = f'gallery/{request.tenant.schema_name}/{datetime.now().strftime("%Y%m%d_%H%M%S")}_{image_file.name}'
 
-        # Save file
-        path = default_storage.save(filename, ContentFile(image_file.read()))
-        url = request.build_absolute_uri(default_storage.url(path))
+        # Save file directly (preserves content type)
+        path = default_storage.save(filename, image_file)
+        url = default_storage.url(path)
+
+        # Make URL absolute if it's relative
+        if not url.startswith('http'):
+            url = request.build_absolute_uri(url)
 
         return Response({
             'url': url,
