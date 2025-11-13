@@ -24,9 +24,8 @@ from .models import (
     Order,
     ClientCard,
     EcommerceSettings,
-    ItemList,
-    ItemListProduct,
 )
+from tickets.models import ItemList
 from .serializers import (
     EcommerceClientSerializer,
     ProductListSerializer,
@@ -42,7 +41,6 @@ from .serializers import (
     ClientCardSerializer,
     ItemListMinimalSerializer,
     ItemListDetailSerializer,
-    ItemListProductSerializer,
 )
 
 
@@ -1070,22 +1068,22 @@ def set_default_client_card(request, card_id):
 
 class ClientItemListViewSet(viewsets.ReadOnlyModelViewSet):
     """
-    Ecommerce clients can access public item lists (product collections)
-    Examples: Featured Products, New Arrivals, Best Sellers
+    Ecommerce clients can access public item lists
+    These are the same item lists used in tickets, but filtered to show only public ones
     No authentication required - public access
     """
     permission_classes = [AllowAny]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
-    search_fields = ['title', 'description', 'slug']
-    ordering_fields = ['sort_order', 'created_at']
-    ordering = ['sort_order', '-created_at']
+    search_fields = ['title', 'description']
+    ordering_fields = ['title', 'created_at']
+    ordering = ['title']
 
     def get_queryset(self):
-        """Return only public and active item lists with their products"""
+        """Return only public and active item lists with their items"""
         return ItemList.objects.filter(
             is_public=True,
             is_active=True
-        ).prefetch_related('list_products__product')
+        ).prefetch_related('items')
 
     def get_serializer_class(self):
         """Use detailed serializer for retrieve, minimal for list"""
@@ -1096,15 +1094,15 @@ class ClientItemListViewSet(viewsets.ReadOnlyModelViewSet):
     @extend_schema(
         tags=['Ecommerce Client - Item Lists'],
         summary='List public item lists',
-        description='Get all public product lists/collections (Featured, New Arrivals, etc.)'
+        description='Get all public item lists that are marked as accessible to clients'
     )
     def list(self, request, *args, **kwargs):
         return super().list(request, *args, **kwargs)
 
     @extend_schema(
         tags=['Ecommerce Client - Item Lists'],
-        summary='Get item list with products',
-        description='Get detailed item list including all products in the collection'
+        summary='Get item list with all items',
+        description='Get detailed item list including all items in the list (hierarchical structure)'
     )
     def retrieve(self, request, *args, **kwargs):
         return super().retrieve(request, *args, **kwargs)

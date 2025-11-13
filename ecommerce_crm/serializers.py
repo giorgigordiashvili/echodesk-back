@@ -16,9 +16,8 @@ from .models import (
     OrderItem,
     EcommerceSettings,
     ClientCard,
-    ItemList,
-    ItemListProduct,
 )
+from tickets.models import ItemList, ListItem
 
 
 class LanguageSerializer(serializers.ModelSerializer):
@@ -762,8 +761,33 @@ class ClientCardSerializer(serializers.ModelSerializer):
         ]
 
 
+class ListItemSerializer(serializers.ModelSerializer):
+    """Serializer for items within an ItemList"""
+    children = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ListItem
+        fields = [
+            'id',
+            'label',
+            'custom_id',
+            'position',
+            'is_active',
+            'custom_data',
+            'children',
+        ]
+        read_only_fields = ['id']
+
+    def get_children(self, obj):
+        """Recursively serialize child items"""
+        if obj.children.exists():
+            return ListItemSerializer(obj.children.filter(is_active=True), many=True).data
+        return []
+
+
 class ItemListMinimalSerializer(serializers.ModelSerializer):
-    """Minimal serializer for ecommerce item lists (product collections)"""
+    """Minimal serializer for public item lists"""
+    items_count = serializers.SerializerMethodField()
 
     class Meta:
         model = ItemList
@@ -771,35 +795,23 @@ class ItemListMinimalSerializer(serializers.ModelSerializer):
             'id',
             'title',
             'description',
-            'slug',
             'is_public',
             'is_active',
-            'sort_order',
+            'items_count',
             'created_at',
             'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
 
-
-class ItemListProductSerializer(serializers.ModelSerializer):
-    """Serializer for products within an item list"""
-    product = ProductListSerializer(read_only=True)
-
-    class Meta:
-        model = ItemListProduct
-        fields = [
-            'id',
-            'product',
-            'position',
-            'added_at',
-        ]
-        read_only_fields = ['id', 'added_at']
+    def get_items_count(self, obj):
+        """Return count of items in this list"""
+        return obj.items.filter(is_active=True).count()
 
 
 class ItemListDetailSerializer(serializers.ModelSerializer):
-    """Detailed serializer for ecommerce item lists with products"""
-    products = ItemListProductSerializer(source='list_products', many=True, read_only=True)
-    products_count = serializers.SerializerMethodField()
+    """Detailed serializer for item lists with all items"""
+    items = serializers.SerializerMethodField()
+    items_count = serializers.SerializerMethodField()
 
     class Meta:
         model = ItemList
@@ -807,17 +819,21 @@ class ItemListDetailSerializer(serializers.ModelSerializer):
             'id',
             'title',
             'description',
-            'slug',
             'is_public',
             'is_active',
-            'sort_order',
-            'products',
-            'products_count',
+            'custom_fields_schema',
+            'items',
+            'items_count',
             'created_at',
             'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
 
-    def get_products_count(self, obj):
-        """Return count of products in this list"""
-        return obj.list_products.count()
+    def get_items(self, obj):
+        """Return only root-level items (items without parent)"""
+        root_items = obj.items.filter(parent__isnull=True, is_active=True).order_by('position')
+        return ListItemSerializer(root_items, many=True).data
+
+    def get_items_count(self, obj):
+        """Return count of items in this list"""
+        return obj.items.filter(is_active=True).count()
