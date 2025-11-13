@@ -1350,20 +1350,19 @@ def upload_image(request):
             full_path = f"{settings.AWS_LOCATION}/{filename}" if settings.AWS_LOCATION else filename
             logger.info(f'Upload debug - Full path: {full_path}')
 
-            # Prepare parameters
+            # Prepare parameters - minimal set without ACL
+            # DigitalOcean Spaces may reject per-object ACL if bucket has default ACL
             put_params = {
                 'Bucket': settings.AWS_STORAGE_BUCKET_NAME,
                 'Key': full_path,
                 'Body': image_file.read(),
                 'ContentType': content_type,
-                'ACL': settings.AWS_DEFAULT_ACL,
-                'CacheControl': 'max-age=86400'
             }
 
             # Log all parameters
             logger.info(f'Upload debug - put_object params: {", ".join([f"{k}={v if k != "Body" else f"<{len(v)} bytes>"}" for k, v in put_params.items()])}')
 
-            # Upload with explicit parameters
+            # Upload with minimal parameters (no ACL, no CacheControl)
             s3_client.put_object(**put_params)
 
             logger.info(f'Upload debug - Successfully uploaded to S3: {full_path}')
