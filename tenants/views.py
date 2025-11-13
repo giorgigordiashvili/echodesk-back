@@ -1307,6 +1307,8 @@ def upload_image(request):
         import os
         from datetime import datetime
         import mimetypes
+        import boto3
+        from django.conf import settings
 
         # Generate unique filename
         ext = os.path.splitext(image_file.name)[1]
@@ -1320,20 +1322,34 @@ def upload_image(request):
 
         logger.info(f'Upload debug - Final content_type: {content_type}')
 
-        # For S3Boto3Storage, set extra_args with ContentType
+        # For S3/DigitalOcean Spaces, use boto3 directly with explicit ContentType
         if hasattr(default_storage, 'bucket'):
-            logger.info('Upload debug - Using S3 storage')
-            # Temporarily set object_parameters to include ContentType
-            original_params = getattr(default_storage, 'object_parameters', {})
-            default_storage.object_parameters = {
-                **original_params,
-                'ContentType': content_type
-            }
-            try:
-                path = default_storage.save(filename, image_file)
-            finally:
-                # Restore original parameters
-                default_storage.object_parameters = original_params
+            logger.info('Upload debug - Using S3/Spaces storage with boto3 client')
+
+            # Create boto3 client
+            s3_client = boto3.client(
+                's3',
+                aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+                aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+                endpoint_url=settings.AWS_S3_ENDPOINT_URL,
+                region_name=settings.AWS_S3_REGION_NAME
+            )
+
+            # Full path with location prefix
+            full_path = f"{settings.AWS_LOCATION}/{filename}" if settings.AWS_LOCATION else filename
+
+            # Upload with explicit parameters
+            s3_client.put_object(
+                Bucket=settings.AWS_STORAGE_BUCKET_NAME,
+                Key=full_path,
+                Body=image_file.read(),
+                ContentType=content_type,
+                ACL=settings.AWS_DEFAULT_ACL,
+                CacheControl='max-age=86400'
+            )
+
+            logger.info(f'Upload debug - Successfully uploaded to S3: {full_path}')
+            path = full_path
         else:
             # For local or other storage
             path = default_storage.save(filename, image_file)
