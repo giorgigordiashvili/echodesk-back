@@ -191,10 +191,10 @@ AWS_STORAGE_BUCKET_NAME = config('DO_SPACES_BUCKET_NAME', default='echodesk-spac
 AWS_S3_ENDPOINT_URL = config('DO_SPACES_ENDPOINT_URL', default='https://fra1.digitaloceanspaces.com')
 AWS_S3_REGION_NAME = config('DO_SPACES_REGION', default='fra1')
 AWS_S3_OBJECT_PARAMETERS = {
-    # CacheControl removed - DigitalOcean Spaces may reject it
-    # 'CacheControl': 'max-age=86400',
+    'CacheControl': 'max-age=86400',
 }
 AWS_LOCATION = 'media'
+# IMPORTANT: Must be 'public-read' with HYPHEN, not 'public_read' with underscore
 AWS_DEFAULT_ACL = 'public-read'
 AWS_S3_CUSTOM_DOMAIN = f'{AWS_STORAGE_BUCKET_NAME}.{AWS_S3_REGION_NAME}.digitaloceanspaces.com'
 
