@@ -157,12 +157,13 @@ class AttributeDefinitionViewSet(viewsets.ModelViewSet):
 
 
 class ProductFilter(FilterSet):
-    """Custom filter for products"""
+    """Custom filter for products with attribute filtering support"""
     min_price = NumberFilter(field_name='price', lookup_expr='gte')
     max_price = NumberFilter(field_name='price', lookup_expr='lte')
     search = CharFilter(method='search_filter')
     in_stock = BooleanFilter(method='filter_in_stock')
     low_stock = BooleanFilter(method='filter_low_stock')
+    attributes = CharFilter(method='filter_by_attributes')
 
     class Meta:
         model = Product
@@ -192,6 +193,38 @@ class ProductFilter(FilterSet):
                 quantity__gt=0
             )
         return queryset
+
+    def filter_by_attributes(self, queryset, name, value):
+        """
+        Filter products by attributes
+        Format: ?attributes=color:red,size:large
+        This filters products that have BOTH color=red AND size=large
+        """
+        if not value:
+            return queryset
+
+        # Parse attribute filters: "color:red,size:large"
+        attribute_filters = []
+        for attr_filter in value.split(','):
+            if ':' not in attr_filter:
+                continue
+
+            key, val = attr_filter.split(':', 1)
+            key = key.strip()
+            val = val.strip()
+
+            if key and val:
+                attribute_filters.append((key, val))
+
+        # Apply filters (AND logic - product must match all attributes)
+        for attr_key, attr_value in attribute_filters:
+            # Filter by attribute key (attribute definition) and value
+            queryset = queryset.filter(
+                attribute_values__attribute__key=attr_key,
+                attribute_values__value_text__iexact=attr_value
+            )
+
+        return queryset.distinct()
 
 
 class ProductViewSet(viewsets.ModelViewSet):
@@ -240,7 +273,13 @@ class ProductViewSet(viewsets.ModelViewSet):
     @extend_schema(
         tags=['Ecommerce Admin - Products'],
         summary='List all products',
-        description='Get a list of products with advanced filtering by price, category, status, and stock levels'
+        description='''Get a list of products with advanced filtering:
+        - Filter by price range: ?min_price=10&max_price=100
+        - Filter by status: ?status=active
+        - Filter by stock: ?in_stock=true&low_stock=false
+        - Filter by attributes: ?attributes=color:red,size:large
+        - Search: ?search=keyword
+        '''
     )
     def list(self, request, *args, **kwargs):
         return super().list(request, *args, **kwargs)
