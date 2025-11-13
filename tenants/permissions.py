@@ -218,6 +218,7 @@ def get_subscription_info(request):
             'name': package.display_name,
             'pricing_model': package.get_pricing_model_display(),
         }
+        # Build base features from package
         features_dict = {
             'ticket_management': package.ticket_management,
             'email_integration': package.email_integration,
@@ -235,6 +236,12 @@ def get_subscription_info(request):
             'user_management': getattr(package, 'user_management', False),
             'settings': getattr(package, 'settings', True),
         }
+
+        # Merge in any additional selected_features (hybrid mode)
+        # This allows packages to be enhanced with additional features
+        selected_feature_keys = list(subscription.selected_features.values_list('key', flat=True))
+        for key in selected_feature_keys:
+            features_dict[key] = True
         limits = {
             'max_users': package.max_users,
             'max_whatsapp_messages': package.max_whatsapp_messages,
@@ -250,23 +257,23 @@ def get_subscription_info(request):
 
         # Build features dict from selected_features
         selected_feature_keys = list(subscription.selected_features.values_list('key', flat=True))
-        features_dict = {
-            'ticket_management': 'ticket_management' in selected_feature_keys,
-            'email_integration': 'email_integration' in selected_feature_keys,
-            'sip_calling': 'sip_calling' in selected_feature_keys,
-            'facebook_integration': 'facebook_integration' in selected_feature_keys,
-            'instagram_integration': 'instagram_integration' in selected_feature_keys,
-            'whatsapp_integration': 'whatsapp_integration' in selected_feature_keys,
-            'advanced_analytics': 'advanced_analytics' in selected_feature_keys,
-            'api_access': 'api_access' in selected_feature_keys,
-            'custom_integrations': 'custom_integrations' in selected_feature_keys,
-            'priority_support': 'priority_support' in selected_feature_keys,
-            'dedicated_account_manager': 'dedicated_account_manager' in selected_feature_keys,
-            'ecommerce_crm': 'ecommerce_crm' in selected_feature_keys,
-            'order_management': 'order_management' in selected_feature_keys,
-            'user_management': 'user_management' in selected_feature_keys,
-            'settings': 'settings' in selected_feature_keys,
-        }
+
+        # Dynamically build features dict from all selected features
+        features_dict = {}
+        for key in selected_feature_keys:
+            features_dict[key] = True
+
+        # Ensure backward compatibility with legacy feature keys
+        legacy_features = [
+            'ticket_management', 'email_integration', 'sip_calling',
+            'facebook_integration', 'instagram_integration', 'whatsapp_integration',
+            'advanced_analytics', 'api_access', 'custom_integrations',
+            'priority_support', 'dedicated_account_manager', 'ecommerce_crm',
+            'order_management', 'user_management', 'settings'
+        ]
+        for feature in legacy_features:
+            if feature not in features_dict:
+                features_dict[feature] = False
 
         # For feature-based, use agent_count as max_users
         limits = {
