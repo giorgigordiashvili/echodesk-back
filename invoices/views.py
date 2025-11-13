@@ -158,6 +158,15 @@ class InvoiceSettingsViewSet(viewsets.ModelViewSet):
 
         return Response({'message': 'Signature removed successfully'})
 
+    @action(detail=False, methods=['get'], url_path='available-itemlists')
+    @require_subscription_feature('invoice_management')
+    def available_itemlists(self, request):
+        """Get list of available item lists that can be used for clients"""
+        from tickets.models import ItemList
+
+        item_lists = ItemList.objects.filter(is_active=True).values('id', 'title', 'description')
+        return Response(list(item_lists))
+
 
 class InvoiceViewSet(viewsets.ModelViewSet):
     """

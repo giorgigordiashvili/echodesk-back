@@ -20,10 +20,22 @@ class InvoiceSettingsSerializer(serializers.ModelSerializer):
     """
     Serializer for InvoiceSettings model
     """
+    client_itemlist_details = serializers.SerializerMethodField()
+
     class Meta:
         model = InvoiceSettings
         fields = '__all__'
         read_only_fields = ('created_at', 'updated_at')
+
+    def get_client_itemlist_details(self, obj):
+        """Return detailed information about the client item list"""
+        if obj.client_itemlist:
+            return {
+                'id': obj.client_itemlist.id,
+                'title': obj.client_itemlist.title,
+                'description': obj.client_itemlist.description
+            }
+        return None
 
     def validate_bank_accounts(self, value):
         """Validate bank accounts JSON structure"""

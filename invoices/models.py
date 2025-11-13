@@ -85,6 +85,16 @@ class InvoiceSettings(models.Model):
     #     }
     # ]
 
+    # Client List Configuration
+    client_itemlist = models.ForeignKey(
+        'tickets.ItemList',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name=_("Client Item List"),
+        help_text=_("The item list to use for invoice clients (if using ItemList instead of ecommerce clients)")
+    )
+
     # Email Settings
     email_from = models.EmailField(blank=True, verbose_name=_("From Email"))
     email_from_name = models.CharField(max_length=100, blank=True, verbose_name=_("From Name"))
