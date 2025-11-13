@@ -1310,9 +1310,13 @@ def upload_image(request):
         import boto3
         from django.conf import settings
 
-        # Generate unique filename
+        # Generate unique filename with sanitization
+        import re
         ext = os.path.splitext(image_file.name)[1]
-        filename = f'gallery/{request.tenant.schema_name}/{datetime.now().strftime("%Y%m%d_%H%M%S")}_{image_file.name}'
+        # Sanitize filename: remove special characters, spaces, etc.
+        safe_name = re.sub(r'[^a-zA-Z0-9_.-]', '_', image_file.name)
+        filename = f'gallery/{request.tenant.schema_name}/{datetime.now().strftime("%Y%m%d_%H%M%S")}_{safe_name}'
+        logger.info(f'Upload debug - Sanitized filename: {safe_name}')
 
         # Get content type - use provided or infer from filename
         content_type = image_file.content_type
