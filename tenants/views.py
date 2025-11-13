@@ -1326,6 +1326,13 @@ def upload_image(request):
         if hasattr(default_storage, 'bucket'):
             logger.info('Upload debug - Using S3/Spaces storage with boto3 client')
 
+            # Log all settings values
+            logger.info(f'Upload debug - AWS_STORAGE_BUCKET_NAME: {settings.AWS_STORAGE_BUCKET_NAME}')
+            logger.info(f'Upload debug - AWS_S3_ENDPOINT_URL: {settings.AWS_S3_ENDPOINT_URL}')
+            logger.info(f'Upload debug - AWS_S3_REGION_NAME: {settings.AWS_S3_REGION_NAME}')
+            logger.info(f'Upload debug - AWS_DEFAULT_ACL: {settings.AWS_DEFAULT_ACL}')
+            logger.info(f'Upload debug - AWS_LOCATION: {settings.AWS_LOCATION}')
+
             # Create boto3 client
             s3_client = boto3.client(
                 's3',
@@ -1337,16 +1344,23 @@ def upload_image(request):
 
             # Full path with location prefix
             full_path = f"{settings.AWS_LOCATION}/{filename}" if settings.AWS_LOCATION else filename
+            logger.info(f'Upload debug - Full path: {full_path}')
+
+            # Prepare parameters
+            put_params = {
+                'Bucket': settings.AWS_STORAGE_BUCKET_NAME,
+                'Key': full_path,
+                'Body': image_file.read(),
+                'ContentType': content_type,
+                'ACL': settings.AWS_DEFAULT_ACL,
+                'CacheControl': 'max-age=86400'
+            }
+
+            # Log all parameters
+            logger.info(f'Upload debug - put_object params: {", ".join([f"{k}={v if k != "Body" else f"<{len(v)} bytes>"}" for k, v in put_params.items()])}')
 
             # Upload with explicit parameters
-            s3_client.put_object(
-                Bucket=settings.AWS_STORAGE_BUCKET_NAME,
-                Key=full_path,
-                Body=image_file.read(),
-                ContentType=content_type,
-                ACL=settings.AWS_DEFAULT_ACL,
-                CacheControl='max-age=86400'
-            )
+            s3_client.put_object(**put_params)
 
             logger.info(f'Upload debug - Successfully uploaded to S3: {full_path}')
             path = full_path
@@ -1365,8 +1379,16 @@ def upload_image(request):
             'message': 'Image uploaded successfully'
         })
     except Exception as e:
+        import traceback
         logger.error(f'Failed to upload image: {str(e)}')
+        logger.error(f'Exception type: {type(e).__name__}')
+        logger.error(f'Full traceback:\n{traceback.format_exc()}')
+
+        # Log exception details if it's a boto3 error
+        if hasattr(e, 'response'):
+            logger.error(f'Boto3 error response: {e.response}')
+
         return Response(
-            {'error': 'Failed to upload image'},
+            {'error': f'Failed to upload image: {str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
