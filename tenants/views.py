@@ -1281,12 +1281,6 @@ def upload_image(request):
 
     image_file = request.FILES['image']
 
-    # Debug logging
-    logger.info(f'Upload debug - File name: {image_file.name}')
-    logger.info(f'Upload debug - File size: {image_file.size}')
-    logger.info(f'Upload debug - Content type: {image_file.content_type}')
-    logger.info(f'Upload debug - File type: {type(image_file)}')
-
     # Validate file type
     allowed_types = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp']
     if image_file.content_type not in allowed_types:
@@ -1304,40 +1298,18 @@ def upload_image(request):
 
     try:
         from django.core.files.storage import default_storage
-        import os
         from datetime import datetime
-        import mimetypes
-        import boto3
-        from django.conf import settings
+        import os
+        import re
 
         # Generate unique filename with sanitization
-        import re
+        # Remove special characters that DigitalOcean Spaces doesn't like
         ext = os.path.splitext(image_file.name)[1]
-        # Sanitize filename: remove special characters, spaces, etc.
         safe_name = re.sub(r'[^a-zA-Z0-9_.-]', '_', image_file.name)
         filename = f'gallery/{request.tenant.schema_name}/{datetime.now().strftime("%Y%m%d_%H%M%S")}_{safe_name}'
-        logger.info(f'Upload debug - Sanitized filename: {safe_name}')
 
-        # Get content type - use provided or infer from filename
-        content_type = image_file.content_type
-        if not content_type:
-            content_type = mimetypes.guess_type(image_file.name)[0] or 'application/octet-stream'
-            logger.info(f'Upload debug - Inferred content_type from filename: {content_type}')
-
-        logger.info(f'Upload debug - Final content_type: {content_type}')
-
-        # Use Django's storage backend which handles DigitalOcean Spaces correctly
-        # The storage backend is already configured with all the right settings
-        logger.info('Upload debug - Using default_storage.save()')
-
-        # Reset file pointer to beginning before saving
-        if hasattr(image_file, 'seek'):
-            image_file.seek(0)
-            logger.info('Upload debug - Reset file pointer to beginning')
-
+        # Save file using Django's storage backend
         path = default_storage.save(filename, image_file)
-        logger.info(f'Upload debug - Successfully saved file: {path}')
-
         url = default_storage.url(path)
 
         # Make URL absolute if it's relative
@@ -1349,15 +1321,7 @@ def upload_image(request):
             'message': 'Image uploaded successfully'
         })
     except Exception as e:
-        import traceback
         logger.error(f'Failed to upload image: {str(e)}')
-        logger.error(f'Exception type: {type(e).__name__}')
-        logger.error(f'Full traceback:\n{traceback.format_exc()}')
-
-        # Log exception details if it's a boto3 error
-        if hasattr(e, 'response'):
-            logger.error(f'Boto3 error response: {e.response}')
-
         return Response(
             {'error': f'Failed to upload image: {str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
