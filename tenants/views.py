@@ -1281,6 +1281,12 @@ def upload_image(request):
 
     image_file = request.FILES['image']
 
+    # Debug logging
+    logger.info(f'Upload debug - File name: {image_file.name}')
+    logger.info(f'Upload debug - File size: {image_file.size}')
+    logger.info(f'Upload debug - Content type: {image_file.content_type}')
+    logger.info(f'Upload debug - File type: {type(image_file)}')
+
     # Validate file type
     allowed_types = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp']
     if image_file.content_type not in allowed_types:
@@ -1300,13 +1306,38 @@ def upload_image(request):
         from django.core.files.storage import default_storage
         import os
         from datetime import datetime
+        import mimetypes
 
         # Generate unique filename
         ext = os.path.splitext(image_file.name)[1]
         filename = f'gallery/{request.tenant.schema_name}/{datetime.now().strftime("%Y%m%d_%H%M%S")}_{image_file.name}'
 
-        # Save file directly (preserves content type)
-        path = default_storage.save(filename, image_file)
+        # Get content type - use provided or infer from filename
+        content_type = image_file.content_type
+        if not content_type:
+            content_type = mimetypes.guess_type(image_file.name)[0] or 'application/octet-stream'
+            logger.info(f'Upload debug - Inferred content_type from filename: {content_type}')
+
+        logger.info(f'Upload debug - Final content_type: {content_type}')
+
+        # For S3Boto3Storage, set extra_args with ContentType
+        if hasattr(default_storage, 'bucket'):
+            logger.info('Upload debug - Using S3 storage')
+            # Temporarily set object_parameters to include ContentType
+            original_params = getattr(default_storage, 'object_parameters', {})
+            default_storage.object_parameters = {
+                **original_params,
+                'ContentType': content_type
+            }
+            try:
+                path = default_storage.save(filename, image_file)
+            finally:
+                # Restore original parameters
+                default_storage.object_parameters = original_params
+        else:
+            # For local or other storage
+            path = default_storage.save(filename, image_file)
+
         url = default_storage.url(path)
 
         # Make URL absolute if it's relative
