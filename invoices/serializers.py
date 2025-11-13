@@ -100,7 +100,7 @@ class InvoiceListSerializer(serializers.ModelSerializer):
     """
     client_name = serializers.SerializerMethodField()
     balance = serializers.DecimalField(max_digits=12, decimal_places=2, source='get_balance', read_only=True)
-    is_overdue = serializers.BooleanField(source='is_overdue', read_only=True)
+    is_overdue = serializers.SerializerMethodField()
     line_items_count = serializers.SerializerMethodField()
 
     class Meta:
@@ -115,6 +115,10 @@ class InvoiceListSerializer(serializers.ModelSerializer):
         """Get full client name"""
         return f"{obj.client.first_name} {obj.client.last_name}".strip() or obj.client.email
 
+    def get_is_overdue(self, obj):
+        """Check if invoice is overdue"""
+        return obj.is_overdue()
+
     def get_line_items_count(self, obj):
         """Get number of line items"""
         return obj.line_items.count()
@@ -128,7 +132,7 @@ class InvoiceDetailSerializer(serializers.ModelSerializer):
     line_items = InvoiceLineItemSerializer(many=True, read_only=True)
     payments = InvoicePaymentSerializer(many=True, read_only=True)
     balance = serializers.DecimalField(max_digits=12, decimal_places=2, source='get_balance', read_only=True)
-    is_overdue = serializers.BooleanField(source='is_overdue', read_only=True)
+    is_overdue = serializers.SerializerMethodField()
     created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True)
     template_name = serializers.CharField(source='template.name', read_only=True, allow_null=True)
     pdf_url = serializers.SerializerMethodField()
@@ -153,6 +157,10 @@ class InvoiceDetailSerializer(serializers.ModelSerializer):
             'phone': client.phone,
             'full_name': f"{client.first_name} {client.last_name}".strip() or client.email
         }
+
+    def get_is_overdue(self, obj):
+        """Check if invoice is overdue"""
+        return obj.is_overdue()
 
     def get_pdf_url(self, obj):
         """Get PDF file URL if exists"""
