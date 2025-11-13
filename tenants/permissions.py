@@ -82,11 +82,11 @@ def has_subscription_feature(request, feature_name):
     if not subscription:
         return False
 
-    # New feature-based model: check selected_features
-    if subscription.selected_features.exists():
-        return subscription.selected_features.filter(key=feature_name).exists()
+    # Check selected_features first (works for both feature-based and hybrid mode)
+    if subscription.selected_features.filter(key=feature_name).exists():
+        return True
 
-    # Legacy package-based model: check package boolean fields
+    # Also check package boolean fields (for legacy features not in selected_features)
     if subscription.package:
         return getattr(subscription.package, feature_name, False)
 
