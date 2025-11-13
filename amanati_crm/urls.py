@@ -92,4 +92,5 @@ urlpatterns = [
     path('api/ecommerce/', include('ecommerce_crm.urls')),
     path('api/bookings/', include('booking_management.urls')),
     path('api/leave/', include('leave_management.urls')),
+    path('api/invoices/', include('invoices.urls')),
 ]
