@@ -2,6 +2,7 @@ from django.db import models
 from django.conf import settings
 from django.utils import timezone
 import json
+from amanati_crm.file_utils import sanitized_upload_to
 
 
 class TicketColumn(models.Model):
@@ -946,7 +947,7 @@ class TicketAttachment(models.Model):
         help_text='Ticket this file is attached to'
     )
     file = models.FileField(
-        upload_to='ticket_attachments/%Y/%m/%d/',
+        upload_to=sanitized_upload_to('ticket_attachments'),
         help_text='Uploaded file'
     )
     filename = models.CharField(

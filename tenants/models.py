@@ -3,6 +3,7 @@ from django.core.exceptions import ValidationError
 from django.utils import timezone
 from datetime import timedelta
 from tenant_schemas.models import TenantMixin
+from amanati_crm.file_utils import sanitized_upload_to
 
 # Import feature models
 from .feature_models import (
@@ -210,7 +211,7 @@ class Tenant(TenantMixin):
     )
 
     # Branding
-    logo = models.ImageField(upload_to='tenant_logos/', blank=True, null=True, help_text="Company logo")
+    logo = models.ImageField(upload_to=sanitized_upload_to('tenant_logos', date_based=False), blank=True, null=True, help_text="Company logo")
 
     # Ticket settings
     min_users_per_ticket = models.IntegerField(

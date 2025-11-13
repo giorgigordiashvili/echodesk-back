@@ -7,6 +7,7 @@ from django.conf import settings
 import uuid
 import secrets
 from decimal import Decimal
+from amanati_crm.file_utils import sanitized_upload_to
 
 
 def generate_booking_number():
@@ -116,7 +117,7 @@ class BookingStaff(models.Model):
     """
     user = models.OneToOneField('users.User', on_delete=models.CASCADE, related_name='booking_staff')
     bio = models.TextField(blank=True, help_text="Staff bio/description")
-    profile_image = models.ImageField(upload_to='booking/staff/', blank=True, null=True)
+    profile_image = models.ImageField(upload_to=sanitized_upload_to('booking/staff', date_based=False), blank=True, null=True)
 
     # Rating system
     average_rating = models.DecimalField(max_digits=3, decimal_places=2, default=0.00, validators=[MinValueValidator(0), MaxValueValidator(5)])
@@ -181,7 +182,7 @@ class Service(models.Model):
 
     # Status
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
-    image = models.ImageField(upload_to='booking/services/', blank=True, null=True)
+    image = models.ImageField(upload_to=sanitized_upload_to('booking/services', date_based=False), blank=True, null=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
