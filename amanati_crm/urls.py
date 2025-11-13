@@ -68,7 +68,7 @@ urlpatterns = [
 
     # API Documentation - Ecommerce Client API (separate schema for client endpoints only)
     path('api/ecommerce-client-schema/', SpectacularAPIView.as_view(
-        generator_class=EcommerceClientSchemaGenerator
+        urlconf='ecommerce_crm.urls_client_schema'
     ), name='ecommerce-client-schema'),
 
     # Swagger UI - Main API

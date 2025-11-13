@@ -15,7 +15,9 @@ from .models import (
     Order,
     OrderItem,
     EcommerceSettings,
-    ClientCard
+    ClientCard,
+    ItemList,
+    ItemListProduct,
 )
 
 
@@ -758,3 +760,64 @@ class ClientCardSerializer(serializers.ModelSerializer):
             'card_expiry',
             'created_at'
         ]
+
+
+class ItemListMinimalSerializer(serializers.ModelSerializer):
+    """Minimal serializer for ecommerce item lists (product collections)"""
+
+    class Meta:
+        model = ItemList
+        fields = [
+            'id',
+            'title',
+            'description',
+            'slug',
+            'is_public',
+            'is_active',
+            'sort_order',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class ItemListProductSerializer(serializers.ModelSerializer):
+    """Serializer for products within an item list"""
+    product = ProductListSerializer(read_only=True)
+
+    class Meta:
+        model = ItemListProduct
+        fields = [
+            'id',
+            'product',
+            'position',
+            'added_at',
+        ]
+        read_only_fields = ['id', 'added_at']
+
+
+class ItemListDetailSerializer(serializers.ModelSerializer):
+    """Detailed serializer for ecommerce item lists with products"""
+    products = ItemListProductSerializer(source='list_products', many=True, read_only=True)
+    products_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ItemList
+        fields = [
+            'id',
+            'title',
+            'description',
+            'slug',
+            'is_public',
+            'is_active',
+            'sort_order',
+            'products',
+            'products_count',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def get_products_count(self, obj):
+        """Return count of products in this list"""
+        return obj.list_products.count()

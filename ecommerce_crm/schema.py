@@ -3,6 +3,7 @@ OpenAPI schema extensions for ecommerce_crm authentication and schema generation
 """
 from drf_spectacular.extensions import OpenApiAuthenticationExtension
 from drf_spectacular.generators import SchemaGenerator
+from django.urls import URLPattern, URLResolver
 
 
 class EcommerceClientJWTAuthenticationScheme(OpenApiAuthenticationExtension):
@@ -31,16 +32,22 @@ class EcommerceClientSchemaGenerator(SchemaGenerator):
     Used to create a separate API documentation page for ecommerce clients.
     Admin endpoints remain in the main API documentation.
     """
+
+    title = 'EchoDesk Ecommerce Client API'
+    description = 'Public and authenticated client endpoints for ecommerce functionality'
+
     def get_info(self):
         """Customize schema info with title and description"""
         info = super().get_info()
-        info['title'] = 'EchoDesk Ecommerce Client API'
-        info['description'] = 'Public and authenticated client endpoints for ecommerce functionality'
+        info['title'] = self.title
+        info['description'] = self.description
         return info
 
     def get_endpoints(self, request=None):
         """Filter endpoints to include only ecommerce client paths"""
         endpoints = super().get_endpoints(request)
+
+        print(f"[DEBUG] Total endpoints before filtering: {len(endpoints)}")
 
         # Filter to include only ecommerce client endpoints
         client_endpoints = []
@@ -48,6 +55,8 @@ class EcommerceClientSchemaGenerator(SchemaGenerator):
             # Include only paths that start with /api/ecommerce/client/
             # This excludes /api/ecommerce/admin/ endpoints
             if path.startswith('/api/ecommerce/client'):
+                print(f"[DEBUG] Including: {path}")
                 client_endpoints.append((path, path_regex, method, callback))
 
+        print(f"[DEBUG] Total client endpoints after filtering: {len(client_endpoints)}")
         return client_endpoints
