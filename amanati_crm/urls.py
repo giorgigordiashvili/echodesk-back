@@ -68,9 +68,7 @@ urlpatterns = [
 
     # API Documentation - Ecommerce Client API (separate schema for client endpoints only)
     path('api/ecommerce-client-schema/', SpectacularAPIView.as_view(
-        generator_class=EcommerceClientSchemaGenerator,
-        title='EchoDesk Ecommerce Client API',
-        description='Public and authenticated client endpoints for ecommerce functionality'
+        generator_class=EcommerceClientSchemaGenerator
     ), name='ecommerce-client-schema'),
 
     # Swagger UI with multiple schemas (dropdown selector)

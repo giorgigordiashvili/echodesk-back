@@ -31,6 +31,13 @@ class EcommerceClientSchemaGenerator(SchemaGenerator):
     Used to create a separate API documentation page for ecommerce clients.
     Admin endpoints remain in the main API documentation.
     """
+    def get_info(self):
+        """Customize schema info with title and description"""
+        info = super().get_info()
+        info['title'] = 'EchoDesk Ecommerce Client API'
+        info['description'] = 'Public and authenticated client endpoints for ecommerce functionality'
+        return info
+
     def get_endpoints(self, request=None):
         """Filter endpoints to include only ecommerce client paths"""
         endpoints = super().get_endpoints(request)
