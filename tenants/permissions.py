@@ -90,24 +90,19 @@ def has_subscription_feature(request, feature_name):
         return False
 
     # Log subscription details
-    logger.info(f"[PERMISSION CHECK] Subscription ID: {subscription.id}, Package: {subscription.package}, Is Active: {subscription.is_active}")
+    logger.info(f"[PERMISSION CHECK] Subscription ID: {subscription.id}, Is Active: {subscription.is_active}")
 
-    # Check selected_features first (works for both feature-based and hybrid mode)
+    # Check selected_features only (feature-based subscriptions)
     selected_features_list = list(subscription.selected_features.values_list('key', flat=True))
     logger.info(f"[PERMISSION CHECK] Selected features: {selected_features_list}")
 
-    if subscription.selected_features.filter(key=feature_name).exists():
+    has_feature = subscription.selected_features.filter(key=feature_name).exists()
+    if has_feature:
         logger.info(f"[PERMISSION CHECK] ✅ Feature '{feature_name}' found in selected_features")
-        return True
+    else:
+        logger.info(f"[PERMISSION CHECK] ❌ Feature '{feature_name}' not found in selected_features")
 
-    # Also check package boolean fields (for legacy features not in selected_features)
-    if subscription.package:
-        package_has_feature = getattr(subscription.package, feature_name, False)
-        logger.info(f"[PERMISSION CHECK] Package '{subscription.package.display_name}' has {feature_name}: {package_has_feature}")
-        return package_has_feature
-
-    logger.info(f"[PERMISSION CHECK] ❌ Feature '{feature_name}' not found")
-    return False
+    return has_feature
 
 
 def check_subscription_limit(request, limit_type):
@@ -139,27 +134,18 @@ def check_subscription_limit(request, limit_type):
 
     if limit_type == 'users':
         current = subscription.current_users
-        if subscription.package:
-            limit = subscription.package.max_users or float('inf')
-        else:
-            # Feature-based subscription: use agent_count as limit
-            limit = subscription.agent_count or float('inf')
+        # Feature-based subscription: use agent_count as limit
+        limit = subscription.agent_count or float('inf')
         within_limit = subscription.can_add_user()
     elif limit_type == 'whatsapp':
         current = subscription.whatsapp_messages_used
-        if subscription.package:
-            limit = subscription.package.max_whatsapp_messages
-        else:
-            # Feature-based subscription: default limit
-            limit = 10000
+        # Feature-based subscription: default limit
+        limit = 10000
         within_limit = subscription.can_send_whatsapp_message()
     elif limit_type == 'storage':
         current = float(subscription.storage_used_gb)
-        if subscription.package:
-            limit = subscription.package.max_storage_gb
-        else:
-            # Feature-based subscription: default 100GB
-            limit = 100
+        # Feature-based subscription: default 100GB
+        limit = 100
         within_limit = not subscription.is_over_storage_limit
     else:
         return {
@@ -198,9 +184,7 @@ def get_subscription_info(request):
             'error': 'No active subscription found'
         }
 
-    package = subscription.package
-
-    # Build subscription info with upgrade details
+    # Build subscription info
     subscription_data = {
         'is_active': subscription.is_active,
         'starts_at': subscription.starts_at,
@@ -213,98 +197,38 @@ def get_subscription_info(request):
         'next_billing_date': subscription.next_billing_date,
     }
 
-    # Add pending upgrade information if exists
-    if subscription.pending_package:
-        subscription_data['pending_upgrade'] = {
-            'package_id': subscription.pending_package.id,
-            'package_name': subscription.pending_package.display_name,
-            'scheduled_for': subscription.upgrade_scheduled_for,
-            'new_monthly_cost': float(subscription.pending_package.price_gel)
-        }
-    else:
-        subscription_data['pending_upgrade'] = None
+    # Build features dict from selected_features
+    selected_feature_keys = list(subscription.selected_features.values_list('key', flat=True))
 
-    # Determine if this is feature-based or package-based subscription
-    is_feature_based = package is None and subscription.selected_features.exists()
+    # Dynamically build features dict from all selected features
+    features_dict = {}
+    for key in selected_feature_keys:
+        features_dict[key] = True
 
-    # Build package info
-    if package:
-        # Legacy package-based subscription
-        package_info = {
-            'id': package.id,
-            'name': package.display_name,
-            'pricing_model': package.get_pricing_model_display(),
-        }
-        # Build base features from package
-        features_dict = {
-            'ticket_management': package.ticket_management,
-            'email_integration': package.email_integration,
-            'sip_calling': package.sip_calling,
-            'facebook_integration': package.facebook_integration,
-            'instagram_integration': package.instagram_integration,
-            'whatsapp_integration': package.whatsapp_integration,
-            'advanced_analytics': package.advanced_analytics,
-            'api_access': package.api_access,
-            'custom_integrations': package.custom_integrations,
-            'priority_support': package.priority_support,
-            'dedicated_account_manager': package.dedicated_account_manager,
-            'ecommerce_crm': getattr(package, 'ecommerce_crm', False),
-            'order_management': getattr(package, 'order_management', False),
-            'user_management': getattr(package, 'user_management', False),
-            'settings': getattr(package, 'settings', True),
-        }
+    # Ensure backward compatibility with legacy feature keys
+    legacy_features = [
+        'ticket_management', 'email_integration', 'sip_calling',
+        'facebook_integration', 'instagram_integration', 'whatsapp_integration',
+        'advanced_analytics', 'api_access', 'custom_integrations',
+        'priority_support', 'dedicated_account_manager', 'ecommerce_crm',
+        'order_management', 'user_management', 'settings', 'invoice_management'
+    ]
+    for feature in legacy_features:
+        if feature not in features_dict:
+            features_dict[feature] = False
 
-        # Merge in any additional selected_features (hybrid mode)
-        # This allows packages to be enhanced with additional features
-        selected_feature_keys = list(subscription.selected_features.values_list('key', flat=True))
-        for key in selected_feature_keys:
-            features_dict[key] = True
-        limits = {
-            'max_users': package.max_users,
-            'max_whatsapp_messages': package.max_whatsapp_messages,
-            'max_storage_gb': package.max_storage_gb,
-        }
-    else:
-        # Feature-based subscription
-        package_info = {
-            'id': None,
-            'name': 'Custom Feature Package',
-            'pricing_model': 'Feature-based',
-        }
-
-        # Build features dict from selected_features
-        selected_feature_keys = list(subscription.selected_features.values_list('key', flat=True))
-
-        # Dynamically build features dict from all selected features
-        features_dict = {}
-        for key in selected_feature_keys:
-            features_dict[key] = True
-
-        # Ensure backward compatibility with legacy feature keys
-        legacy_features = [
-            'ticket_management', 'email_integration', 'sip_calling',
-            'facebook_integration', 'instagram_integration', 'whatsapp_integration',
-            'advanced_analytics', 'api_access', 'custom_integrations',
-            'priority_support', 'dedicated_account_manager', 'ecommerce_crm',
-            'order_management', 'user_management', 'settings'
-        ]
-        for feature in legacy_features:
-            if feature not in features_dict:
-                features_dict[feature] = False
-
-        # For feature-based, use agent_count as max_users
-        limits = {
-            'max_users': subscription.agent_count,
-            'max_whatsapp_messages': 10000,  # Default limit
-            'max_storage_gb': 100,  # Default 100GB
-        }
+    # Use agent_count as max_users
+    limits = {
+        'max_users': subscription.agent_count,
+        'max_whatsapp_messages': 10000,  # Default limit
+        'max_storage_gb': 100,  # Default 100GB
+    }
 
     return {
         'has_subscription': True,
-        'package': package_info,
         'subscription': subscription_data,
         'features': features_dict,
-        'selected_features': list(subscription.selected_features.values('id', 'key', 'name', 'price_per_user_gel')) if is_feature_based else [],
+        'selected_features': list(subscription.selected_features.values('id', 'key', 'name', 'price_per_user_gel')),
         'limits': limits,
         'usage': {
             'current_users': subscription.current_users,

@@ -174,32 +174,17 @@ class InvoiceSettingsViewSet(viewsets.ModelViewSet):
         # Get selected features
         selected_features = list(subscription.selected_features.values('id', 'key', 'name'))
 
-        # Get package info
-        package_info = None
-        package_features = {}
-        if subscription.package:
-            package_info = {
-                'id': subscription.package.id,
-                'display_name': subscription.package.display_name,
-            }
-            # Get all boolean feature fields from package
-            for field in ['invoice_management', 'ticket_management', 'email_integration',
-                          'sip_calling', 'facebook_integration', 'instagram_integration',
-                          'whatsapp_integration', 'advanced_analytics', 'api_access']:
-                package_features[field] = getattr(subscription.package, field, False)
-
         return Response({
             'tenant': request.tenant.schema_name,
             'subscription': {
                 'id': subscription.id,
                 'is_active': subscription.is_active,
                 'subscription_type': subscription.subscription_type,
+                'agent_count': subscription.agent_count,
+                'monthly_cost': float(subscription.monthly_cost),
             },
-            'package': package_info,
-            'package_features': package_features,
             'selected_features': selected_features,
-            'has_invoice_management_in_selected': subscription.selected_features.filter(key='invoice_management').exists(),
-            'has_invoice_management_in_package': getattr(subscription.package, 'invoice_management', False) if subscription.package else False,
+            'has_invoice_management': subscription.selected_features.filter(key='invoice_management').exists(),
         })
 
     @action(detail=False, methods=['get'], url_path='available-itemlists')
