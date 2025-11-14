@@ -192,11 +192,21 @@ class InvoiceSettingsViewSet(viewsets.ModelViewSet):
         })
 
     @action(detail=False, methods=['get'], url_path='available-itemlists')
-    @require_subscription_feature('invoice_management')
     def available_itemlists(self, request):
         """Get list of available item lists that can be used for clients"""
         from tickets.models import ItemList
         from tickets.serializers import ItemListMinimalSerializer
+        from tenants.permissions import has_subscription_feature
+
+        # Check permission inline
+        if not has_subscription_feature(request, 'invoice_management'):
+            return Response(
+                {
+                    'error': 'Your subscription does not include access to invoice management',
+                    'feature_required': 'invoice_management'
+                },
+                status=status.HTTP_403_FORBIDDEN
+            )
 
         item_lists = ItemList.objects.filter(is_active=True)
         serializer = ItemListMinimalSerializer(item_lists, many=True)
