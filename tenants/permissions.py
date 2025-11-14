@@ -77,19 +77,36 @@ def has_subscription_feature(request, feature_name):
     Returns:
         bool: True if feature is enabled, False otherwise
     """
+    import logging
+    logger = logging.getLogger(__name__)
+
     subscription = get_tenant_subscription(request)
 
+    tenant_name = getattr(request.tenant, 'schema_name', 'unknown') if hasattr(request, 'tenant') else 'no-tenant'
+    logger.info(f"[PERMISSION CHECK] Tenant: {tenant_name}, Feature: {feature_name}")
+
     if not subscription:
+        logger.info(f"[PERMISSION CHECK] No subscription found for tenant {tenant_name}")
         return False
 
+    # Log subscription details
+    logger.info(f"[PERMISSION CHECK] Subscription ID: {subscription.id}, Package: {subscription.package}, Is Active: {subscription.is_active}")
+
     # Check selected_features first (works for both feature-based and hybrid mode)
+    selected_features_list = list(subscription.selected_features.values_list('key', flat=True))
+    logger.info(f"[PERMISSION CHECK] Selected features: {selected_features_list}")
+
     if subscription.selected_features.filter(key=feature_name).exists():
+        logger.info(f"[PERMISSION CHECK] ✅ Feature '{feature_name}' found in selected_features")
         return True
 
     # Also check package boolean fields (for legacy features not in selected_features)
     if subscription.package:
-        return getattr(subscription.package, feature_name, False)
+        package_has_feature = getattr(subscription.package, feature_name, False)
+        logger.info(f"[PERMISSION CHECK] Package '{subscription.package.display_name}' has {feature_name}: {package_has_feature}")
+        return package_has_feature
 
+    logger.info(f"[PERMISSION CHECK] ❌ Feature '{feature_name}' not found")
     return False
 
 

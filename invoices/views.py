@@ -158,6 +158,50 @@ class InvoiceSettingsViewSet(viewsets.ModelViewSet):
 
         return Response({'message': 'Signature removed successfully'})
 
+    @action(detail=False, methods=['get'], url_path='debug-subscription')
+    def debug_subscription(self, request):
+        """Debug endpoint to check subscription state"""
+        from tenants.permissions import get_tenant_subscription
+
+        subscription = get_tenant_subscription(request)
+
+        if not subscription:
+            return Response({
+                'error': 'No subscription found',
+                'tenant': request.tenant.schema_name if hasattr(request, 'tenant') else 'no-tenant'
+            })
+
+        # Get selected features
+        selected_features = list(subscription.selected_features.values('id', 'key', 'name'))
+
+        # Get package info
+        package_info = None
+        package_features = {}
+        if subscription.package:
+            package_info = {
+                'id': subscription.package.id,
+                'display_name': subscription.package.display_name,
+            }
+            # Get all boolean feature fields from package
+            for field in ['invoice_management', 'ticket_management', 'email_integration',
+                          'sip_calling', 'facebook_integration', 'instagram_integration',
+                          'whatsapp_integration', 'advanced_analytics', 'api_access']:
+                package_features[field] = getattr(subscription.package, field, False)
+
+        return Response({
+            'tenant': request.tenant.schema_name,
+            'subscription': {
+                'id': subscription.id,
+                'is_active': subscription.is_active,
+                'subscription_type': subscription.subscription_type,
+            },
+            'package': package_info,
+            'package_features': package_features,
+            'selected_features': selected_features,
+            'has_invoice_management_in_selected': subscription.selected_features.filter(key='invoice_management').exists(),
+            'has_invoice_management_in_package': getattr(subscription.package, 'invoice_management', False) if subscription.package else False,
+        })
+
     @action(detail=False, methods=['get'], url_path='available-itemlists')
     @require_subscription_feature('invoice_management')
     def available_itemlists(self, request):
