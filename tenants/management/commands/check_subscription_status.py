@@ -19,6 +19,9 @@ logger = logging.getLogger(__name__)
 class Command(BaseCommand):
     help = 'Check subscription status and send notifications for expiring/expired subscriptions'
 
+    # Tenants with permanent subscriptions (excluded from expiration checks)
+    EXEMPT_TENANTS = ['amanati']
+
     def add_arguments(self, parser):
         parser.add_argument(
             '--grace-days',
@@ -41,6 +44,8 @@ class Command(BaseCommand):
             is_active=True,
             expires_at__date=seven_days_away.date(),
             tenant__is_active=True
+        ).exclude(
+            tenant__schema_name__in=self.EXEMPT_TENANTS
         ).select_related('tenant', 'package')
 
         for subscription in expiring_soon:
@@ -53,6 +58,8 @@ class Command(BaseCommand):
             is_active=True,
             expires_at__date=three_days_away.date(),
             tenant__is_active=True
+        ).exclude(
+            tenant__schema_name__in=self.EXEMPT_TENANTS
         ).select_related('tenant', 'package')
 
         for subscription in expiring_urgent:
@@ -68,6 +75,8 @@ class Command(BaseCommand):
             expires_at__lt=now,
             expires_at__gte=grace_cutoff,
             tenant__is_active=True
+        ).exclude(
+            tenant__schema_name__in=self.EXEMPT_TENANTS
         ).select_related('tenant', 'package')
 
         for subscription in in_grace_period:
@@ -83,6 +92,8 @@ class Command(BaseCommand):
             is_active=True,
             expires_at__lt=grace_cutoff,
             tenant__is_active=True
+        ).exclude(
+            tenant__schema_name__in=self.EXEMPT_TENANTS
         ).select_related('tenant')
 
         suspended_count = 0
