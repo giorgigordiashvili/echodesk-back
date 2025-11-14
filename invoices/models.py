@@ -220,31 +220,31 @@ class Invoice(models.Model):
     subtotal = models.DecimalField(
         max_digits=12,
         decimal_places=2,
-        default=0.00,
+        default=Decimal('0.00'),
         verbose_name=_("Subtotal")
     )
     tax_amount = models.DecimalField(
         max_digits=12,
         decimal_places=2,
-        default=0.00,
+        default=Decimal('0.00'),
         verbose_name=_("Tax Amount")
     )
     discount_amount = models.DecimalField(
         max_digits=12,
         decimal_places=2,
-        default=0.00,
+        default=Decimal('0.00'),
         verbose_name=_("Discount Amount")
     )
     total = models.DecimalField(
         max_digits=12,
         decimal_places=2,
-        default=0.00,
+        default=Decimal('0.00'),
         verbose_name=_("Total")
     )
     paid_amount = models.DecimalField(
         max_digits=12,
         decimal_places=2,
-        default=0.00,
+        default=Decimal('0.00'),
         verbose_name=_("Paid Amount")
     )
 
@@ -304,12 +304,12 @@ class Invoice(models.Model):
         """Calculate subtotal, tax, and total from line items"""
         line_items = self.line_items.all()
 
-        subtotal = sum(item.line_total for item in line_items)
-        tax_amount = sum(item.tax_amount for item in line_items)
+        subtotal = sum((item.line_total for item in line_items), Decimal('0.00'))
+        tax_amount = sum((item.tax_amount for item in line_items), Decimal('0.00'))
 
         self.subtotal = subtotal
         self.tax_amount = tax_amount
-        self.total = subtotal + tax_amount - self.discount_amount
+        self.total = subtotal + tax_amount - (self.discount_amount or Decimal('0.00'))
 
         return self.total
 
