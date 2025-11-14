@@ -199,7 +199,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
     API endpoint for invoice management
     """
     queryset = Invoice.objects.all()
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, CanManageInvoices]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['status', 'client', 'currency']
     search_fields = ['invoice_number', 'client__first_name', 'client__last_name', 'client__email']
@@ -214,7 +214,6 @@ class InvoiceViewSet(viewsets.ModelViewSet):
             return InvoiceCreateUpdateSerializer
         return InvoiceDetailSerializer
 
-    @require_subscription_feature('invoice_management')
     def list(self, request, *args, **kwargs):
         """List invoices with filters"""
         queryset = self.filter_queryset(self.get_queryset())
@@ -247,12 +246,10 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
 
-    @require_subscription_feature('invoice_management')
     def retrieve(self, request, *args, **kwargs):
         """Get invoice details"""
         return super().retrieve(request, *args, **kwargs)
 
-    @require_subscription_feature('invoice_management')
     def create(self, request, *args, **kwargs):
         """Create new invoice"""
         serializer = self.get_serializer(data=request.data)
@@ -265,7 +262,6 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         detail_serializer = InvoiceDetailSerializer(invoice, context={'request': request})
         return Response(detail_serializer.data, status=status.HTTP_201_CREATED)
 
-    @require_subscription_feature('invoice_management')
     def update(self, request, *args, **kwargs):
         """Update invoice (only if draft)"""
         instance = self.get_object()
@@ -278,7 +274,6 @@ class InvoiceViewSet(viewsets.ModelViewSet):
 
         return super().update(request, *args, **kwargs)
 
-    @require_subscription_feature('invoice_management')
     def destroy(self, request, *args, **kwargs):
         """Delete invoice (only if draft)"""
         instance = self.get_object()
@@ -292,7 +287,6 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         return super().destroy(request, *args, **kwargs)
 
     @action(detail=True, methods=['post'])
-    @require_subscription_feature('invoice_management')
     def finalize(self, request, pk=None):
         """Finalize invoice and generate PDF"""
         invoice = self.get_object()
@@ -313,7 +307,6 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
     @action(detail=True, methods=['post'])
-    @require_subscription_feature('invoice_management')
     def send_email(self, request, pk=None):
         """Send invoice via email"""
         invoice = self.get_object()
@@ -335,7 +328,6 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         return Response({'message': 'Invoice sent successfully'})
 
     @action(detail=True, methods=['get'])
-    @require_subscription_feature('invoice_management')
     def pdf(self, request, pk=None):
         """Download invoice PDF"""
         invoice = self.get_object()
@@ -351,7 +343,6 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         )
 
     @action(detail=True, methods=['get'])
-    @require_subscription_feature('invoice_management')
     def excel(self, request, pk=None):
         """Export invoice to Excel"""
         invoice = self.get_object()
@@ -363,7 +354,6 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         )
 
     @action(detail=True, methods=['post'])
-    @require_subscription_feature('invoice_management')
     def mark_paid(self, request, pk=None):
         """Quick mark invoice as paid"""
         invoice = self.get_object()
@@ -384,7 +374,6 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
     @action(detail=True, methods=['post'])
-    @require_subscription_feature('invoice_management')
     def duplicate(self, request, pk=None):
         """Duplicate an existing invoice"""
         original = self.get_object()
@@ -427,7 +416,6 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         return Response(detail_serializer.data, status=status.HTTP_201_CREATED)
 
     @action(detail=False, methods=['get'])
-    @require_subscription_feature('invoice_management')
     def stats(self, request):
         """Get invoice statistics"""
         queryset = self.get_queryset()
@@ -463,9 +451,8 @@ class InvoiceLineItemViewSet(viewsets.ModelViewSet):
     """
     queryset = InvoiceLineItem.objects.all()
     serializer_class = InvoiceLineItemSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, CanManageInvoices]
 
-    @require_subscription_feature('invoice_management')
     def list(self, request, *args, **kwargs):
         """List line items (filtered by invoice if provided)"""
         queryset = self.get_queryset()
@@ -478,7 +465,6 @@ class InvoiceLineItemViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
     @action(detail=False, methods=['post'], url_path='reorder')
-    @require_subscription_feature('invoice_management')
     def reorder(self, request):
         """Reorder line items"""
         items = request.data.get('items', [])
@@ -497,9 +483,8 @@ class InvoicePaymentViewSet(viewsets.ModelViewSet):
     """
     queryset = InvoicePayment.objects.all()
     serializer_class = InvoicePaymentSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, CanManageInvoices]
 
-    @require_subscription_feature('invoice_management')
     def list(self, request, *args, **kwargs):
         """List payments (filtered by invoice if provided)"""
         queryset = self.get_queryset()
@@ -511,7 +496,6 @@ class InvoicePaymentViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
 
-    @require_subscription_feature('invoice_management')
     def create(self, request, *args, **kwargs):
         """Record a payment"""
         serializer = self.get_serializer(data=request.data)
@@ -527,16 +511,14 @@ class InvoiceTemplateViewSet(viewsets.ModelViewSet):
     """
     queryset = InvoiceTemplate.objects.filter(is_active=True)
     serializer_class = InvoiceTemplateSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, CanManageInvoices]
     filter_backends = [filters.SearchFilter]
     search_fields = ['name', 'description']
 
-    @require_subscription_feature('invoice_management')
     def list(self, request, *args, **kwargs):
         """List active templates"""
         return super().list(request, *args, **kwargs)
 
-    @require_subscription_feature('invoice_management')
     def create(self, request, *args, **kwargs):
         """Create new template"""
         serializer = self.get_serializer(data=request.data)
@@ -546,7 +528,6 @@ class InvoiceTemplateViewSet(viewsets.ModelViewSet):
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['get'])
-    @require_subscription_feature('invoice_management')
     def preview(self, request, pk=None):
         """Preview template with sample data"""
         template = self.get_object()
@@ -564,11 +545,10 @@ class ClientViewSet(viewsets.ReadOnlyModelViewSet):
     """
     queryset = EcommerceClient.objects.filter(is_active=True)
     serializer_class = ClientSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, CanManageInvoices]
     filter_backends = [filters.SearchFilter]
     search_fields = ['first_name', 'last_name', 'email', 'phone']
 
-    @require_subscription_feature('invoice_management')
     def list(self, request, *args, **kwargs):
         """List active clients"""
         return super().list(request, *args, **kwargs)
@@ -580,11 +560,10 @@ class InvoiceMaterialViewSet(viewsets.ReadOnlyModelViewSet):
     """
     queryset = ListItem.objects.filter(is_active=True)
     serializer_class = ListItemMaterialSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, CanManageInvoices]
     filter_backends = [filters.SearchFilter]
     search_fields = ['label', 'custom_data']
 
-    @require_subscription_feature('invoice_management')
     def list(self, request, *args, **kwargs):
         """List materials from invoice materials ItemList"""
         # Filter by invoice materials list
