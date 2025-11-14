@@ -554,18 +554,27 @@ class ClientViewSet(viewsets.ReadOnlyModelViewSet):
         Get clients from the configured ItemList in InvoiceSettings
         Falls back to EcommerceClient if no ItemList is configured
         """
+        import logging
+        logger = logging.getLogger(__name__)
+
         # Get invoice settings to find the client itemlist
         settings, created = InvoiceSettings.objects.get_or_create()
 
+        logger.info(f"[ClientViewSet] Settings: client_itemlist={settings.client_itemlist}")
+
         if settings.client_itemlist:
             # Return items from the selected ItemList
-            return ListItem.objects.filter(
+            queryset = ListItem.objects.filter(
                 item_list=settings.client_itemlist,
                 is_active=True
             )
+            logger.info(f"[ClientViewSet] Returning ListItem queryset, count={queryset.count()}")
+            return queryset
         else:
             # Fallback to EcommerceClient for backward compatibility
-            return EcommerceClient.objects.filter(is_active=True)
+            queryset = EcommerceClient.objects.filter(is_active=True)
+            logger.info(f"[ClientViewSet] Returning EcommerceClient queryset, count={queryset.count()}")
+            return queryset
 
 
 class InvoiceMaterialViewSet(viewsets.ReadOnlyModelViewSet):
