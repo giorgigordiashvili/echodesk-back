@@ -161,7 +161,7 @@ class InvoiceSettingsViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='debug-subscription')
     def debug_subscription(self, request):
         """Debug endpoint to check subscription state"""
-        from tenants.permissions import get_tenant_subscription
+        from tenants.permissions import get_tenant_subscription, has_subscription_feature
 
         subscription = get_tenant_subscription(request)
 
@@ -174,6 +174,9 @@ class InvoiceSettingsViewSet(viewsets.ModelViewSet):
         # Get selected features
         selected_features = list(subscription.selected_features.values('id', 'key', 'name'))
 
+        # Test the actual permission function
+        has_feature_result = has_subscription_feature(request, 'invoice_management')
+
         return Response({
             'tenant': request.tenant.schema_name,
             'subscription': {
@@ -184,7 +187,8 @@ class InvoiceSettingsViewSet(viewsets.ModelViewSet):
                 'monthly_cost': float(subscription.monthly_cost),
             },
             'selected_features': selected_features,
-            'has_invoice_management': subscription.selected_features.filter(key='invoice_management').exists(),
+            'has_invoice_management_query': subscription.selected_features.filter(key='invoice_management').exists(),
+            'has_invoice_management_function': has_feature_result,
         })
 
     @action(detail=False, methods=['get'], url_path='available-itemlists')
