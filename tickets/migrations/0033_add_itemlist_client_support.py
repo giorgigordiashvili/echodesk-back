@@ -3,6 +3,26 @@
 from django.db import migrations
 
 
+def remove_constraint_if_exists(apps, schema_editor):
+    """
+    Safely remove constraint if it exists.
+    This handles the case where the constraint was already removed.
+    """
+    with schema_editor.connection.cursor() as cursor:
+        # Check if constraint exists
+        cursor.execute("""
+            SELECT 1 FROM pg_constraint
+            WHERE conname = 'checklist_item_belongs_to_ticket_or_sub_ticket'
+            AND connamespace = (SELECT oid FROM pg_namespace WHERE nspname = current_schema())
+        """)
+        if cursor.fetchone():
+            # Constraint exists, remove it
+            cursor.execute("""
+                ALTER TABLE tickets_checklistitem
+                DROP CONSTRAINT IF EXISTS checklist_item_belongs_to_ticket_or_sub_ticket
+            """)
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -10,8 +30,5 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RemoveConstraint(
-            model_name='checklistitem',
-            name='checklist_item_belongs_to_ticket_or_sub_ticket',
-        ),
+        migrations.RunPython(remove_constraint_if_exists, migrations.RunPython.noop),
     ]
