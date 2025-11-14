@@ -69,7 +69,7 @@ class InvoiceLineItemSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = InvoiceLineItem
-        fields = '__all__'
+        exclude = ['invoice']  # Exclude invoice when used as nested serializer
         read_only_fields = ('created_at', 'updated_at')
 
     def validate(self, data):
