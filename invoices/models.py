@@ -179,12 +179,34 @@ class Invoice(models.Model):
         verbose_name=_("Status")
     )
 
-    # Client - Link to E-commerce Client
+    # Client - Link to E-commerce Client (legacy)
     client = models.ForeignKey(
         'ecommerce_crm.EcommerceClient',
         on_delete=models.PROTECT,
         related_name='invoices',
-        verbose_name=_("Client")
+        verbose_name=_("Client"),
+        null=True,
+        blank=True
+    )
+
+    # Client from ItemList (new flexible approach)
+    client_itemlist_item = models.ForeignKey(
+        'tickets.ListItem',
+        on_delete=models.PROTECT,
+        related_name='invoices',
+        verbose_name=_("Client (ItemList)"),
+        null=True,
+        blank=True,
+        help_text=_("Client from configured ItemList")
+    )
+
+    # Store client name for display (denormalized for performance and data preservation)
+    client_name = models.CharField(
+        max_length=255,
+        default='',
+        blank=True,
+        verbose_name=_("Client Name"),
+        help_text=_("Cached client name for display")
     )
 
     # Dates

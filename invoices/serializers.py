@@ -188,6 +188,8 @@ class InvoiceCreateUpdateSerializer(serializers.ModelSerializer):
     Serializer for creating/updating invoices
     """
     line_items = InvoiceLineItemSerializer(many=True, required=False)
+    # Accept client as an integer - will be interpreted based on InvoiceSettings
+    client = serializers.IntegerField(write_only=True)
 
     class Meta:
         model = Invoice
@@ -195,6 +197,37 @@ class InvoiceCreateUpdateSerializer(serializers.ModelSerializer):
             'client', 'issue_date', 'due_date', 'currency', 'discount_amount',
             'notes', 'terms_and_conditions', 'template', 'line_items'
         ]
+
+    def validate_client(self, value):
+        """
+        Validate client ID and determine if it's from EcommerceClient or ListItem
+        based on InvoiceSettings configuration
+        """
+        from tickets.models import ListItem
+        from ecommerce_crm.models import EcommerceClient
+
+        # Get invoice settings to determine client source
+        settings, _ = InvoiceSettings.objects.get_or_create()
+
+        if settings.client_itemlist:
+            # Client should be from ItemList
+            try:
+                client = ListItem.objects.get(id=value, item_list=settings.client_itemlist)
+                # Store for use in create()
+                self.context['client_type'] = 'itemlist'
+                self.context['client_obj'] = client
+                return value
+            except ListItem.DoesNotExist:
+                raise serializers.ValidationError(f"Client with ID {value} not found in configured ItemList")
+        else:
+            # Client should be from EcommerceClient
+            try:
+                client = EcommerceClient.objects.get(id=value)
+                self.context['client_type'] = 'ecommerce'
+                self.context['client_obj'] = client
+                return value
+            except EcommerceClient.DoesNotExist:
+                raise serializers.ValidationError(f"Client with ID {value} not found")
 
     def validate(self, data):
         """Validate invoice data"""
@@ -212,6 +245,11 @@ class InvoiceCreateUpdateSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         """Create invoice with line items"""
         line_items_data = validated_data.pop('line_items', [])
+        client_id = validated_data.pop('client')
+
+        # Get client info from context (set in validate_client)
+        client_type = self.context.get('client_type')
+        client_obj = self.context.get('client_obj')
 
         # Get invoice settings to generate invoice number
         try:
@@ -236,6 +274,16 @@ class InvoiceCreateUpdateSerializer(serializers.ModelSerializer):
         # Set terms and conditions if not provided
         if not validated_data.get('terms_and_conditions'):
             validated_data['terms_and_conditions'] = settings.default_terms
+
+        # Set client fields based on type
+        if client_type == 'itemlist':
+            validated_data['client_itemlist_item'] = client_obj
+            validated_data['client'] = None
+            validated_data['client_name'] = client_obj.label
+        else:
+            validated_data['client'] = client_obj
+            validated_data['client_itemlist_item'] = None
+            validated_data['client_name'] = f"{client_obj.first_name} {client_obj.last_name}".strip() or client_obj.email
 
         # Create invoice
         invoice = Invoice.objects.create(
