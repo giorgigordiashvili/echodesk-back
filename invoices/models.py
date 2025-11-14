@@ -298,7 +298,8 @@ class Invoice(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.invoice_number} - {self.client} - {self.get_status_display()}"
+        client_display = self.client_name or str(self.client) if self.client else str(self.client_itemlist_item) if self.client_itemlist_item else 'No Client'
+        return f"{self.invoice_number} - {client_display} - {self.get_status_display()}"
 
     def calculate_totals(self):
         """Calculate subtotal, tax, and total from line items"""

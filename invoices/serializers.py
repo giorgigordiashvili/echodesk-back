@@ -124,8 +124,13 @@ class InvoiceListSerializer(serializers.ModelSerializer):
         ]
 
     def get_client_name(self, obj):
-        """Get full client name"""
-        return f"{obj.client.first_name} {obj.client.last_name}".strip() or obj.client.email
+        """Get full client name - handles both EcommerceClient and ItemList clients"""
+        if obj.client_itemlist_item:
+            return obj.client_itemlist_item.label
+        elif obj.client:
+            return f"{obj.client.first_name} {obj.client.last_name}".strip() or obj.client.email
+        else:
+            return obj.client_name or 'Unknown Client'
 
     def get_is_overdue(self, obj):
         """Check if invoice is overdue"""
@@ -159,16 +164,40 @@ class InvoiceDetailSerializer(serializers.ModelSerializer):
         )
 
     def get_client_details(self, obj):
-        """Get full client details"""
-        client = obj.client
-        return {
-            'id': client.id,
-            'first_name': client.first_name,
-            'last_name': client.last_name,
-            'email': client.email,
-            'phone': client.phone,
-            'full_name': f"{client.first_name} {client.last_name}".strip() or client.email
-        }
+        """Get full client details - handles both EcommerceClient and ItemList clients"""
+        if obj.client_itemlist_item:
+            # Client from ItemList
+            item = obj.client_itemlist_item
+            custom_data = item.custom_data or {}
+            return {
+                'id': item.id,
+                'first_name': '',
+                'last_name': '',
+                'email': custom_data.get('email', ''),
+                'phone': custom_data.get('phone', ''),
+                'full_name': item.label
+            }
+        elif obj.client:
+            # Client from EcommerceClient
+            client = obj.client
+            return {
+                'id': client.id,
+                'first_name': client.first_name,
+                'last_name': client.last_name,
+                'email': client.email,
+                'phone': client.phone,
+                'full_name': f"{client.first_name} {client.last_name}".strip() or client.email
+            }
+        else:
+            # Fallback - use cached client_name
+            return {
+                'id': None,
+                'first_name': '',
+                'last_name': '',
+                'email': '',
+                'phone': '',
+                'full_name': obj.client_name
+            }
 
     def get_is_overdue(self, obj):
         """Check if invoice is overdue"""
