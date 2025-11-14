@@ -45,25 +45,44 @@ class InvoiceSettingsViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     http_method_names = ['get', 'post', 'put', 'patch']
 
-    @require_subscription_feature('invoice_management')
+    def _check_permission(self, request):
+        """Check if user has invoice_management feature"""
+        from tenants.permissions import has_subscription_feature
+        if not has_subscription_feature(request, 'invoice_management'):
+            return Response(
+                {'error': 'Your subscription does not include access to invoice management', 'feature_required': 'invoice_management'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        return None
+
     def list(self, request, *args, **kwargs):
         """Get or create invoice settings (singleton)"""
+        perm_check = self._check_permission(request)
+        if perm_check:
+            return perm_check
+
         settings, created = InvoiceSettings.objects.get_or_create()
         serializer = self.get_serializer(settings)
         return Response(serializer.data)
 
-    @require_subscription_feature('invoice_management')
     def create(self, request, *args, **kwargs):
         """Update settings (create not allowed, use update instead)"""
+        perm_check = self._check_permission(request)
+        if perm_check:
+            return perm_check
+
         settings, created = InvoiceSettings.objects.get_or_create()
         serializer = self.get_serializer(settings, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data)
 
-    @require_subscription_feature('invoice_management')
     def update(self, request, *args, **kwargs):
         """Update invoice settings"""
+        perm_check = self._check_permission(request)
+        if perm_check:
+            return perm_check
+
         settings, created = InvoiceSettings.objects.get_or_create()
         partial = kwargs.pop('partial', False)
         serializer = self.get_serializer(settings, data=request.data, partial=partial)
@@ -72,9 +91,12 @@ class InvoiceSettingsViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
     @action(detail=False, methods=['post'], url_path='upload-logo')
-    @require_subscription_feature('invoice_management')
     def upload_logo(self, request):
         """Upload company logo"""
+        perm_check = self._check_permission(request)
+        if perm_check:
+            return perm_check
+
         settings, created = InvoiceSettings.objects.get_or_create()
 
         if 'logo' not in request.FILES:
@@ -90,9 +112,12 @@ class InvoiceSettingsViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
     @action(detail=False, methods=['post'], url_path='upload-badge')
-    @require_subscription_feature('invoice_management')
     def upload_badge(self, request):
         """Upload company badge/seal"""
+        perm_check = self._check_permission(request)
+        if perm_check:
+            return perm_check
+
         settings, created = InvoiceSettings.objects.get_or_create()
 
         if 'badge' not in request.FILES:
@@ -108,9 +133,12 @@ class InvoiceSettingsViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
     @action(detail=False, methods=['post'], url_path='upload-signature')
-    @require_subscription_feature('invoice_management')
     def upload_signature(self, request):
         """Upload signature image"""
+        perm_check = self._check_permission(request)
+        if perm_check:
+            return perm_check
+
         settings, created = InvoiceSettings.objects.get_or_create()
 
         if 'signature' not in request.FILES:
@@ -126,9 +154,12 @@ class InvoiceSettingsViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
     @action(detail=False, methods=['delete'], url_path='remove-logo')
-    @require_subscription_feature('invoice_management')
     def remove_logo(self, request):
         """Remove company logo"""
+        perm_check = self._check_permission(request)
+        if perm_check:
+            return perm_check
+
         settings = InvoiceSettings.objects.first()
         if settings and settings.logo:
             settings.logo.delete()
@@ -137,9 +168,12 @@ class InvoiceSettingsViewSet(viewsets.ModelViewSet):
         return Response({'message': 'Logo removed successfully'})
 
     @action(detail=False, methods=['delete'], url_path='remove-badge')
-    @require_subscription_feature('invoice_management')
     def remove_badge(self, request):
         """Remove company badge"""
+        perm_check = self._check_permission(request)
+        if perm_check:
+            return perm_check
+
         settings = InvoiceSettings.objects.first()
         if settings and settings.badge:
             settings.badge.delete()
@@ -148,9 +182,12 @@ class InvoiceSettingsViewSet(viewsets.ModelViewSet):
         return Response({'message': 'Badge removed successfully'})
 
     @action(detail=False, methods=['delete'], url_path='remove-signature')
-    @require_subscription_feature('invoice_management')
     def remove_signature(self, request):
         """Remove signature"""
+        perm_check = self._check_permission(request)
+        if perm_check:
+            return perm_check
+
         settings = InvoiceSettings.objects.first()
         if settings and settings.signature:
             settings.signature.delete()
