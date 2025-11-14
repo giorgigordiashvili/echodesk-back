@@ -342,6 +342,41 @@ class Invoice(models.Model):
             self.status = 'overdue'
         self.save()
 
+    def generate_pdf(self):
+        """Generate PDF for this invoice"""
+        from django.template.loader import render_to_string
+        from weasyprint import HTML, CSS
+        from django.core.files.base import ContentFile
+        import tempfile
+
+        # Get invoice settings for company info
+        try:
+            settings = InvoiceSettings.objects.first()
+        except InvoiceSettings.DoesNotExist:
+            settings = None
+
+        # Prepare context for template
+        context = {
+            'invoice': self,
+            'settings': settings,
+            'line_items': self.line_items.all().order_by('position'),
+            'payments': self.payments.all().order_by('-payment_date'),
+        }
+
+        # Render HTML template
+        html_string = render_to_string('invoices/invoice_pdf.html', context)
+
+        # Generate PDF using WeasyPrint
+        pdf_file = HTML(string=html_string).write_pdf()
+
+        # Save PDF to model
+        filename = f"invoice_{self.invoice_number}.pdf"
+        self.pdf_file.save(filename, ContentFile(pdf_file), save=False)
+        self.pdf_generated_at = timezone.now()
+        self.save()
+
+        return self.pdf_file
+
 
 class InvoiceLineItem(models.Model):
     """

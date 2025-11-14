@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Invoice {{ invoice.invoice_number }}</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 2cm;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'DejaVu Sans', Arial, sans-serif;
+            font-size: 10pt;
+            line-height: 1.6;
+            color: #333;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 3px solid #4F46E5;
+        }
+
+        .company-info h1 {
+            font-size: 24pt;
+            color: #4F46E5;
+            margin-bottom: 10px;
+        }
+
+        .company-info p {
+            margin: 3px 0;
+            font-size: 9pt;
+            color: #666;
+        }
+
+        .invoice-info {
+            text-align: right;
+        }
+
+        .invoice-info h2 {
+            font-size: 28pt;
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .invoice-info p {
+            margin: 3px 0;
+            font-size: 9pt;
+        }
+
+        .invoice-info .status {
+            display: inline-block;
+            padding: 5px 15px;
+            border-radius: 4px;
+            font-weight: bold;
+            text-transform: uppercase;
+            font-size: 8pt;
+            margin-top: 10px;
+        }
+
+        .status-draft { background-color: #E5E7EB; color: #374151; }
+        .status-sent { background-color: #DBEAFE; color: #1E40AF; }
+        .status-paid { background-color: #D1FAE5; color: #065F46; }
+        .status-partially_paid { background-color: #FEF3C7; color: #92400E; }
+        .status-overdue { background-color: #FEE2E2; color: #991B1B; }
+        .status-cancelled { background-color: #F3F4F6; color: #6B7280; }
+
+        .parties {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 30px;
+        }
+
+        .party {
+            width: 48%;
+        }
+
+        .party h3 {
+            font-size: 11pt;
+            color: #666;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .party-details {
+            background-color: #F9FAFB;
+            padding: 15px;
+            border-radius: 4px;
+        }
+
+        .party-details p {
+            margin: 3px 0;
+            font-size: 9pt;
+        }
+
+        .party-details .name {
+            font-weight: bold;
+            font-size: 11pt;
+            margin-bottom: 5px;
+            color: #111;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+
+        thead {
+            background-color: #4F46E5;
+            color: white;
+        }
+
+        thead th {
+            padding: 12px 8px;
+            text-align: left;
+            font-size: 9pt;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        thead th.right {
+            text-align: right;
+        }
+
+        thead th.center {
+            text-align: center;
+        }
+
+        tbody tr {
+            border-bottom: 1px solid #E5E7EB;
+        }
+
+        tbody tr:last-child {
+            border-bottom: 2px solid #4F46E5;
+        }
+
+        tbody td {
+            padding: 10px 8px;
+            font-size: 9pt;
+        }
+
+        tbody td.right {
+            text-align: right;
+        }
+
+        tbody td.center {
+            text-align: center;
+        }
+
+        tbody td.description {
+            color: #666;
+            font-size: 8pt;
+        }
+
+        .totals {
+            float: right;
+            width: 300px;
+            margin-top: 20px;
+        }
+
+        .totals table {
+            margin: 0;
+        }
+
+        .totals tbody tr {
+            border: none;
+        }
+
+        .totals td {
+            padding: 8px;
+        }
+
+        .totals td:first-child {
+            text-align: right;
+            font-weight: 600;
+            color: #666;
+        }
+
+        .totals td:last-child {
+            text-align: right;
+            font-weight: bold;
+        }
+
+        .totals .total-row {
+            background-color: #4F46E5;
+            color: white;
+        }
+
+        .totals .total-row td {
+            font-size: 12pt;
+            padding: 12px 8px;
+        }
+
+        .notes {
+            clear: both;
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #E5E7EB;
+        }
+
+        .notes h3 {
+            font-size: 10pt;
+            color: #666;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+        }
+
+        .notes p {
+            font-size: 9pt;
+            color: #444;
+            line-height: 1.5;
+        }
+
+        .terms {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #F9FAFB;
+            border-left: 3px solid #4F46E5;
+        }
+
+        .terms h3 {
+            font-size: 10pt;
+            color: #666;
+            margin-bottom: 8px;
+        }
+
+        .terms p {
+            font-size: 8pt;
+            color: #666;
+            line-height: 1.6;
+        }
+
+        .footer {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            text-align: center;
+            font-size: 8pt;
+            color: #999;
+            padding: 20px;
+            border-top: 1px solid #E5E7EB;
+        }
+
+        .bank-accounts {
+            margin-top: 20px;
+        }
+
+        .bank-accounts h3 {
+            font-size: 10pt;
+            color: #666;
+            margin-bottom: 10px;
+        }
+
+        .bank-account {
+            background-color: #F9FAFB;
+            padding: 10px;
+            margin-bottom: 8px;
+            border-radius: 4px;
+            font-size: 8pt;
+        }
+
+        .bank-account strong {
+            color: #111;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="company-info">
+            <h1>{{ settings.company_name|default:"Company Name" }}</h1>
+            {% if settings.company_address %}
+            <p>{{ settings.company_address }}</p>
+            {% endif %}
+            {% if settings.company_phone %}
+            <p>Phone: {{ settings.company_phone }}</p>
+            {% endif %}
+            {% if settings.company_email %}
+            <p>Email: {{ settings.company_email }}</p>
+            {% endif %}
+            {% if settings.tax_id %}
+            <p>Tax ID: {{ settings.tax_id }}</p>
+            {% endif %}
+        </div>
+        <div class="invoice-info">
+            <h2>INVOICE</h2>
+            <p><strong>Invoice #:</strong> {{ invoice.invoice_number }}</p>
+            <p><strong>Date:</strong> {{ invoice.issue_date|date:"M d, Y" }}</p>
+            <p><strong>Due Date:</strong> {{ invoice.due_date|date:"M d, Y" }}</p>
+            <span class="status status-{{ invoice.status }}">{{ invoice.get_status_display }}</span>
+        </div>
+    </div>
+
+    <div class="parties">
+        <div class="party">
+            <h3>Bill To</h3>
+            <div class="party-details">
+                <p class="name">{{ invoice.client_name }}</p>
+                {% if invoice.client_itemlist_item %}
+                    {% if invoice.client_itemlist_item.custom_data.email %}
+                    <p>{{ invoice.client_itemlist_item.custom_data.email }}</p>
+                    {% endif %}
+                    {% if invoice.client_itemlist_item.custom_data.phone %}
+                    <p>{{ invoice.client_itemlist_item.custom_data.phone }}</p>
+                    {% endif %}
+                    {% if invoice.client_itemlist_item.custom_data.address %}
+                    <p>{{ invoice.client_itemlist_item.custom_data.address }}</p>
+                    {% endif %}
+                {% elif invoice.client %}
+                    {% if invoice.client.email %}
+                    <p>{{ invoice.client.email }}</p>
+                    {% endif %}
+                    {% if invoice.client.phone %}
+                    <p>{{ invoice.client.phone }}</p>
+                    {% endif %}
+                    {% if invoice.client.address %}
+                    <p>{{ invoice.client.address }}</p>
+                    {% endif %}
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="party">
+            <h3>Payment Details</h3>
+            <div class="party-details">
+                <p><strong>Currency:</strong> {{ invoice.currency }}</p>
+                <p><strong>Total Amount:</strong> {{ invoice.total }} {{ invoice.currency }}</p>
+                <p><strong>Amount Paid:</strong> {{ invoice.paid_amount }} {{ invoice.currency }}</p>
+                <p><strong>Balance Due:</strong> {{ invoice.get_balance }} {{ invoice.currency }}</p>
+            </div>
+        </div>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 5%;">#</th>
+                <th style="width: 40%;">Description</th>
+                <th class="center" style="width: 10%;">Qty</th>
+                <th class="center" style="width: 10%;">Unit</th>
+                <th class="right" style="width: 12%;">Unit Price</th>
+                <th class="right" style="width: 10%;">Tax</th>
+                <th class="right" style="width: 13%;">Amount</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in line_items %}
+            <tr>
+                <td class="center">{{ forloop.counter }}</td>
+                <td>
+                    <strong>{{ item.description }}</strong>
+                    {% if item.product %}
+                    <div class="description">Product: {{ item.product.name }}</div>
+                    {% elif item.list_item %}
+                    <div class="description">{{ item.list_item.label }}</div>
+                    {% endif %}
+                </td>
+                <td class="center">{{ item.quantity }}</td>
+                <td class="center">{{ item.unit }}</td>
+                <td class="right">{{ item.unit_price }} {{ invoice.currency }}</td>
+                <td class="right">{{ item.tax_amount }} {{ invoice.currency }}</td>
+                <td class="right">{{ item.line_total }} {{ invoice.currency }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="7" class="center">No line items</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="totals">
+        <table>
+            <tbody>
+                <tr>
+                    <td>Subtotal:</td>
+                    <td>{{ invoice.subtotal }} {{ invoice.currency }}</td>
+                </tr>
+                <tr>
+                    <td>Tax:</td>
+                    <td>{{ invoice.tax_amount }} {{ invoice.currency }}</td>
+                </tr>
+                {% if invoice.discount_amount %}
+                <tr>
+                    <td>Discount:</td>
+                    <td>-{{ invoice.discount_amount }} {{ invoice.currency }}</td>
+                </tr>
+                {% endif %}
+                <tr class="total-row">
+                    <td>TOTAL:</td>
+                    <td>{{ invoice.total }} {{ invoice.currency }}</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    {% if invoice.notes %}
+    <div class="notes">
+        <h3>Notes</h3>
+        <p>{{ invoice.notes|linebreaks }}</p>
+    </div>
+    {% endif %}
+
+    {% if invoice.terms_and_conditions %}
+    <div class="terms">
+        <h3>Terms & Conditions</h3>
+        <p>{{ invoice.terms_and_conditions|linebreaks }}</p>
+    </div>
+    {% endif %}
+
+    {% if settings.bank_accounts %}
+    <div class="bank-accounts">
+        <h3>Bank Account Information</h3>
+        {% for account in settings.bank_accounts %}
+        <div class="bank-account">
+            <strong>{{ account.bank_name }}</strong><br>
+            Account Number: {{ account.account_number }}
+            {% if account.swift %} | SWIFT: {{ account.swift }}{% endif %}
+            {% if account.iban %} | IBAN: {{ account.iban }}{% endif %}
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="footer">
+        <p>Invoice generated on {{ invoice.pdf_generated_at|date:"F d, Y" }} | {{ settings.company_name|default:"Company Name" }}</p>
+    </div>
+</body>
+</html>

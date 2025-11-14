@@ -332,15 +332,38 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         """Download invoice PDF"""
         invoice = self.get_object()
 
-        # TODO: Implement PDF generation
-        # if not invoice.pdf_file or regenerate:
-        #     invoice.generate_pdf()
+        # Check if we should regenerate the PDF
+        regenerate = request.query_params.get('regenerate', 'false').lower() == 'true'
 
-        # For now, return placeholder
-        return Response(
-            {'message': 'PDF generation not yet implemented'},
-            status=status.HTTP_501_NOT_IMPLEMENTED
-        )
+        # Generate PDF if it doesn't exist or regeneration is requested
+        if not invoice.pdf_file or regenerate:
+            try:
+                invoice.generate_pdf()
+            except Exception as e:
+                return Response(
+                    {'error': f'Failed to generate PDF: {str(e)}'},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+
+        # Return the PDF file
+        if invoice.pdf_file:
+            try:
+                response = FileResponse(
+                    invoice.pdf_file.open('rb'),
+                    content_type='application/pdf'
+                )
+                response['Content-Disposition'] = f'inline; filename="{invoice.invoice_number}.pdf"'
+                return response
+            except Exception as e:
+                return Response(
+                    {'error': f'Failed to open PDF file: {str(e)}'},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+        else:
+            return Response(
+                {'error': 'PDF file not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
 
     @action(detail=True, methods=['get'])
     def excel(self, request, pk=None):
