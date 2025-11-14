@@ -303,19 +303,43 @@ class InvoiceTemplateSerializer(serializers.ModelSerializer):
         return value
 
 
-class ClientSerializer(serializers.ModelSerializer):
+class ClientSerializer(serializers.Serializer):
     """
-    Simple serializer for client selection
+    Unified serializer for client selection - works with both EcommerceClient and ListItem
     """
-    full_name = serializers.SerializerMethodField()
+    id = serializers.IntegerField()
+    name = serializers.SerializerMethodField()
+    email = serializers.SerializerMethodField()
+    phone = serializers.SerializerMethodField()
 
-    class Meta:
-        model = EcommerceClient
-        fields = ['id', 'first_name', 'last_name', 'email', 'phone', 'full_name']
+    def get_name(self, obj):
+        """Get client name from either EcommerceClient or ListItem"""
+        if hasattr(obj, 'label'):
+            # ListItem - use label
+            return obj.label
+        else:
+            # EcommerceClient - use full name
+            return f"{obj.first_name} {obj.last_name}".strip() or obj.email
 
-    def get_full_name(self, obj):
-        """Get full name"""
-        return f"{obj.first_name} {obj.last_name}".strip() or obj.email
+    def get_email(self, obj):
+        """Get email if available"""
+        if hasattr(obj, 'custom_data') and obj.custom_data:
+            # ListItem - check custom_data
+            return obj.custom_data.get('email', '')
+        elif hasattr(obj, 'email'):
+            # EcommerceClient
+            return obj.email
+        return ''
+
+    def get_phone(self, obj):
+        """Get phone if available"""
+        if hasattr(obj, 'custom_data') and obj.custom_data:
+            # ListItem - check custom_data
+            return obj.custom_data.get('phone', '')
+        elif hasattr(obj, 'phone'):
+            # EcommerceClient
+            return obj.phone
+        return ''
 
 
 class ListItemMaterialSerializer(serializers.ModelSerializer):

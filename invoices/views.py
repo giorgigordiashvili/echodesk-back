@@ -542,16 +542,30 @@ class InvoiceTemplateViewSet(viewsets.ModelViewSet):
 class ClientViewSet(viewsets.ReadOnlyModelViewSet):
     """
     API endpoint for client selection in invoices
+    Returns clients from the configured client_itemlist in InvoiceSettings
     """
-    queryset = EcommerceClient.objects.filter(is_active=True)
     serializer_class = ClientSerializer
     permission_classes = [IsAuthenticated, CanManageInvoices]
     filter_backends = [filters.SearchFilter]
-    search_fields = ['first_name', 'last_name', 'email', 'phone']
+    search_fields = ['label']
 
-    def list(self, request, *args, **kwargs):
-        """List active clients"""
-        return super().list(request, *args, **kwargs)
+    def get_queryset(self):
+        """
+        Get clients from the configured ItemList in InvoiceSettings
+        Falls back to EcommerceClient if no ItemList is configured
+        """
+        # Get invoice settings to find the client itemlist
+        settings, created = InvoiceSettings.objects.get_or_create()
+
+        if settings.client_itemlist:
+            # Return items from the selected ItemList
+            return ListItem.objects.filter(
+                item_list=settings.client_itemlist,
+                is_active=True
+            )
+        else:
+            # Fallback to EcommerceClient for backward compatibility
+            return EcommerceClient.objects.filter(is_active=True)
 
 
 class InvoiceMaterialViewSet(viewsets.ReadOnlyModelViewSet):
