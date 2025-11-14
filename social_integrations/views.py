@@ -228,7 +228,7 @@ def facebook_oauth_start(request):
             f"scope=business_management,pages_show_list,pages_manage_metadata,pages_messaging,pages_read_engagement,instagram_basic,instagram_manage_messages,public_profile,email&"
             f"state={state}&"
             f"response_type=code&"
-            f"auth_type=rerequest"
+            f"display=popup"
         )
         
         return Response({
