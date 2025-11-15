@@ -15,6 +15,7 @@ from .views import (
     EcommerceSettingsViewSet,
     register_client,
     login_client,
+    logout_client,
     refresh_client_token,
     verify_email,
     resend_verification_code,
@@ -73,6 +74,7 @@ urlpatterns = [
     # to prevent router from treating them as detail lookups
     path('clients/register/', register_client, name='register-client'),
     path('clients/login/', login_client, name='login-client'),
+    path('clients/logout/', logout_client, name='logout-client'),
     path('clients/refresh-token/', refresh_client_token, name='refresh-client-token'),
     path('clients/verify/', verify_email, name='verify-email'),
     path('clients/resend-code/', resend_verification_code, name='resend-verification-code'),

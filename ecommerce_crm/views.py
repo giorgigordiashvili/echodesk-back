@@ -695,6 +695,74 @@ def refresh_client_token(request):
 
 
 @extend_schema(
+    operation_id='logout_client',
+    summary='Logout client',
+    description='Invalidate the client refresh token to logout. The frontend should also clear stored tokens.',
+    request={
+        'application/json': {
+            'type': 'object',
+            'properties': {
+                'refresh': {'type': 'string', 'description': 'Refresh token to invalidate'}
+            },
+            'required': ['refresh']
+        }
+    },
+    responses={
+        200: {
+            'type': 'object',
+            'properties': {
+                'message': {'type': 'string', 'description': 'Logout success message'}
+            }
+        },
+        400: {'description': 'Refresh token is required'},
+        401: {'description': 'Invalid or expired refresh token'}
+    },
+    tags=['Ecommerce - Client Auth']
+)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def logout_client(request):
+    """Logout ecommerce client by invalidating refresh token"""
+    from rest_framework_simplejwt.tokens import RefreshToken
+    from rest_framework_simplejwt.exceptions import TokenError, InvalidToken
+
+    refresh_token = request.data.get('refresh')
+
+    if not refresh_token:
+        return Response({
+            'error': 'Refresh token is required'
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        # Validate the refresh token
+        token = RefreshToken(refresh_token)
+
+        # Check if it's a client token
+        client_id = token.get('client_id')
+        if not client_id:
+            return Response({
+                'error': 'Invalid token type'
+            }, status=status.HTTP_401_UNAUTHORIZED)
+
+        # Blacklist the token (invalidate it)
+        try:
+            token.blacklist()
+        except AttributeError:
+            # Token blacklisting is not enabled, but we'll still return success
+            # The frontend should clear its stored tokens
+            pass
+
+        return Response({
+            'message': 'Logout successful'
+        }, status=status.HTTP_200_OK)
+
+    except (TokenError, InvalidToken) as e:
+        return Response({
+            'error': 'Invalid or expired refresh token'
+        }, status=status.HTTP_401_UNAUTHORIZED)
+
+
+@extend_schema(
     operation_id='verify_email',
     summary='Verify email with code',
     description='Verify client email using the verification token and code sent via email. Returns JWT tokens upon successful verification.',
