@@ -381,7 +381,7 @@ class ClientProductViewSet(viewsets.ReadOnlyModelViewSet):
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['is_featured']
     search_fields = ['sku', 'slug']
-    ordering_fields = ['price', 'created_at']
+    ordering_fields = ['price', 'created_at', 'name']
     ordering = ['-created_at']
     schema = ClientProductAutoSchema()
 
@@ -389,8 +389,9 @@ class ClientProductViewSet(viewsets.ReadOnlyModelViewSet):
         """
         Filter products by attributes using query params like: ?attr_color=red,blue&attr_size=large
         Also supports price range: ?min_price=10&max_price=100
+        And on_sale filter: ?on_sale=true
         """
-        from django.db.models import Q
+        from django.db.models import Q, F
 
         queryset = super().get_queryset()
 
@@ -401,6 +402,14 @@ class ClientProductViewSet(viewsets.ReadOnlyModelViewSet):
             queryset = queryset.filter(price__gte=min_price)
         if max_price:
             queryset = queryset.filter(price__lte=max_price)
+
+        # On sale filter - products where compare_at_price > price
+        on_sale = self.request.query_params.get('on_sale')
+        if on_sale and on_sale.lower() == 'true':
+            queryset = queryset.filter(
+                compare_at_price__isnull=False,
+                compare_at_price__gt=F('price')
+            )
 
         # Attribute-based filtering
         for key, value in self.request.GET.items():
@@ -483,11 +492,19 @@ class ClientProductViewSet(viewsets.ReadOnlyModelViewSet):
         - `?attr_width=10-20` - Number ranges
         - `?attr_waterproof=true` - Boolean values
 
+        **Ordering Options:**
+        - `?ordering=price` - Sort by price ascending
+        - `?ordering=-price` - Sort by price descending
+        - `?ordering=created_at` - Sort by creation date ascending (oldest first)
+        - `?ordering=-created_at` - Sort by creation date descending (newest first)
+        - `?ordering=name` - Sort by name ascending
+        - `?ordering=-name` - Sort by name descending
+
         **Other Filters:**
         - Basic: `?is_featured=true`
+        - On Sale: `?on_sale=true`
         - Search: `?search=laptop`
         - Price: `?min_price=100&max_price=500`
-        - Ordering: `?ordering=-price` or `?ordering=created_at`
         - Language: `?language=ka`''',
         parameters=[
             OpenApiParameter(
@@ -508,6 +525,31 @@ class ClientProductViewSet(viewsets.ReadOnlyModelViewSet):
                 required=False,
                 examples=[
                     OpenApiExample('Example', value=500.00)
+                ]
+            ),
+            OpenApiParameter(
+                name='on_sale',
+                type=bool,
+                location=OpenApiParameter.QUERY,
+                description='Filter to show only products on sale (compare_at_price > price)',
+                required=False,
+                examples=[
+                    OpenApiExample('On Sale Only', value=True),
+                ]
+            ),
+            OpenApiParameter(
+                name='ordering',
+                type=str,
+                location=OpenApiParameter.QUERY,
+                description='Sort products by field. Available options: price, -price, created_at, -created_at, name, -name. Prefix with - for descending order.',
+                required=False,
+                examples=[
+                    OpenApiExample('Price Low to High', value='price'),
+                    OpenApiExample('Price High to Low', value='-price'),
+                    OpenApiExample('Newest First', value='-created_at'),
+                    OpenApiExample('Oldest First', value='created_at'),
+                    OpenApiExample('Name A-Z', value='name'),
+                    OpenApiExample('Name Z-A', value='-name'),
                 ]
             ),
             OpenApiParameter(
