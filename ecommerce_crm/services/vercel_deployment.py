@@ -276,7 +276,7 @@ class VercelDeploymentService:
 
     def trigger_deployment(self, project_name: str) -> Dict[str, Any]:
         """
-        Trigger a new deployment for a project
+        Trigger a new deployment for a project using Deploy Hooks
 
         Args:
             project_name: Project name or ID
@@ -284,10 +284,9 @@ class VercelDeploymentService:
         Returns:
             Deployment information
         """
-        # Method 1: Create deployment directly from git
         logger.info(f"Triggering deployment for project: {project_name}")
 
-        # First get the project to ensure it has git configured
+        # First get the project to get its ID
         project_info = self.get_project(project_name)
         if not project_info.get("success"):
             return {
@@ -295,7 +294,59 @@ class VercelDeploymentService:
                 "error": f"Project not found: {project_name}"
             }
 
-        # Try creating a deployment using the v13 API with git reference
+        project_id = project_info.get("id")
+
+        # METHOD 1 (PREFERRED): Use Deploy Hooks - bypasses SHA check
+        logger.info(f"Creating deploy hook for project {project_name}")
+        hook_url = f"{self.BASE_URL}/v9/projects/{project_name}/deploy-hooks{self._get_team_param()}"
+
+        hook_payload = {
+            "name": f"api-trigger-{int(time.time())}",  # Unique name
+            "ref": "main"
+        }
+
+        hook_response = requests.post(hook_url, headers=self.headers, json=hook_payload)
+        logger.info(f"Deploy hook creation status: {hook_response.status_code}")
+
+        if hook_response.status_code in [200, 201]:
+            hook_data = hook_response.json()
+            logger.info(f"Deploy hook created: {hook_data}")
+
+            # The URL might be in different fields
+            deploy_hook_url = hook_data.get("url") or hook_data.get("deploymentUrl")
+
+            # If not found, construct it from the hook ID and project ID
+            if not deploy_hook_url and hook_data.get("id"):
+                hook_id = hook_data.get("id")
+                deploy_hook_url = f"https://api.vercel.com/v1/integrations/deploy/{project_id}/{hook_id}"
+                logger.info(f"Constructed deploy hook URL: {deploy_hook_url}")
+
+            if deploy_hook_url:
+                logger.info(f"Calling deploy hook URL: {deploy_hook_url}")
+                trigger_response = requests.post(deploy_hook_url)
+                logger.info(f"Deploy hook response: {trigger_response.status_code}")
+
+                if trigger_response.status_code in [200, 201]:
+                    trigger_data = trigger_response.json()
+                    job_info = trigger_data.get("job", {})
+                    logger.info(f"Deployment triggered via hook! Job ID: {job_info.get('id')}")
+                    return {
+                        "success": True,
+                        "deployment_id": job_info.get("id"),
+                        "url": None,
+                        "ready_state": "QUEUED",
+                        "created_at": job_info.get("createdAt")
+                    }
+                else:
+                    logger.warning(f"Hook trigger failed: {trigger_response.status_code} - {trigger_response.text[:500]}")
+            else:
+                logger.warning(f"No deploy hook URL in response: {hook_data}")
+        else:
+            hook_error = hook_response.json() if hook_response.text else {}
+            logger.warning(f"Failed to create deploy hook: {hook_error}")
+
+        # METHOD 2 (FALLBACK): Try direct deployment API with forceNew
+        logger.info(f"Falling back to direct deployment API...")
         deploy_url = f"{self.BASE_URL}/v13/deployments{self._get_team_param()}"
         if "?" in deploy_url:
             deploy_url += "&forceNew=1"
@@ -317,7 +368,7 @@ class VercelDeploymentService:
 
         if deploy_response.status_code in [200, 201]:
             deployment_data = deploy_response.json()
-            logger.info(f"Deployment created: {deployment_data.get('id')}")
+            logger.info(f"Deployment created via direct API: {deployment_data.get('id')}")
             return {
                 "success": True,
                 "deployment_id": deployment_data.get("id"),
@@ -327,60 +378,11 @@ class VercelDeploymentService:
             }
 
         error_data = deploy_response.json() if deploy_response.text else {}
-        logger.warning(f"Direct deployment failed: {error_data}")
-
-        # Method 2: Try deploy hook approach
-        hook_url = f"{self.BASE_URL}/v9/projects/{project_name}/deploy-hooks{self._get_team_param()}"
-
-        hook_payload = {
-            "name": "api-deployment",
-            "ref": "main"
-        }
-
-        hook_response = requests.post(hook_url, headers=self.headers, json=hook_payload)
-        logger.info(f"Deploy hook response status: {hook_response.status_code}")
-
-        if hook_response.status_code in [200, 201]:
-            hook_data = hook_response.json()
-            logger.info(f"Deploy hook response data: {hook_data}")
-
-            # The URL might be in different fields depending on API version
-            deploy_hook_url = hook_data.get("url") or hook_data.get("deploymentUrl")
-
-            # If not found, construct it from the hook ID
-            if not deploy_hook_url and hook_data.get("id"):
-                hook_id = hook_data.get("id")
-                # Get the project ID from our earlier lookup
-                deploy_hook_url = f"https://api.vercel.com/v1/integrations/deploy/{project_info.get('id')}/{hook_id}"
-                logger.info(f"Constructed deploy hook URL: {deploy_hook_url}")
-
-            if deploy_hook_url:
-                logger.info(f"Triggering deployment via hook URL: {deploy_hook_url}")
-                trigger_response = requests.post(deploy_hook_url)
-                logger.info(f"Hook trigger response: {trigger_response.status_code} - {trigger_response.text[:500]}")
-
-                if trigger_response.status_code in [200, 201]:
-                    trigger_data = trigger_response.json()
-                    job_info = trigger_data.get("job", {})
-                    logger.info(f"Deployment triggered via hook: {job_info.get('id')}")
-                    return {
-                        "success": True,
-                        "deployment_id": job_info.get("id"),
-                        "url": None,
-                        "ready_state": "QUEUED",
-                        "created_at": job_info.get("createdAt")
-                    }
-                else:
-                    logger.error(f"Failed to trigger via hook: {trigger_response.text}")
-            else:
-                logger.error(f"No deploy hook URL found in response: {hook_data}")
-        else:
-            hook_error = hook_response.json() if hook_response.text else {}
-            logger.warning(f"Failed to create deploy hook: {hook_error}")
+        logger.error(f"Direct deployment also failed: {error_data}")
 
         return {
             "success": False,
-            "error": error_data.get("error", {}).get("message", "Failed to trigger deployment")
+            "error": error_data.get("error", {}).get("message", "Failed to trigger deployment via both methods")
         }
 
     def get_deployment_status(self, deployment_id: str) -> Dict[str, Any]:
