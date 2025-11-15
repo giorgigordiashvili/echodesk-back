@@ -2159,3 +2159,290 @@ class EcommerceSettingsViewSet(viewsets.ModelViewSet):
                 "success": False,
                 "error": str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @extend_schema(
+        tags=['Ecommerce Admin - Settings'],
+        summary='Get custom domains',
+        description='Get all custom domains for the deployed frontend with their verification status',
+        responses={
+            200: inline_serializer(
+                name='DomainsListResponse',
+                fields={
+                    'success': serializers.BooleanField(),
+                    'domains': serializers.ListField(child=serializers.DictField()),
+                }
+            ),
+            400: OpenApiResponse(description='No deployment exists'),
+        }
+    )
+    @action(detail=False, methods=['get'], url_path='domains')
+    def get_domains(self, request):
+        """
+        Get all custom domains for the frontend deployment
+        """
+        from .services.vercel_deployment import VercelDeploymentService
+
+        tenant = request.tenant
+
+        settings, created = EcommerceSettings.objects.get_or_create(
+            tenant=tenant,
+            defaults={'store_name': tenant.name}
+        )
+
+        if not settings.vercel_project_id:
+            return Response(
+                {"error": "No deployment exists. Deploy frontend first."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            service = VercelDeploymentService()
+            result = service.get_domains(settings.vercel_project_id)
+
+            if result.get("success"):
+                return Response(result, status=status.HTTP_200_OK)
+            else:
+                return Response({
+                    "success": False,
+                    "error": result.get("error", "Failed to get domains")
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        except Exception as e:
+            return Response({
+                "success": False,
+                "error": str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @extend_schema(
+        tags=['Ecommerce Admin - Settings'],
+        summary='Add custom domain',
+        description='Add a custom domain to the deployed frontend. Returns DNS configuration instructions.',
+        request=inline_serializer(
+            name='AddDomainRequest',
+            fields={
+                'domain': serializers.CharField(help_text='Domain name (e.g., shop.example.com)')
+            }
+        ),
+        responses={
+            201: inline_serializer(
+                name='AddDomainResponse',
+                fields={
+                    'success': serializers.BooleanField(),
+                    'domain': serializers.CharField(),
+                    'verified': serializers.BooleanField(),
+                    'verification': serializers.ListField(child=serializers.DictField()),
+                    'dns_instructions': serializers.DictField(),
+                }
+            ),
+            400: OpenApiResponse(description='No deployment exists or invalid domain'),
+        }
+    )
+    @action(detail=False, methods=['post'], url_path='add-domain')
+    def add_domain(self, request):
+        """
+        Add a custom domain to the frontend deployment
+        """
+        from .services.vercel_deployment import VercelDeploymentService
+
+        tenant = request.tenant
+        domain = request.data.get('domain', '').strip().lower()
+
+        if not domain:
+            return Response(
+                {"error": "Domain is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        settings, created = EcommerceSettings.objects.get_or_create(
+            tenant=tenant,
+            defaults={'store_name': tenant.name}
+        )
+
+        if not settings.vercel_project_id:
+            return Response(
+                {"error": "No deployment exists. Deploy frontend first."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            service = VercelDeploymentService()
+            result = service.add_domain(settings.vercel_project_id, domain)
+
+            if result.get("success"):
+                # Add DNS instructions
+                is_subdomain = '.' in domain and not domain.startswith('www.')
+                apex_name = result.get("apexName", domain)
+
+                dns_instructions = {
+                    "domain": domain,
+                    "is_subdomain": is_subdomain,
+                }
+
+                if is_subdomain:
+                    # For subdomain like shop.example.com
+                    subdomain_part = domain.replace(f".{apex_name}", "")
+                    dns_instructions["instructions"] = [
+                        {
+                            "type": "CNAME",
+                            "name": subdomain_part,
+                            "value": "cname.vercel-dns.com",
+                            "description": f"Point {subdomain_part} to Vercel"
+                        }
+                    ]
+                else:
+                    # For root domain like example.com
+                    dns_instructions["instructions"] = [
+                        {
+                            "type": "A",
+                            "name": "@",
+                            "value": "76.76.21.21",
+                            "description": "Point root domain to Vercel"
+                        }
+                    ]
+
+                result["dns_instructions"] = dns_instructions
+
+                # Save custom domain to settings
+                settings.custom_domain = domain
+                settings.save(update_fields=['custom_domain'])
+
+                return Response(result, status=status.HTTP_201_CREATED)
+            else:
+                return Response({
+                    "success": False,
+                    "error": result.get("error", "Failed to add domain")
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        except Exception as e:
+            return Response({
+                "success": False,
+                "error": str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @extend_schema(
+        tags=['Ecommerce Admin - Settings'],
+        summary='Remove custom domain',
+        description='Remove a custom domain from the deployed frontend',
+        request=inline_serializer(
+            name='RemoveDomainRequest',
+            fields={
+                'domain': serializers.CharField(help_text='Domain name to remove')
+            }
+        ),
+        responses={
+            200: OpenApiResponse(description='Domain removed successfully'),
+            400: OpenApiResponse(description='No deployment exists or domain not found'),
+        }
+    )
+    @action(detail=False, methods=['post'], url_path='remove-domain')
+    def remove_domain(self, request):
+        """
+        Remove a custom domain from the frontend deployment
+        """
+        from .services.vercel_deployment import VercelDeploymentService
+
+        tenant = request.tenant
+        domain = request.data.get('domain', '').strip().lower()
+
+        if not domain:
+            return Response(
+                {"error": "Domain is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        settings, created = EcommerceSettings.objects.get_or_create(
+            tenant=tenant,
+            defaults={'store_name': tenant.name}
+        )
+
+        if not settings.vercel_project_id:
+            return Response(
+                {"error": "No deployment exists. Deploy frontend first."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            service = VercelDeploymentService()
+            result = service.remove_domain(settings.vercel_project_id, domain)
+
+            if result.get("success"):
+                # Clear custom domain from settings if it matches
+                if settings.custom_domain == domain:
+                    settings.custom_domain = None
+                    settings.save(update_fields=['custom_domain'])
+
+                return Response({
+                    "success": True,
+                    "message": f"Domain {domain} removed successfully"
+                }, status=status.HTTP_200_OK)
+            else:
+                return Response({
+                    "success": False,
+                    "error": result.get("error", "Failed to remove domain")
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        except Exception as e:
+            return Response({
+                "success": False,
+                "error": str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @extend_schema(
+        tags=['Ecommerce Admin - Settings'],
+        summary='Verify domain DNS',
+        description='Check if the DNS records for a domain have been configured correctly',
+        request=inline_serializer(
+            name='VerifyDomainRequest',
+            fields={
+                'domain': serializers.CharField(help_text='Domain name to verify')
+            }
+        ),
+        responses={
+            200: inline_serializer(
+                name='VerifyDomainResponse',
+                fields={
+                    'success': serializers.BooleanField(),
+                    'verified': serializers.BooleanField(),
+                    'verification': serializers.ListField(child=serializers.DictField()),
+                }
+            ),
+        }
+    )
+    @action(detail=False, methods=['post'], url_path='verify-domain')
+    def verify_domain(self, request):
+        """
+        Verify DNS configuration for a custom domain
+        """
+        from .services.vercel_deployment import VercelDeploymentService
+
+        tenant = request.tenant
+        domain = request.data.get('domain', '').strip().lower()
+
+        if not domain:
+            return Response(
+                {"error": "Domain is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        settings, created = EcommerceSettings.objects.get_or_create(
+            tenant=tenant,
+            defaults={'store_name': tenant.name}
+        )
+
+        if not settings.vercel_project_id:
+            return Response(
+                {"error": "No deployment exists. Deploy frontend first."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            service = VercelDeploymentService()
+            result = service.verify_domain(settings.vercel_project_id, domain)
+
+            return Response(result, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response({
+                "success": False,
+                "error": str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

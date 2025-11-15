@@ -1060,6 +1060,12 @@ class EcommerceSettings(models.Model):
         default='pending',
         help_text="Current deployment status of the e-commerce frontend"
     )
+    custom_domain = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        help_text="Custom domain for the e-commerce storefront (e.g., shop.example.com)"
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

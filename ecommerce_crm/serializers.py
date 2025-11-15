@@ -563,10 +563,10 @@ class EcommerceSettingsSerializer(serializers.ModelSerializer):
             'bog_use_production', 'bog_return_url_success', 'bog_return_url_fail',
             'enable_cash_on_delivery', 'enable_card_payment',
             'store_name', 'store_email', 'store_phone',
-            'ecommerce_frontend_url', 'deployment_status', 'vercel_project_id',
+            'ecommerce_frontend_url', 'deployment_status', 'vercel_project_id', 'custom_domain',
             'created_at', 'updated_at'
         ]
-        read_only_fields = ['id', 'tenant', 'ecommerce_frontend_url', 'deployment_status', 'vercel_project_id', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'tenant', 'ecommerce_frontend_url', 'deployment_status', 'vercel_project_id', 'custom_domain', 'created_at', 'updated_at']
 
     def create(self, validated_data):
         # Handle encrypted secret

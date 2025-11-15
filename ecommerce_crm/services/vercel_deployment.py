@@ -473,6 +473,152 @@ class VercelDeploymentService:
                 "error": error_data.get("error", {}).get("message", "Unknown error")
             }
 
+    def add_domain(self, project_id: str, domain: str) -> Dict[str, Any]:
+        """
+        Add a custom domain to a project
+
+        Args:
+            project_id: Vercel project ID
+            domain: Domain name to add (e.g., store.example.com)
+
+        Returns:
+            Domain configuration including DNS records needed
+        """
+        url = f"{self.BASE_URL}/v9/projects/{project_id}/domains{self._get_team_param()}"
+
+        payload = {
+            "name": domain
+        }
+
+        logger.info(f"Adding domain {domain} to project {project_id}")
+        response = requests.post(url, headers=self.headers, json=payload)
+
+        if response.status_code in [200, 201]:
+            domain_data = response.json()
+            logger.info(f"Domain added successfully: {domain}")
+
+            # Get verification records
+            verification = domain_data.get("verification", [])
+
+            return {
+                "success": True,
+                "domain": domain_data.get("name"),
+                "verified": domain_data.get("verified", False),
+                "verification": verification,
+                "apexName": domain_data.get("apexName"),
+                "createdAt": domain_data.get("createdAt"),
+                "gitBranch": domain_data.get("gitBranch"),
+                "redirect": domain_data.get("redirect"),
+                "redirectStatusCode": domain_data.get("redirectStatusCode")
+            }
+        else:
+            error_data = response.json() if response.text else {}
+            logger.error(f"Failed to add domain: {error_data}")
+            return {
+                "success": False,
+                "error": error_data.get("error", {}).get("message", "Unknown error")
+            }
+
+    def remove_domain(self, project_id: str, domain: str) -> Dict[str, Any]:
+        """
+        Remove a custom domain from a project
+
+        Args:
+            project_id: Vercel project ID
+            domain: Domain name to remove
+
+        Returns:
+            Operation result
+        """
+        url = f"{self.BASE_URL}/v9/projects/{project_id}/domains/{domain}{self._get_team_param()}"
+
+        logger.info(f"Removing domain {domain} from project {project_id}")
+        response = requests.delete(url, headers=self.headers)
+
+        if response.status_code in [200, 204]:
+            logger.info(f"Domain {domain} removed successfully")
+            return {"success": True}
+        else:
+            error_data = response.json() if response.text else {}
+            logger.error(f"Failed to remove domain: {error_data}")
+            return {
+                "success": False,
+                "error": error_data.get("error", {}).get("message", "Unknown error")
+            }
+
+    def get_domains(self, project_id: str) -> Dict[str, Any]:
+        """
+        Get all domains for a project
+
+        Args:
+            project_id: Vercel project ID
+
+        Returns:
+            List of domains with their configuration
+        """
+        url = f"{self.BASE_URL}/v9/projects/{project_id}/domains{self._get_team_param()}"
+
+        response = requests.get(url, headers=self.headers)
+
+        if response.status_code == 200:
+            data = response.json()
+            domains = data.get("domains", [])
+
+            formatted_domains = []
+            for domain in domains:
+                formatted_domains.append({
+                    "name": domain.get("name"),
+                    "verified": domain.get("verified", False),
+                    "verification": domain.get("verification", []),
+                    "apexName": domain.get("apexName"),
+                    "createdAt": domain.get("createdAt"),
+                    "gitBranch": domain.get("gitBranch"),
+                    "redirect": domain.get("redirect"),
+                    "redirectStatusCode": domain.get("redirectStatusCode")
+                })
+
+            return {
+                "success": True,
+                "domains": formatted_domains
+            }
+        else:
+            error_data = response.json() if response.text else {}
+            logger.error(f"Failed to get domains: {error_data}")
+            return {
+                "success": False,
+                "error": error_data.get("error", {}).get("message", "Unknown error")
+            }
+
+    def verify_domain(self, project_id: str, domain: str) -> Dict[str, Any]:
+        """
+        Verify a domain's DNS configuration
+
+        Args:
+            project_id: Vercel project ID
+            domain: Domain to verify
+
+        Returns:
+            Verification status
+        """
+        url = f"{self.BASE_URL}/v9/projects/{project_id}/domains/{domain}/verify{self._get_team_param()}"
+
+        response = requests.post(url, headers=self.headers)
+
+        if response.status_code == 200:
+            data = response.json()
+            return {
+                "success": True,
+                "verified": data.get("verified", False),
+                "verification": data.get("verification", [])
+            }
+        else:
+            error_data = response.json() if response.text else {}
+            return {
+                "success": False,
+                "error": error_data.get("error", {}).get("message", "Unknown error"),
+                "verified": False
+            }
+
 
 def deploy_tenant_frontend(tenant) -> Dict[str, Any]:
     """
