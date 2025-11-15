@@ -2391,13 +2391,23 @@ def whatsapp_embedded_signup_callback(request):
             'input_token': access_token,
             'access_token': f"{fb_app_id}|{fb_app_secret}"
         }
-        debug_response = requests.get(debug_url, params=debug_params)
-        debug_data = debug_response.json()
-        logger.info(f"🔍 Token debug info: {debug_data}")
 
-        if 'data' in debug_data:
-            scopes = debug_data['data'].get('scopes', [])
-            logger.info(f"📋 Granted permissions: {scopes}")
+        try:
+            debug_response = requests.get(debug_url, params=debug_params)
+            debug_data = debug_response.json()
+            logger.info(f"🔍 Token debug info: {debug_data}")
+
+            if 'data' in debug_data:
+                scopes = debug_data['data'].get('scopes', [])
+                logger.info(f"📋 Granted permissions: {scopes}")
+
+                # Check if required WhatsApp permissions are present
+                required_perms = ['whatsapp_business_management', 'whatsapp_business_messaging']
+                missing_perms = [p for p in required_perms if p not in scopes]
+                if missing_perms:
+                    logger.warning(f"⚠️ Missing required permissions: {missing_perms}")
+        except Exception as e:
+            logger.error(f"Failed to debug token: {str(e)}")
 
         # Get WhatsApp Business Accounts
         waba_url = f"https://graph.facebook.com/{fb_api_version}/me/businesses"
