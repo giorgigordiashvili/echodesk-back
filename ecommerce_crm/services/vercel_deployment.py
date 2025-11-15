@@ -169,10 +169,7 @@ class VercelDeploymentService:
                 "type": "github",
                 "repo": self.github_repo
             },
-            "environmentVariables": formatted_env_vars,
-            # Force build even if SHA was deployed in another project
-            "skipGitConnectDuringLink": False,
-            "commandForIgnoringBuildStep": "exit 1"  # Always build (exit 1 = build needed)
+            "environmentVariables": formatted_env_vars
         }
 
         logger.info(f"Creating Vercel project: {project_name}")
@@ -181,10 +178,15 @@ class VercelDeploymentService:
 
         if response.status_code == 200:
             project_data = response.json()
-            logger.info(f"Project created successfully: {project_data.get('id')}")
+            project_id = project_data.get("id")
+            logger.info(f"Project created successfully: {project_id}")
+
+            # Update project settings to force build regardless of SHA
+            self._configure_build_settings(project_id)
+
             return {
                 "success": True,
-                "project_id": project_data.get("id"),
+                "project_id": project_id,
                 "project_name": project_data.get("name"),
                 "account_id": project_data.get("accountId"),
                 "created_at": project_data.get("createdAt"),
@@ -198,6 +200,38 @@ class VercelDeploymentService:
                 "success": False,
                 "error": error_data.get("error", {}).get("message", "Unknown error"),
                 "code": error_data.get("error", {}).get("code", "UNKNOWN")
+            }
+
+    def _configure_build_settings(self, project_id: str) -> Dict[str, Any]:
+        """
+        Configure project build settings to force deployment
+
+        Args:
+            project_id: Vercel project ID
+
+        Returns:
+            Operation result
+        """
+        url = f"{self.BASE_URL}/v9/projects/{project_id}{self._get_team_param()}"
+
+        # Set ignored build step to always build (exit 1 = build needed)
+        payload = {
+            "commandForIgnoringBuildStep": "exit 1",
+            "autoExposeSystemEnvs": True
+        }
+
+        logger.info(f"Configuring build settings for project {project_id}")
+        response = requests.patch(url, headers=self.headers, json=payload)
+
+        if response.status_code == 200:
+            logger.info(f"Build settings configured successfully")
+            return {"success": True}
+        else:
+            error_data = response.json() if response.text else {}
+            logger.warning(f"Failed to configure build settings: {error_data}")
+            return {
+                "success": False,
+                "error": error_data.get("error", {}).get("message", "Unknown error")
             }
 
     def add_environment_variables(self, project_id: str, env_vars: List[Dict[str, Any]]) -> Dict[str, Any]:
