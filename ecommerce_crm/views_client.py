@@ -9,7 +9,8 @@ from rest_framework import viewsets, filters, status, serializers
 from rest_framework.decorators import action, api_view, permission_classes, authentication_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
-from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiParameter, OpenApiExample
+from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiParameter, OpenApiExample, extend_schema_view
+from drf_spectacular.openapi import AutoSchema
 from django_filters.rest_framework import DjangoFilterBackend
 from .authentication import EcommerceClientJWTAuthentication
 from .models import (
@@ -276,6 +277,71 @@ class ClientAttributeViewSet(viewsets.ReadOnlyModelViewSet):
         })
 
 
+class ClientProductAutoSchema(AutoSchema):
+    """Custom schema for ClientProductViewSet that dynamically generates attribute filter parameters"""
+
+    def get_override_parameters(self):
+        """Add dynamic attribute filter parameters to the schema"""
+        from django.db import connection
+
+        parameters = super().get_override_parameters()
+
+        # Only add dynamic parameters for the list action
+        if self.method.lower() != 'get' or self.path.endswith('{id}/'):
+            return parameters
+
+        # Try to get attribute definitions from the database
+        # In multi-tenant setup, we'll try to get from public schema or use a generic approach
+        try:
+            # Get all filterable attributes
+            attrs = AttributeDefinition.objects.filter(is_filterable=True).values('key', 'label', 'attribute_type')
+
+            for attr in attrs:
+                attr_key = attr['key']
+                attr_label = attr['label'] or attr_key.title()
+                attr_type = attr['attribute_type']
+
+                # Create description based on attribute type
+                if attr_type == 'select':
+                    description = f'Filter by {attr_label}. Supports multiple values separated by comma (OR logic). Example: ?attr_{attr_key}=value1,value2'
+                elif attr_type == 'multiselect':
+                    description = f'Filter by {attr_label}. Supports multiple values separated by comma. Example: ?attr_{attr_key}=value1,value2'
+                elif attr_type == 'boolean':
+                    description = f'Filter by {attr_label}. Use true or false. Example: ?attr_{attr_key}=true'
+                elif attr_type == 'number':
+                    description = f'Filter by {attr_label}. Supports ranges with hyphen (min-max) or exact values. Example: ?attr_{attr_key}=10-20'
+                elif attr_type == 'text':
+                    description = f'Filter by {attr_label}. Supports partial text matching. Example: ?attr_{attr_key}=search_term'
+                else:
+                    description = f'Filter by {attr_label}. Example: ?attr_{attr_key}=value'
+
+                parameters.append(
+                    OpenApiParameter(
+                        name=f'attr_{attr_key}',
+                        type=str,
+                        location=OpenApiParameter.QUERY,
+                        description=description,
+                        required=False,
+                    )
+                )
+        except Exception as e:
+            # If we can't query attributes (e.g., during initial migration or no tenant context),
+            # add a generic parameter to show the pattern
+            parameters.append(
+                OpenApiParameter(
+                    name='attr_{attribute_key}',
+                    type=str,
+                    location=OpenApiParameter.QUERY,
+                    description='Dynamic attribute filter. Replace {attribute_key} with any filterable attribute key from your system. '
+                               'Supports: select (comma-separated values), number (ranges with hyphen: 10-20), boolean (true/false), text (partial match). '
+                               'Example: ?attr_color=red,blue&attr_size=large&attr_price=10-20',
+                    required=False,
+                )
+            )
+
+        return parameters
+
+
 class ClientProductViewSet(viewsets.ReadOnlyModelViewSet):
     """
     Client-facing product browsing (read-only, public access)
@@ -289,6 +355,7 @@ class ClientProductViewSet(viewsets.ReadOnlyModelViewSet):
     search_fields = ['sku', 'slug']
     ordering_fields = ['price', 'created_at']
     ordering = ['-created_at']
+    schema = ClientProductAutoSchema()
 
     def get_queryset(self):
         """
@@ -378,8 +445,10 @@ class ClientProductViewSet(viewsets.ReadOnlyModelViewSet):
         description='''Browse active products with filtering options.
 
         **Dynamic Attribute Filters:**
-        You can filter by any product attribute using the pattern `attr_{attribute_key}`.
-        For example, if you have attributes with keys 'color', 'size', 'material', you can use:
+        Filter by any product attribute using the pattern `attr_{attribute_key}`.
+        The available attribute filters are dynamically generated based on your attribute definitions.
+
+        Examples:
         - `?attr_color=red` - Single value
         - `?attr_color=red,blue,green` - Multiple values (OR logic)
         - `?attr_size=large&attr_color=red` - Multiple attributes (AND logic)
@@ -424,45 +493,7 @@ class ClientProductViewSet(viewsets.ReadOnlyModelViewSet):
                     OpenApiExample('Georgian', value='ka'),
                 ]
             ),
-            OpenApiParameter(
-                name='attr_color',
-                type=str,
-                location=OpenApiParameter.QUERY,
-                description='Filter by color attribute (example). Supports multiple values: red,blue,green',
-                required=False,
-                examples=[
-                    OpenApiExample('Single', value='red'),
-                    OpenApiExample('Multiple', value='red,blue,green'),
-                ]
-            ),
-            OpenApiParameter(
-                name='attr_size',
-                type=str,
-                location=OpenApiParameter.QUERY,
-                description='Filter by size attribute (example). Supports multiple values: small,medium,large',
-                required=False,
-                examples=[
-                    OpenApiExample('Single', value='large'),
-                    OpenApiExample('Multiple', value='small,medium'),
-                ]
-            ),
-            OpenApiParameter(
-                name='attr_material',
-                type=str,
-                location=OpenApiParameter.QUERY,
-                description='Filter by material attribute (example). Works with any text attribute.',
-                required=False,
-                examples=[
-                    OpenApiExample('Example', value='cotton'),
-                ]
-            ),
-            OpenApiParameter(
-                name='attr_{any_attribute}',
-                type=str,
-                location=OpenApiParameter.QUERY,
-                description='Dynamic attribute filter. Replace {any_attribute} with any attribute key defined in your system (e.g., attr_brand, attr_weight, etc.)',
-                required=False,
-            ),
+            # Dynamic attribute parameters are added via ClientProductAutoSchema
         ]
     )
     def list(self, request, *args, **kwargs):
