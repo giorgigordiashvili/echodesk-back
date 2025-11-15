@@ -515,37 +515,37 @@ def deploy_tenant_frontend(tenant) -> Dict[str, Any]:
         # Set the expected URL immediately
         result["url"] = f"https://{project_name}.vercel.app"
 
-        # Give Vercel a moment, then check if deployment started
+        # Give Vercel a moment to finish project setup
         time.sleep(2)
 
-        # Check if deployment already started
-        project_info = service.get_project_domains(project_id)
-        has_deployment = False
+        # ALWAYS trigger a manual deployment after project creation
+        # This is necessary because:
+        # 1. Project settings (commandForIgnoringBuildStep) are now configured
+        # 2. The initial auto-deployment may have been skipped due to SHA check
+        # 3. Manual trigger uses forceNew=1 which bypasses SHA check
+        logger.info(f"Triggering deployment for new project...")
+        deployment_result = service.trigger_deployment(project_name)
 
-        if project_info.get("success"):
-            latest_deployments = project_info.get("latest_deployments", [])
-            if latest_deployments:
-                latest = latest_deployments[0]
-                state = latest.get("readyState", "")
-                logger.info(f"Found deployment with state: {state}")
-                has_deployment = True
+        if deployment_result.get("success"):
+            logger.info(f"Deployment triggered successfully: {deployment_result.get('deployment_id')}")
+            result["deployment_triggered"] = True
+            result["deployment_id"] = deployment_result.get("deployment_id")
+        else:
+            logger.warning(f"Failed to trigger deployment: {deployment_result.get('error')}")
+            result["deployment_error"] = deployment_result.get('error')
 
-                if state == "READY":
-                    actual_url = project_info.get("production_url")
-                    if actual_url:
-                        result["url"] = actual_url
-                        logger.info(f"Deployment already ready: {actual_url}")
-
-        # If no deployment found, trigger one explicitly
-        if not has_deployment:
-            logger.info(f"No deployment found after project creation, triggering manually...")
-            deployment_result = service.trigger_deployment(project_name)
-            if deployment_result.get("success"):
-                logger.info(f"Manual deployment triggered: {deployment_result.get('deployment_id')}")
-                result["deployment_triggered"] = True
-            else:
-                logger.error(f"Failed to trigger deployment: {deployment_result.get('error')}")
-                result["deployment_error"] = deployment_result.get('error')
+            # Check if there's an existing deployment (unlikely but possible)
+            project_info = service.get_project_domains(project_id)
+            if project_info.get("success"):
+                latest_deployments = project_info.get("latest_deployments", [])
+                if latest_deployments:
+                    latest = latest_deployments[0]
+                    state = latest.get("readyState", "")
+                    logger.info(f"Found existing deployment with state: {state}")
+                    if state == "READY":
+                        actual_url = project_info.get("production_url")
+                        if actual_url:
+                            result["url"] = actual_url
 
         logger.info(f"Tenant {tenant.schema_name} frontend project created. Expected URL: {result['url']}")
         logger.info(f"Note: Deployment builds in background on Vercel (1-2 min to be live)")
