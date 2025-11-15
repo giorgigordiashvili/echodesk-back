@@ -502,3 +502,8 @@ SERVER_EMAIL = SENDGRID_FROM_EMAIL
 VERCEL_TOKEN = config('VERCEL_TOKEN', default='')
 VERCEL_TEAM_ID = config('VERCEL_TEAM_ID', default='')
 VERCEL_GITHUB_REPO = config('VERCEL_GITHUB_REPO', default='echodeskge/echodesk-frontend-template-one')
+
+# Netlify Deployment Configuration
+NETLIFY_TOKEN = config('NETLIFY_TOKEN', default='')
+NETLIFY_TEAM_SLUG = config('NETLIFY_TEAM_SLUG', default='')
+NETLIFY_GITHUB_REPO = config('NETLIFY_GITHUB_REPO', default='')  # Uses VERCEL_GITHUB_REPO if not set

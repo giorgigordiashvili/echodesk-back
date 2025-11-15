@@ -260,6 +260,10 @@ class VercelDeploymentService:
 
         # Try creating a deployment using the v13 API with git reference
         deploy_url = f"{self.BASE_URL}/v13/deployments{self._get_team_param()}"
+        if "?" in deploy_url:
+            deploy_url += "&forceNew=1"
+        else:
+            deploy_url += "?forceNew=1"
 
         deploy_payload = {
             "name": project_name,
