@@ -239,7 +239,7 @@ class VercelDeploymentService:
 
     def trigger_deployment(self, project_name: str) -> Dict[str, Any]:
         """
-        Trigger a new deployment for a project
+        Trigger a new deployment for a project using deploy hook
 
         Args:
             project_name: Project name or ID
@@ -247,35 +247,83 @@ class VercelDeploymentService:
         Returns:
             Deployment information
         """
-        url = f"{self.BASE_URL}/v13/deployments{self._get_team_param()}"
+        # First, create a deploy hook for the project if it doesn't exist
+        hook_url = f"{self.BASE_URL}/v9/projects/{project_name}/deploy-hooks{self._get_team_param()}"
 
-        payload = {
-            "name": project_name,
-            "gitSource": {
-                "type": "github",
-                "repo": self.github_repo,
-                "ref": "main"  # Deploy from main branch
-            }
+        hook_payload = {
+            "name": "api-deployment",
+            "ref": "main"
         }
 
-        response = requests.post(url, headers=self.headers, json=payload)
+        hook_response = requests.post(hook_url, headers=self.headers, json=hook_payload)
 
-        if response.status_code in [200, 201]:
-            deployment_data = response.json()
-            logger.info(f"Deployment triggered: {deployment_data.get('id')}")
-            return {
-                "success": True,
-                "deployment_id": deployment_data.get("id"),
-                "url": deployment_data.get("url"),
-                "ready_state": deployment_data.get("readyState"),
-                "created_at": deployment_data.get("createdAt")
-            }
+        if hook_response.status_code in [200, 201]:
+            hook_data = hook_response.json()
+            deploy_hook_url = hook_data.get("url")
+
+            # Trigger deployment using the hook
+            if deploy_hook_url:
+                trigger_response = requests.post(deploy_hook_url)
+
+                if trigger_response.status_code in [200, 201]:
+                    trigger_data = trigger_response.json()
+                    logger.info(f"Deployment triggered via hook: {trigger_data.get('job', {}).get('id')}")
+                    return {
+                        "success": True,
+                        "deployment_id": trigger_data.get("job", {}).get("id"),
+                        "url": None,  # URL will be available after deployment
+                        "ready_state": "QUEUED",
+                        "created_at": trigger_data.get("job", {}).get("createdAt")
+                    }
+                else:
+                    logger.error(f"Failed to trigger deployment: {trigger_response.text}")
+                    return {
+                        "success": False,
+                        "error": "Failed to trigger deployment via hook"
+                    }
+            else:
+                return {
+                    "success": False,
+                    "error": "Deploy hook URL not returned"
+                }
         else:
-            error_data = response.json()
-            logger.error(f"Failed to trigger deployment: {error_data}")
+            # If hook creation fails, try alternative method
+            error_data = hook_response.json() if hook_response.text else {}
+            logger.warning(f"Failed to create deploy hook: {error_data}")
+
+            # Alternative: Use the redeploy endpoint
+            redeploy_url = f"{self.BASE_URL}/v13/deployments{self._get_team_param()}"
+
+            # Get the latest deployment to redeploy
+            project_info = self.get_project(project_name)
+            if project_info.get("success") and project_info.get("latest_deployments"):
+                latest = project_info["latest_deployments"][0]
+                deployment_id = latest.get("id")
+
+                if deployment_id:
+                    # Redeploy the latest deployment
+                    redeploy_payload = {
+                        "deploymentId": deployment_id,
+                        "name": project_name,
+                        "target": "production"
+                    }
+
+                    redeploy_response = requests.post(redeploy_url, headers=self.headers, json=redeploy_payload)
+
+                    if redeploy_response.status_code in [200, 201]:
+                        deployment_data = redeploy_response.json()
+                        logger.info(f"Deployment triggered via redeploy: {deployment_data.get('id')}")
+                        return {
+                            "success": True,
+                            "deployment_id": deployment_data.get("id"),
+                            "url": deployment_data.get("url"),
+                            "ready_state": deployment_data.get("readyState"),
+                            "created_at": deployment_data.get("createdAt")
+                        }
+
             return {
                 "success": False,
-                "error": error_data.get("error", {}).get("message", "Unknown error")
+                "error": error_data.get("error", {}).get("message", "Failed to create deploy hook")
             }
 
     def get_deployment_status(self, deployment_id: str) -> Dict[str, Any]:
