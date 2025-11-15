@@ -297,26 +297,42 @@ class VercelDeploymentService:
         }
 
         hook_response = requests.post(hook_url, headers=self.headers, json=hook_payload)
+        logger.info(f"Deploy hook response status: {hook_response.status_code}")
 
         if hook_response.status_code in [200, 201]:
             hook_data = hook_response.json()
-            deploy_hook_url = hook_data.get("url")
+            logger.info(f"Deploy hook response data: {hook_data}")
+
+            # The URL might be in different fields depending on API version
+            deploy_hook_url = hook_data.get("url") or hook_data.get("deploymentUrl")
+
+            # If not found, construct it from the hook ID
+            if not deploy_hook_url and hook_data.get("id"):
+                hook_id = hook_data.get("id")
+                # Get the project ID from our earlier lookup
+                deploy_hook_url = f"https://api.vercel.com/v1/integrations/deploy/{project_info.get('id')}/{hook_id}"
+                logger.info(f"Constructed deploy hook URL: {deploy_hook_url}")
 
             if deploy_hook_url:
+                logger.info(f"Triggering deployment via hook URL: {deploy_hook_url}")
                 trigger_response = requests.post(deploy_hook_url)
+                logger.info(f"Hook trigger response: {trigger_response.status_code} - {trigger_response.text[:500]}")
 
                 if trigger_response.status_code in [200, 201]:
                     trigger_data = trigger_response.json()
-                    logger.info(f"Deployment triggered via hook: {trigger_data.get('job', {}).get('id')}")
+                    job_info = trigger_data.get("job", {})
+                    logger.info(f"Deployment triggered via hook: {job_info.get('id')}")
                     return {
                         "success": True,
-                        "deployment_id": trigger_data.get("job", {}).get("id"),
+                        "deployment_id": job_info.get("id"),
                         "url": None,
                         "ready_state": "QUEUED",
-                        "created_at": trigger_data.get("job", {}).get("createdAt")
+                        "created_at": job_info.get("createdAt")
                     }
                 else:
                     logger.error(f"Failed to trigger via hook: {trigger_response.text}")
+            else:
+                logger.error(f"No deploy hook URL found in response: {hook_data}")
         else:
             hook_error = hook_response.json() if hook_response.text else {}
             logger.warning(f"Failed to create deploy hook: {hook_error}")
