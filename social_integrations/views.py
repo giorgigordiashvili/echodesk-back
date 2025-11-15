@@ -2296,8 +2296,15 @@ def whatsapp_embedded_signup_callback(request):
         }
 
         logger.info(f"Exchanging code for access token...")
+        logger.info(f"Token URL: {token_url}")
+        logger.info(f"Token params: {token_params}")
+
+        # Make the request and log the exact URL being called
         token_response = requests.get(token_url, params=token_params)
+        logger.info(f"Actual request URL: {token_response.url}")
+
         token_data = token_response.json()
+        logger.info(f"Token response: {token_data}")
 
         if 'error' in token_data:
             error_msg = token_data.get('error', {}).get('message', 'Unknown error')
