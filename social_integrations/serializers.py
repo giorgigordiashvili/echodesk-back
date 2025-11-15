@@ -2,7 +2,7 @@ from rest_framework import serializers
 from .models import (
     FacebookPageConnection, FacebookMessage,
     InstagramAccountConnection, InstagramMessage,
-    WhatsAppBusinessAccount, WhatsAppMessage,
+    WhatsAppBusinessAccount, WhatsAppMessage, WhatsAppMessageTemplate,
     SocialIntegrationSettings
 )
 
@@ -76,6 +76,7 @@ class WhatsAppMessageSerializer(serializers.ModelSerializer):
     business_name = serializers.CharField(source='business_account.business_name', read_only=True)
     business_phone = serializers.CharField(source='business_account.display_phone_number', read_only=True)
     waba_id = serializers.CharField(source='business_account.waba_id', read_only=True)
+    template_name = serializers.CharField(source='template.name', read_only=True, allow_null=True)
 
     class Meta:
         model = WhatsAppMessage
@@ -83,7 +84,8 @@ class WhatsAppMessageSerializer(serializers.ModelSerializer):
             'id', 'message_id', 'from_number', 'to_number', 'contact_name', 'profile_pic_url',
             'message_text', 'message_type', 'media_url', 'media_mime_type', 'timestamp',
             'is_from_business', 'status', 'is_delivered', 'delivered_at', 'is_read', 'read_at',
-            'error_message', 'business_name', 'business_phone', 'waba_id', 'created_at'
+            'error_message', 'business_name', 'business_phone', 'waba_id', 'template', 'template_name',
+            'template_parameters', 'created_at'
         ]
         read_only_fields = ['id', 'status', 'is_delivered', 'delivered_at', 'is_read', 'read_at', 'created_at']
 
@@ -92,6 +94,85 @@ class WhatsAppSendMessageSerializer(serializers.Serializer):
     to_number = serializers.CharField(max_length=20, help_text="Recipient's phone number (E.164 format, e.g., +1234567890)")
     message = serializers.CharField(help_text="Message text to send")
     waba_id = serializers.CharField(max_length=100, help_text="WhatsApp Business Account ID to send from")
+
+    def validate_to_number(self, value):
+        """Ensure phone number starts with +"""
+        if not value.startswith('+'):
+            raise serializers.ValidationError("Phone number must be in E.164 format (start with +)")
+        return value
+
+
+class WhatsAppMessageTemplateSerializer(serializers.ModelSerializer):
+    """Serializer for WhatsApp message templates"""
+    business_name = serializers.CharField(source='business_account.business_name', read_only=True)
+    created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True, allow_null=True)
+
+    class Meta:
+        model = WhatsAppMessageTemplate
+        fields = [
+            'id', 'business_account', 'template_id', 'name', 'language', 'status',
+            'category', 'components', 'created_by', 'created_by_name', 'business_name',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'template_id', 'created_at', 'updated_at', 'business_name', 'created_by_name']
+
+
+class WhatsAppTemplateCreateSerializer(serializers.Serializer):
+    """Serializer for creating WhatsApp message templates"""
+    waba_id = serializers.CharField(max_length=100, help_text="WhatsApp Business Account ID")
+    name = serializers.CharField(
+        max_length=512,
+        help_text="Template name (lowercase, no spaces, use underscores)"
+    )
+    language = serializers.CharField(max_length=10, default='en', help_text="Language code (e.g., en, ka, ru)")
+    category = serializers.ChoiceField(
+        choices=['MARKETING', 'UTILITY', 'AUTHENTICATION'],
+        default='UTILITY',
+        help_text="Template category"
+    )
+    components = serializers.ListField(
+        child=serializers.DictField(),
+        help_text="Array of component objects (header, body, footer, buttons)"
+    )
+
+    def validate_name(self, value):
+        """Validate template name format"""
+        import re
+        if not re.match(r'^[a-z0-9_]+$', value):
+            raise serializers.ValidationError(
+                "Template name must be lowercase alphanumeric with underscores only (no spaces)"
+            )
+        if len(value) < 1 or len(value) > 512:
+            raise serializers.ValidationError("Template name must be 1-512 characters")
+        return value
+
+    def validate_components(self, value):
+        """Validate components structure"""
+        if not value:
+            raise serializers.ValidationError("At least one component is required")
+
+        # Check that at least one component is BODY
+        has_body = any(comp.get('type') == 'BODY' for comp in value)
+        if not has_body:
+            raise serializers.ValidationError("Template must have at least one BODY component")
+
+        return value
+
+
+class WhatsAppTemplateSendSerializer(serializers.Serializer):
+    """Serializer for sending template-based WhatsApp messages"""
+    waba_id = serializers.CharField(max_length=100, help_text="WhatsApp Business Account ID")
+    template_id = serializers.IntegerField(help_text="Template ID from database")
+    to_number = serializers.CharField(
+        max_length=20,
+        help_text="Recipient's phone number (E.164 format, e.g., +1234567890)"
+    )
+    parameters = serializers.DictField(
+        child=serializers.CharField(),
+        required=False,
+        allow_null=True,
+        help_text="Template parameters as key-value pairs (e.g., {'name': 'John', 'order_id': '12345'})"
+    )
 
     def validate_to_number(self, value):
         """Ensure phone number starts with +"""

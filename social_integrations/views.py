@@ -22,13 +22,14 @@ from drf_spectacular.utils import extend_schema
 from .models import (
     FacebookPageConnection, FacebookMessage,
     InstagramAccountConnection, InstagramMessage,
-    WhatsAppBusinessAccount, WhatsAppMessage,
+    WhatsAppBusinessAccount, WhatsAppMessage, WhatsAppMessageTemplate,
     SocialIntegrationSettings
 )
 from .serializers import (
     FacebookPageConnectionSerializer, FacebookMessageSerializer, FacebookSendMessageSerializer,
     InstagramAccountConnectionSerializer, InstagramMessageSerializer, InstagramSendMessageSerializer,
     WhatsAppBusinessAccountSerializer, WhatsAppMessageSerializer, WhatsAppSendMessageSerializer,
+    WhatsAppMessageTemplateSerializer, WhatsAppTemplateCreateSerializer, WhatsAppTemplateSendSerializer,
     SocialIntegrationSettingsSerializer
 )
 from .permissions import (
@@ -2798,3 +2799,358 @@ def whatsapp_webhook(request):
                 'status': 'error',
                 'message': str(e)
             }, status=500)
+
+
+# ==================== WHATSAPP TEMPLATE MANAGEMENT ====================
+
+@extend_schema(
+    summary="List WhatsApp message templates",
+    description="Fetch all message templates for a WhatsApp Business Account from the database and optionally sync from Meta",
+    responses={200: WhatsAppMessageTemplateSerializer(many=True)}
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, CanManageSocialConnections])
+def whatsapp_list_templates(request, waba_id):
+    """List all WhatsApp message templates for a given WABA"""
+    tenant_schema = request.tenant.schema_name
+
+    with schema_context(tenant_schema):
+        try:
+            # Get WABA
+            waba = WhatsAppBusinessAccount.objects.get(waba_id=waba_id)
+
+            # Get templates from database
+            templates = WhatsAppMessageTemplate.objects.filter(business_account=waba)
+
+            serializer = WhatsAppMessageTemplateSerializer(templates, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+
+        except WhatsAppBusinessAccount.DoesNotExist:
+            return Response({
+                'error': 'WhatsApp Business Account not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            logger.error(f"Error listing WhatsApp templates: {e}")
+            return Response({
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@extend_schema(
+    summary="Sync WhatsApp templates from Meta",
+    description="Fetch all templates from Meta's API and sync them to the database",
+    responses={200: WhatsAppMessageTemplateSerializer(many=True)}
+)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, CanManageSocialConnections])
+def whatsapp_sync_templates(request, waba_id):
+    """Sync templates from Meta API to database"""
+    tenant_schema = request.tenant.schema_name
+
+    with schema_context(tenant_schema):
+        try:
+            # Get WABA
+            waba = WhatsAppBusinessAccount.objects.get(waba_id=waba_id)
+
+            # Fetch templates from Meta
+            fb_api_version = settings.FACEBOOK_APP_VERSION
+            templates_url = f"https://graph.facebook.com/{fb_api_version}/{waba_id}/message_templates"
+            params = {
+                'access_token': waba.access_token,
+                'fields': 'id,name,language,status,category,components',
+                'limit': 100
+            }
+
+            response = requests.get(templates_url, params=params)
+
+            if response.status_code != 200:
+                return Response({
+                    'error': 'Failed to fetch templates from Meta',
+                    'details': response.json()
+                }, status=response.status_code)
+
+            meta_templates = response.json().get('data', [])
+
+            # Sync to database
+            synced_count = 0
+            for meta_template in meta_templates:
+                template_obj, created = WhatsAppMessageTemplate.objects.update_or_create(
+                    business_account=waba,
+                    name=meta_template['name'],
+                    language=meta_template['language'],
+                    defaults={
+                        'template_id': meta_template['id'],
+                        'status': meta_template['status'],
+                        'category': meta_template.get('category', 'UTILITY'),
+                        'components': meta_template.get('components', []),
+                        'created_by': request.user
+                    }
+                )
+                synced_count += 1
+
+            # Get all templates after sync
+            templates = WhatsAppMessageTemplate.objects.filter(business_account=waba)
+            serializer = WhatsAppMessageTemplateSerializer(templates, many=True)
+
+            return Response({
+                'synced': synced_count,
+                'templates': serializer.data
+            }, status=status.HTTP_200_OK)
+
+        except WhatsAppBusinessAccount.DoesNotExist:
+            return Response({
+                'error': 'WhatsApp Business Account not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            logger.error(f"Error syncing WhatsApp templates: {e}")
+            return Response({
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@extend_schema(
+    summary="Create WhatsApp message template",
+    description="Create a new message template via Meta's API",
+    request=WhatsAppTemplateCreateSerializer,
+    responses={201: WhatsAppMessageTemplateSerializer}
+)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, CanManageSocialConnections])
+def whatsapp_create_template(request):
+    """Create a new WhatsApp message template"""
+    tenant_schema = request.tenant.schema_name
+
+    with schema_context(tenant_schema):
+        serializer = WhatsAppTemplateCreateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            waba_id = serializer.validated_data['waba_id']
+            waba = WhatsAppBusinessAccount.objects.get(waba_id=waba_id)
+
+            # Create template via Meta API
+            fb_api_version = settings.FACEBOOK_APP_VERSION
+            create_url = f"https://graph.facebook.com/{fb_api_version}/{waba_id}/message_templates"
+
+            payload = {
+                'name': serializer.validated_data['name'],
+                'language': serializer.validated_data['language'],
+                'category': serializer.validated_data['category'],
+                'components': serializer.validated_data['components']
+            }
+
+            headers = {
+                'Authorization': f'Bearer {waba.access_token}',
+                'Content-Type': 'application/json'
+            }
+
+            response = requests.post(create_url, json=payload, headers=headers)
+
+            if response.status_code not in [200, 201]:
+                return Response({
+                    'error': 'Failed to create template in Meta',
+                    'details': response.json()
+                }, status=response.status_code)
+
+            meta_response = response.json()
+
+            # Save to database
+            template = WhatsAppMessageTemplate.objects.create(
+                business_account=waba,
+                template_id=meta_response.get('id', ''),
+                name=serializer.validated_data['name'],
+                language=serializer.validated_data['language'],
+                status='PENDING',  # New templates start as pending
+                category=serializer.validated_data['category'],
+                components=serializer.validated_data['components'],
+                created_by=request.user
+            )
+
+            response_serializer = WhatsAppMessageTemplateSerializer(template)
+            return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+        except WhatsAppBusinessAccount.DoesNotExist:
+            return Response({
+                'error': 'WhatsApp Business Account not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            logger.error(f"Error creating WhatsApp template: {e}")
+            return Response({
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@extend_schema(
+    summary="Delete WhatsApp message template",
+    description="Delete a message template from both Meta and database",
+    responses={200: {'description': 'Template deleted successfully'}}
+)
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated, CanManageSocialConnections])
+def whatsapp_delete_template(request, template_id):
+    """Delete a WhatsApp message template"""
+    tenant_schema = request.tenant.schema_name
+
+    with schema_context(tenant_schema):
+        try:
+            template = WhatsAppMessageTemplate.objects.get(id=template_id)
+            waba = template.business_account
+
+            # Delete from Meta if template_id exists
+            if template.template_id:
+                fb_api_version = settings.FACEBOOK_APP_VERSION
+                delete_url = f"https://graph.facebook.com/{fb_api_version}/{waba.waba_id}/message_templates"
+                params = {
+                    'access_token': waba.access_token,
+                    'name': template.name
+                }
+
+                response = requests.delete(delete_url, params=params)
+
+                if response.status_code not in [200, 204]:
+                    logger.warning(f"Failed to delete template from Meta: {response.json()}")
+                    # Continue with database deletion even if Meta deletion fails
+
+            # Delete from database
+            template.delete()
+
+            return Response({
+                'message': 'Template deleted successfully'
+            }, status=status.HTTP_200_OK)
+
+        except WhatsAppMessageTemplate.DoesNotExist:
+            return Response({
+                'error': 'Template not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            logger.error(f"Error deleting WhatsApp template: {e}")
+            return Response({
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@extend_schema(
+    summary="Send WhatsApp template message",
+    description="Send a message using a WhatsApp message template with parameters",
+    request=WhatsAppTemplateSendSerializer,
+    responses={200: WhatsAppMessageSerializer}
+)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, CanSendSocialMessages])
+def whatsapp_send_template_message(request):
+    """Send a WhatsApp message using a template"""
+    tenant_schema = request.tenant.schema_name
+
+    with schema_context(tenant_schema):
+        serializer = WhatsAppTemplateSendSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            waba_id = serializer.validated_data['waba_id']
+            template_id = serializer.validated_data['template_id']
+            to_number = serializer.validated_data['to_number']
+            parameters = serializer.validated_data.get('parameters', {})
+
+            # Get WABA and template
+            waba = WhatsAppBusinessAccount.objects.get(waba_id=waba_id)
+            template = WhatsAppMessageTemplate.objects.get(id=template_id)
+
+            # Check template status
+            if template.status != 'APPROVED':
+                return Response({
+                    'error': f'Template status is {template.status}. Only APPROVED templates can be sent.'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Build template components with parameters
+            components = []
+            for component in template.components:
+                if component.get('type') == 'BODY' and parameters:
+                    # Extract parameter placeholders from body text
+                    body_text = component.get('text', '')
+                    import re
+                    param_placeholders = re.findall(r'\{\{(\d+)\}\}', body_text)
+
+                    # Build parameters array
+                    body_parameters = []
+                    for i, placeholder in enumerate(param_placeholders, 1):
+                        param_key = f'param{i}' if f'param{i}' in parameters else list(parameters.keys())[i-1] if len(parameters) >= i else None
+                        if param_key and param_key in parameters:
+                            body_parameters.append({
+                                'type': 'text',
+                                'text': str(parameters[param_key])
+                            })
+
+                    if body_parameters:
+                        components.append({
+                            'type': 'body',
+                            'parameters': body_parameters
+                        })
+
+            # Send via WhatsApp Cloud API
+            fb_api_version = settings.FACEBOOK_APP_VERSION
+            send_url = f"https://graph.facebook.com/{fb_api_version}/{waba.phone_number_id}/messages"
+
+            message_payload = {
+                'messaging_product': 'whatsapp',
+                'to': to_number.lstrip('+'),
+                'type': 'template',
+                'template': {
+                    'name': template.name,
+                    'language': {
+                        'code': template.language
+                    }
+                }
+            }
+
+            if components:
+                message_payload['template']['components'] = components
+
+            headers = {
+                'Authorization': f'Bearer {waba.access_token}',
+                'Content-Type': 'application/json'
+            }
+
+            response = requests.post(send_url, json=message_payload, headers=headers)
+
+            if response.status_code != 200:
+                return Response({
+                    'error': 'Failed to send template message',
+                    'details': response.json()
+                }, status=response.status_code)
+
+            meta_response = response.json()
+            message_id = meta_response.get('messages', [{}])[0].get('id', '')
+
+            # Save to database
+            message = WhatsAppMessage.objects.create(
+                business_account=waba,
+                message_id=message_id,
+                from_number=waba.phone_number,
+                to_number=to_number,
+                message_text=f"Template: {template.name}",
+                message_type='template',
+                template=template,
+                template_parameters=parameters,
+                timestamp=timezone.now(),
+                is_from_business=True,
+                status='sent'
+            )
+
+            response_serializer = WhatsAppMessageSerializer(message)
+            return Response(response_serializer.data, status=status.HTTP_200_OK)
+
+        except WhatsAppBusinessAccount.DoesNotExist:
+            return Response({
+                'error': 'WhatsApp Business Account not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except WhatsAppMessageTemplate.DoesNotExist:
+            return Response({
+                'error': 'Template not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            logger.error(f"Error sending WhatsApp template message: {e}")
+            return Response({
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

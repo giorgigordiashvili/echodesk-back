@@ -106,6 +106,52 @@ class WhatsAppBusinessAccount(models.Model):
         return f"{self.business_name} - {self.display_phone_number or self.phone_number}"
 
 
+class WhatsAppMessageTemplate(models.Model):
+    """Stores WhatsApp message templates for a business account"""
+    STATUS_CHOICES = [
+        ('PENDING', 'Pending'),
+        ('APPROVED', 'Approved'),
+        ('REJECTED', 'Rejected'),
+    ]
+
+    CATEGORY_CHOICES = [
+        ('MARKETING', 'Marketing'),
+        ('UTILITY', 'Utility'),
+        ('AUTHENTICATION', 'Authentication'),
+    ]
+
+    business_account = models.ForeignKey(
+        WhatsAppBusinessAccount,
+        on_delete=models.CASCADE,
+        related_name='templates'
+    )
+    template_id = models.CharField(max_length=100, blank=True)  # Meta's template ID (assigned after creation)
+    name = models.CharField(max_length=512)  # Template name (lowercase, no spaces, underscores allowed)
+    language = models.CharField(max_length=10, default='en')  # Language code (en, ka, ru, etc.)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default='UTILITY')
+    components = models.JSONField(default=list)  # Array of component objects (header, body, footer, buttons)
+    created_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='created_whatsapp_templates'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        unique_together = [['business_account', 'name', 'language']]
+        indexes = [
+            models.Index(fields=['business_account', 'status']),
+            models.Index(fields=['name']),
+        ]
+
+    def __str__(self):
+        return f"{self.name} ({self.language}) - {self.status}"
+
+
 class WhatsAppMessage(models.Model):
     """Stores WhatsApp messages"""
     MESSAGE_TYPE_CHOICES = [
@@ -140,6 +186,15 @@ class WhatsAppMessage(models.Model):
     message_type = models.CharField(max_length=20, choices=MESSAGE_TYPE_CHOICES, default='text')
     media_url = models.URLField(max_length=500, blank=True, null=True)  # URL for media messages
     media_mime_type = models.CharField(max_length=100, blank=True)  # MIME type for media
+    # Template-related fields
+    template = models.ForeignKey(
+        WhatsAppMessageTemplate,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='messages'
+    )  # Template used for this message (if template-based)
+    template_parameters = models.JSONField(null=True, blank=True)  # Parameters used to fill template variables
     timestamp = models.DateTimeField()  # Message timestamp from WhatsApp
     is_from_business = models.BooleanField(default=False)  # True if sent by business
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='sent')

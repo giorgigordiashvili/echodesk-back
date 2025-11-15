@@ -43,6 +43,13 @@ urlpatterns = [
     path('whatsapp/send-message/', views.whatsapp_send_message, name='whatsapp_send_message'),
     path('whatsapp/webhook/', views.whatsapp_webhook, name='whatsapp_webhook'),
 
+    # WhatsApp Template Management
+    path('whatsapp/<str:waba_id>/templates/', views.whatsapp_list_templates, name='whatsapp_list_templates'),
+    path('whatsapp/<str:waba_id>/templates/sync/', views.whatsapp_sync_templates, name='whatsapp_sync_templates'),
+    path('whatsapp/templates/create/', views.whatsapp_create_template, name='whatsapp_create_template'),
+    path('whatsapp/templates/<int:template_id>/delete/', views.whatsapp_delete_template, name='whatsapp_delete_template'),
+    path('whatsapp/templates/send/', views.whatsapp_send_template_message, name='whatsapp_send_template_message'),
+
     # Webhook debugging endpoints
     path('webhook-status/', views.webhook_status, name='webhook_status'),
     path('webhook-logs/', views.webhook_debug_logs, name='webhook_debug_logs'),
