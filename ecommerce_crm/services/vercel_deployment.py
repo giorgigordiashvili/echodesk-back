@@ -239,7 +239,7 @@ class VercelDeploymentService:
 
     def trigger_deployment(self, project_name: str) -> Dict[str, Any]:
         """
-        Trigger a new deployment for a project using deploy hook
+        Trigger a new deployment for a project
 
         Args:
             project_name: Project name or ID
@@ -247,7 +247,48 @@ class VercelDeploymentService:
         Returns:
             Deployment information
         """
-        # First, create a deploy hook for the project if it doesn't exist
+        # Method 1: Create deployment directly from git
+        logger.info(f"Triggering deployment for project: {project_name}")
+
+        # First get the project to ensure it has git configured
+        project_info = self.get_project(project_name)
+        if not project_info.get("success"):
+            return {
+                "success": False,
+                "error": f"Project not found: {project_name}"
+            }
+
+        # Try creating a deployment using the v13 API with git reference
+        deploy_url = f"{self.BASE_URL}/v13/deployments{self._get_team_param()}"
+
+        deploy_payload = {
+            "name": project_name,
+            "target": "production",
+            "gitSource": {
+                "type": "github",
+                "repo": self.github_repo,
+                "ref": "main"
+            }
+        }
+
+        logger.info(f"Creating deployment with payload: {deploy_payload}")
+        deploy_response = requests.post(deploy_url, headers=self.headers, json=deploy_payload)
+
+        if deploy_response.status_code in [200, 201]:
+            deployment_data = deploy_response.json()
+            logger.info(f"Deployment created: {deployment_data.get('id')}")
+            return {
+                "success": True,
+                "deployment_id": deployment_data.get("id"),
+                "url": deployment_data.get("url"),
+                "ready_state": deployment_data.get("readyState"),
+                "created_at": deployment_data.get("createdAt")
+            }
+
+        error_data = deploy_response.json() if deploy_response.text else {}
+        logger.warning(f"Direct deployment failed: {error_data}")
+
+        # Method 2: Try deploy hook approach
         hook_url = f"{self.BASE_URL}/v9/projects/{project_name}/deploy-hooks{self._get_team_param()}"
 
         hook_payload = {
@@ -261,7 +302,6 @@ class VercelDeploymentService:
             hook_data = hook_response.json()
             deploy_hook_url = hook_data.get("url")
 
-            # Trigger deployment using the hook
             if deploy_hook_url:
                 trigger_response = requests.post(deploy_hook_url)
 
@@ -271,60 +311,20 @@ class VercelDeploymentService:
                     return {
                         "success": True,
                         "deployment_id": trigger_data.get("job", {}).get("id"),
-                        "url": None,  # URL will be available after deployment
+                        "url": None,
                         "ready_state": "QUEUED",
                         "created_at": trigger_data.get("job", {}).get("createdAt")
                     }
                 else:
-                    logger.error(f"Failed to trigger deployment: {trigger_response.text}")
-                    return {
-                        "success": False,
-                        "error": "Failed to trigger deployment via hook"
-                    }
-            else:
-                return {
-                    "success": False,
-                    "error": "Deploy hook URL not returned"
-                }
+                    logger.error(f"Failed to trigger via hook: {trigger_response.text}")
         else:
-            # If hook creation fails, try alternative method
-            error_data = hook_response.json() if hook_response.text else {}
-            logger.warning(f"Failed to create deploy hook: {error_data}")
+            hook_error = hook_response.json() if hook_response.text else {}
+            logger.warning(f"Failed to create deploy hook: {hook_error}")
 
-            # Alternative: Use the redeploy endpoint
-            redeploy_url = f"{self.BASE_URL}/v13/deployments{self._get_team_param()}"
-
-            # Get the latest deployment to redeploy
-            project_info = self.get_project(project_name)
-            if project_info.get("success") and project_info.get("latest_deployments"):
-                latest = project_info["latest_deployments"][0]
-                deployment_id = latest.get("id")
-
-                if deployment_id:
-                    # Redeploy the latest deployment
-                    redeploy_payload = {
-                        "deploymentId": deployment_id,
-                        "name": project_name,
-                        "target": "production"
-                    }
-
-                    redeploy_response = requests.post(redeploy_url, headers=self.headers, json=redeploy_payload)
-
-                    if redeploy_response.status_code in [200, 201]:
-                        deployment_data = redeploy_response.json()
-                        logger.info(f"Deployment triggered via redeploy: {deployment_data.get('id')}")
-                        return {
-                            "success": True,
-                            "deployment_id": deployment_data.get("id"),
-                            "url": deployment_data.get("url"),
-                            "ready_state": deployment_data.get("readyState"),
-                            "created_at": deployment_data.get("createdAt")
-                        }
-
-            return {
-                "success": False,
-                "error": error_data.get("error", {}).get("message", "Failed to create deploy hook")
-            }
+        return {
+            "success": False,
+            "error": error_data.get("error", {}).get("message", "Failed to trigger deployment")
+        }
 
     def get_deployment_status(self, deployment_id: str) -> Dict[str, Any]:
         """
@@ -455,40 +455,43 @@ def deploy_tenant_frontend(tenant) -> Dict[str, Any]:
         project_id = result.get("project_id")
         logger.info(f"Project created: {project_id}")
 
-        # When we create a project with gitRepository, Vercel automatically triggers
-        # an initial deployment. We don't wait for it to avoid HTTP timeout.
-        # The deployment will happen in the background on Vercel's side.
-
         # Set the expected URL immediately
         result["url"] = f"https://{project_name}.vercel.app"
 
-        # Give Vercel a brief moment to start the deployment, then check status
-        time.sleep(3)
+        # Give Vercel a moment, then check if deployment started
+        time.sleep(2)
 
-        # Quick check if deployment already started
+        # Check if deployment already started
         project_info = service.get_project_domains(project_id)
+        has_deployment = False
+
         if project_info.get("success"):
             latest_deployments = project_info.get("latest_deployments", [])
             if latest_deployments:
                 latest = latest_deployments[0]
                 state = latest.get("readyState", "")
-                logger.info(f"Initial deployment state: {state}")
+                logger.info(f"Found deployment with state: {state}")
+                has_deployment = True
 
-                # If already ready, get the actual URL
                 if state == "READY":
                     actual_url = project_info.get("production_url")
                     if actual_url:
                         result["url"] = actual_url
                         logger.info(f"Deployment already ready: {actual_url}")
+
+        # If no deployment found, trigger one explicitly
+        if not has_deployment:
+            logger.info(f"No deployment found after project creation, triggering manually...")
+            deployment_result = service.trigger_deployment(project_name)
+            if deployment_result.get("success"):
+                logger.info(f"Manual deployment triggered: {deployment_result.get('deployment_id')}")
+                result["deployment_triggered"] = True
             else:
-                # No deployment yet - trigger one manually
-                logger.info(f"No deployment found, triggering manually...")
-                deployment_result = service.trigger_deployment(project_name)
-                if deployment_result.get("success"):
-                    logger.info(f"Manual deployment triggered: {deployment_result.get('deployment_id')}")
+                logger.error(f"Failed to trigger deployment: {deployment_result.get('error')}")
+                result["deployment_error"] = deployment_result.get('error')
 
         logger.info(f"Tenant {tenant.schema_name} frontend project created. Expected URL: {result['url']}")
-        logger.info(f"Deployment is happening in the background on Vercel.")
+        logger.info(f"Note: Deployment builds in background on Vercel (1-2 min to be live)")
     else:
         logger.error(f"Failed to deploy frontend for {tenant.schema_name}: {result.get('error')}")
 
