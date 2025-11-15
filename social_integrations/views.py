@@ -2385,13 +2385,14 @@ def whatsapp_embedded_signup_callback(request):
 
         logger.info("✅ Successfully obtained access token")
 
-        # Debug: Check token permissions
+        # Debug: Check token permissions and extract WABA IDs from granular scopes
         debug_url = f"https://graph.facebook.com/{fb_api_version}/debug_token"
         debug_params = {
             'input_token': access_token,
             'access_token': f"{fb_app_id}|{fb_app_secret}"
         }
 
+        waba_ids = []
         try:
             debug_response = requests.get(debug_url, params=debug_params)
             debug_data = debug_response.json()
@@ -2401,6 +2402,14 @@ def whatsapp_embedded_signup_callback(request):
                 scopes = debug_data['data'].get('scopes', [])
                 logger.info(f"📋 Granted permissions: {scopes}")
 
+                # Extract WABA IDs from granular_scopes
+                granular_scopes = debug_data['data'].get('granular_scopes', [])
+                for scope in granular_scopes:
+                    if scope.get('scope') == 'whatsapp_business_management':
+                        waba_ids = scope.get('target_ids', [])
+                        logger.info(f"✅ Found WABA IDs in granular scopes: {waba_ids}")
+                        break
+
                 # Check if required WhatsApp permissions are present
                 required_perms = ['whatsapp_business_management', 'whatsapp_business_messaging']
                 missing_perms = [p for p in required_perms if p not in scopes]
@@ -2409,34 +2418,31 @@ def whatsapp_embedded_signup_callback(request):
         except Exception as e:
             logger.error(f"Failed to debug token: {str(e)}")
 
-        # Get WhatsApp Business Accounts
-        waba_url = f"https://graph.facebook.com/{fb_api_version}/me/businesses"
-        waba_params = {
-            'access_token': access_token,
-            'fields': 'owned_whatsapp_business_accounts{id,name,timezone_id,message_template_namespace}'
-        }
-
-        logger.info("Fetching WhatsApp Business Accounts...")
-        waba_response = requests.get(waba_url, params=waba_params)
-        waba_data = waba_response.json()
-
-        if 'error' in waba_data:
-            error_msg = waba_data.get('error', {}).get('message', 'Unknown error')
-            logger.error(f"Failed to fetch WABA: {error_msg}")
+        if not waba_ids:
             return Response({
-                'error': f'Failed to fetch WhatsApp Business Accounts: {error_msg}'
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        # Extract WhatsApp Business Accounts
-        businesses = waba_data.get('data', [])
-        if not businesses:
-            return Response({
-                'error': 'No businesses found for this account'
+                'error': 'No WhatsApp Business Account IDs found in token'
             }, status=status.HTTP_404_NOT_FOUND)
 
-        # Get the first business and its WhatsApp accounts
-        business = businesses[0]
-        whatsapp_accounts = business.get('owned_whatsapp_business_accounts', {}).get('data', [])
+        # Fetch details for each WABA directly
+        whatsapp_accounts = []
+        for waba_id in waba_ids:
+            logger.info(f"Fetching details for WABA: {waba_id}")
+            waba_url = f"https://graph.facebook.com/{fb_api_version}/{waba_id}"
+            waba_params = {
+                'access_token': access_token,
+                'fields': 'id,name,timezone_id,message_template_namespace'
+            }
+
+            waba_response = requests.get(waba_url, params=waba_params)
+            waba_data = waba_response.json()
+
+            if 'error' in waba_data:
+                error_msg = waba_data.get('error', {}).get('message', 'Unknown error')
+                logger.error(f"Failed to fetch WABA {waba_id}: {error_msg}")
+                continue
+
+            whatsapp_accounts.append(waba_data)
+            logger.info(f"✅ Successfully fetched WABA: {waba_data.get('name', waba_id)}")
 
         if not whatsapp_accounts:
             return Response({
