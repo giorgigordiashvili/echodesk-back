@@ -2009,20 +2009,51 @@ class EcommerceSettingsViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Check if already deployed (allow redeployment)
+        # Check if already deployed - if so, trigger redeploy
         if settings.deployment_status == 'deployed' and settings.vercel_project_id:
-            # For now, return the existing deployment info
-            # In the future, we can add a force_redeploy parameter
-            return Response(
-                {
-                    "success": True,
-                    "message": "Frontend already deployed",
-                    "url": settings.ecommerce_frontend_url,
-                    "project_id": settings.vercel_project_id,
-                    "project_name": f"store-{tenant.schema_name}"
-                },
-                status=status.HTTP_200_OK
-            )
+            # Trigger a redeploy of the existing project
+            from .services.vercel_deployment import VercelDeploymentService
+            service = VercelDeploymentService()
+
+            project_name = f"store-{tenant.schema_name}".lower().replace("_", "-")
+
+            # Update status to deploying
+            settings.deployment_status = 'deploying'
+            settings.save(update_fields=['deployment_status'])
+
+            # Trigger deployment
+            deployment_result = service.trigger_deployment(project_name)
+
+            if deployment_result.get("success"):
+                # Wait for deployment
+                wait_result = service.wait_for_deployment(settings.vercel_project_id, max_wait=300)
+
+                if wait_result.get("success"):
+                    settings.ecommerce_frontend_url = wait_result.get("production_url")
+                    settings.deployment_status = 'deployed'
+                    settings.save(update_fields=['ecommerce_frontend_url', 'deployment_status'])
+
+                    return Response({
+                        "success": True,
+                        "message": "Frontend redeployed successfully",
+                        "url": wait_result.get("production_url"),
+                        "project_id": settings.vercel_project_id,
+                        "project_name": project_name
+                    }, status=status.HTTP_200_OK)
+                else:
+                    settings.deployment_status = 'failed'
+                    settings.save(update_fields=['deployment_status'])
+                    return Response({
+                        "success": False,
+                        "error": wait_result.get("error", "Deployment did not complete")
+                    }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            else:
+                settings.deployment_status = 'failed'
+                settings.save(update_fields=['deployment_status'])
+                return Response({
+                    "success": False,
+                    "error": deployment_result.get("error", "Failed to trigger deployment")
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         # Update status to deploying
         settings.deployment_status = 'deploying'
@@ -2064,6 +2095,66 @@ class EcommerceSettingsViewSet(viewsets.ModelViewSet):
             settings.deployment_status = 'failed'
             settings.save(update_fields=['deployment_status'])
 
+            return Response({
+                "success": False,
+                "error": str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @extend_schema(
+        summary="Delete frontend deployment",
+        description="Delete the Vercel project and reset deployment status",
+        responses={
+            200: OpenApiResponse(description='Deployment deleted successfully'),
+            400: OpenApiResponse(description='No deployment to delete'),
+            500: OpenApiResponse(description='Failed to delete deployment'),
+        }
+    )
+    @action(detail=False, methods=['delete'], url_path='delete-deployment')
+    def delete_deployment(self, request):
+        """
+        Delete frontend deployment from Vercel and reset status
+        """
+        from .services.vercel_deployment import VercelDeploymentService
+
+        tenant = request.tenant
+
+        # Get or create EcommerceSettings for this tenant
+        settings, created = EcommerceSettings.objects.get_or_create(
+            tenant=tenant,
+            defaults={'store_name': tenant.name}
+        )
+
+        # Check if there's a deployment to delete
+        if not settings.vercel_project_id:
+            return Response(
+                {"error": "No deployment to delete"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            service = VercelDeploymentService()
+
+            # Delete the project from Vercel
+            result = service.delete_project(settings.vercel_project_id)
+
+            if result.get("success"):
+                # Reset deployment info
+                settings.vercel_project_id = None
+                settings.ecommerce_frontend_url = None
+                settings.deployment_status = 'pending'
+                settings.save(update_fields=['vercel_project_id', 'ecommerce_frontend_url', 'deployment_status'])
+
+                return Response({
+                    "success": True,
+                    "message": "Deployment deleted successfully"
+                }, status=status.HTTP_200_OK)
+            else:
+                return Response({
+                    "success": False,
+                    "error": result.get("error", "Failed to delete deployment")
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        except Exception as e:
             return Response({
                 "success": False,
                 "error": str(e)
