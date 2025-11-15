@@ -310,16 +310,25 @@ class VercelDeploymentService:
 
         if hook_response.status_code in [200, 201]:
             hook_data = hook_response.json()
-            logger.info(f"Deploy hook created: {hook_data}")
+            logger.info(f"Deploy hook response received")
 
-            # The URL might be in different fields
-            deploy_hook_url = hook_data.get("url") or hook_data.get("deploymentUrl")
+            # The URL is in the link.deployHooks array of the project response
+            # We need to find our newly created hook
+            link_data = hook_data.get("link", {})
+            deploy_hooks = link_data.get("deployHooks", [])
 
-            # If not found, construct it from the hook ID and project ID
-            if not deploy_hook_url and hook_data.get("id"):
-                hook_id = hook_data.get("id")
-                deploy_hook_url = f"https://api.vercel.com/v1/integrations/deploy/{project_id}/{hook_id}"
-                logger.info(f"Constructed deploy hook URL: {deploy_hook_url}")
+            deploy_hook_url = None
+            for hook in deploy_hooks:
+                if hook.get("url"):
+                    deploy_hook_url = hook.get("url")
+                    logger.info(f"Found deploy hook URL in response: {deploy_hook_url}")
+                    break
+
+            # If still not found, look for direct url field
+            if not deploy_hook_url:
+                deploy_hook_url = hook_data.get("url") or hook_data.get("deploymentUrl")
+                if deploy_hook_url:
+                    logger.info(f"Found deploy hook URL directly: {deploy_hook_url}")
 
             if deploy_hook_url:
                 logger.info(f"Calling deploy hook URL: {deploy_hook_url}")
