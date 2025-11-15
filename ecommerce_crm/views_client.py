@@ -9,7 +9,7 @@ from rest_framework import viewsets, filters, status, serializers
 from rest_framework.decorators import action, api_view, permission_classes, authentication_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
-from drf_spectacular.utils import extend_schema, OpenApiResponse
+from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiParameter, OpenApiExample
 from django_filters.rest_framework import DjangoFilterBackend
 from .authentication import EcommerceClientJWTAuthentication
 from .models import (
@@ -375,13 +375,95 @@ class ClientProductViewSet(viewsets.ReadOnlyModelViewSet):
     @extend_schema(
         tags=['Ecommerce Client - Products'],
         summary='List products',
-        description='''Browse active products with filtering options:
-        - Basic filters: ?is_featured=true
-        - Search: ?search=laptop
-        - Price range: ?min_price=100&max_price=500
-        - Attribute filters: ?attr_color=red,blue&attr_size=large
-        - Ordering: ?ordering=-price (price descending) or ?ordering=created_at
-        - Language: ?language=ka (for multilingual content)'''
+        description='''Browse active products with filtering options.
+
+        **Dynamic Attribute Filters:**
+        You can filter by any product attribute using the pattern `attr_{attribute_key}`.
+        For example, if you have attributes with keys 'color', 'size', 'material', you can use:
+        - `?attr_color=red` - Single value
+        - `?attr_color=red,blue,green` - Multiple values (OR logic)
+        - `?attr_size=large&attr_color=red` - Multiple attributes (AND logic)
+        - `?attr_width=10-20` - Number ranges
+        - `?attr_waterproof=true` - Boolean values
+
+        **Other Filters:**
+        - Basic: `?is_featured=true`
+        - Search: `?search=laptop`
+        - Price: `?min_price=100&max_price=500`
+        - Ordering: `?ordering=-price` or `?ordering=created_at`
+        - Language: `?language=ka`''',
+        parameters=[
+            OpenApiParameter(
+                name='min_price',
+                type=float,
+                location=OpenApiParameter.QUERY,
+                description='Minimum price filter',
+                required=False,
+                examples=[
+                    OpenApiExample('Example', value=10.00)
+                ]
+            ),
+            OpenApiParameter(
+                name='max_price',
+                type=float,
+                location=OpenApiParameter.QUERY,
+                description='Maximum price filter',
+                required=False,
+                examples=[
+                    OpenApiExample('Example', value=500.00)
+                ]
+            ),
+            OpenApiParameter(
+                name='language',
+                type=str,
+                location=OpenApiParameter.QUERY,
+                description='Language code for multilingual content (e.g., en, ka, ru)',
+                required=False,
+                examples=[
+                    OpenApiExample('English', value='en'),
+                    OpenApiExample('Georgian', value='ka'),
+                ]
+            ),
+            OpenApiParameter(
+                name='attr_color',
+                type=str,
+                location=OpenApiParameter.QUERY,
+                description='Filter by color attribute (example). Supports multiple values: red,blue,green',
+                required=False,
+                examples=[
+                    OpenApiExample('Single', value='red'),
+                    OpenApiExample('Multiple', value='red,blue,green'),
+                ]
+            ),
+            OpenApiParameter(
+                name='attr_size',
+                type=str,
+                location=OpenApiParameter.QUERY,
+                description='Filter by size attribute (example). Supports multiple values: small,medium,large',
+                required=False,
+                examples=[
+                    OpenApiExample('Single', value='large'),
+                    OpenApiExample('Multiple', value='small,medium'),
+                ]
+            ),
+            OpenApiParameter(
+                name='attr_material',
+                type=str,
+                location=OpenApiParameter.QUERY,
+                description='Filter by material attribute (example). Works with any text attribute.',
+                required=False,
+                examples=[
+                    OpenApiExample('Example', value='cotton'),
+                ]
+            ),
+            OpenApiParameter(
+                name='attr_{any_attribute}',
+                type=str,
+                location=OpenApiParameter.QUERY,
+                description='Dynamic attribute filter. Replace {any_attribute} with any attribute key defined in your system (e.g., attr_brand, attr_weight, etc.)',
+                required=False,
+            ),
+        ]
     )
     def list(self, request, *args, **kwargs):
         return super().list(request, *args, **kwargs)
