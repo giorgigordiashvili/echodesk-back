@@ -2583,7 +2583,7 @@ def whatsapp_connection_status(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated, CanManageSocialConnections])
 def whatsapp_disconnect(request):
-    """Disconnect WhatsApp Business Account(s)"""
+    """Disconnect WhatsApp Business Account(s) and delete all related data"""
     try:
         waba_id = request.data.get('waba_id')
 
@@ -2591,12 +2591,26 @@ def whatsapp_disconnect(request):
             # Disconnect specific account
             account = WhatsAppBusinessAccount.objects.filter(waba_id=waba_id).first()
             if account:
-                account.is_active = False
-                account.save()
-                logger.info(f"Disconnected WhatsApp Business Account: {account.business_name}")
+                business_name = account.business_name
+
+                # Count related data before deletion
+                messages_count = WhatsAppMessage.objects.filter(business_account=account).count()
+                templates_count = WhatsAppMessageTemplate.objects.filter(business_account=account).count()
+
+                # Delete the account (will cascade delete messages and templates)
+                account.delete()
+
+                logger.info(
+                    f"Deleted WhatsApp Business Account: {business_name} "
+                    f"({messages_count} messages, {templates_count} templates)"
+                )
                 return Response({
                     'status': 'success',
-                    'message': f'Disconnected WhatsApp Business Account: {account.business_name}'
+                    'message': f'Disconnected and deleted WhatsApp Business Account: {business_name}',
+                    'deleted': {
+                        'messages': messages_count,
+                        'templates': templates_count
+                    }
                 })
             else:
                 return Response({
@@ -2606,11 +2620,26 @@ def whatsapp_disconnect(request):
             # Disconnect all accounts
             accounts = WhatsAppBusinessAccount.objects.all()
             count = accounts.count()
-            accounts.update(is_active=False)
-            logger.info(f"Disconnected all {count} WhatsApp Business Account(s)")
+
+            # Count all related data
+            total_messages = WhatsAppMessage.objects.count()
+            total_templates = WhatsAppMessageTemplate.objects.count()
+
+            # Delete all accounts (will cascade delete all messages and templates)
+            accounts.delete()
+
+            logger.info(
+                f"Deleted all {count} WhatsApp Business Account(s) "
+                f"({total_messages} messages, {total_templates} templates)"
+            )
             return Response({
                 'status': 'success',
-                'message': f'Disconnected {count} WhatsApp Business Account(s)'
+                'message': f'Disconnected and deleted {count} WhatsApp Business Account(s)',
+                'deleted': {
+                    'accounts': count,
+                    'messages': total_messages,
+                    'templates': total_templates
+                }
             })
 
     except Exception as e:
