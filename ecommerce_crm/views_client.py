@@ -283,6 +283,8 @@ class ClientProductAutoSchema(AutoSchema):
     def get_override_parameters(self):
         """Add dynamic attribute filter parameters to the schema"""
         from django.db import connection
+        from tenant_schemas.utils import schema_context, get_public_schema_name
+        from tenants.models import Tenant
 
         parameters = super().get_override_parameters()
 
@@ -290,16 +292,37 @@ class ClientProductAutoSchema(AutoSchema):
         if self.method.lower() != 'get' or self.path.endswith('{id}/'):
             return parameters
 
-        # Try to get attribute definitions from the database
-        # In multi-tenant setup, we'll try to get from public schema or use a generic approach
-        try:
-            # Get all filterable attributes
-            attrs = AttributeDefinition.objects.filter(is_filterable=True).values('key', 'label', 'attribute_type')
+        # Collect unique attributes from all tenants
+        all_attributes = {}
 
-            for attr in attrs:
-                attr_key = attr['key']
-                attr_label = attr['label'] or attr_key.title()
-                attr_type = attr['attribute_type']
+        try:
+            # Get all active tenants
+            with schema_context(get_public_schema_name()):
+                tenants = Tenant.objects.all()
+
+            # Query attributes from each tenant schema
+            for tenant in tenants:
+                try:
+                    with schema_context(tenant.schema_name):
+                        attrs = AttributeDefinition.objects.filter(is_filterable=True).values('key', 'label', 'attribute_type')
+
+                        for attr in attrs:
+                            attr_key = attr['key']
+                            # Store unique attributes by key (avoid duplicates across tenants)
+                            if attr_key not in all_attributes:
+                                all_attributes[attr_key] = {
+                                    'key': attr_key,
+                                    'label': attr['label'] or attr_key.title(),
+                                    'type': attr['attribute_type']
+                                }
+                except Exception:
+                    # Skip this tenant if there's an error
+                    continue
+
+            # Generate parameters for all unique attributes
+            for attr_key, attr_data in all_attributes.items():
+                attr_label = attr_data['label']
+                attr_type = attr_data['type']
 
                 # Create description based on attribute type
                 if attr_type == 'select':
@@ -324,20 +347,11 @@ class ClientProductAutoSchema(AutoSchema):
                         required=False,
                     )
                 )
+
         except Exception as e:
-            # If we can't query attributes (e.g., during initial migration or no tenant context),
-            # add a generic parameter to show the pattern
-            parameters.append(
-                OpenApiParameter(
-                    name='attr_{attribute_key}',
-                    type=str,
-                    location=OpenApiParameter.QUERY,
-                    description='Dynamic attribute filter. Replace {attribute_key} with any filterable attribute key from your system. '
-                               'Supports: select (comma-separated values), number (ranges with hyphen: 10-20), boolean (true/false), text (partial match). '
-                               'Example: ?attr_color=red,blue&attr_size=large&attr_price=10-20',
-                    required=False,
-                )
-            )
+            # If we can't query attributes, don't add any attribute parameters
+            # The description in the main decorator explains the pattern
+            pass
 
         return parameters
 
