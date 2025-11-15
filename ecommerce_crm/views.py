@@ -5,6 +5,7 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiParameter, inline_serializer
 from django_filters.rest_framework import DjangoFilterBackend, FilterSet, CharFilter, NumberFilter, BooleanFilter
 from django.db.models import Q, F
+from tenants.models import Tenant
 from .models import (
     Language,
     AttributeDefinition,
@@ -2016,7 +2017,7 @@ class EcommerceSettingsViewSet(viewsets.ModelViewSet):
                 {
                     "success": True,
                     "message": "Frontend already deployed",
-                    "frontend_url": settings.ecommerce_frontend_url,
+                    "url": settings.ecommerce_frontend_url,
                     "project_id": settings.vercel_project_id,
                     "project_name": f"store-{tenant.schema_name}"
                 },
@@ -2043,7 +2044,7 @@ class EcommerceSettingsViewSet(viewsets.ModelViewSet):
                 return Response({
                     "success": True,
                     "message": "Frontend deployed successfully",
-                    "frontend_url": result.get("url"),
+                    "url": result.get("url"),
                     "project_id": result.get("project_id"),
                     "project_name": result.get("project_name")
                 }, status=status.HTTP_201_CREATED)
