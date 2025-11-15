@@ -28,6 +28,10 @@ from .feature_views import (
     TenantPermissionViewSet
 )
 from .cors_views import simple_cors_test
+from .deployment_views import (
+    deploy_frontend, get_deployment_status as get_frontend_deployment_status,
+    redeploy_frontend, delete_deployment, update_deployment_env
+)
 
 router = DefaultRouter()
 router.register(r'tenants', TenantViewSet)
@@ -106,7 +110,14 @@ urlpatterns = [
 
     # CORS testing endpoints
     path('api/cors-simple/', simple_cors_test, name='simple_cors_test'),
-    
+
+    # Frontend deployment endpoints (Vercel)
+    path('api/deployment/<int:tenant_id>/deploy/', deploy_frontend, name='deploy_frontend'),
+    path('api/deployment/<int:tenant_id>/status/', get_frontend_deployment_status, name='get_frontend_deployment_status'),
+    path('api/deployment/<int:tenant_id>/redeploy/', redeploy_frontend, name='redeploy_frontend'),
+    path('api/deployment/<int:tenant_id>/delete/', delete_deployment, name='delete_deployment'),
+    path('api/deployment/<int:tenant_id>/env/', update_deployment_env, name='update_deployment_env'),
+
     # Admin API endpoints
     path('api/', include(router.urls)),
 ]

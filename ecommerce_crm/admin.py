@@ -1,4 +1,9 @@
 from django.contrib import admin
+from django.utils.html import format_html
+from django.urls import path, reverse
+from django.http import HttpResponseRedirect
+from django.contrib import messages
+from tenant_schemas.utils import get_public_schema_name, schema_context
 from .models import (
     Language,
     AttributeDefinition,
@@ -9,7 +14,8 @@ from .models import (
     ProductVariantAttributeValue,
     EcommerceClient,
     ClientVerificationCode,
-    PasswordResetToken
+    PasswordResetToken,
+    EcommerceSettings
 )
 
 
@@ -164,3 +170,147 @@ class ClientVerificationCodeAdmin(admin.ModelAdmin):
             'fields': ('is_used',)
         }),
     )
+
+
+@admin.register(EcommerceSettings)
+class EcommerceSettingsAdmin(admin.ModelAdmin):
+    list_display = ['tenant', 'store_name', 'currency', 'deployment_status', 'frontend_url_link', 'deploy_button']
+    readonly_fields = ['tenant', 'deployment_status', 'frontend_url_link', 'vercel_project_id', 'deploy_button']
+
+    fieldsets = (
+        ('Store Information', {
+            'fields': ('tenant', 'store_name', 'store_description', 'logo_url')
+        }),
+        ('Contact Information', {
+            'fields': ('contact_email', 'contact_phone', 'contact_address')
+        }),
+        ('Social Media', {
+            'fields': ('facebook_url', 'instagram_url', 'twitter_url')
+        }),
+        ('Settings', {
+            'fields': ('currency', 'default_language')
+        }),
+        ('Features', {
+            'fields': ('enable_wishlist', 'enable_reviews', 'enable_compare')
+        }),
+        ('Frontend Deployment', {
+            'fields': ('deployment_status', 'vercel_project_id', 'frontend_url_link', 'deploy_button'),
+            'classes': ('wide',)
+        }),
+    )
+
+    def deployment_status(self, obj):
+        """Get deployment status from parent tenant"""
+        if obj.tenant:
+            status = obj.tenant.deployment_status
+            colors = {
+                'pending': '#ffc107',
+                'deploying': '#17a2b8',
+                'deployed': '#28a745',
+                'failed': '#dc3545'
+            }
+            color = colors.get(status, '#6c757d')
+            return format_html(
+                '<span style="color: {}; font-weight: bold;">{}</span>',
+                color,
+                status.upper()
+            )
+        return '-'
+    deployment_status.short_description = 'Deployment Status'
+
+    def frontend_url_link(self, obj):
+        """Show frontend URL as clickable link"""
+        if obj.tenant and obj.tenant.frontend_url:
+            return format_html(
+                '<a href="{}" target="_blank" style="color: #007bff;">{}</a>',
+                obj.tenant.frontend_url,
+                obj.tenant.frontend_url
+            )
+        return 'Not deployed'
+    frontend_url_link.short_description = 'Frontend URL'
+
+    def vercel_project_id(self, obj):
+        """Get Vercel project ID from parent tenant"""
+        if obj.tenant and obj.tenant.vercel_project_id:
+            return obj.tenant.vercel_project_id
+        return '-'
+    vercel_project_id.short_description = 'Vercel Project ID'
+
+    def deploy_button(self, obj):
+        """Render deploy/redeploy button"""
+        if obj.pk:
+            if obj.tenant and obj.tenant.frontend_url:
+                # Already deployed - show redeploy button
+                return format_html(
+                    '<a class="button" href="{}" style="background-color: #17a2b8; color: white; padding: 5px 15px; text-decoration: none; border-radius: 3px;">Redeploy Frontend</a>',
+                    reverse('admin:ecommerce_crm_ecommercesettings_deploy', args=[obj.pk])
+                )
+            else:
+                # Not deployed - show deploy button
+                return format_html(
+                    '<a class="button" href="{}" style="background-color: #28a745; color: white; padding: 5px 15px; text-decoration: none; border-radius: 3px;">Deploy Frontend</a>',
+                    reverse('admin:ecommerce_crm_ecommercesettings_deploy', args=[obj.pk])
+                )
+        return '-'
+    deploy_button.short_description = 'Actions'
+
+    def get_urls(self):
+        """Add custom URL for deploy action"""
+        urls = super().get_urls()
+        custom_urls = [
+            path(
+                '<int:settings_id>/deploy/',
+                self.admin_site.admin_view(self.deploy_view),
+                name='ecommerce_crm_ecommercesettings_deploy'
+            ),
+        ]
+        return custom_urls + urls
+
+    def deploy_view(self, request, settings_id):
+        """Handle deploy button click"""
+        from .services.vercel_deployment import deploy_tenant_frontend
+
+        try:
+            settings = EcommerceSettings.objects.get(pk=settings_id)
+            tenant = settings.tenant
+
+            if not tenant:
+                messages.error(request, "No tenant associated with these settings")
+                return HttpResponseRedirect(reverse('admin:ecommerce_crm_ecommercesettings_change', args=[settings_id]))
+
+            # Update status to deploying
+            with schema_context(get_public_schema_name()):
+                tenant.deployment_status = 'deploying'
+                tenant.save()
+
+            # Deploy to Vercel
+            result = deploy_tenant_frontend(tenant)
+
+            if result.get('success'):
+                # Update tenant with deployment info
+                with schema_context(get_public_schema_name()):
+                    tenant.frontend_url = result.get('url')
+                    tenant.vercel_project_id = result.get('project_id')
+                    tenant.deployment_status = 'deployed'
+                    tenant.save()
+
+                messages.success(
+                    request,
+                    f"Frontend deployed successfully! URL: {result.get('url')}"
+                )
+            else:
+                # Update status to failed
+                with schema_context(get_public_schema_name()):
+                    tenant.deployment_status = 'failed'
+                    tenant.save()
+
+                messages.error(
+                    request,
+                    f"Deployment failed: {result.get('error', 'Unknown error')}"
+                )
+        except EcommerceSettings.DoesNotExist:
+            messages.error(request, "Settings not found")
+        except Exception as e:
+            messages.error(request, f"Error during deployment: {str(e)}")
+
+        return HttpResponseRedirect(reverse('admin:ecommerce_crm_ecommercesettings_change', args=[settings_id]))

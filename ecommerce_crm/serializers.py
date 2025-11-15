@@ -556,6 +556,11 @@ class EcommerceSettingsSerializer(serializers.ModelSerializer):
         help_text="BOG client secret (write-only, will be encrypted)"
     )
 
+    # Deployment fields from parent Tenant (read-only)
+    frontend_url = serializers.SerializerMethodField(read_only=True)
+    deployment_status = serializers.SerializerMethodField(read_only=True)
+    vercel_project_id = serializers.SerializerMethodField(read_only=True)
+
     class Meta:
         model = EcommerceSettings
         fields = [
@@ -563,9 +568,28 @@ class EcommerceSettingsSerializer(serializers.ModelSerializer):
             'bog_use_production', 'bog_return_url_success', 'bog_return_url_fail',
             'enable_cash_on_delivery', 'enable_card_payment',
             'store_name', 'store_email', 'store_phone',
+            'frontend_url', 'deployment_status', 'vercel_project_id',
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'tenant', 'created_at', 'updated_at']
+
+    def get_frontend_url(self, obj):
+        """Get frontend URL from parent Tenant"""
+        if obj.tenant:
+            return obj.tenant.frontend_url
+        return None
+
+    def get_deployment_status(self, obj):
+        """Get deployment status from parent Tenant"""
+        if obj.tenant:
+            return obj.tenant.deployment_status
+        return 'pending'
+
+    def get_vercel_project_id(self, obj):
+        """Get Vercel project ID from parent Tenant"""
+        if obj.tenant:
+            return obj.tenant.vercel_project_id
+        return None
 
     def create(self, validated_data):
         # Handle encrypted secret

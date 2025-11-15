@@ -497,3 +497,8 @@ EMAIL_HOST_USER = 'apikey'  # This is always 'apikey' for SendGrid
 EMAIL_HOST_PASSWORD = SENDGRID_API_KEY
 DEFAULT_FROM_EMAIL = SENDGRID_FROM_EMAIL
 SERVER_EMAIL = SENDGRID_FROM_EMAIL
+
+# Vercel Deployment Configuration
+VERCEL_TOKEN = config('VERCEL_TOKEN', default='')
+VERCEL_TEAM_ID = config('VERCEL_TEAM_ID', default='')
+VERCEL_GITHUB_REPO = config('VERCEL_GITHUB_REPO', default='echodeskge/echodesk-frontend-template-one')

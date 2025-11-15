@@ -1962,3 +1962,109 @@ class EcommerceSettingsViewSet(viewsets.ModelViewSet):
     )
     def partial_update(self, request, *args, **kwargs):
         return super().partial_update(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce Admin - Settings'],
+        summary='Deploy frontend website',
+        description='Deploy the ecommerce frontend website to Vercel. Creates a new Vercel project with tenant-specific configuration and environment variables.',
+        responses={
+            201: inline_serializer(
+                name='DeploymentResponse',
+                fields={
+                    'success': serializers.BooleanField(),
+                    'message': serializers.CharField(),
+                    'url': serializers.URLField(),
+                    'project_id': serializers.CharField(),
+                    'project_name': serializers.CharField(),
+                }
+            ),
+            400: OpenApiResponse(description='Deployment already in progress or already deployed'),
+            500: OpenApiResponse(description='Deployment failed'),
+        }
+    )
+    @action(detail=False, methods=['post'], url_path='deploy-frontend')
+    def deploy_frontend(self, request):
+        """
+        Deploy frontend website to Vercel
+
+        This will create a new Vercel project with tenant-specific environment variables
+        and deploy the ecommerce frontend template.
+        """
+        from .services.vercel_deployment import deploy_tenant_frontend
+        from tenant_schemas.utils import get_public_schema_name, schema_context
+
+        tenant = request.tenant
+
+        # Check current deployment status
+        if tenant.deployment_status == 'deploying':
+            return Response(
+                {"error": "Deployment already in progress"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Check if already deployed
+        if tenant.deployment_status == 'deployed' and tenant.vercel_project_id:
+            return Response(
+                {
+                    "success": True,
+                    "message": "Frontend already deployed",
+                    "url": tenant.frontend_url,
+                    "project_id": tenant.vercel_project_id,
+                    "project_name": f"store-{tenant.schema_name}"
+                },
+                status=status.HTTP_200_OK
+            )
+
+        # Update status to deploying
+        with schema_context(get_public_schema_name()):
+            from tenants.models import Tenant
+            tenant_obj = Tenant.objects.get(id=tenant.id)
+            tenant_obj.deployment_status = 'deploying'
+            tenant_obj.save(update_fields=['deployment_status'])
+
+        try:
+            # Deploy to Vercel
+            with schema_context(get_public_schema_name()):
+                tenant_obj = Tenant.objects.get(id=tenant.id)
+                result = deploy_tenant_frontend(tenant_obj)
+
+            if result.get("success"):
+                # Update tenant with deployment info
+                with schema_context(get_public_schema_name()):
+                    tenant_obj = Tenant.objects.get(id=tenant.id)
+                    tenant_obj.vercel_project_id = result.get("project_id")
+                    tenant_obj.frontend_url = result.get("url")
+                    tenant_obj.deployment_status = 'deployed'
+                    tenant_obj.save(update_fields=['vercel_project_id', 'frontend_url', 'deployment_status'])
+
+                return Response({
+                    "success": True,
+                    "message": "Frontend deployed successfully",
+                    "url": result.get("url"),
+                    "project_id": result.get("project_id"),
+                    "project_name": result.get("project_name")
+                }, status=status.HTTP_201_CREATED)
+            else:
+                # Deployment failed
+                with schema_context(get_public_schema_name()):
+                    tenant_obj = Tenant.objects.get(id=tenant.id)
+                    tenant_obj.deployment_status = 'failed'
+                    tenant_obj.save(update_fields=['deployment_status'])
+
+                return Response({
+                    "success": False,
+                    "error": result.get("error", "Deployment failed"),
+                    "code": result.get("code", "UNKNOWN")
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        except Exception as e:
+            # Reset status on error
+            with schema_context(get_public_schema_name()):
+                tenant_obj = Tenant.objects.get(id=tenant.id)
+                tenant_obj.deployment_status = 'failed'
+                tenant_obj.save(update_fields=['deployment_status'])
+
+            return Response({
+                "success": False,
+                "error": str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

@@ -225,6 +225,7 @@ class Tenant(TenantMixin):
 
     # Frontend deployment fields
     frontend_url = models.URLField(blank=True, null=True, help_text="URL of the deployed frontend")
+    vercel_project_id = models.CharField(max_length=100, blank=True, null=True, help_text="Vercel project ID for frontend deployment")
     deployment_status = models.CharField(
         max_length=20,
         choices=[
