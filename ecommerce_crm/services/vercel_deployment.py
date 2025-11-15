@@ -169,7 +169,10 @@ class VercelDeploymentService:
                 "type": "github",
                 "repo": self.github_repo
             },
-            "environmentVariables": formatted_env_vars
+            "environmentVariables": formatted_env_vars,
+            # Force build even if SHA was deployed in another project
+            "skipGitConnectDuringLink": False,
+            "commandForIgnoringBuildStep": "exit 1"  # Always build (exit 1 = build needed)
         }
 
         logger.info(f"Creating Vercel project: {project_name}")
