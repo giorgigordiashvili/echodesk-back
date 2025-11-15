@@ -1036,6 +1036,31 @@ class EcommerceSettings(models.Model):
         help_text="Store contact phone"
     )
 
+    # E-commerce Frontend Deployment
+    ecommerce_frontend_url = models.URLField(
+        max_length=500,
+        blank=True,
+        null=True,
+        help_text="URL of the deployed e-commerce storefront"
+    )
+    vercel_project_id = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        help_text="Vercel project ID for the e-commerce frontend"
+    )
+    deployment_status = models.CharField(
+        max_length=20,
+        choices=[
+            ('pending', 'Pending'),
+            ('deploying', 'Deploying'),
+            ('deployed', 'Deployed'),
+            ('failed', 'Failed'),
+        ],
+        default='pending',
+        help_text="Current deployment status of the e-commerce frontend"
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

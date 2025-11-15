@@ -1995,32 +1995,37 @@ class EcommerceSettingsViewSet(viewsets.ModelViewSet):
 
         tenant = request.tenant
 
+        # Get or create EcommerceSettings for this tenant
+        settings, created = EcommerceSettings.objects.get_or_create(
+            tenant=tenant,
+            defaults={'store_name': tenant.name}
+        )
+
         # Check current deployment status
-        if tenant.deployment_status == 'deploying':
+        if settings.deployment_status == 'deploying':
             return Response(
                 {"error": "Deployment already in progress"},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Check if already deployed
-        if tenant.deployment_status == 'deployed' and tenant.vercel_project_id:
+        # Check if already deployed (allow redeployment)
+        if settings.deployment_status == 'deployed' and settings.vercel_project_id:
+            # For now, return the existing deployment info
+            # In the future, we can add a force_redeploy parameter
             return Response(
                 {
                     "success": True,
                     "message": "Frontend already deployed",
-                    "url": tenant.frontend_url,
-                    "project_id": tenant.vercel_project_id,
+                    "frontend_url": settings.ecommerce_frontend_url,
+                    "project_id": settings.vercel_project_id,
                     "project_name": f"store-{tenant.schema_name}"
                 },
                 status=status.HTTP_200_OK
             )
 
         # Update status to deploying
-        with schema_context(get_public_schema_name()):
-            from tenants.models import Tenant
-            tenant_obj = Tenant.objects.get(id=tenant.id)
-            tenant_obj.deployment_status = 'deploying'
-            tenant_obj.save(update_fields=['deployment_status'])
+        settings.deployment_status = 'deploying'
+        settings.save(update_fields=['deployment_status'])
 
         try:
             # Deploy to Vercel
@@ -2029,27 +2034,23 @@ class EcommerceSettingsViewSet(viewsets.ModelViewSet):
                 result = deploy_tenant_frontend(tenant_obj)
 
             if result.get("success"):
-                # Update tenant with deployment info
-                with schema_context(get_public_schema_name()):
-                    tenant_obj = Tenant.objects.get(id=tenant.id)
-                    tenant_obj.vercel_project_id = result.get("project_id")
-                    tenant_obj.frontend_url = result.get("url")
-                    tenant_obj.deployment_status = 'deployed'
-                    tenant_obj.save(update_fields=['vercel_project_id', 'frontend_url', 'deployment_status'])
+                # Update EcommerceSettings with deployment info
+                settings.vercel_project_id = result.get("project_id")
+                settings.ecommerce_frontend_url = result.get("url")
+                settings.deployment_status = 'deployed'
+                settings.save(update_fields=['vercel_project_id', 'ecommerce_frontend_url', 'deployment_status'])
 
                 return Response({
                     "success": True,
                     "message": "Frontend deployed successfully",
-                    "url": result.get("url"),
+                    "frontend_url": result.get("url"),
                     "project_id": result.get("project_id"),
                     "project_name": result.get("project_name")
                 }, status=status.HTTP_201_CREATED)
             else:
                 # Deployment failed
-                with schema_context(get_public_schema_name()):
-                    tenant_obj = Tenant.objects.get(id=tenant.id)
-                    tenant_obj.deployment_status = 'failed'
-                    tenant_obj.save(update_fields=['deployment_status'])
+                settings.deployment_status = 'failed'
+                settings.save(update_fields=['deployment_status'])
 
                 return Response({
                     "success": False,
@@ -2059,10 +2060,8 @@ class EcommerceSettingsViewSet(viewsets.ModelViewSet):
 
         except Exception as e:
             # Reset status on error
-            with schema_context(get_public_schema_name()):
-                tenant_obj = Tenant.objects.get(id=tenant.id)
-                tenant_obj.deployment_status = 'failed'
-                tenant_obj.save(update_fields=['deployment_status'])
+            settings.deployment_status = 'failed'
+            settings.save(update_fields=['deployment_status'])
 
             return Response({
                 "success": False,

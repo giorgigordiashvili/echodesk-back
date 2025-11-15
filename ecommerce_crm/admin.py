@@ -4,6 +4,7 @@ from django.urls import path, reverse
 from django.http import HttpResponseRedirect
 from django.contrib import messages
 from tenant_schemas.utils import get_public_schema_name, schema_context
+from tenants.models import Tenant
 from .models import (
     Language,
     AttributeDefinition,
@@ -174,72 +175,61 @@ class ClientVerificationCodeAdmin(admin.ModelAdmin):
 
 @admin.register(EcommerceSettings)
 class EcommerceSettingsAdmin(admin.ModelAdmin):
-    list_display = ['tenant', 'store_name', 'currency', 'deployment_status', 'frontend_url_link', 'deploy_button']
-    readonly_fields = ['tenant', 'deployment_status', 'frontend_url_link', 'vercel_project_id', 'deploy_button']
+    list_display = ['tenant', 'store_name', 'get_deployment_status_display', 'frontend_url_link', 'deploy_button']
+    readonly_fields = ['tenant', 'get_deployment_status_display', 'frontend_url_link', 'get_vercel_project_id', 'deploy_button']
 
     fieldsets = (
         ('Store Information', {
-            'fields': ('tenant', 'store_name', 'store_description', 'logo_url')
+            'fields': ('tenant', 'store_name', 'store_email', 'store_phone')
         }),
-        ('Contact Information', {
-            'fields': ('contact_email', 'contact_phone', 'contact_address')
-        }),
-        ('Social Media', {
-            'fields': ('facebook_url', 'instagram_url', 'twitter_url')
-        }),
-        ('Settings', {
-            'fields': ('currency', 'default_language')
-        }),
-        ('Features', {
-            'fields': ('enable_wishlist', 'enable_reviews', 'enable_compare')
+        ('Payment Settings', {
+            'fields': ('bog_client_id', 'bog_use_production', 'bog_return_url_success', 'bog_return_url_fail', 'enable_cash_on_delivery', 'enable_card_payment')
         }),
         ('Frontend Deployment', {
-            'fields': ('deployment_status', 'vercel_project_id', 'frontend_url_link', 'deploy_button'),
+            'fields': ('get_deployment_status_display', 'get_vercel_project_id', 'frontend_url_link', 'deploy_button'),
             'classes': ('wide',)
         }),
     )
 
-    def deployment_status(self, obj):
-        """Get deployment status from parent tenant"""
-        if obj.tenant:
-            status = obj.tenant.deployment_status
-            colors = {
-                'pending': '#ffc107',
-                'deploying': '#17a2b8',
-                'deployed': '#28a745',
-                'failed': '#dc3545'
-            }
-            color = colors.get(status, '#6c757d')
-            return format_html(
-                '<span style="color: {}; font-weight: bold;">{}</span>',
-                color,
-                status.upper()
-            )
-        return '-'
-    deployment_status.short_description = 'Deployment Status'
+    def get_deployment_status_display(self, obj):
+        """Display deployment status with color coding"""
+        status = obj.deployment_status
+        colors = {
+            'pending': '#ffc107',
+            'deploying': '#17a2b8',
+            'deployed': '#28a745',
+            'failed': '#dc3545'
+        }
+        color = colors.get(status, '#6c757d')
+        return format_html(
+            '<span style="color: {}; font-weight: bold;">{}</span>',
+            color,
+            status.upper()
+        )
+    get_deployment_status_display.short_description = 'Deployment Status'
 
     def frontend_url_link(self, obj):
         """Show frontend URL as clickable link"""
-        if obj.tenant and obj.tenant.frontend_url:
+        if obj.ecommerce_frontend_url:
             return format_html(
                 '<a href="{}" target="_blank" style="color: #007bff;">{}</a>',
-                obj.tenant.frontend_url,
-                obj.tenant.frontend_url
+                obj.ecommerce_frontend_url,
+                obj.ecommerce_frontend_url
             )
         return 'Not deployed'
-    frontend_url_link.short_description = 'Frontend URL'
+    frontend_url_link.short_description = 'E-commerce Frontend URL'
 
-    def vercel_project_id(self, obj):
-        """Get Vercel project ID from parent tenant"""
-        if obj.tenant and obj.tenant.vercel_project_id:
-            return obj.tenant.vercel_project_id
+    def get_vercel_project_id(self, obj):
+        """Get Vercel project ID"""
+        if obj.vercel_project_id:
+            return obj.vercel_project_id
         return '-'
-    vercel_project_id.short_description = 'Vercel Project ID'
+    get_vercel_project_id.short_description = 'Vercel Project ID'
 
     def deploy_button(self, obj):
         """Render deploy/redeploy button"""
         if obj.pk:
-            if obj.tenant and obj.tenant.frontend_url:
+            if obj.ecommerce_frontend_url:
                 # Already deployed - show redeploy button
                 return format_html(
                     '<a class="button" href="{}" style="background-color: #17a2b8; color: white; padding: 5px 15px; text-decoration: none; border-radius: 3px;">Redeploy Frontend</a>',
@@ -279,20 +269,20 @@ class EcommerceSettingsAdmin(admin.ModelAdmin):
                 return HttpResponseRedirect(reverse('admin:ecommerce_crm_ecommercesettings_change', args=[settings_id]))
 
             # Update status to deploying
-            with schema_context(get_public_schema_name()):
-                tenant.deployment_status = 'deploying'
-                tenant.save()
+            settings.deployment_status = 'deploying'
+            settings.save(update_fields=['deployment_status'])
 
             # Deploy to Vercel
-            result = deploy_tenant_frontend(tenant)
+            with schema_context(get_public_schema_name()):
+                tenant_obj = Tenant.objects.get(id=tenant.id)
+                result = deploy_tenant_frontend(tenant_obj)
 
             if result.get('success'):
-                # Update tenant with deployment info
-                with schema_context(get_public_schema_name()):
-                    tenant.frontend_url = result.get('url')
-                    tenant.vercel_project_id = result.get('project_id')
-                    tenant.deployment_status = 'deployed'
-                    tenant.save()
+                # Update settings with deployment info
+                settings.ecommerce_frontend_url = result.get('url')
+                settings.vercel_project_id = result.get('project_id')
+                settings.deployment_status = 'deployed'
+                settings.save(update_fields=['ecommerce_frontend_url', 'vercel_project_id', 'deployment_status'])
 
                 messages.success(
                     request,
@@ -300,9 +290,8 @@ class EcommerceSettingsAdmin(admin.ModelAdmin):
                 )
             else:
                 # Update status to failed
-                with schema_context(get_public_schema_name()):
-                    tenant.deployment_status = 'failed'
-                    tenant.save()
+                settings.deployment_status = 'failed'
+                settings.save(update_fields=['deployment_status'])
 
                 messages.error(
                     request,
