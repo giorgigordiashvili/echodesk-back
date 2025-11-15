@@ -282,10 +282,12 @@ class ClientProductAutoSchema(AutoSchema):
 
     def get_override_parameters(self):
         """Add dynamic attribute filter parameters to the schema"""
+        import logging
         from django.db import connection
         from tenant_schemas.utils import schema_context, get_public_schema_name
         from tenants.models import Tenant
 
+        logger = logging.getLogger(__name__)
         parameters = super().get_override_parameters()
 
         # Only add dynamic parameters for the list action
@@ -304,19 +306,29 @@ class ClientProductAutoSchema(AutoSchema):
             for tenant in tenants:
                 try:
                     with schema_context(tenant.schema_name):
-                        attrs = AttributeDefinition.objects.filter(is_filterable=True).values('key', 'label', 'attribute_type')
+                        # Use 'name' field (JSONField) instead of 'label'
+                        attrs = AttributeDefinition.objects.filter(is_filterable=True).values('key', 'name', 'attribute_type')
 
                         for attr in attrs:
                             attr_key = attr['key']
                             # Store unique attributes by key (avoid duplicates across tenants)
                             if attr_key not in all_attributes:
+                                # Extract label from JSONField 'name' (multilingual)
+                                attr_name = attr['name']
+                                if isinstance(attr_name, dict):
+                                    # Try to get English name, fallback to first available or key
+                                    attr_label = attr_name.get('en', next(iter(attr_name.values()), attr_key.title()))
+                                else:
+                                    attr_label = attr_key.title()
+
                                 all_attributes[attr_key] = {
                                     'key': attr_key,
-                                    'label': attr['label'] or attr_key.title(),
+                                    'label': attr_label,
                                     'type': attr['attribute_type']
                                 }
-                except Exception:
-                    # Skip this tenant if there's an error
+                except Exception as e:
+                    # Log the error but continue with other tenants
+                    logger.warning(f"Error querying attributes for tenant {tenant.schema_name}: {e}")
                     continue
 
             # Generate parameters for all unique attributes
@@ -348,9 +360,11 @@ class ClientProductAutoSchema(AutoSchema):
                     )
                 )
 
+            logger.info(f"Generated {len(all_attributes)} dynamic attribute parameters for OpenAPI schema")
+
         except Exception as e:
-            # If we can't query attributes, don't add any attribute parameters
-            # The description in the main decorator explains the pattern
+            # Log the error for debugging
+            logger.error(f"Failed to generate dynamic attribute parameters: {e}")
             pass
 
         return parameters
