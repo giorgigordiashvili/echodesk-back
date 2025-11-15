@@ -25,6 +25,7 @@ from .models import (
     Order,
     ClientCard,
     EcommerceSettings,
+    Language,
 )
 from tickets.models import ItemList
 from .serializers import (
@@ -42,6 +43,7 @@ from .serializers import (
     ClientCardSerializer,
     ItemListMinimalSerializer,
     ItemListDetailSerializer,
+    LanguageSerializer,
 )
 
 
@@ -1289,4 +1291,33 @@ class ClientItemListViewSet(viewsets.ReadOnlyModelViewSet):
     )
     def retrieve(self, request, *args, **kwargs):
         return super().retrieve(request, *args, **kwargs)
+
+
+@extend_schema_view(
+    list=extend_schema(
+        tags=['Ecommerce Client - Languages'],
+        summary='List available languages',
+        description='Get all active languages available for the storefront'
+    ),
+    retrieve=extend_schema(
+        tags=['Ecommerce Client - Languages'],
+        summary='Get language details',
+        description='Get details of a specific language'
+    )
+)
+class ClientLanguageViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    Client-facing language endpoint for storefronts.
+    Returns active languages that can be used for UI localization.
+    No authentication required - public access.
+    """
+    serializer_class = LanguageSerializer
+    permission_classes = [AllowAny]
+    filter_backends = [filters.OrderingFilter]
+    ordering_fields = ['sort_order', 'code', 'name']
+    ordering = ['sort_order']
+
+    def get_queryset(self):
+        """Return only active languages ordered by sort_order"""
+        return Language.objects.filter(is_active=True).order_by('sort_order')
 

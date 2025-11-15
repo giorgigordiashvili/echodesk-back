@@ -34,6 +34,7 @@ from .views_client import (
     ClientCartItemViewSet,
     ClientOrderViewSet,
     ClientItemListViewSet,
+    ClientLanguageViewSet,
     add_client_card,
     list_client_cards,
     delete_client_card,
@@ -66,6 +67,7 @@ client_router.register(r'cart', ClientCartViewSet, basename='client-cart')
 client_router.register(r'cart-items', ClientCartItemViewSet, basename='client-cart-item')
 client_router.register(r'orders', ClientOrderViewSet, basename='client-order')
 client_router.register(r'item-lists', ClientItemListViewSet, basename='client-item-list')
+client_router.register(r'languages', ClientLanguageViewSet, basename='client-language')
 
 app_name = 'ecommerce_crm'
 
