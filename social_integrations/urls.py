@@ -37,6 +37,7 @@ urlpatterns = [
     path('instagram/webhook/', views.instagram_webhook, name='instagram_webhook'),
 
     # WhatsApp endpoints
+    path('whatsapp/oauth/start/', views.whatsapp_oauth_start, name='whatsapp_oauth_start'),
     path('whatsapp/embedded-signup/callback/', views.whatsapp_embedded_signup_callback, name='whatsapp_embedded_signup_callback'),
     path('whatsapp/status/', views.whatsapp_connection_status, name='whatsapp_status'),
     path('whatsapp/disconnect/', views.whatsapp_disconnect, name='whatsapp_disconnect'),

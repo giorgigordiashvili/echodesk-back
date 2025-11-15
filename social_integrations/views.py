@@ -2218,6 +2218,70 @@ class WhatsAppMessageViewSet(viewsets.ReadOnlyModelViewSet):
         return WhatsAppMessage.objects.filter(business_account__in=tenant_accounts)
 
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, CanManageSocialConnections])
+def whatsapp_oauth_start(request):
+    """Generate WhatsApp Business OAuth URL"""
+    logger = logging.getLogger(__name__)
+
+    try:
+        fb_app_id = getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_APP_ID')
+        if not fb_app_id:
+            return Response({
+                'error': 'Facebook App ID not configured'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        # WhatsApp Embedded Signup config ID
+        config_id = '4254308474803749'
+
+        # Use public callback URL since Facebook needs a consistent redirect URI
+        redirect_uri = 'https://api.echodesk.ge/api/social/whatsapp/embedded-signup/callback/'
+
+        # Include tenant info in state parameter
+        from urllib.parse import quote
+        tenant_obj = getattr(request, "tenant", None)
+
+        # Extract tenant schema name from Tenant object or use default
+        if tenant_obj and hasattr(tenant_obj, 'schema_name'):
+            tenant_name = tenant_obj.schema_name
+        elif tenant_obj and hasattr(tenant_obj, 'name'):
+            tenant_name = tenant_obj.name
+        else:
+            tenant_name = "amanati"  # Default fallback
+
+        # Simplified state parameter with just tenant schema
+        state_raw = f'tenant={tenant_name}'
+        state = quote(state_raw)  # URL encode the state
+        logger.info(f"WhatsApp OAuth - Tenant: {tenant_name}")
+        logger.info(f"WhatsApp OAuth - State parameter: {state}")
+
+        # WhatsApp Embedded Signup OAuth URL
+        oauth_url = (
+            f"https://www.facebook.com/v23.0/dialog/oauth?"
+            f"client_id={fb_app_id}&"
+            f"redirect_uri={quote(redirect_uri)}&"
+            f"config_id={config_id}&"
+            f"response_type=code&"
+            f"scope=whatsapp_business_management,whatsapp_business_messaging&"
+            f"state={state}"
+        )
+
+        logger.info(f"WhatsApp OAuth URL: {oauth_url}")
+
+        # Return OAuth URL to frontend (similar to Facebook pattern)
+        return Response({
+            'oauth_url': oauth_url,
+            'redirect_uri': redirect_uri,
+            'instructions': 'Visit the OAuth URL to connect your WhatsApp Business Account'
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to generate WhatsApp OAuth URL: {str(e)}")
+        return Response({
+            'error': f'Failed to generate WhatsApp OAuth URL: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 @api_view(['GET', 'POST'])
 @permission_classes([])  # No authentication required for embedded signup callback
 def whatsapp_embedded_signup_callback(request):
