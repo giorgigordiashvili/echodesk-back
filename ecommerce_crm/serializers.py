@@ -108,6 +108,7 @@ class ProductListSerializer(serializers.ModelSerializer):
     discount_percentage = serializers.FloatField(read_only=True)
     is_low_stock = serializers.BooleanField(read_only=True)
     is_in_stock = serializers.BooleanField(read_only=True)
+    attribute_values = ProductAttributeValueSerializer(many=True, read_only=True)
 
     class Meta:
         model = Product
@@ -115,7 +116,8 @@ class ProductListSerializer(serializers.ModelSerializer):
             'id', 'sku', 'slug', 'name', 'short_description',
             'price', 'compare_at_price', 'discount_percentage',
             'image', 'quantity', 'status', 'is_featured',
-            'is_low_stock', 'is_in_stock', 'created_at', 'updated_at'
+            'is_low_stock', 'is_in_stock', 'attribute_values',
+            'created_at', 'updated_at'
         ]
         read_only_fields = ['created_at', 'updated_at']
 
