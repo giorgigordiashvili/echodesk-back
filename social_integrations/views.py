@@ -7,6 +7,7 @@ from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
+from tenant_schemas.utils import schema_context
 from django.db.models import F
 from django.http import JsonResponse, HttpResponse
 from django.utils import timezone
