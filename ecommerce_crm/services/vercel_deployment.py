@@ -453,30 +453,43 @@ def deploy_tenant_frontend(tenant) -> Dict[str, Any]:
 
     if result.get("success"):
         project_id = result.get("project_id")
+        logger.info(f"Project created: {project_id}")
 
-        # Trigger a deployment after creating the project
-        logger.info(f"Triggering deployment for project {project_name}...")
-        deployment_result = service.trigger_deployment(project_name)
+        # When we create a project with gitRepository, Vercel automatically triggers
+        # an initial deployment. Let's wait for it to complete.
+        logger.info(f"Waiting for initial deployment to start...")
+        time.sleep(5)  # Give Vercel a moment to queue the deployment
 
-        if deployment_result.get("success"):
-            logger.info(f"Deployment triggered: {deployment_result.get('deployment_id')}")
+        # Wait for deployment to be ready (with timeout)
+        wait_result = service.wait_for_deployment(project_id, max_wait=300)
 
-            # Wait for deployment to be ready (with timeout)
-            wait_result = service.wait_for_deployment(project_id, max_wait=300)
-
-            if wait_result.get("success"):
-                result["url"] = wait_result.get("production_url")
-                result["deployment_url"] = wait_result.get("deployment_url")
-                logger.info(f"Tenant {tenant.schema_name} frontend deployed successfully. URL: {result['url']}")
-            else:
-                # Deployment didn't complete in time or failed
-                logger.warning(f"Deployment did not complete: {wait_result.get('error')}")
-                # Still return the expected URL
-                result["url"] = f"https://{project_name}.vercel.app"
+        if wait_result.get("success"):
+            result["url"] = wait_result.get("production_url")
+            result["deployment_url"] = wait_result.get("deployment_url")
+            logger.info(f"Tenant {tenant.schema_name} frontend deployed successfully. URL: {result['url']}")
         else:
-            logger.warning(f"Failed to trigger deployment: {deployment_result.get('error')}")
-            # Fallback to constructed URL
-            result["url"] = f"https://{project_name}.vercel.app"
+            # Initial deployment didn't start or complete - try triggering manually
+            logger.warning(f"Initial deployment did not complete: {wait_result.get('error')}")
+            logger.info(f"Attempting to trigger deployment manually...")
+
+            deployment_result = service.trigger_deployment(project_name)
+
+            if deployment_result.get("success"):
+                logger.info(f"Manual deployment triggered: {deployment_result.get('deployment_id')}")
+
+                # Wait again for the manual deployment
+                wait_result = service.wait_for_deployment(project_id, max_wait=300)
+
+                if wait_result.get("success"):
+                    result["url"] = wait_result.get("production_url")
+                    result["deployment_url"] = wait_result.get("deployment_url")
+                    logger.info(f"Tenant {tenant.schema_name} frontend deployed successfully. URL: {result['url']}")
+                else:
+                    logger.warning(f"Manual deployment did not complete: {wait_result.get('error')}")
+                    result["url"] = f"https://{project_name}.vercel.app"
+            else:
+                logger.warning(f"Failed to trigger manual deployment: {deployment_result.get('error')}")
+                result["url"] = f"https://{project_name}.vercel.app"
 
         # Fetch final domain info
         domains_info = service.get_project_domains(project_id)
