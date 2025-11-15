@@ -456,50 +456,39 @@ def deploy_tenant_frontend(tenant) -> Dict[str, Any]:
         logger.info(f"Project created: {project_id}")
 
         # When we create a project with gitRepository, Vercel automatically triggers
-        # an initial deployment. Let's wait for it to complete.
-        logger.info(f"Waiting for initial deployment to start...")
-        time.sleep(5)  # Give Vercel a moment to queue the deployment
+        # an initial deployment. We don't wait for it to avoid HTTP timeout.
+        # The deployment will happen in the background on Vercel's side.
 
-        # Wait for deployment to be ready (with timeout)
-        wait_result = service.wait_for_deployment(project_id, max_wait=300)
+        # Set the expected URL immediately
+        result["url"] = f"https://{project_name}.vercel.app"
 
-        if wait_result.get("success"):
-            result["url"] = wait_result.get("production_url")
-            result["deployment_url"] = wait_result.get("deployment_url")
-            logger.info(f"Tenant {tenant.schema_name} frontend deployed successfully. URL: {result['url']}")
-        else:
-            # Initial deployment didn't start or complete - try triggering manually
-            logger.warning(f"Initial deployment did not complete: {wait_result.get('error')}")
-            logger.info(f"Attempting to trigger deployment manually...")
+        # Give Vercel a brief moment to start the deployment, then check status
+        time.sleep(3)
 
-            deployment_result = service.trigger_deployment(project_name)
+        # Quick check if deployment already started
+        project_info = service.get_project_domains(project_id)
+        if project_info.get("success"):
+            latest_deployments = project_info.get("latest_deployments", [])
+            if latest_deployments:
+                latest = latest_deployments[0]
+                state = latest.get("readyState", "")
+                logger.info(f"Initial deployment state: {state}")
 
-            if deployment_result.get("success"):
-                logger.info(f"Manual deployment triggered: {deployment_result.get('deployment_id')}")
-
-                # Wait again for the manual deployment
-                wait_result = service.wait_for_deployment(project_id, max_wait=300)
-
-                if wait_result.get("success"):
-                    result["url"] = wait_result.get("production_url")
-                    result["deployment_url"] = wait_result.get("deployment_url")
-                    logger.info(f"Tenant {tenant.schema_name} frontend deployed successfully. URL: {result['url']}")
-                else:
-                    logger.warning(f"Manual deployment did not complete: {wait_result.get('error')}")
-                    result["url"] = f"https://{project_name}.vercel.app"
+                # If already ready, get the actual URL
+                if state == "READY":
+                    actual_url = project_info.get("production_url")
+                    if actual_url:
+                        result["url"] = actual_url
+                        logger.info(f"Deployment already ready: {actual_url}")
             else:
-                logger.warning(f"Failed to trigger manual deployment: {deployment_result.get('error')}")
-                result["url"] = f"https://{project_name}.vercel.app"
+                # No deployment yet - trigger one manually
+                logger.info(f"No deployment found, triggering manually...")
+                deployment_result = service.trigger_deployment(project_name)
+                if deployment_result.get("success"):
+                    logger.info(f"Manual deployment triggered: {deployment_result.get('deployment_id')}")
 
-        # Fetch final domain info
-        domains_info = service.get_project_domains(project_id)
-        if domains_info.get("success"):
-            result["all_domains"] = domains_info.get("all_domains", [])
-            # Use actual URL if available and we don't have one yet
-            if not result.get("url") or result.get("url") == f"https://{project_name}.vercel.app":
-                actual_url = domains_info.get("production_url")
-                if actual_url:
-                    result["url"] = actual_url
+        logger.info(f"Tenant {tenant.schema_name} frontend project created. Expected URL: {result['url']}")
+        logger.info(f"Deployment is happening in the background on Vercel.")
     else:
         logger.error(f"Failed to deploy frontend for {tenant.schema_name}: {result.get('error')}")
 
