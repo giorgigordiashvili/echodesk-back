@@ -72,7 +72,7 @@ class SubscriptionMiddleware:
 
         # Try to get active subscription
         try:
-            subscription = TenantSubscription.objects.select_related('package').get(
+            subscription = TenantSubscription.objects.select_related('package').prefetch_related('selected_features').get(
                 tenant=request.tenant,
                 is_active=True
             )
@@ -80,23 +80,47 @@ class SubscriptionMiddleware:
             request.subscription = subscription
             request.subscription_package = subscription.package
 
-            # Create features dict for easy access (legacy features)
+            # Create features dict for easy access
+            # Support BOTH legacy package-based AND new feature-based subscriptions
             package = subscription.package
+
+            # Initialize all legacy features as False
             request.subscription_features = {
-                'ticket_management': package.ticket_management,
-                'email_integration': package.email_integration,
-                'sip_calling': package.sip_calling,
-                'facebook_integration': package.facebook_integration,
-                'instagram_integration': package.instagram_integration,
-                'whatsapp_integration': package.whatsapp_integration,
-                'advanced_analytics': package.advanced_analytics,
-                'api_access': package.api_access,
-                'custom_integrations': package.custom_integrations,
-                'priority_support': package.priority_support,
-                'dedicated_account_manager': package.dedicated_account_manager,
+                'ticket_management': False,
+                'email_integration': False,
+                'sip_calling': False,
+                'facebook_integration': False,
+                'instagram_integration': False,
+                'whatsapp_integration': False,
+                'advanced_analytics': False,
+                'api_access': False,
+                'custom_integrations': False,
+                'priority_support': False,
+                'dedicated_account_manager': False,
             }
 
-            # Add dynamic features to the dict
+            # If package exists (legacy mode), use package features
+            if package:
+                request.subscription_features.update({
+                    'ticket_management': package.ticket_management,
+                    'email_integration': package.email_integration,
+                    'sip_calling': package.sip_calling,
+                    'facebook_integration': package.facebook_integration,
+                    'instagram_integration': package.instagram_integration,
+                    'whatsapp_integration': package.whatsapp_integration,
+                    'advanced_analytics': package.advanced_analytics,
+                    'api_access': package.api_access,
+                    'custom_integrations': package.custom_integrations,
+                    'priority_support': package.priority_support,
+                    'dedicated_account_manager': package.dedicated_account_manager,
+                })
+
+            # Add features from selected_features (new feature-based subscriptions)
+            # This overwrites legacy features if the same key exists
+            for feature in subscription.selected_features.all():
+                request.subscription_features[feature.key] = True
+
+            # Also add dynamic features from TenantFeature (for backward compatibility)
             tenant_features = TenantFeature.objects.filter(
                 tenant=request.tenant,
                 is_active=True,

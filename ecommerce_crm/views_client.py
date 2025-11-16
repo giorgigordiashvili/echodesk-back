@@ -27,7 +27,7 @@ from .models import (
     EcommerceSettings,
     Language,
 )
-from tickets.models import ItemList
+from tickets.models import ItemList, ListItem
 from .serializers import (
     EcommerceClientSerializer,
     ProductListSerializer,
@@ -43,6 +43,7 @@ from .serializers import (
     ClientCardSerializer,
     ItemListMinimalSerializer,
     ItemListDetailSerializer,
+    ListItemSerializer,
     LanguageSerializer,
 )
 
@@ -1291,6 +1292,36 @@ class ClientItemListViewSet(viewsets.ReadOnlyModelViewSet):
     )
     def retrieve(self, request, *args, **kwargs):
         return super().retrieve(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce Client - Item Lists'],
+        summary='Get specific item from item list',
+        description='Get a specific item by its ID from within an item list',
+        responses={200: ListItemSerializer}
+    )
+    @action(detail=True, methods=['get'], url_path='items/(?P<item_id>[^/.]+)')
+    def get_item(self, request, pk=None, item_id=None):
+        """
+        Get a specific item from an item list
+        GET /api/ecommerce/client/item-lists/{id}/items/{item_id}/
+        """
+        # Get the item list first (ensures it's public and active)
+        item_list = self.get_object()
+
+        # Try to get the specific item
+        try:
+            item = ListItem.objects.get(
+                id=item_id,
+                item_list=item_list,
+                is_active=True
+            )
+            serializer = ListItemSerializer(item)
+            return Response(serializer.data)
+        except ListItem.DoesNotExist:
+            return Response(
+                {'error': 'Item not found in this list'},
+                status=status.HTTP_404_NOT_FOUND
+            )
 
 
 @extend_schema_view(
