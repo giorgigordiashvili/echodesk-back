@@ -565,6 +565,11 @@ class EcommerceSettingsSerializer(serializers.ModelSerializer):
             'enable_cash_on_delivery', 'enable_card_payment',
             'store_name', 'store_email', 'store_phone',
             'ecommerce_frontend_url', 'deployment_status', 'vercel_project_id', 'custom_domain',
+            # Theme configuration fields
+            'theme_preset', 'theme_primary_color', 'theme_secondary_color', 'theme_accent_color',
+            'theme_background_color', 'theme_foreground_color', 'theme_muted_color',
+            'theme_muted_foreground_color', 'theme_destructive_color', 'theme_border_color',
+            'theme_border_radius', 'theme_card_color', 'theme_card_foreground_color',
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'tenant', 'ecommerce_frontend_url', 'deployment_status', 'vercel_project_id', 'custom_domain', 'created_at', 'updated_at']

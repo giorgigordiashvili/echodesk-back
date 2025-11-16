@@ -41,6 +41,7 @@ from .views_client import (
     delete_client_card,
     set_default_client_card,
     get_homepage_config,
+    get_store_theme,
 )
 
 # Admin router - requires admin JWT authentication
@@ -95,6 +96,8 @@ urlpatterns = [
     path('client/cards/<int:card_id>/set-default/', set_default_client_card, name='client-set-default-card'),
     # Public homepage endpoint
     path('client/homepage/', get_homepage_config, name='client-homepage'),
+    # Public theme endpoint
+    path('client/theme/', get_store_theme, name='client-theme'),
     # Client-facing endpoints (requires client JWT)
     path('client/', include(client_router.urls)),
     # Admin endpoints (requires admin JWT)

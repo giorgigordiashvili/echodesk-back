@@ -1382,3 +1382,96 @@ def get_homepage_config(request):
         'sections': serializer.data
     })
 
+
+@extend_schema(
+    operation_id='get_store_theme',
+    summary='Get store theme configuration',
+    description='Get the theme configuration (colors, border radius) for the storefront. This endpoint is public and does not require authentication.',
+    responses={
+        200: OpenApiResponse(
+            description='Theme configuration',
+            examples=[
+                OpenApiExample(
+                    'Theme Response',
+                    value={
+                        'preset': 'default',
+                        'colors': {
+                            'primary': '221 83% 53%',
+                            'secondary': '215 16% 47%',
+                            'accent': '221 83% 53%',
+                            'background': '0 0% 100%',
+                            'foreground': '0 0% 9%',
+                            'muted': '0 0% 96%',
+                            'muted_foreground': '0 0% 45%',
+                            'destructive': '0 84.2% 60.2%',
+                            'border': '0 0% 90%',
+                            'card': '0 0% 100%',
+                            'card_foreground': '0 0% 9%',
+                        },
+                        'radius': '0.5rem',
+                        'store_name': 'My Store',
+                    }
+                )
+            ]
+        ),
+        404: OpenApiResponse(description='Settings not found')
+    },
+    tags=['Store']
+)
+@api_view(['GET'])
+@permission_classes([AllowAny])
+@authentication_classes([])
+def get_store_theme(request):
+    """
+    Get the theme configuration for the storefront.
+    Returns theme colors, border radius, and preset information.
+
+    GET /api/ecommerce/client/theme/
+    """
+    try:
+        settings = EcommerceSettings.objects.first()
+        if not settings:
+            # Return defaults if no settings exist
+            return Response({
+                'preset': 'default',
+                'colors': {
+                    'primary': '221 83% 53%',
+                    'secondary': '215 16% 47%',
+                    'accent': '221 83% 53%',
+                    'background': '0 0% 100%',
+                    'foreground': '0 0% 9%',
+                    'muted': '0 0% 96%',
+                    'muted_foreground': '0 0% 45%',
+                    'destructive': '0 84.2% 60.2%',
+                    'border': '0 0% 90%',
+                    'card': '0 0% 100%',
+                    'card_foreground': '0 0% 9%',
+                },
+                'radius': '0.5rem',
+                'store_name': '',
+            })
+
+        return Response({
+            'preset': settings.theme_preset,
+            'colors': {
+                'primary': settings.theme_primary_color,
+                'secondary': settings.theme_secondary_color,
+                'accent': settings.theme_accent_color,
+                'background': settings.theme_background_color,
+                'foreground': settings.theme_foreground_color,
+                'muted': settings.theme_muted_color,
+                'muted_foreground': settings.theme_muted_foreground_color,
+                'destructive': settings.theme_destructive_color,
+                'border': settings.theme_border_color,
+                'card': settings.theme_card_color,
+                'card_foreground': settings.theme_card_foreground_color,
+            },
+            'radius': settings.theme_border_radius,
+            'store_name': settings.store_name,
+        })
+    except Exception as e:
+        return Response(
+            {'error': f'Failed to fetch theme: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+

@@ -1067,6 +1067,80 @@ class EcommerceSettings(models.Model):
         help_text="Custom domain for the e-commerce storefront (e.g., shop.example.com)"
     )
 
+    # Theme Configuration (shadcn/ui CSS variables)
+    theme_preset = models.CharField(
+        max_length=50,
+        default='default',
+        choices=[
+            ('default', 'Default'),
+            ('rounded', 'Rounded'),
+            ('sharp', 'Sharp'),
+            ('soft', 'Soft'),
+            ('custom', 'Custom'),
+        ],
+        help_text="Predefined theme preset"
+    )
+    theme_primary_color = models.CharField(
+        max_length=50,
+        default="221 83% 53%",
+        help_text="Primary color in HSL format (e.g., '221 83% 53%')"
+    )
+    theme_secondary_color = models.CharField(
+        max_length=50,
+        default="215 16% 47%",
+        help_text="Secondary color in HSL format"
+    )
+    theme_accent_color = models.CharField(
+        max_length=50,
+        default="221 83% 53%",
+        help_text="Accent color in HSL format"
+    )
+    theme_background_color = models.CharField(
+        max_length=50,
+        default="0 0% 100%",
+        help_text="Background color in HSL format"
+    )
+    theme_foreground_color = models.CharField(
+        max_length=50,
+        default="0 0% 9%",
+        help_text="Foreground/text color in HSL format"
+    )
+    theme_muted_color = models.CharField(
+        max_length=50,
+        default="0 0% 96%",
+        help_text="Muted background color in HSL format"
+    )
+    theme_muted_foreground_color = models.CharField(
+        max_length=50,
+        default="0 0% 45%",
+        help_text="Muted foreground/text color in HSL format"
+    )
+    theme_destructive_color = models.CharField(
+        max_length=50,
+        default="0 84.2% 60.2%",
+        help_text="Destructive/error color in HSL format"
+    )
+    theme_border_color = models.CharField(
+        max_length=50,
+        default="0 0% 90%",
+        help_text="Border color in HSL format"
+    )
+    theme_border_radius = models.CharField(
+        max_length=20,
+        default="0.5rem",
+        help_text="Border radius value (e.g., '0.5rem', '1rem', '0')"
+    )
+    theme_card_color = models.CharField(
+        max_length=50,
+        default="0 0% 100%",
+        help_text="Card background color in HSL format"
+    )
+    theme_card_foreground_color = models.CharField(
+        max_length=50,
+        default="0 0% 9%",
+        help_text="Card foreground/text color in HSL format"
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
