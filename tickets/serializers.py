@@ -629,7 +629,7 @@ class ItemListSerializer(serializers.ModelSerializer):
     class Meta:
         model = ItemList
         fields = [
-            'id', 'title', 'description', 'is_active', 'parent_list', 'custom_fields_schema',
+            'id', 'title', 'description', 'is_active', 'is_public', 'parent_list', 'custom_fields_schema',
             'created_at', 'updated_at', 'created_by',
             'items', 'items_count', 'root_items'
         ]
@@ -658,7 +658,7 @@ class ItemListMinimalSerializer(serializers.ModelSerializer):
     class Meta:
         model = ItemList
         fields = [
-            'id', 'title', 'description', 'is_active', 'parent_list', 'custom_fields_schema',
+            'id', 'title', 'description', 'is_active', 'is_public', 'parent_list', 'custom_fields_schema',
             'created_at', 'updated_at', 'created_by', 'items_count'
         ]
         read_only_fields = fields

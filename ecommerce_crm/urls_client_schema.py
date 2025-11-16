@@ -19,6 +19,7 @@ from ecommerce_crm.views_client import (
     list_client_cards,
     delete_client_card,
     set_default_client_card,
+    get_homepage_config,
 )
 
 urlpatterns = [
@@ -37,6 +38,9 @@ urlpatterns = [
     path('api/ecommerce/client/cards/', list_client_cards, name='client-list-cards'),
     path('api/ecommerce/client/cards/<int:card_id>/delete/', delete_client_card, name='client-delete-card'),
     path('api/ecommerce/client/cards/<int:card_id>/set-default/', set_default_client_card, name='client-set-default-card'),
+
+    # Public homepage endpoint
+    path('api/ecommerce/client/homepage/', get_homepage_config, name='client-homepage'),
 
     # Client-facing endpoints (requires client JWT)
     path('api/ecommerce/client/', include(client_router.urls)),
