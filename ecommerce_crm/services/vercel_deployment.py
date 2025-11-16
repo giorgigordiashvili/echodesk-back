@@ -7,6 +7,8 @@ e-commerce frontends to Vercel.
 import requests
 import logging
 import time
+import secrets
+import base64
 from django.conf import settings
 from typing import Dict, Any, Optional, List
 
@@ -635,6 +637,10 @@ def deploy_tenant_frontend(tenant) -> Dict[str, Any]:
     # Generate project name (must be URL-safe)
     project_name = f"store-{tenant.schema_name}".lower().replace("_", "-")
 
+    # Generate NextAuth secret (unique per tenant)
+    nextauth_secret = base64.b64encode(secrets.token_bytes(32)).decode('utf-8')
+    frontend_url = f"https://{project_name}.vercel.app"
+
     # Prepare environment variables from tenant configuration
     env_vars = [
         {"key": "NEXT_PUBLIC_TENANT_ID", "value": str(tenant.id)},
@@ -660,6 +666,9 @@ def deploy_tenant_frontend(tenant) -> Dict[str, Any]:
         {"key": "NEXT_PUBLIC_GA_ID", "value": ""},
         {"key": "NEXT_PUBLIC_GTM_ID", "value": ""},
         {"key": "NEXT_PUBLIC_IMAGE_HOSTNAMES", "value": "echodesk-spaces.fra1.digitaloceanspaces.com"},
+        # NextAuth.js configuration (required for authentication)
+        {"key": "NEXTAUTH_SECRET", "value": nextauth_secret},
+        {"key": "NEXTAUTH_URL", "value": frontend_url},
     ]
 
     # Create project with environment variables
