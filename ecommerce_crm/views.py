@@ -2521,7 +2521,7 @@ class HomepageSectionViewSet(viewsets.ModelViewSet):
         responses={200: HomepageSectionSerializer(many=True)},
         parameters=[]  # Explicitly exclude inherited query parameters
     )
-    @action(detail=False, methods=['post'], url_path='reorder')
+    @action(detail=False, methods=['post'], url_path='reorder', pagination_class=None, filter_backends=[])
     def reorder(self, request):
         """
         Reorder homepage sections based on provided order of IDs.
