@@ -636,6 +636,146 @@ def bog_webhook(request):
                     'card_id': saved_card.id
                 })
 
+            # Check if this is an ecommerce card addition payment
+            if payment_type == 'add_ecommerce_card':
+                tenant = payment_order.tenant
+
+                # Extract card information from webhook
+                card_type = payment_detail.get('card_type', '')
+                masked_card_number = payment_detail.get('payer_identifier', '')
+                card_expiry = payment_detail.get('card_expiry_date', '')
+
+                logger.info(f'Processing ecommerce card addition for tenant {tenant.schema_name}: {card_type} {masked_card_number}')
+
+                # Save the card to SavedCard model as ecommerce type
+                with transaction.atomic():
+                    # Check if ecommerce card already exists
+                    existing_ecommerce_card = SavedCard.objects.filter(
+                        tenant=tenant,
+                        card_save_type='ecommerce',
+                        is_active=True
+                    ).first()
+
+                    if existing_ecommerce_card:
+                        # Update existing ecommerce card
+                        existing_ecommerce_card.parent_order_id = bog_order_id
+                        existing_ecommerce_card.card_type = card_type
+                        existing_ecommerce_card.masked_card_number = masked_card_number
+                        existing_ecommerce_card.card_expiry = card_expiry
+                        existing_ecommerce_card.transaction_id = transaction_id
+                        existing_ecommerce_card.save()
+                        saved_card = existing_ecommerce_card
+                        logger.info(f'Updated ecommerce card for tenant {tenant.schema_name}: {saved_card.id}')
+                    else:
+                        saved_card = SavedCard.objects.create(
+                            tenant=tenant,
+                            parent_order_id=bog_order_id,
+                            card_type=card_type,
+                            masked_card_number=masked_card_number,
+                            card_expiry=card_expiry,
+                            transaction_id=transaction_id,
+                            is_active=True,
+                            is_default=False,  # Ecommerce card is not default for recurring
+                            card_save_type='ecommerce'  # Variable amount charges
+                        )
+                        logger.info(f'Ecommerce card saved for tenant {tenant.schema_name}: {saved_card.id}')
+
+                    # Mark payment order as having saved the card
+                    payment_order.card_saved = True
+                    payment_order.save()
+
+                return Response({
+                    'status': 'success',
+                    'action': 'ecommerce_card_added',
+                    'card_id': saved_card.id
+                })
+
+            # Check if this is a feature addition payment
+            if payment_type == 'feature_addition':
+                logger.info(f'Processing feature addition payment for order {external_order_id}')
+
+                tenant = payment_order.tenant
+                feature_id = payment_order.metadata.get('feature_id')
+                save_card_type = payment_order.metadata.get('save_card_type', 'ecommerce')
+
+                with transaction.atomic():
+                    # Add the feature to subscription
+                    try:
+                        from .models import Feature
+                        feature = Feature.objects.get(id=feature_id)
+                        subscription = TenantSubscription.objects.get(tenant=tenant)
+
+                        # Add feature if not already added
+                        if not subscription.selected_features.filter(id=feature_id).exists():
+                            subscription.selected_features.add(feature)
+                            logger.info(f'Feature {feature.key} added to subscription for {tenant.schema_name}')
+
+                        # Recalculate monthly cost
+                        total_feature_cost = sum(
+                            f.price_per_user_gel for f in subscription.selected_features.all()
+                        )
+                        # Note: monthly_cost is a property, not a field, so we don't save it
+                        subscription.save()
+
+                    except Feature.DoesNotExist:
+                        logger.error(f'Feature {feature_id} not found for feature addition')
+                    except TenantSubscription.DoesNotExist:
+                        logger.error(f'Subscription not found for tenant {tenant.schema_name}')
+
+                    # Save the ecommerce card if card was saved
+                    if card_saved_for_recurring and save_card_type == 'ecommerce':
+                        card_type = payment_detail.get('card_type', '')
+                        masked_card = payment_detail.get('payer_identifier', '')
+                        card_expiry = payment_detail.get('card_expiry_date', '')
+
+                        # Check if ecommerce card already exists for this tenant
+                        existing_ecommerce_card = SavedCard.objects.filter(
+                            tenant=tenant,
+                            card_save_type='ecommerce',
+                            is_active=True
+                        ).first()
+
+                        if not existing_ecommerce_card:
+                            SavedCard.objects.create(
+                                tenant=tenant,
+                                parent_order_id=bog_order_id,
+                                card_type=card_type,
+                                masked_card_number=masked_card,
+                                card_expiry=card_expiry,
+                                transaction_id=transaction_id,
+                                is_active=True,
+                                is_default=False,  # Ecommerce card is not default
+                                card_save_type='ecommerce'
+                            )
+                            logger.info(f'Saved ecommerce card for tenant {tenant.schema_name}: {card_type} {masked_card}')
+                        else:
+                            # Update existing ecommerce card
+                            existing_ecommerce_card.parent_order_id = bog_order_id
+                            existing_ecommerce_card.card_type = card_type
+                            existing_ecommerce_card.masked_card_number = masked_card
+                            existing_ecommerce_card.card_expiry = card_expiry
+                            existing_ecommerce_card.transaction_id = transaction_id
+                            existing_ecommerce_card.save()
+                            logger.info(f'Updated ecommerce card for tenant {tenant.schema_name}')
+
+                    # Mark payment order as complete
+                    payment_order.card_saved = card_saved_for_recurring
+                    payment_order.save()
+
+                    # Generate invoice
+                    generate_invoice_for_payment(
+                        payment_order=payment_order,
+                        tenant=tenant,
+                        package=None,
+                        agent_count=payment_order.agent_count
+                    )
+
+                return Response({
+                    'status': 'success',
+                    'action': 'feature_added',
+                    'feature_id': feature_id
+                })
+
             # Check if this is a reactivation payment
             if payment_type == 'reactivation':
                 logger.info(f'Processing reactivation payment for order {external_order_id}')
@@ -1690,6 +1830,138 @@ def add_new_card(request):
         return Response(
             {
                 'error': 'Card addition failed',
+                'message': str(e)
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@extend_schema(
+    operation_id='add_ecommerce_card',
+    summary='Add Ecommerce Payment Card',
+    description='Create a 0 GEL payment to add and save a new ecommerce payment card for variable amount charges (like feature additions)',
+    request=inline_serializer(
+        name='AddEcommerceCardRequest',
+        fields={}
+    ),
+    responses={
+        200: OpenApiResponse(
+            description='Payment URL created to add ecommerce card',
+            response=inline_serializer(
+                name='AddEcommerceCardResponse',
+                fields={
+                    'payment_id': serializers.CharField(),
+                    'payment_url': serializers.CharField(),
+                    'amount': serializers.FloatField(),
+                    'currency': serializers.CharField()
+                }
+            )
+        ),
+        403: OpenApiResponse(description='Not accessible from this domain'),
+        503: OpenApiResponse(description='Payment gateway not configured')
+    },
+    tags=['Payments']
+)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def add_ecommerce_card(request):
+    """
+    Create a 0 GEL payment to add and save an ecommerce payment card
+
+    This endpoint creates a payment session with 0 amount, allowing the user
+    to go through the BOG payment flow and add their card details. The card
+    will be saved as an 'ecommerce' type card for future variable amount charges
+    (like feature additions).
+
+    Different from add_new_card which saves a 'subscription' type card for fixed recurring amounts.
+    """
+    if not hasattr(request, 'tenant'):
+        return Response(
+            {'error': 'This endpoint is only available from tenant subdomains'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    # Check if BOG is configured
+    if not bog_service.is_configured():
+        return Response(
+            {
+                'error': 'Payment gateway not configured',
+                'message': 'Please contact support to set up payment processing'
+            },
+            status=status.HTTP_503_SERVICE_UNAVAILABLE
+        )
+
+    # Generate URLs
+    api_host = request.get_host()
+    frontend_host = api_host.replace('api.', '')
+    frontend_url = f"https://{frontend_host}"
+    return_url = f"{frontend_url}/settings/subscription?ecommerce_card_added=success"
+
+    # Ensure callback_url starts with https://
+    api_domain = settings.API_DOMAIN
+    if not api_domain.startswith('http'):
+        api_domain = f"https://{api_domain}"
+    callback_url = f"{api_domain}/api/payments/webhook/"
+
+    try:
+        # Generate external order ID for tracking
+        import uuid
+        external_order_id = f"ECARD-{uuid.uuid4().hex[:12].upper()}"
+
+        # Create 0 GEL payment session
+        payment_result = bog_service.create_payment(
+            amount=0.0,  # 0 GEL charge
+            currency='GEL',
+            description='Add ecommerce payment card',
+            customer_email=request.user.email if hasattr(request.user, 'email') else '',
+            customer_name=f"{request.user.first_name} {request.user.last_name}" if hasattr(request.user, 'first_name') else '',
+            return_url_success=return_url,
+            return_url_fail=f"{frontend_url}/settings/subscription?ecommerce_card_added=failed",
+            callback_url=callback_url,
+            external_order_id=external_order_id,
+            metadata={
+                'type': 'add_ecommerce_card',
+                'tenant_id': request.tenant.id
+            }
+        )
+
+        # Enable ecommerce card saving (variable amounts)
+        bog_order_id = payment_result['order_id']
+        bog_service.enable_card_saving(bog_order_id)  # Uses /cards endpoint for ecommerce
+
+        # Store payment order in database
+        payment_order = PaymentOrder.objects.create(
+            order_id=external_order_id,
+            bog_order_id=bog_order_id,
+            tenant=request.tenant,
+            package=None,
+            amount=0.0,
+            currency='GEL',
+            agent_count=0,
+            payment_url=payment_result['payment_url'],
+            status='pending',
+            metadata={
+                **payment_result.get('metadata', {}),
+                'type': 'add_ecommerce_card'
+            }
+        )
+
+        logger.info(f'Ecommerce card addition payment order created: {payment_order.order_id} for tenant {request.tenant.schema_name}')
+
+        return Response({
+            'payment_id': payment_result.get('payment_id'),
+            'payment_url': payment_result.get('payment_url'),
+            'amount': 0.0,
+            'currency': 'GEL',
+            'status': 'pending',
+            'message': 'Redirect user to payment_url to add ecommerce card'
+        })
+
+    except Exception as e:
+        logger.error(f'Failed to create ecommerce card addition payment for tenant {request.tenant.schema_name}: {e}')
+        return Response(
+            {
+                'error': 'Ecommerce card addition failed',
                 'message': str(e)
             },
             status=status.HTTP_500_INTERNAL_SERVER_ERROR

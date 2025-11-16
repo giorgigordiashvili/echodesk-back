@@ -14,7 +14,7 @@ from .package_views import (
 from .payment_views import (
     create_subscription_payment, check_payment_status, bog_webhook, cancel_subscription,
     get_saved_card, remove_saved_card, set_default_card, manual_payment, add_new_card, list_invoices,
-    reactivate_subscription_payment
+    reactivate_subscription_payment, add_ecommerce_card
 )
 from .upgrade_views import (
     upgrade_preview, upgrade_immediate, upgrade_scheduled, cancel_scheduled_upgrade
@@ -25,7 +25,9 @@ from .cron_views import (
 )
 from .feature_views import (
     FeatureViewSet, PermissionViewSet, TenantFeatureViewSet,
-    TenantPermissionViewSet
+    TenantPermissionViewSet, add_feature_to_subscription,
+    remove_feature_from_subscription, update_agent_count,
+    get_available_features
 )
 from .cors_views import simple_cors_test
 from .deployment_views import (
@@ -58,6 +60,10 @@ urlpatterns = [
 
     # Subscription endpoints (authenticated access)
     path('api/subscription/me/', get_my_subscription, name='get_my_subscription'),
+    path('api/subscription/features/add/', add_feature_to_subscription, name='add_feature_to_subscription'),
+    path('api/subscription/features/remove/', remove_feature_from_subscription, name='remove_feature_from_subscription'),
+    path('api/subscription/features/available/', get_available_features, name='get_available_features'),
+    path('api/subscription/agent-count/', update_agent_count, name='update_agent_count'),
 
     # Payment endpoints
     path('api/payments/create/', create_subscription_payment, name='create_subscription_payment'),
@@ -68,6 +74,7 @@ urlpatterns = [
     path('api/payments/saved-card/', remove_saved_card, name='remove_saved_card'),
     path('api/payments/saved-card/set-default/', set_default_card, name='set_default_card'),
     path('api/payments/saved-card/add/', add_new_card, name='add_new_card'),
+    path('api/payments/saved-card/add-ecommerce/', add_ecommerce_card, name='add_ecommerce_card'),
     path('api/payments/manual/', manual_payment, name='manual_payment'),
     path('api/payments/reactivate/', reactivate_subscription_payment, name='reactivate_subscription_payment'),
     path('api/payments/invoices/', list_invoices, name='list_invoices'),

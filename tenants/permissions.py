@@ -228,7 +228,7 @@ def get_subscription_info(request):
         'has_subscription': True,
         'subscription': subscription_data,
         'features': features_dict,
-        'selected_features': list(subscription.selected_features.values('id', 'key', 'name', 'price_per_user_gel')),
+        'selected_features': list(subscription.selected_features.values('id', 'key', 'name', 'price_per_user_gel', 'category', 'description')),
         'limits': limits,
         'usage': {
             'current_users': subscription.current_users,
