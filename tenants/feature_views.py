@@ -199,103 +199,31 @@ def add_feature_to_subscription(request):
     # Calculate prorated cost for remaining days in billing cycle
     today = timezone.now().date()
     if subscription.next_billing_date:
-        days_remaining = (subscription.next_billing_date - today).days
+        # Handle both datetime and date types
+        next_billing = subscription.next_billing_date
+        if hasattr(next_billing, 'date'):
+            next_billing = next_billing.date()
+        days_remaining = (next_billing - today).days
     else:
         days_remaining = 30
 
     monthly_feature_cost = feature.price_per_user_gel * subscription.agent_count
     prorated_cost = (Decimal(days_remaining) / Decimal(30)) * monthly_feature_cost
 
-    # Charge the ecommerce saved card if available and charge_immediately is true
+    # Always redirect user to payment page for 3DS authentication
+    # Even with saved card, user must complete payment flow
     payment_result = None
     payment_required = prorated_cost > 0 and charge_immediately
 
     if payment_required:
-        # Look for an ecommerce card first, then fall back to any active card
-        ecommerce_card = SavedCard.objects.filter(
-            tenant=request.tenant,
-            is_active=True,
-            card_save_type='ecommerce'
-        ).first()
-
-        if not ecommerce_card:
-            # No ecommerce card saved - return payment URL for user to pay
-            logger.info(f'No ecommerce card found for tenant {request.tenant.schema_name}, creating payment session')
-
-            # Create a payment session for the prorated amount
-            try:
-                from django.conf import settings as django_settings
-                api_host = request.get_host()
-                frontend_host = api_host.replace('api.', '')
-                frontend_url = f"https://{frontend_host}"
-
-                api_domain = django_settings.API_DOMAIN
-                if not api_domain.startswith('http'):
-                    api_domain = f"https://{api_domain}"
-                callback_url = f"{api_domain}/api/payments/webhook/"
-
-                external_order_id = f"FEAT-{uuid.uuid4().hex[:12].upper()}"
-
-                payment_response = bog_service.create_payment(
-                    amount=float(prorated_cost),
-                    currency='GEL',
-                    description=f'Add feature: {feature.name}',
-                    customer_email=request.tenant.admin_email,
-                    customer_name=request.tenant.admin_name,
-                    return_url_success=f"{frontend_url}/settings/subscription?feature_added=success",
-                    return_url_fail=f"{frontend_url}/settings/subscription?feature_added=failed",
-                    callback_url=callback_url,
-                    external_order_id=external_order_id,
-                )
-
-                # Enable ecommerce card saving
-                bog_service.enable_card_saving(payment_response['order_id'])
-
-                # Create payment order
-                PaymentOrder.objects.create(
-                    order_id=external_order_id,
-                    bog_order_id=payment_response['order_id'],
-                    tenant=request.tenant,
-                    package=None,
-                    amount=float(prorated_cost),
-                    currency='GEL',
-                    agent_count=subscription.agent_count,
-                    payment_url=payment_response['payment_url'],
-                    status='pending',
-                    metadata={
-                        'type': 'feature_addition',
-                        'feature_id': feature.id,
-                        'feature_key': feature.key,
-                        'prorated_cost': float(prorated_cost),
-                        'save_card_type': 'ecommerce'
-                    }
-                )
-
-                return Response({
-                    'success': False,
-                    'requires_payment': True,
-                    'message': 'Payment required to add this feature',
-                    'payment_url': payment_response['payment_url'],
-                    'feature': {
-                        'id': feature.id,
-                        'key': feature.key,
-                        'name': feature.name,
-                        'price_per_user_gel': float(feature.price_per_user_gel),
-                    },
-                    'prorated_cost': float(prorated_cost),
-                    'days_remaining': days_remaining,
-                })
-
-            except Exception as e:
-                logger.error(f'Failed to create payment for feature addition: {e}')
-                return Response(
-                    {'error': f'Failed to create payment: {str(e)}'},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
-                )
-
-        # Charge the ecommerce card
+        # Create a payment session for the prorated amount
+        # User will be redirected to complete payment (with 3DS if needed)
         try:
             from django.conf import settings as django_settings
+            api_host = request.get_host()
+            frontend_host = api_host.replace('api.', '')
+            frontend_url = f"https://{frontend_host}"
+
             api_domain = django_settings.API_DOMAIN
             if not api_domain.startswith('http'):
                 api_domain = f"https://{api_domain}"
@@ -303,91 +231,77 @@ def add_feature_to_subscription(request):
 
             external_order_id = f"FEAT-{uuid.uuid4().hex[:12].upper()}"
 
-            payment_result = bog_service.charge_saved_card(
-                parent_order_id=ecommerce_card.parent_order_id,
+            # Check if we should save card for future use
+            has_ecommerce_card = SavedCard.objects.filter(
+                tenant=request.tenant,
+                is_active=True,
+                card_save_type='ecommerce'
+            ).exists()
+
+            payment_response = bog_service.create_payment(
                 amount=float(prorated_cost),
                 currency='GEL',
+                description=f'Add feature: {feature.name}',
+                customer_email=request.tenant.admin_email,
+                customer_name=request.tenant.admin_name,
+                return_url_success=f"{frontend_url}/settings/subscription?feature_added=success",
+                return_url_fail=f"{frontend_url}/settings/subscription?feature_added=failed",
                 callback_url=callback_url,
-                external_order_id=external_order_id
+                external_order_id=external_order_id,
             )
 
-            # If payment requires authentication (3D Secure), return the payment URL
-            if payment_result.get('requires_authentication'):
-                # Create payment order for tracking
-                PaymentOrder.objects.create(
-                    order_id=external_order_id,
-                    bog_order_id=payment_result['order_id'],
-                    tenant=request.tenant,
-                    package=None,
-                    amount=float(prorated_cost),
-                    currency='GEL',
-                    agent_count=subscription.agent_count,
-                    payment_url=payment_result.get('payment_url', ''),
-                    status='pending',
-                    metadata={
-                        'type': 'feature_addition',
-                        'feature_id': feature.id,
-                        'feature_key': feature.key,
-                        'prorated_cost': float(prorated_cost),
-                    }
-                )
+            # Enable ecommerce card saving if user doesn't have one yet
+            if not has_ecommerce_card:
+                bog_service.enable_card_saving(payment_response['order_id'])
+                save_card_type = 'ecommerce'
+            else:
+                save_card_type = None
 
-                return Response({
-                    'success': False,
-                    'requires_authentication': True,
-                    'message': 'Card authentication required',
-                    'payment_url': payment_result['payment_url'],
-                    'feature': {
-                        'id': feature.id,
-                        'key': feature.key,
-                        'name': feature.name,
-                        'price_per_user_gel': float(feature.price_per_user_gel),
-                    },
-                    'prorated_cost': float(prorated_cost),
-                    'days_remaining': days_remaining,
-                })
-
-            # Payment successful - create payment order record
-            payment_order = PaymentOrder.objects.create(
+            # Create payment order
+            PaymentOrder.objects.create(
                 order_id=external_order_id,
-                bog_order_id=payment_result['order_id'],
+                bog_order_id=payment_response['order_id'],
                 tenant=request.tenant,
                 package=None,
                 amount=float(prorated_cost),
                 currency='GEL',
                 agent_count=subscription.agent_count,
-                payment_url='',
-                status='paid',
-                paid_at=timezone.now(),
+                payment_url=payment_response['payment_url'],
+                status='pending',
                 metadata={
                     'type': 'feature_addition',
                     'feature_id': feature.id,
                     'feature_key': feature.key,
                     'prorated_cost': float(prorated_cost),
+                    'save_card_type': save_card_type
                 }
             )
 
-            # Generate invoice
-            Invoice.objects.create(
-                tenant=request.tenant,
-                payment_order=payment_order,
-                amount=float(prorated_cost),
-                currency='GEL',
-                package=None,
-                description=f'Feature addition: {feature.name} (prorated for {days_remaining} days)',
-                agent_count=subscription.agent_count,
-                paid_date=timezone.now(),
-            )
+            logger.info(f'Feature addition payment created for tenant {request.tenant.schema_name}: {prorated_cost} GEL')
 
-            logger.info(f'Feature {feature.key} charged to tenant {request.tenant.schema_name}: {prorated_cost} GEL')
+            return Response({
+                'success': False,
+                'requires_payment': True,
+                'message': 'Payment required to add this feature',
+                'payment_url': payment_response['payment_url'],
+                'feature': {
+                    'id': feature.id,
+                    'key': feature.key,
+                    'name': feature.name,
+                    'price_per_user_gel': float(feature.price_per_user_gel),
+                },
+                'prorated_cost': float(prorated_cost),
+                'days_remaining': days_remaining,
+            })
 
         except Exception as e:
-            logger.error(f'Failed to charge ecommerce card for feature addition: {e}')
+            logger.error(f'Failed to create payment for feature addition: {e}')
             return Response(
-                {'error': f'Payment failed: {str(e)}'},
-                status=status.HTTP_402_PAYMENT_REQUIRED
+                {'error': f'Failed to create payment: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
+    # If no payment required (prorated_cost is 0), add feature directly
     # Add feature to subscription
     subscription.selected_features.add(feature)
 
