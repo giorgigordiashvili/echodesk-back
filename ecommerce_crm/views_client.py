@@ -45,7 +45,9 @@ from .serializers import (
     ItemListDetailSerializer,
     ListItemSerializer,
     LanguageSerializer,
+    HomepageSectionPublicSerializer,
 )
+from .models import HomepageSection
 
 
 class ClientAddressSerializer(serializers.ModelSerializer):
@@ -1351,4 +1353,32 @@ class ClientLanguageViewSet(viewsets.ReadOnlyModelViewSet):
     def get_queryset(self):
         """Return only active languages ordered by sort_order"""
         return Language.objects.filter(is_active=True).order_by('sort_order')
+
+
+@extend_schema(
+    tags=['Ecommerce Client - Homepage'],
+    summary='Get homepage configuration',
+    description='''Get the complete homepage configuration with resolved section data.
+    Returns all active sections ordered by position, with data from linked ItemLists resolved.
+    This endpoint is public and does not require authentication.''',
+    responses={200: HomepageSectionPublicSerializer(many=True)}
+)
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def get_homepage_config(request):
+    """
+    Get the homepage configuration for the storefront.
+    Returns all active sections with their resolved data from ItemLists.
+
+    GET /api/ecommerce/client/homepage/
+    """
+    sections = HomepageSection.objects.filter(
+        is_active=True
+    ).select_related('item_list').order_by('position')
+
+    serializer = HomepageSectionPublicSerializer(sections, many=True)
+
+    return Response({
+        'sections': serializer.data
+    })
 

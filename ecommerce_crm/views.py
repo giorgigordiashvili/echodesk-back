@@ -20,7 +20,8 @@ from .models import (
     CartItem,
     Order,
     OrderItem,
-    EcommerceSettings
+    EcommerceSettings,
+    HomepageSection
 )
 from .serializers import (
     LanguageSerializer,
@@ -43,7 +44,10 @@ from .serializers import (
     CartItemCreateSerializer,
     OrderSerializer,
     OrderCreateSerializer,
-    EcommerceSettingsSerializer
+    EcommerceSettingsSerializer,
+    HomepageSectionSerializer,
+    HomepageSectionPublicSerializer,
+    HomepageSectionReorderSerializer
 )
 
 
@@ -2446,3 +2450,112 @@ class EcommerceSettingsViewSet(viewsets.ModelViewSet):
                 "success": False,
                 "error": str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class HomepageSectionViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing homepage sections (tenant admin).
+    Allows CRUD operations and reordering of homepage sections.
+    """
+    queryset = HomepageSection.objects.all()
+    serializer_class = HomepageSectionSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['section_type', 'is_active']
+    ordering_fields = ['position', 'created_at']
+    ordering = ['position']
+
+    @extend_schema(
+        tags=['Ecommerce Admin - Homepage Builder'],
+        summary='List homepage sections',
+        description='Get all homepage sections for this tenant, ordered by position'
+    )
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce Admin - Homepage Builder'],
+        summary='Create homepage section',
+        description='Add a new section to the homepage'
+    )
+    def create(self, request, *args, **kwargs):
+        return super().create(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce Admin - Homepage Builder'],
+        summary='Get homepage section details',
+        description='View detailed configuration of a specific section'
+    )
+    def retrieve(self, request, *args, **kwargs):
+        return super().retrieve(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce Admin - Homepage Builder'],
+        summary='Update homepage section',
+        description='Modify section configuration'
+    )
+    def update(self, request, *args, **kwargs):
+        return super().update(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce Admin - Homepage Builder'],
+        summary='Partially update homepage section',
+        description='Modify specific fields of a section'
+    )
+    def partial_update(self, request, *args, **kwargs):
+        return super().partial_update(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce Admin - Homepage Builder'],
+        summary='Delete homepage section',
+        description='Remove a section from the homepage'
+    )
+    def destroy(self, request, *args, **kwargs):
+        return super().destroy(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce Admin - Homepage Builder'],
+        summary='Reorder homepage sections',
+        description='Update the order of homepage sections by providing an ordered list of section IDs',
+        request=HomepageSectionReorderSerializer,
+        responses={200: HomepageSectionSerializer(many=True)}
+    )
+    @action(detail=False, methods=['post'], url_path='reorder')
+    def reorder(self, request):
+        """
+        Reorder homepage sections based on provided order of IDs.
+        POST body: {"section_ids": [3, 1, 2, 5, 4]}
+        """
+        serializer = HomepageSectionReorderSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        section_ids = serializer.validated_data['section_ids']
+
+        # Update positions based on the order in the list
+        for position, section_id in enumerate(section_ids):
+            HomepageSection.objects.filter(id=section_id).update(position=position)
+
+        # Return updated sections in new order
+        sections = HomepageSection.objects.all().order_by('position')
+        return Response(HomepageSectionSerializer(sections, many=True).data)
+
+    @extend_schema(
+        tags=['Ecommerce Admin - Homepage Builder'],
+        summary='Get section type choices',
+        description='Get available section types and display modes'
+    )
+    @action(detail=False, methods=['get'], url_path='choices')
+    def get_choices(self, request):
+        """
+        Get available section types and display modes for the frontend form
+        """
+        return Response({
+            'section_types': [
+                {'value': choice[0], 'label': choice[1]}
+                for choice in HomepageSection.SECTION_TYPE_CHOICES
+            ],
+            'display_modes': [
+                {'value': choice[0], 'label': choice[1]}
+                for choice in HomepageSection.DISPLAY_MODE_CHOICES
+            ]
+        })

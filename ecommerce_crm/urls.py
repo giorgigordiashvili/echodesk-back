@@ -13,6 +13,7 @@ from .views import (
     CartItemViewSet,
     OrderViewSet,
     EcommerceSettingsViewSet,
+    HomepageSectionViewSet,
     register_client,
     login_client,
     logout_client,
@@ -39,6 +40,7 @@ from .views_client import (
     list_client_cards,
     delete_client_card,
     set_default_client_card,
+    get_homepage_config,
 )
 
 # Admin router - requires admin JWT authentication
@@ -55,6 +57,7 @@ admin_router.register(r'cart', CartViewSet, basename='cart')
 admin_router.register(r'cart-items', CartItemViewSet, basename='cart-item')
 admin_router.register(r'orders', OrderViewSet, basename='order')
 admin_router.register(r'settings', EcommerceSettingsViewSet, basename='ecommerce-settings')
+admin_router.register(r'homepage-sections', HomepageSectionViewSet, basename='homepage-section')
 
 # Client router - public and authenticated client access
 client_router = DefaultRouter()
@@ -90,6 +93,8 @@ urlpatterns = [
     path('client/cards/', list_client_cards, name='client-list-cards'),
     path('client/cards/<int:card_id>/delete/', delete_client_card, name='client-delete-card'),
     path('client/cards/<int:card_id>/set-default/', set_default_client_card, name='client-set-default-card'),
+    # Public homepage endpoint
+    path('client/homepage/', get_homepage_config, name='client-homepage'),
     # Client-facing endpoints (requires client JWT)
     path('client/', include(client_router.urls)),
     # Admin endpoints (requires admin JWT)

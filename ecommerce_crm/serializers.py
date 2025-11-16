@@ -16,6 +16,7 @@ from .models import (
     OrderItem,
     EcommerceSettings,
     ClientCard,
+    HomepageSection,
 )
 from tickets.models import ItemList, ListItem
 
@@ -840,3 +841,74 @@ class ItemListDetailSerializer(serializers.ModelSerializer):
     def get_items_count(self, obj):
         """Return count of items in this list"""
         return obj.items.filter(is_active=True).count()
+
+
+class HomepageSectionSerializer(serializers.ModelSerializer):
+    """Serializer for homepage section configuration (admin)"""
+    item_list_title = serializers.CharField(source='item_list.title', read_only=True, allow_null=True)
+    section_type_display = serializers.CharField(source='get_section_type_display', read_only=True)
+    display_mode_display = serializers.CharField(source='get_display_mode_display', read_only=True)
+
+    class Meta:
+        model = HomepageSection
+        fields = [
+            'id',
+            'title',
+            'subtitle',
+            'section_type',
+            'section_type_display',
+            'position',
+            'is_active',
+            'item_list',
+            'item_list_title',
+            'attribute_key',
+            'attribute_value',
+            'display_mode',
+            'display_mode_display',
+            'settings',
+            'background_color',
+            'background_image_url',
+            'text_color',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at', 'section_type_display', 'display_mode_display', 'item_list_title']
+
+
+class HomepageSectionPublicSerializer(serializers.ModelSerializer):
+    """Serializer for public homepage API - includes resolved data"""
+    data = serializers.SerializerMethodField()
+
+    class Meta:
+        model = HomepageSection
+        fields = [
+            'id',
+            'title',
+            'subtitle',
+            'section_type',
+            'position',
+            'display_mode',
+            'settings',
+            'background_color',
+            'background_image_url',
+            'text_color',
+            'attribute_key',
+            'attribute_value',
+            'data',
+        ]
+
+    def get_data(self, obj):
+        """Resolve data from ItemList if available"""
+        if obj.item_list:
+            # Get root-level items from the linked ItemList
+            root_items = obj.item_list.items.filter(parent__isnull=True, is_active=True).order_by('position')
+            return ListItemSerializer(root_items, many=True).data
+        return []
+
+
+class HomepageSectionReorderSerializer(serializers.Serializer):
+    """Serializer for reordering homepage sections"""
+    section_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        help_text='List of section IDs in desired order'
+    )

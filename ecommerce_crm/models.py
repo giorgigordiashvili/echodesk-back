@@ -1232,3 +1232,129 @@ class ClientCard(models.Model):
         super().save(*args, **kwargs)
 
 
+class HomepageSection(models.Model):
+    """
+    Configurable homepage section for ecommerce storefronts.
+    Tenants can create, reorder, and configure sections to customize their homepage.
+    """
+    SECTION_TYPE_CHOICES = [
+        ('hero_banner', 'Hero Banner/Slider'),
+        ('featured_products', 'Featured Products'),
+        ('category_grid', 'Category Grid'),
+        ('product_by_attribute', 'Products by Attribute'),
+        ('statistics', 'Statistics/Achievements'),
+        ('branches', 'Store Branches/Locations'),
+        ('custom_content', 'Custom ItemList Content'),
+    ]
+
+    DISPLAY_MODE_CHOICES = [
+        ('slider', 'Slider/Carousel'),
+        ('grid', 'Grid Layout'),
+        ('single', 'Single Item'),
+        ('list', 'Vertical List'),
+    ]
+
+    # Basic info
+    title = models.JSONField(
+        help_text='Section title in different languages: {"en": "Featured Products", "ka": "რჩეული პროდუქტები"}'
+    )
+    subtitle = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text='Optional subtitle in different languages'
+    )
+    section_type = models.CharField(
+        max_length=30,
+        choices=SECTION_TYPE_CHOICES,
+        help_text='Type of content this section displays'
+    )
+    position = models.IntegerField(
+        default=0,
+        help_text='Order position on the homepage (lower numbers appear first)'
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text='Whether this section is visible on the homepage'
+    )
+
+    # Data source - link to ItemList for dynamic content
+    item_list = models.ForeignKey(
+        'tickets.ItemList',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='homepage_sections',
+        help_text='ItemList to use as data source (for banners, categories, branches, etc.)'
+    )
+
+    # For product filtering by attribute
+    attribute_key = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text='Attribute key to filter products (for product_by_attribute type)'
+    )
+    attribute_value = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text='Attribute value to filter products'
+    )
+
+    # Display configuration
+    display_mode = models.CharField(
+        max_length=20,
+        choices=DISPLAY_MODE_CHOICES,
+        default='grid',
+        help_text='How to display items in this section'
+    )
+    settings = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text='Additional display settings: {"columns": 3, "autoSlide": true, "slideInterval": 5000, "itemsPerView": 4}'
+    )
+
+    # Styling
+    background_color = models.CharField(
+        max_length=20,
+        blank=True,
+        help_text='Background color (e.g., "#f5f5f5", "transparent")'
+    )
+    background_image_url = models.URLField(
+        blank=True,
+        help_text='Background image URL for this section'
+    )
+    text_color = models.CharField(
+        max_length=20,
+        blank=True,
+        help_text='Text color for the section'
+    )
+
+    # Metadata
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['position', 'created_at']
+        verbose_name = 'Homepage Section'
+        verbose_name_plural = 'Homepage Sections'
+        indexes = [
+            models.Index(fields=['position']),
+            models.Index(fields=['is_active', 'position']),
+        ]
+
+    def __str__(self):
+        title_str = self.title.get('en', list(self.title.values())[0]) if isinstance(self.title, dict) else str(self.title)
+        return f"{title_str} ({self.get_section_type_display()})"
+
+    def get_title(self, language='en'):
+        """Get title in specified language with fallback"""
+        if isinstance(self.title, dict):
+            return self.title.get(language, self.title.get('en', ''))
+        return str(self.title)
+
+    def get_subtitle(self, language='en'):
+        """Get subtitle in specified language with fallback"""
+        if isinstance(self.subtitle, dict):
+            return self.subtitle.get(language, self.subtitle.get('en', ''))
+        return str(self.subtitle) if self.subtitle else ''
+
+
