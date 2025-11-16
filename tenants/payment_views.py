@@ -696,7 +696,7 @@ def bog_webhook(request):
 
                 tenant = payment_order.tenant
                 feature_id = payment_order.metadata.get('feature_id')
-                save_card_type = payment_order.metadata.get('save_card_type', 'ecommerce')
+                save_both_cards = payment_order.metadata.get('save_both_cards', False)
 
                 with transaction.atomic():
                     # Add the feature to subscription
@@ -722,13 +722,13 @@ def bog_webhook(request):
                     except TenantSubscription.DoesNotExist:
                         logger.error(f'Subscription not found for tenant {tenant.schema_name}')
 
-                    # Save the ecommerce card if card was saved
-                    if card_saved_for_recurring and save_card_type == 'ecommerce':
+                    # Save BOTH card types if card was saved
+                    if card_saved_for_recurring and save_both_cards:
                         card_type = payment_detail.get('card_type', '')
                         masked_card = payment_detail.get('payer_identifier', '')
                         card_expiry = payment_detail.get('card_expiry_date', '')
 
-                        # Check if ecommerce card already exists for this tenant
+                        # 1. Save/Update ECOMMERCE card (for variable amount charges)
                         existing_ecommerce_card = SavedCard.objects.filter(
                             tenant=tenant,
                             card_save_type='ecommerce',
@@ -757,6 +757,45 @@ def bog_webhook(request):
                             existing_ecommerce_card.transaction_id = transaction_id
                             existing_ecommerce_card.save()
                             logger.info(f'Updated ecommerce card for tenant {tenant.schema_name}')
+
+                        # 2. Save/Update SUBSCRIPTION card (for fixed recurring charges)
+                        existing_subscription_card = SavedCard.objects.filter(
+                            tenant=tenant,
+                            card_save_type='subscription',
+                            is_active=True
+                        ).first()
+
+                        if not existing_subscription_card:
+                            SavedCard.objects.create(
+                                tenant=tenant,
+                                parent_order_id=bog_order_id,
+                                card_type=card_type,
+                                masked_card_number=masked_card,
+                                card_expiry=card_expiry,
+                                transaction_id=transaction_id,
+                                is_active=True,
+                                is_default=True,  # Subscription card is default for recurring
+                                card_save_type='subscription'
+                            )
+                            logger.info(f'Saved subscription card for tenant {tenant.schema_name}: {card_type} {masked_card}')
+                        else:
+                            # Update existing subscription card
+                            existing_subscription_card.parent_order_id = bog_order_id
+                            existing_subscription_card.card_type = card_type
+                            existing_subscription_card.masked_card_number = masked_card
+                            existing_subscription_card.card_expiry = card_expiry
+                            existing_subscription_card.transaction_id = transaction_id
+                            existing_subscription_card.save()
+                            logger.info(f'Updated subscription card for tenant {tenant.schema_name}')
+
+                        # Also update subscription's parent_order_id for recurring payments
+                        try:
+                            subscription = TenantSubscription.objects.get(tenant=tenant)
+                            subscription.parent_order_id = bog_order_id
+                            subscription.save()
+                            logger.info(f'Updated subscription parent_order_id for tenant {tenant.schema_name}')
+                        except TenantSubscription.DoesNotExist:
+                            pass
 
                     # Mark payment order as complete
                     payment_order.card_saved = card_saved_for_recurring

@@ -250,12 +250,11 @@ def add_feature_to_subscription(request):
                 external_order_id=external_order_id,
             )
 
-            # Enable ecommerce card saving if user doesn't have one yet
-            if not has_ecommerce_card:
-                bog_service.enable_card_saving(payment_response['order_id'])
-                save_card_type = 'ecommerce'
-            else:
-                save_card_type = None
+            # Enable BOTH card saving types:
+            # 1. Ecommerce card - for variable amount charges (future feature additions)
+            # 2. Subscription card - for fixed recurring charges (monthly payments)
+            bog_service.enable_card_saving(payment_response['order_id'])  # Ecommerce card
+            bog_service.enable_subscription_card_saving(payment_response['order_id'])  # Subscription card
 
             # Create payment order
             PaymentOrder.objects.create(
@@ -273,7 +272,7 @@ def add_feature_to_subscription(request):
                     'feature_id': feature.id,
                     'feature_key': feature.key,
                     'prorated_cost': float(prorated_cost),
-                    'save_card_type': save_card_type
+                    'save_both_cards': True  # Save both ecommerce and subscription cards
                 }
             )
 
