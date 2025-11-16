@@ -7,7 +7,7 @@ import django.db.models.deletion
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('tickets', '0034_add_homepage_section'),
+        ('tickets', '0033_add_itemlist_client_support'),
         ('ecommerce_crm', '0020_add_custom_domain'),
     ]
 
