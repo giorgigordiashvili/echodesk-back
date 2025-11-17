@@ -1260,6 +1260,7 @@ class ClientItemListViewSet(viewsets.ReadOnlyModelViewSet):
     These are the same item lists used in tickets, but filtered to show only public ones
     No authentication required - public access
     """
+    authentication_classes = []
     permission_classes = [AllowAny]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['title', 'description']
