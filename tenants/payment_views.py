@@ -11,10 +11,15 @@ from rest_framework import serializers
 from django.conf import settings
 from django.utils import timezone
 from datetime import timedelta
-from .models import Tenant, Package, TenantSubscription, UsageLog, PaymentOrder, PendingRegistration, SavedCard, Invoice
+from .models import (
+    Tenant, Package, TenantSubscription, UsageLog, PaymentOrder,
+    PendingRegistration, SavedCard, Invoice, PaymentAttempt,
+    SubscriptionEvent, PaymentRetrySchedule
+)
 from .bog_payment import bog_service
 from .services import SingleFrontendDeploymentService
 from .email_service import email_service
+from .subscription_utils import schedule_payment_retries, cancel_pending_retries
 from tenant_schemas.utils import schema_context
 from django.contrib.auth import get_user_model
 from django.db import transaction
@@ -40,6 +45,29 @@ def get_next_billing_date():
     else:
         # Production mode: 30 days
         return timezone.now() + timedelta(days=30)
+
+
+def create_subscription_event(subscription, event_type, payment_order=None, payment_attempt=None, description='', metadata=None):
+    """
+    Helper function to create subscription events
+
+    Args:
+        subscription: TenantSubscription instance
+        event_type: Event type (e.g., 'created', 'payment_success')
+        payment_order: Optional PaymentOrder
+        payment_attempt: Optional PaymentAttempt
+        description: Event description
+        metadata: Additional event metadata
+    """
+    return SubscriptionEvent.objects.create(
+        subscription=subscription,
+        tenant=subscription.tenant,
+        event_type=event_type,
+        payment_order=payment_order,
+        payment_attempt=payment_attempt,
+        description=description,
+        metadata=metadata or {}
+    )
 
 
 def trigger_tenant_processing(schema_name):
@@ -392,7 +420,73 @@ def bog_webhook(request):
             # Update payment order status
             payment_order.status = 'paid'
             payment_order.paid_at = timezone.now()
+            payment_order.bog_order_id = bog_order_id  # Save BOG's order ID
             payment_order.save()
+
+            # Determine if this is a retry attempt
+            is_retry_payment = external_order_id.startswith('RETRY-')
+            attempt_num = 1
+
+            if is_retry_payment:
+                # Extract retry number from order ID if possible
+                try:
+                    # Format: RETRY-{retry_schedule_id}-{original_order_id}
+                    retry_id = external_order_id.split('-')[1]
+                    retry_schedule = PaymentRetrySchedule.objects.get(id=retry_id)
+                    attempt_num = retry_schedule.retry_number + 1
+                except:
+                    attempt_num = 2  # Default to 2 for retries
+
+            # Create successful PaymentAttempt record
+            attempt = PaymentAttempt.objects.create(
+                payment_order=payment_order,
+                subscription=payment_order.tenant.subscription if payment_order.tenant else None,
+                tenant=payment_order.tenant if payment_order.tenant else None,
+                attempt_number=attempt_num,
+                status='success',
+                bog_order_id=bog_order_id,
+                amount=payment_order.amount,
+                attempted_at=timezone.now(),
+                completed_at=timezone.now(),
+                bog_response=body,
+                is_retry=is_retry_payment,
+            )
+
+            # If this is a successful retry, update retry schedule and cancel remaining retries
+            if is_retry_payment and payment_order.tenant and hasattr(payment_order.tenant, 'subscription'):
+                subscription = payment_order.tenant.subscription
+
+                # Mark payment as successful
+                subscription.mark_payment_succeeded()
+
+                # Cancel all pending retries
+                cancelled_count = cancel_pending_retries(subscription, reason='Payment succeeded on retry')
+
+                # Mark the retry schedule that triggered this as succeeded
+                try:
+                    retry_id = external_order_id.split('-')[1]
+                    retry_schedule = PaymentRetrySchedule.objects.get(id=retry_id)
+                    retry_schedule.status = 'succeeded'
+                    retry_schedule.executed_at = timezone.now()
+                    retry_schedule.retry_attempt = attempt
+                    retry_schedule.save()
+
+                    # Create retry success event
+                    create_subscription_event(
+                        subscription=subscription,
+                        event_type='retry_success',
+                        payment_order=payment_order,
+                        payment_attempt=attempt,
+                        description=f'Retry #{retry_schedule.retry_number} succeeded',
+                        metadata={
+                            'retry_number': retry_schedule.retry_number,
+                            'cancelled_remaining_retries': cancelled_count,
+                        }
+                    )
+                except:
+                    logger.warning(f'Could not find retry schedule for {external_order_id}')
+
+                logger.info(f'Retry payment succeeded, cancelled {cancelled_count} pending retries')
 
             # Extract card save information from webhook
             saved_card_type = payment_detail.get('saved_card_type')
@@ -541,13 +635,57 @@ def bog_webhook(request):
                             storage_used_gb=0,
                             last_billed_at=timezone.now(),
                             next_billing_date=get_next_billing_date(),
-                            parent_order_id=parent_order_id_for_subscription  # Save BOG order ID for recurring charges
+                            parent_order_id=parent_order_id_for_subscription,  # Save BOG order ID for recurring charges
+                            payment_status='current',  # Mark as current since payment successful
                         )
 
                         # Add selected features for feature-based subscriptions
                         if pending_registration.selected_features.exists():
                             subscription.selected_features.set(pending_registration.selected_features.all())
                             logger.info(f'Added {pending_registration.selected_features.count()} features to subscription for {tenant.schema_name}')
+
+                        # Update PaymentAttempt with subscription reference
+                        attempt.subscription = subscription
+                        attempt.tenant = tenant
+                        attempt.save()
+
+                        # Create subscription events
+                        create_subscription_event(
+                            subscription=subscription,
+                            event_type='created',
+                            payment_order=payment_order,
+                            payment_attempt=attempt,
+                            description=f'Subscription created for {tenant.name}',
+                            metadata={
+                                'package': pending_registration.package.name if pending_registration.package else 'feature_based',
+                                'agent_count': pending_registration.agent_count,
+                                'is_trial': False,
+                            }
+                        )
+
+                        create_subscription_event(
+                            subscription=subscription,
+                            event_type='payment_success',
+                            payment_order=payment_order,
+                            payment_attempt=attempt,
+                            description=f'Initial payment successful: {payment_order.amount} GEL',
+                            metadata={
+                                'amount': str(payment_order.amount),
+                                'transaction_id': transaction_id,
+                            }
+                        )
+
+                        if card_saved_for_recurring:
+                            create_subscription_event(
+                                subscription=subscription,
+                                event_type='card_added',
+                                payment_order=payment_order,
+                                description='Card saved for recurring payments',
+                                metadata={
+                                    'card_type': payment_detail.get('card_type', ''),
+                                    'masked_card': payment_detail.get('payer_identifier', ''),
+                                }
+                            )
 
                         # Generate invoice
                         if payment_order.amount > 0:
@@ -1093,9 +1231,56 @@ def bog_webhook(request):
         try:
             payment_order = PaymentOrder.objects.get(order_id=external_order_id)
             payment_order.status = 'failed'
+            payment_order.bog_order_id = bog_order_id
             payment_order.metadata['bog_status'] = bog_status
             payment_order.metadata['response_code'] = response_code
             payment_order.save()
+
+            # Create failed PaymentAttempt record
+            failed_attempt = PaymentAttempt.objects.create(
+                payment_order=payment_order,
+                subscription=payment_order.tenant.subscription if payment_order.tenant else None,
+                tenant=payment_order.tenant if payment_order.tenant else None,
+                attempt_number=1,  # Initial attempt
+                status='failed',
+                bog_order_id=bog_order_id,
+                amount=payment_order.amount,
+                attempted_at=timezone.now(),
+                completed_at=timezone.now(),
+                failed_reason=body.get('message', 'Payment rejected by BOG'),
+                bog_error_code=response_code,
+                bog_response=body,
+            )
+
+            # If this is for an existing subscription (recurring payment), schedule retries
+            if payment_order.tenant and hasattr(payment_order.tenant, 'subscription'):
+                subscription = payment_order.tenant.subscription
+
+                # Create payment failure event
+                create_subscription_event(
+                    subscription=subscription,
+                    event_type='payment_failed',
+                    payment_order=payment_order,
+                    payment_attempt=failed_attempt,
+                    description=f'Payment failed: {failed_attempt.failed_reason}',
+                    metadata={
+                        'amount': str(payment_order.amount),
+                        'error_code': response_code,
+                    }
+                )
+
+                # Schedule automatic retries if subscription has saved card
+                if subscription.parent_order_id:
+                    schedule_payment_retries(payment_order, failed_attempt)
+                    subscription.mark_payment_failed()  # Update payment status to 'retrying'
+
+                    logger.info(f'Scheduled retries for failed payment: {external_order_id}')
+                else:
+                    # No saved card - mark as failed
+                    subscription.payment_status = 'failed'
+                    subscription.mark_payment_failed()
+                    logger.warning(f'Payment failed with no saved card for retry: {external_order_id}')
+
         except PaymentOrder.DoesNotExist:
             logger.error(f'Payment order not found for failed payment: {external_order_id}')
 

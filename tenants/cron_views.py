@@ -173,6 +173,104 @@ def cron_process_trial_expirations(request):
         }, status=500)
 
 
+@api_view(['GET', 'POST'])
+@permission_classes([AllowAny])
+def cron_payment_retries(request):
+    """
+    HTTP endpoint to process payment retries
+
+    Security: Requires CRON_SECRET_TOKEN in header or query param
+
+    Usage:
+    curl -X GET "https://api.echodesk.ge/api/cron/payment-retries/" \
+         -H "X-Cron-Token: your-secret-token"
+    """
+    # Verify token
+    token = request.headers.get('X-Cron-Token') or request.GET.get('token')
+    expected_token = getattr(settings, 'CRON_SECRET_TOKEN', None)
+
+    if not expected_token:
+        logger.error('CRON_SECRET_TOKEN not configured in settings')
+        return Response({
+            'error': 'Cron service not configured'
+        }, status=500)
+
+    if not token or token != expected_token:
+        logger.warning(f'Unauthorized cron access attempt from {request.META.get("REMOTE_ADDR")}')
+        return Response({
+            'error': 'Unauthorized'
+        }, status=401)
+
+    # Run command
+    try:
+        output = StringIO()
+        call_command('process_payment_retries', stdout=output)
+
+        output_text = output.getvalue()
+        logger.info(f'Payment retries cron executed successfully')
+
+        return Response({
+            'status': 'success',
+            'message': 'Payment retries processed',
+            'output': output_text
+        })
+    except Exception as e:
+        logger.error(f'Payment retries cron failed: {e}')
+        return Response({
+            'status': 'error',
+            'error': str(e)
+        }, status=500)
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([AllowAny])
+def cron_calculate_metrics(request):
+    """
+    HTTP endpoint to calculate platform metrics
+
+    Security: Requires CRON_SECRET_TOKEN in header or query param
+
+    Usage:
+    curl -X GET "https://api.echodesk.ge/api/cron/calculate-metrics/" \
+         -H "X-Cron-Token: your-secret-token"
+    """
+    # Verify token
+    token = request.headers.get('X-Cron-Token') or request.GET.get('token')
+    expected_token = getattr(settings, 'CRON_SECRET_TOKEN', None)
+
+    if not expected_token:
+        logger.error('CRON_SECRET_TOKEN not configured in settings')
+        return Response({
+            'error': 'Cron service not configured'
+        }, status=500)
+
+    if not token or token != expected_token:
+        logger.warning(f'Unauthorized cron access attempt from {request.META.get("REMOTE_ADDR")}')
+        return Response({
+            'error': 'Unauthorized'
+        }, status=401)
+
+    # Run command
+    try:
+        output = StringIO()
+        call_command('calculate_platform_metrics', stdout=output)
+
+        output_text = output.getvalue()
+        logger.info(f'Platform metrics cron executed successfully')
+
+        return Response({
+            'status': 'success',
+            'message': 'Platform metrics calculated',
+            'output': output_text
+        })
+    except Exception as e:
+        logger.error(f'Platform metrics cron failed: {e}')
+        return Response({
+            'status': 'error',
+            'error': str(e)
+        }, status=500)
+
+
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def cron_health_check(request):
@@ -187,6 +285,8 @@ def cron_health_check(request):
         'endpoints': {
             'recurring_payments': '/api/cron/recurring-payments/',
             'subscription_check': '/api/cron/subscription-check/',
-            'trial_expirations': '/api/cron/process-trial-expirations/'
+            'trial_expirations': '/api/cron/process-trial-expirations/',
+            'payment_retries': '/api/cron/payment-retries/',
+            'calculate_metrics': '/api/cron/calculate-metrics/',
         }
     })

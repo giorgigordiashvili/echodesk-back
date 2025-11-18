@@ -6,11 +6,16 @@ from django.contrib import messages
 from django import forms
 from django.contrib.auth.models import Permission
 from tenant_schemas.utils import get_public_schema_name
+import logging
 from .models import (
     Tenant, Package, TenantSubscription, UsageLog, PaymentOrder, PendingRegistration,
     SavedCard, Feature, FeaturePermission, PackageFeature,
-    TenantFeature, TenantPermission
+    TenantFeature, TenantPermission, PaymentAttempt, SubscriptionEvent,
+    PaymentRetrySchedule, PlatformMetrics
 )
+from .subscription_utils import get_subscription_health, get_failed_payments_summary
+
+logger = logging.getLogger(__name__)
 
 
 class PackageFeatureInline(admin.TabularInline):
@@ -135,26 +140,47 @@ class PackageAdmin(admin.ModelAdmin):
 class TenantSubscriptionAdmin(admin.ModelAdmin):
     """Admin interface for TenantSubscription model"""
     list_display = [
-        'tenant', 'package', 'status_badge', 'agent_count', 'monthly_cost',
-        'current_users', 'usage_status', 'starts_at', 'expires_at'
+        'tenant', 'package', 'status_badge', 'payment_health_display',
+        'agent_count', 'monthly_cost', 'current_users',
+        'next_billing_date', 'failed_payment_count'
     ]
-    list_filter = ['is_active', 'package__pricing_model', 'package']
+    list_filter = [
+        'is_active',
+        'payment_status',
+        'package__pricing_model',
+        'package',
+        'is_trial',
+    ]
     search_fields = ['tenant__name', 'tenant__admin_email', 'package__display_name']
     ordering = ['-created_at']
     readonly_fields = [
         'monthly_cost', 'created_at', 'updated_at',
-        'usage_summary', 'feature_summary'
+        'usage_summary', 'feature_summary', 'payment_health_status',
+        'days_until_next_billing', 'view_payment_attempts', 'view_events'
     ]
     actions = [
         'activate_subscriptions',
         'deactivate_subscriptions',
         'reset_usage',
-        'extend_subscription_30_days'
+        'extend_subscription_30_days',
+        'retry_failed_payments',
     ]
 
     fieldsets = (
         ('Subscription Details', {
-            'fields': ('tenant', 'package', 'is_active', 'starts_at', 'expires_at')
+            'fields': ('tenant', 'package', 'is_active', 'is_trial', 'trial_ends_at', 'starts_at', 'expires_at')
+        }),
+        ('Payment Health', {
+            'fields': (
+                'payment_status',
+                'payment_health_status',
+                'parent_order_id',
+                'failed_payment_count',
+                'last_payment_failure',
+                'view_payment_attempts',
+                'view_events',
+            ),
+            'classes': ['wide']
         }),
         ('Pricing', {
             'fields': ('agent_count', 'monthly_cost')
@@ -167,7 +193,7 @@ class TenantSubscriptionAdmin(admin.ModelAdmin):
             'classes': ['collapse']
         }),
         ('Billing', {
-            'fields': ('last_billed_at', 'next_billing_date')
+            'fields': ('last_billed_at', 'next_billing_date', 'days_until_next_billing')
         }),
         ('Metadata', {
             'fields': ('created_at', 'updated_at'),
@@ -323,6 +349,115 @@ class TenantSubscriptionAdmin(admin.ModelAdmin):
             request,
             f'{queryset.count()} subscription(s) extended by 30 days.',
             messages.SUCCESS
+        )
+
+    @admin.action(description='Retry failed payments for selected subscriptions')
+    def retry_failed_payments(self, request, queryset):
+        """Manually retry failed payments for selected subscriptions"""
+        from tenants.subscription_utils import execute_retry
+        from tenants.models import PaymentRetrySchedule
+
+        retry_count = 0
+        error_count = 0
+
+        for subscription in queryset:
+            # Only retry if subscription has failed payment status and has saved card
+            if subscription.payment_status in ['overdue', 'retrying', 'failed'] and subscription.parent_order_id:
+                # Find pending retries
+                pending_retries = PaymentRetrySchedule.objects.filter(
+                    subscription=subscription,
+                    status='pending'
+                ).order_by('scheduled_for')
+
+                if pending_retries.exists():
+                    # Execute the first pending retry
+                    retry_schedule = pending_retries.first()
+                    try:
+                        execute_retry(retry_schedule)
+                        retry_count += 1
+                    except Exception as e:
+                        error_count += 1
+                        logger.error(f'Manual retry failed for subscription {subscription.id}: {e}')
+                else:
+                    # No retries scheduled - subscription might have exhausted all retries
+                    error_count += 1
+
+        if retry_count > 0:
+            self.message_user(
+                request,
+                f'Successfully initiated {retry_count} payment retry/retries.',
+                messages.SUCCESS
+            )
+        if error_count > 0:
+            self.message_user(
+                request,
+                f'{error_count} subscription(s) could not be retried (no pending retries or no saved card).',
+                messages.WARNING
+            )
+
+    # Display methods for payment health
+
+    @admin.display(description='Payment Health')
+    def payment_health_display(self, obj):
+        """Display payment health status with colored badge"""
+        status_config = {
+            'current': {'color': '#4CAF50', 'text': '✓ Current'},
+            'overdue': {'color': '#FF9800', 'text': '⚠ Overdue'},
+            'retrying': {'color': '#FFC107', 'text': '🔄 Retrying'},
+            'failed': {'color': '#F44336', 'text': '✗ Failed'},
+            'no_card': {'color': '#9E9E9E', 'text': '⊘ No Card'},
+        }
+
+        config = status_config.get(obj.payment_status, {'color': '#9E9E9E', 'text': obj.payment_status})
+
+        html = f'<span style="background-color: {config["color"]}; color: white; padding: 3px 10px; border-radius: 3px; display: inline-block;">{config["text"]}</span>'
+
+        # Add failed count if > 0
+        if obj.failed_payment_count > 0:
+            html += f'<br><small style="color: #F44336;">Failed: {obj.failed_payment_count}x</small>'
+
+        return format_html(html)
+
+    @admin.display(description='Payment Attempts')
+    def view_payment_attempts(self, obj):
+        """Link to view all payment attempts for this subscription"""
+        from django.urls import reverse
+        from django.utils.http import urlencode
+
+        count = obj.payment_attempts.count()
+        if count == 0:
+            return format_html('<span style="color: #999;">No attempts</span>')
+
+        url = reverse('admin:tenants_paymentattempt_changelist')
+        filter_params = urlencode({'subscription__id__exact': obj.id})
+        link_url = f'{url}?{filter_params}'
+
+        # Color code based on recent failures
+        recent_failures = obj.payment_attempts.filter(status='failed').count()
+        color = '#F44336' if recent_failures > 0 else '#4CAF50'
+
+        return format_html(
+            '<a href="{}" style="color: {}; text-decoration: none;">📋 {} attempts ({} failed)</a>',
+            link_url, color, count, recent_failures
+        )
+
+    @admin.display(description='Subscription Events')
+    def view_events(self, obj):
+        """Link to view all events for this subscription"""
+        from django.urls import reverse
+        from django.utils.http import urlencode
+
+        count = obj.events.count()
+        if count == 0:
+            return format_html('<span style="color: #999;">No events</span>')
+
+        url = reverse('admin:tenants_subscriptionevent_changelist')
+        filter_params = urlencode({'subscription__id__exact': obj.id})
+        link_url = f'{url}?{filter_params}'
+
+        return format_html(
+            '<a href="{}" style="color: #2196F3; text-decoration: none;">📅 {} events</a>',
+            link_url, count
         )
 
 
@@ -904,3 +1039,315 @@ class TenantPermissionAdmin(admin.ModelAdmin):
 # UserPermission admin removed - tenant admins manage user permissions
 # via the existing User model fields (can_view_all_tickets, can_manage_users, etc.)
 # TenantPermission shows which permissions are available to the tenant based on their package
+
+
+# ====================================================================================
+# SUBSCRIPTION MANAGEMENT ADMIN CLASSES
+# ====================================================================================
+
+@admin.register(PaymentAttempt)
+class PaymentAttemptAdmin(admin.ModelAdmin):
+    """Admin interface for payment attempts"""
+    list_display = [
+        'id',
+        'tenant_link',
+        'amount_display',
+        'status_badge',
+        'attempt_number',
+        'is_retry',
+        'attempted_at',
+        'duration_display',
+    ]
+    list_filter = [
+        'status',
+        'is_retry',
+        ('attempted_at', admin.DateFieldListFilter),
+    ]
+    search_fields = [
+        'tenant__name',
+        'tenant__schema_name',
+        'bog_order_id',
+        'payment_order__order_id',
+    ]
+    readonly_fields = [
+        'payment_order',
+        'subscription',
+        'tenant',
+        'attempt_number',
+        'status',
+        'bog_order_id',
+        'amount',
+        'attempted_at',
+        'completed_at',
+        'failed_reason',
+        'bog_error_code',
+        'bog_response_display',
+        'is_retry',
+        'parent_attempt',
+        'duration_display',
+    ]
+    date_hierarchy = 'attempted_at'
+    ordering = ['-attempted_at']
+
+    def tenant_link(self, obj):
+        if obj.tenant:
+            url = reverse('admin:tenants_tenant_change', args=[obj.tenant.pk])
+            return format_html('<a href="{}">{}</a>', url, obj.tenant.name)
+        return '-'
+    tenant_link.short_description = 'Tenant'
+
+    def amount_display(self, obj):
+        return f'{obj.amount} GEL'
+    amount_display.short_description = 'Amount'
+
+    def status_badge(self, obj):
+        colors = {
+            'pending': '#FFA500',
+            'success': '#28A745',
+            'failed': '#DC3545',
+            'cancelled': '#6C757D',
+        }
+        color = colors.get(obj.status, '#6C757D')
+        return format_html(
+            '<span style="background-color: {}; color: white; padding: 3px 10px; border-radius: 3px;">{}</span>',
+            color,
+            obj.status.upper()
+        )
+    status_badge.short_description = 'Status'
+
+    def duration_display(self, obj):
+        if obj.duration:
+            return f'{obj.duration:.2f}s'
+        return '-'
+    duration_display.short_description = 'Duration'
+
+    def bog_response_display(self, obj):
+        import json
+        return format_html('<pre>{}</pre>', json.dumps(obj.bog_response, indent=2))
+    bog_response_display.short_description = 'BOG Response'
+
+
+@admin.register(SubscriptionEvent)
+class SubscriptionEventAdmin(admin.ModelAdmin):
+    """Admin interface for subscription events"""
+    list_display = [
+        'id',
+        'tenant_link',
+        'event_type_badge',
+        'description_short',
+        'created_at',
+        'created_by',
+    ]
+    list_filter = [
+        'event_type',
+        ('created_at', admin.DateFieldListFilter),
+    ]
+    search_fields = [
+        'tenant__name',
+        'tenant__schema_name',
+        'description',
+    ]
+    readonly_fields = [
+        'subscription',
+        'tenant',
+        'event_type',
+        'payment_order',
+        'payment_attempt',
+        'old_value',
+        'new_value',
+        'metadata',
+        'description',
+        'created_at',
+        'created_by',
+    ]
+    date_hierarchy = 'created_at'
+    ordering = ['-created_at']
+
+    def tenant_link(self, obj):
+        url = reverse('admin:tenants_tenant_change', args=[obj.tenant.pk])
+        return format_html('<a href="{}">{}</a>', url, obj.tenant.name)
+    tenant_link.short_description = 'Tenant'
+
+    def event_type_badge(self, obj):
+        colors = {
+            'created': '#17A2B8',
+            'payment_success': '#28A745',
+            'payment_failed': '#DC3545',
+            'retry_success': '#FFC107',
+            'suspended': '#6C757D',
+            'cancelled': '#343A40',
+        }
+        color = colors.get(obj.event_type, '#6C757D')
+        return format_html(
+            '<span style="background-color: {}; color: white; padding: 3px 10px; border-radius: 3px;">{}</span>',
+            color,
+            obj.get_event_type_display()
+        )
+    event_type_badge.short_description = 'Event'
+
+    def description_short(self, obj):
+        if len(obj.description) > 80:
+            return obj.description[:80] + '...'
+        return obj.description
+    description_short.short_description = 'Description'
+
+
+@admin.register(PaymentRetrySchedule)
+class PaymentRetryScheduleAdmin(admin.ModelAdmin):
+    """Admin interface for payment retry schedules"""
+    list_display = [
+        'id',
+        'tenant_link',
+        'retry_number',
+        'status_badge',
+        'scheduled_for',
+        'executed_at',
+        'is_overdue_display',
+    ]
+    list_filter = [
+        'status',
+        'retry_number',
+        ('scheduled_for', admin.DateFieldListFilter),
+    ]
+    search_fields = [
+        'tenant__name',
+        'tenant__schema_name',
+    ]
+    readonly_fields = [
+        'payment_order',
+        'subscription',
+        'tenant',
+        'original_attempt',
+        'retry_number',
+        'scheduled_for',
+        'executed_at',
+        'status',
+        'retry_attempt',
+        'skip_reason',
+    ]
+    actions = ['execute_retry_now', 'skip_retry', 'cancel_retry']
+    date_hierarchy = 'scheduled_for'
+    ordering = ['scheduled_for']
+
+    def tenant_link(self, obj):
+        url = reverse('admin:tenants_tenant_change', args=[obj.tenant.pk])
+        return format_html('<a href="{}">{}</a>', url, obj.tenant.name)
+    tenant_link.short_description = 'Tenant'
+
+    def status_badge(self, obj):
+        colors = {
+            'pending': '#FFA500',
+            'executing': '#17A2B8',
+            'succeeded': '#28A745',
+            'failed': '#DC3545',
+            'skipped': '#6C757D',
+            'cancelled': '#343A40',
+        }
+        color = colors.get(obj.status, '#6C757D')
+        return format_html(
+            '<span style="background-color: {}; color: white; padding: 3px 10px; border-radius: 3px;">{}</span>',
+            color,
+            obj.status.upper()
+        )
+    status_badge.short_description = 'Status'
+
+    def is_overdue_display(self, obj):
+        if obj.is_overdue:
+            return format_html('<span style="color: red; font-weight: bold;">⚠ OVERDUE</span>')
+        return '-'
+    is_overdue_display.short_description = 'Overdue?'
+
+    def execute_retry_now(self, request, queryset):
+        """Execute selected retries immediately"""
+        from .subscription_utils import execute_retry
+        count = 0
+        for retry in queryset.filter(status='pending'):
+            result = execute_retry(retry)
+            if result['success']:
+                count += 1
+        self.message_user(request, f'{count} retry(ies) executed successfully.', messages.SUCCESS)
+    execute_retry_now.short_description = 'Execute retry now'
+
+    def skip_retry(self, request, queryset):
+        """Skip selected retries"""
+        count = queryset.filter(status='pending').update(
+            status='skipped',
+            skip_reason='Manually skipped by admin',
+            executed_at=timezone.now()
+        )
+        self.message_user(request, f'{count} retry(ies) skipped.', messages.SUCCESS)
+    skip_retry.short_description = 'Skip retry'
+
+    def cancel_retry(self, request, queryset):
+        """Cancel selected retries"""
+        count = queryset.filter(status='pending').update(
+            status='cancelled',
+            skip_reason='Manually cancelled by admin',
+            executed_at=timezone.now()
+        )
+        self.message_user(request, f'{count} retry(ies) cancelled.', messages.SUCCESS)
+    cancel_retry.short_description = 'Cancel retry'
+
+
+@admin.register(PlatformMetrics)
+class PlatformMetricsAdmin(admin.ModelAdmin):
+    """Admin interface for platform metrics"""
+    list_display = [
+        'date',
+        'active_subscriptions',
+        'mrr_display',
+        'successful_payments',
+        'failed_payments',
+        'payment_success_rate_display',
+        'churn_rate_display',
+    ]
+    list_filter = [
+        ('date', admin.DateFieldListFilter),
+    ]
+    readonly_fields = [
+        'date',
+        'total_subscriptions',
+        'active_subscriptions',
+        'trial_subscriptions',
+        'suspended_subscriptions',
+        'cancelled_subscriptions',
+        'new_subscriptions_today',
+        'cancelled_today',
+        'mrr',
+        'arr',
+        'total_revenue_today',
+        'successful_payments',
+        'failed_payments',
+        'retry_success_rate',
+        'churn_rate',
+        'retention_rate',
+        'package_distribution',
+        'revenue_by_package',
+        'calculated_at',
+        'payment_success_rate',
+    ]
+    ordering = ['-date']
+
+    def mrr_display(self, obj):
+        return f'{obj.mrr} GEL'
+    mrr_display.short_description = 'MRR'
+
+    def payment_success_rate_display(self, obj):
+        rate = obj.payment_success_rate
+        color = '#28A745' if rate >= 95 else '#FFC107' if rate >= 85 else '#DC3545'
+        return format_html(
+            '<span style="color: {}; font-weight: bold;">{:.1f}%</span>',
+            color,
+            rate
+        )
+    payment_success_rate_display.short_description = 'Success Rate'
+
+    def churn_rate_display(self, obj):
+        rate = obj.churn_rate
+        color = '#28A745' if rate <= 5 else '#FFC107' if rate <= 10 else '#DC3545'
+        return format_html(
+            '<span style="color: {}; font-weight: bold;">{:.2f}%</span>',
+            color,
+            rate
+        )
+    churn_rate_display.short_description = 'Churn Rate'

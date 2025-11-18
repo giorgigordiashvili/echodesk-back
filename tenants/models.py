@@ -1,6 +1,7 @@
 from django.db import models
 from django.core.exceptions import ValidationError
 from django.utils import timezone
+from django.conf import settings
 from datetime import timedelta
 from tenant_schemas.models import TenantMixin
 from amanati_crm.file_utils import sanitized_upload_to
@@ -320,6 +321,22 @@ class TenantSubscription(models.Model):
     # Saved card for recurring payments
     parent_order_id = models.CharField(max_length=100, blank=True, null=True, help_text='BOG order ID with saved card')
 
+    # Payment health tracking
+    payment_status = models.CharField(
+        max_length=20,
+        choices=[
+            ('current', 'Current'),  # All payments successful
+            ('overdue', 'Overdue'),  # Payment due but not paid
+            ('retrying', 'Retrying'),  # Failed payment, retry in progress
+            ('failed', 'Failed'),  # All retries exhausted
+            ('no_card', 'No Card'),  # No saved card on file
+        ],
+        default='current',
+        help_text='Current payment health status'
+    )
+    last_payment_failure = models.DateTimeField(null=True, blank=True, help_text='When last payment failed')
+    failed_payment_count = models.IntegerField(default=0, help_text='Number of consecutive failed payments')
+
     # Package upgrade tracking
     pending_package = models.ForeignKey(
         Package,
@@ -430,6 +447,45 @@ class TenantSubscription(models.Model):
     def can_send_whatsapp_message(self):
         """Check if tenant can send WhatsApp message (deprecated - always returns True)"""
         return True  # WhatsApp limits removed
+
+    @property
+    def payment_health_status(self):
+        """Get user-friendly payment health status for admin display"""
+        status_map = {
+            'current': '🟢 Current',
+            'overdue': '🟡 Overdue',
+            'retrying': '🟠 Retrying',
+            'failed': '🔴 Failed',
+            'no_card': '⚪ No Card',
+        }
+        return status_map.get(self.payment_status, self.payment_status)
+
+    @property
+    def has_payment_issues(self):
+        """Check if subscription has any payment issues"""
+        return self.payment_status in ['overdue', 'retrying', 'failed']
+
+    @property
+    def days_until_next_billing(self):
+        """Calculate days until next billing"""
+        if not self.next_billing_date:
+            return None
+        delta = self.next_billing_date - timezone.now()
+        return delta.days
+
+    def mark_payment_failed(self):
+        """Mark a payment as failed and update counters"""
+        self.failed_payment_count += 1
+        self.last_payment_failure = timezone.now()
+        self.payment_status = 'retrying'
+        self.save(update_fields=['failed_payment_count', 'last_payment_failure', 'payment_status'])
+
+    def mark_payment_succeeded(self):
+        """Mark a payment as succeeded and reset failure counter"""
+        self.failed_payment_count = 0
+        self.last_payment_failure = None
+        self.payment_status = 'current'
+        self.save(update_fields=['failed_payment_count', 'last_payment_failure', 'payment_status'])
 
 
 class UsageLog(models.Model):
@@ -717,3 +773,331 @@ class PendingRegistration(models.Model):
     def can_process(self):
         """Check if this registration can be processed"""
         return not self.is_processed and not self.is_expired
+
+
+class PaymentAttempt(models.Model):
+    """
+    Tracks every payment attempt made through BOG
+    Links to PaymentOrder and tracks success/failure with detailed BOG response
+    """
+    payment_order = models.ForeignKey(
+        'PaymentOrder',
+        on_delete=models.CASCADE,
+        related_name='attempts'
+    )
+    subscription = models.ForeignKey(
+        'TenantSubscription',
+        on_delete=models.CASCADE,
+        related_name='payment_attempts',
+        null=True,
+        blank=True
+    )
+    tenant = models.ForeignKey(
+        'Tenant',
+        on_delete=models.CASCADE,
+        related_name='payment_attempts'
+    )
+
+    # Attempt tracking
+    attempt_number = models.IntegerField(
+        default=1,
+        help_text='Attempt number (1 for initial, 2+ for retries)'
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=[
+            ('pending', 'Pending'),
+            ('success', 'Success'),
+            ('failed', 'Failed'),
+            ('cancelled', 'Cancelled'),
+        ],
+        default='pending'
+    )
+
+    # BOG data
+    bog_order_id = models.CharField(max_length=255, db_index=True, blank=True)
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+
+    # Timing
+    attempted_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    # Failure details
+    failed_reason = models.TextField(blank=True)
+    bog_error_code = models.CharField(max_length=50, blank=True)
+    bog_response = models.JSONField(default=dict, blank=True)
+
+    # Retry tracking
+    is_retry = models.BooleanField(default=False)
+    parent_attempt = models.ForeignKey(
+        'self',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='retry_attempts'
+    )
+
+    class Meta:
+        db_table = 'tenants_payment_attempt'
+        ordering = ['-attempted_at']
+        indexes = [
+            models.Index(fields=['tenant', 'status']),
+            models.Index(fields=['subscription', 'attempted_at']),
+            models.Index(fields=['bog_order_id']),
+        ]
+
+    def __str__(self):
+        return f"Attempt #{self.attempt_number} - {self.tenant.name} - {self.status} - {self.amount} GEL"
+
+    @property
+    def duration(self):
+        """Calculate attempt duration"""
+        if self.completed_at:
+            return (self.completed_at - self.attempted_at).total_seconds()
+        return None
+
+
+class SubscriptionEvent(models.Model):
+    """
+    Logs all subscription-related events for audit trail and timeline
+    """
+    EVENT_TYPES = [
+        ('created', 'Created'),
+        ('activated', 'Activated'),
+        ('payment_success', 'Payment Succeeded'),
+        ('payment_failed', 'Payment Failed'),
+        ('retry_scheduled', 'Retry Scheduled'),
+        ('retry_success', 'Retry Succeeded'),
+        ('retry_failed', 'Retry Failed'),
+        ('suspended', 'Suspended'),
+        ('reactivated', 'Reactivated'),
+        ('cancelled', 'Cancelled'),
+        ('upgraded', 'Upgraded'),
+        ('downgraded', 'Downgraded'),
+        ('card_updated', 'Card Updated'),
+        ('card_added', 'Card Added'),
+        ('card_removed', 'Card Removed'),
+        ('trial_started', 'Trial Started'),
+        ('trial_converted', 'Trial Converted'),
+        ('trial_expired', 'Trial Expired'),
+        ('feature_added', 'Feature Added'),
+        ('feature_removed', 'Feature Removed'),
+        ('billing_date_changed', 'Billing Date Changed'),
+    ]
+
+    subscription = models.ForeignKey(
+        'TenantSubscription',
+        on_delete=models.CASCADE,
+        related_name='events'
+    )
+    tenant = models.ForeignKey(
+        'Tenant',
+        on_delete=models.CASCADE,
+        related_name='subscription_events'
+    )
+    event_type = models.CharField(max_length=30, choices=EVENT_TYPES, db_index=True)
+
+    # Related objects
+    payment_order = models.ForeignKey(
+        'PaymentOrder',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='events'
+    )
+    payment_attempt = models.ForeignKey(
+        'PaymentAttempt',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='events'
+    )
+
+    # Event data
+    old_value = models.JSONField(null=True, blank=True, help_text='Previous state for upgrades/downgrades')
+    new_value = models.JSONField(null=True, blank=True, help_text='New state for upgrades/downgrades')
+    metadata = models.JSONField(default=dict, blank=True)
+    description = models.TextField()
+
+    # Tracking
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        help_text='Superadmin who triggered this event (if manual)'
+    )
+
+    class Meta:
+        db_table = 'tenants_subscription_event'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['subscription', '-created_at']),
+            models.Index(fields=['tenant', 'event_type']),
+            models.Index(fields=['event_type', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.tenant.name} - {self.get_event_type_display()} - {self.created_at.strftime('%Y-%m-%d %H:%M')}"
+
+
+class PaymentRetrySchedule(models.Model):
+    """
+    Manages automatic retry scheduling for failed payments
+    Implements smart retry logic: +4hrs, +3days, +7days
+    """
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('executing', 'Executing'),
+        ('succeeded', 'Succeeded'),
+        ('failed', 'Failed'),
+        ('skipped', 'Skipped'),
+        ('cancelled', 'Cancelled'),
+    ]
+
+    payment_order = models.ForeignKey(
+        'PaymentOrder',
+        on_delete=models.CASCADE,
+        related_name='retry_schedules'
+    )
+    subscription = models.ForeignKey(
+        'TenantSubscription',
+        on_delete=models.CASCADE,
+        related_name='retry_schedules'
+    )
+    tenant = models.ForeignKey(
+        'Tenant',
+        on_delete=models.CASCADE,
+        related_name='payment_retries'
+    )
+    original_attempt = models.ForeignKey(
+        'PaymentAttempt',
+        on_delete=models.CASCADE,
+        related_name='retry_schedules'
+    )
+
+    # Retry config
+    retry_number = models.IntegerField(
+        help_text='Retry attempt number (1, 2, or 3)'
+    )
+    scheduled_for = models.DateTimeField(db_index=True)
+    executed_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+
+    # Result
+    retry_attempt = models.ForeignKey(
+        'PaymentAttempt',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='retry_schedule'
+    )
+    skip_reason = models.TextField(blank=True, help_text='Reason if skipped or cancelled')
+
+    class Meta:
+        db_table = 'tenants_payment_retry_schedule'
+        ordering = ['scheduled_for']
+        indexes = [
+            models.Index(fields=['status', 'scheduled_for']),
+            models.Index(fields=['tenant', 'status']),
+            models.Index(fields=['subscription', 'retry_number']),
+        ]
+
+    def __str__(self):
+        return f"Retry #{self.retry_number} - {self.tenant.name} - {self.status} - {self.scheduled_for.strftime('%Y-%m-%d %H:%M')}"
+
+    @property
+    def is_overdue(self):
+        """Check if retry is overdue"""
+        if self.status == 'pending':
+            return timezone.now() > self.scheduled_for
+        return False
+
+
+class PlatformMetrics(models.Model):
+    """
+    Daily platform-wide subscription and revenue metrics
+    Calculated by cron job for analytics dashboard
+    """
+    date = models.DateField(unique=True, db_index=True)
+
+    # Subscription counts
+    total_subscriptions = models.IntegerField(default=0)
+    active_subscriptions = models.IntegerField(default=0)
+    trial_subscriptions = models.IntegerField(default=0)
+    suspended_subscriptions = models.IntegerField(default=0)
+    cancelled_subscriptions = models.IntegerField(default=0)
+    new_subscriptions_today = models.IntegerField(default=0)
+    cancelled_today = models.IntegerField(default=0)
+
+    # Revenue metrics
+    mrr = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+        help_text='Monthly Recurring Revenue'
+    )
+    arr = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+        help_text='Annual Recurring Revenue'
+    )
+    total_revenue_today = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+
+    # Payment metrics
+    successful_payments = models.IntegerField(default=0)
+    failed_payments = models.IntegerField(default=0)
+    retry_success_rate = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=0,
+        help_text='Percentage of successful retries'
+    )
+
+    # Churn metrics
+    churn_rate = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=0,
+        help_text='Monthly churn rate percentage'
+    )
+    retention_rate = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=0,
+        help_text='Monthly retention rate percentage'
+    )
+
+    # Breakdown data (JSON)
+    package_distribution = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text='Subscription count by package: {package_name: count}'
+    )
+    revenue_by_package = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text='MRR by package: {package_name: revenue}'
+    )
+
+    # Metadata
+    calculated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'tenants_platform_metrics'
+        ordering = ['-date']
+        verbose_name = 'Platform Metrics'
+        verbose_name_plural = 'Platform Metrics'
+
+    def __str__(self):
+        return f"Metrics {self.date} - MRR: {self.mrr} GEL - Active: {self.active_subscriptions}"
+
+    @property
+    def payment_success_rate(self):
+        """Calculate payment success rate"""
+        total = self.successful_payments + self.failed_payments
+        if total == 0:
+            return 0
+        return round((self.successful_payments / total) * 100, 2)
