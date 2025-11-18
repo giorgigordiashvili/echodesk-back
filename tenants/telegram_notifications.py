@@ -25,41 +25,12 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-# Check if telegram is available
-try:
-    import telegram
-    from telegram import Bot
-    from telegram.error import TelegramError
-    TELEGRAM_AVAILABLE = True
-except ImportError:
-    TELEGRAM_AVAILABLE = False
-    logger.warning("python-telegram-bot not installed. Telegram notifications disabled.")
-
-
-def get_bot():
-    """Get configured Telegram bot instance"""
-    if not TELEGRAM_AVAILABLE:
-        return None
-
-    bot_token = getattr(settings, 'TELEGRAM_BOT_TOKEN', None)
-    if not bot_token:
-        logger.warning("TELEGRAM_BOT_TOKEN not configured. Notifications disabled.")
-        return None
-
-    return Bot(token=bot_token)
-
-
-def get_chat_id():
-    """Get configured Telegram chat ID"""
-    chat_id = getattr(settings, 'TELEGRAM_CHAT_ID', None)
-    if not chat_id:
-        logger.warning("TELEGRAM_CHAT_ID not configured. Notifications disabled.")
-    return chat_id
+import requests
 
 
 def send_telegram_message(message, parse_mode='HTML', disable_notification=False):
     """
-    Send a message to Telegram
+    Send a message to Telegram using HTTP API (synchronous)
 
     Args:
         message: Message text (supports HTML formatting)
@@ -69,26 +40,33 @@ def send_telegram_message(message, parse_mode='HTML', disable_notification=False
     Returns:
         bool: True if sent successfully, False otherwise
     """
-    if not TELEGRAM_AVAILABLE:
-        logger.debug("Telegram not available, skipping notification")
+    bot_token = getattr(settings, 'TELEGRAM_BOT_TOKEN', None)
+    chat_id = getattr(settings, 'TELEGRAM_CHAT_ID', None)
+
+    if not bot_token:
+        logger.debug("TELEGRAM_BOT_TOKEN not configured. Notifications disabled.")
         return False
 
-    bot = get_bot()
-    chat_id = get_chat_id()
-
-    if not bot or not chat_id:
+    if not chat_id:
+        logger.debug("TELEGRAM_CHAT_ID not configured. Notifications disabled.")
         return False
+
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+
+    payload = {
+        'chat_id': chat_id,
+        'text': message,
+        'parse_mode': parse_mode,
+        'disable_notification': disable_notification
+    }
 
     try:
-        bot.send_message(
-            chat_id=chat_id,
-            text=message,
-            parse_mode=parse_mode,
-            disable_notification=disable_notification
-        )
+        response = requests.post(url, json=payload, timeout=10)
+        response.raise_for_status()
+
         logger.info("Telegram notification sent successfully")
         return True
-    except TelegramError as e:
+    except requests.exceptions.RequestException as e:
         logger.error(f"Failed to send Telegram notification: {e}")
         return False
     except Exception as e:
@@ -317,44 +295,31 @@ def test_telegram_connection():
     Test Telegram bot connection
     Returns dict with status and message
     """
-    if not TELEGRAM_AVAILABLE:
-        return {
-            'success': False,
-            'message': 'python-telegram-bot not installed'
-        }
+    test_message = "✅ <b>Telegram Bot Connected!</b>\n\nEchoDesk notifications are now active."
 
-    bot = get_bot()
-    chat_id = get_chat_id()
+    result = send_telegram_message(test_message)
 
-    if not bot:
-        return {
-            'success': False,
-            'message': 'TELEGRAM_BOT_TOKEN not configured'
-        }
-
-    if not chat_id:
-        return {
-            'success': False,
-            'message': 'TELEGRAM_CHAT_ID not configured'
-        }
-
-    try:
-        bot.send_message(
-            chat_id=chat_id,
-            text="✅ <b>Telegram Bot Connected!</b>\n\nEchoDesk notifications are now active.",
-            parse_mode='HTML'
-        )
+    if result:
         return {
             'success': True,
             'message': 'Test message sent successfully'
         }
-    except TelegramError as e:
-        return {
-            'success': False,
-            'message': f'Telegram error: {str(e)}'
-        }
-    except Exception as e:
-        return {
-            'success': False,
-            'message': f'Unexpected error: {str(e)}'
-        }
+    else:
+        bot_token = getattr(settings, 'TELEGRAM_BOT_TOKEN', None)
+        chat_id = getattr(settings, 'TELEGRAM_CHAT_ID', None)
+
+        if not bot_token:
+            return {
+                'success': False,
+                'message': 'TELEGRAM_BOT_TOKEN not configured'
+            }
+        elif not chat_id:
+            return {
+                'success': False,
+                'message': 'TELEGRAM_CHAT_ID not configured'
+            }
+        else:
+            return {
+                'success': False,
+                'message': 'Failed to send message - check logs for details'
+            }
