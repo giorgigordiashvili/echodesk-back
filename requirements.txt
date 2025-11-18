@@ -20,6 +20,7 @@ boto3>=1.40.0
 sendgrid==6.12.5
 pywebpush>=1.14.0
 py-vapid>=1.9.0
+python-telegram-bot>=20.0
 
 # Invoice generation
 reportlab>=4.0.0

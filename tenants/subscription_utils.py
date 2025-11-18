@@ -18,6 +18,9 @@ from .models import (
     PlatformMetrics,
     Tenant,
 )
+from .telegram_notifications import (
+    notify_retry_scheduled, notify_all_retries_exhausted, notify_subscription_suspended
+)
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +83,13 @@ def schedule_payment_retries(payment_order, original_attempt):
             'failed_amount': str(payment_order.amount),
         }
     )
+
+    # Send Telegram notification for the first retry being scheduled
+    try:
+        if created_retries:
+            notify_retry_scheduled(subscription, created_retries[0])
+    except Exception as e:
+        logger.error(f'Failed to send Telegram notification for retry scheduled: {e}')
 
     # Update subscription payment status
     subscription.payment_status = 'retrying'
@@ -419,5 +429,11 @@ def suspend_subscription_for_payment_failure(subscription):
             'last_failure': str(subscription.last_payment_failure),
         }
     )
+
+    # Send Telegram notification
+    try:
+        notify_subscription_suspended(subscription, reason='All payment retries exhausted')
+    except Exception as e:
+        logger.error(f'Failed to send Telegram notification for suspension: {e}')
 
     logger.warning(f"Suspended subscription for {subscription.tenant.name} due to payment failure")

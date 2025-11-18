@@ -20,6 +20,10 @@ from .bog_payment import bog_service
 from .services import SingleFrontendDeploymentService
 from .email_service import email_service
 from .subscription_utils import schedule_payment_retries, cancel_pending_retries
+from .telegram_notifications import (
+    notify_subscription_created, notify_payment_success, notify_payment_failed,
+    notify_retry_success, notify_retry_scheduled, notify_all_retries_exhausted
+)
 from tenant_schemas.utils import schema_context
 from django.contrib.auth import get_user_model
 from django.db import transaction
@@ -483,6 +487,13 @@ def bog_webhook(request):
                             'cancelled_remaining_retries': cancelled_count,
                         }
                     )
+
+                    # Send Telegram notification for successful retry
+                    try:
+                        notify_retry_success(subscription, attempt)
+                    except Exception as e:
+                        logger.error(f'Failed to send Telegram notification for retry success: {e}')
+
                 except:
                     logger.warning(f'Could not find retry schedule for {external_order_id}')
 
@@ -674,6 +685,13 @@ def bog_webhook(request):
                                 'transaction_id': transaction_id,
                             }
                         )
+
+                        # Send Telegram notifications
+                        try:
+                            notify_subscription_created(subscription)
+                            notify_payment_success(attempt, subscription)
+                        except Exception as e:
+                            logger.error(f'Failed to send Telegram notification: {e}')
 
                         if card_saved_for_recurring:
                             create_subscription_event(
@@ -1268,6 +1286,12 @@ def bog_webhook(request):
                         'error_code': response_code,
                     }
                 )
+
+                # Send Telegram notification for failed payment
+                try:
+                    notify_payment_failed(failed_attempt, subscription)
+                except Exception as e:
+                    logger.error(f'Failed to send Telegram notification for payment failure: {e}')
 
                 # Schedule automatic retries if subscription has saved card
                 if subscription.parent_order_id:

@@ -476,6 +476,10 @@ BOG_API_BASE_URL = config('BOG_API_BASE_URL', default='https://api.bog.ge/paymen
 # Cron Job Security Token (for scheduled task HTTP endpoints)
 CRON_SECRET_TOKEN = config('CRON_SECRET_TOKEN', default='')
 
+# Telegram Bot Configuration (for subscription notifications)
+TELEGRAM_BOT_TOKEN = config('TELEGRAM_BOT_TOKEN', default='')
+TELEGRAM_CHAT_ID = config('TELEGRAM_CHAT_ID', default='')
+
 # Test Mode for Billing Intervals
 # When True, subscriptions renew every 2 minutes instead of 30 days (for testing)
 # PRODUCTION: Set TEST_BILLING_INTERVAL=false or remove from .env
