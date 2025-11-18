@@ -1336,18 +1336,18 @@ class PlatformMetricsAdmin(admin.ModelAdmin):
         rate = obj.payment_success_rate
         color = '#28A745' if rate >= 95 else '#FFC107' if rate >= 85 else '#DC3545'
         return format_html(
-            '<span style="color: {}; font-weight: bold;">{:.1f}%</span>',
+            '<span style="color: {}; font-weight: bold;">{}</span>',
             color,
-            rate
+            f'{rate:.1f}%'
         )
     payment_success_rate_display.short_description = 'Success Rate'
 
     def churn_rate_display(self, obj):
-        rate = obj.churn_rate
+        rate = float(obj.churn_rate)
         color = '#28A745' if rate <= 5 else '#FFC107' if rate <= 10 else '#DC3545'
         return format_html(
-            '<span style="color: {}; font-weight: bold;">{:.2f}%</span>',
+            '<span style="color: {}; font-weight: bold;">{}</span>',
             color,
-            rate
+            f'{rate:.2f}%'
         )
     churn_rate_display.short_description = 'Churn Rate'
