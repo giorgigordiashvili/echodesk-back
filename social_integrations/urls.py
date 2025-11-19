@@ -27,6 +27,7 @@ urlpatterns = [
     path('facebook/pages/debug/', views.debug_facebook_pages, name='facebook_pages_debug'),
     path('facebook/status/', views.facebook_connection_status, name='facebook_status'),
     path('facebook/disconnect/', views.facebook_disconnect, name='facebook_disconnect'),
+    path('facebook/pages/<str:page_id>/disconnect/', views.facebook_page_disconnect, name='facebook_page_disconnect'),
     path('facebook/send-message/', views.facebook_send_message, name='facebook_send_message'),
     path('facebook/webhook/', views.facebook_webhook, name='facebook_webhook'),
 

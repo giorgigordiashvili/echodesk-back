@@ -579,50 +579,155 @@ def facebook_connection_status(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated, CanManageSocialConnections])
 def facebook_disconnect(request):
-    """Disconnect Facebook integration for current tenant"""
+    """
+    Disconnect Facebook integration for current tenant
+
+    By default, performs soft delete (sets is_active=False) to preserve data.
+    Pass hard_delete=true in request body to permanently delete.
+    """
     try:
         logger = logging.getLogger(__name__)
-        
-        # Get count before deletion for response
-        pages_to_delete = FacebookPageConnection.objects.all()  # All pages for this tenant
-        page_count = pages_to_delete.count()
-        page_names = list(pages_to_delete.values_list('page_name', flat=True))
-        
+
+        # Check if hard delete is requested
+        hard_delete = request.data.get('hard_delete', False) if hasattr(request, 'data') else False
+
+        # Get all pages for this tenant
+        pages_to_disconnect = FacebookPageConnection.objects.all()
+        page_count = pages_to_disconnect.count()
+        page_names = list(pages_to_disconnect.values_list('page_name', flat=True))
+
         if page_count == 0:
             return Response({
                 'status': 'no_pages',
                 'message': 'No Facebook pages found to disconnect'
             })
-        
-        # Delete Facebook messages
-        facebook_message_count = 0
-        for page in pages_to_delete:
-            messages_deleted = FacebookMessage.objects.filter(
-                page_connection=page
-            ).count()
-            FacebookMessage.objects.filter(page_connection=page).delete()
-            facebook_message_count += messages_deleted
-        
-        # Delete Facebook page connections
-        pages_to_delete.delete()
-        
-        logger.info(f"✅ Facebook disconnect completed:")
-        logger.info(f"   - Facebook pages deleted: {page_count}")
-        logger.info(f"   - Facebook messages deleted: {facebook_message_count}")
-        
-        return Response({
-            'status': 'disconnected',
-            'facebook_pages_deleted': page_count,
-            'facebook_messages_deleted': facebook_message_count,
-            'deleted_pages': page_names,
-            'message': f'Permanently removed {page_count} Facebook page(s) and {facebook_message_count} messages'
-        })
-        
+
+        if hard_delete:
+            # HARD DELETE: Permanently remove pages and messages
+            facebook_message_count = 0
+            for page in pages_to_disconnect:
+                messages_deleted = FacebookMessage.objects.filter(
+                    page_connection=page
+                ).count()
+                FacebookMessage.objects.filter(page_connection=page).delete()
+                facebook_message_count += messages_deleted
+
+            pages_to_disconnect.delete()
+
+            logger.info(f"✅ Facebook hard disconnect completed:")
+            logger.info(f"   - Facebook pages deleted: {page_count}")
+            logger.info(f"   - Facebook messages deleted: {facebook_message_count}")
+
+            return Response({
+                'status': 'hard_disconnected',
+                'facebook_pages_deleted': page_count,
+                'facebook_messages_deleted': facebook_message_count,
+                'deleted_pages': page_names,
+                'message': f'Permanently removed {page_count} Facebook page(s) and {facebook_message_count} messages'
+            })
+        else:
+            # SOFT DELETE: Deactivate pages, keep data for audit trail
+            from django.utils import timezone
+
+            now = timezone.now()
+            deactivated_count = pages_to_disconnect.update(
+                is_active=False,
+                deactivated_at=now,
+                deactivation_reason='manual',
+                updated_at=now
+            )
+
+            logger.info(f"✅ Facebook soft disconnect completed:")
+            logger.info(f"   - Facebook pages deactivated: {deactivated_count}")
+            logger.info(f"   - Deactivation reason: manual")
+            logger.info(f"   - Messages preserved for audit trail")
+            logger.info(f"   - Webhooks will now return 404 for these pages")
+
+            return Response({
+                'status': 'disconnected',
+                'facebook_pages_deactivated': deactivated_count,
+                'deactivated_pages': page_names,
+                'message': f'Deactivated {deactivated_count} Facebook page(s). Messages preserved. Webhooks will be rejected.',
+                'note': 'Pages are soft-deleted. Pass hard_delete=true to permanently remove data.'
+            })
+
     except Exception as e:
         logger = logging.getLogger(__name__)
         logger.error(f"Failed to disconnect Facebook: {e}")
         return Response({
             'error': f'Failed to disconnect: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, CanManageSocialConnections])
+def facebook_page_disconnect(request, page_id):
+    """
+    Disconnect a specific Facebook page by page_id
+
+    Performs soft delete (sets is_active=False) by default.
+    Pass hard_delete=true to permanently delete.
+    """
+    try:
+        logger = logging.getLogger(__name__)
+
+        # Check if hard delete is requested
+        hard_delete = request.data.get('hard_delete', False) if hasattr(request, 'data') else False
+
+        # Get the specific page for this tenant
+        try:
+            page = FacebookPageConnection.objects.get(page_id=page_id)
+        except FacebookPageConnection.DoesNotExist:
+            return Response({
+                'error': f'Facebook page {page_id} not found for this tenant'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        page_name = page.page_name
+
+        if hard_delete:
+            # HARD DELETE: Permanently remove page and messages
+            message_count = FacebookMessage.objects.filter(page_connection=page).count()
+            FacebookMessage.objects.filter(page_connection=page).delete()
+            page.delete()
+
+            logger.info(f"✅ Hard deleted Facebook page: {page_name} (ID: {page_id})")
+            logger.info(f"   - Messages deleted: {message_count}")
+
+            return Response({
+                'status': 'hard_disconnected',
+                'page_id': page_id,
+                'page_name': page_name,
+                'messages_deleted': message_count,
+                'message': f'Permanently removed Facebook page "{page_name}" and {message_count} messages'
+            })
+        else:
+            # SOFT DELETE: Deactivate page, keep data
+            from django.utils import timezone
+
+            now = timezone.now()
+            page.is_active = False
+            page.deactivated_at = now
+            page.deactivation_reason = 'manual'
+            page.updated_at = now
+            page.save()
+
+            logger.info(f"✅ Soft disconnected Facebook page: {page_name} (ID: {page_id})")
+            logger.info(f"   - Messages preserved for audit trail")
+            logger.info(f"   - Webhooks will now return 404 for this page")
+
+            return Response({
+                'status': 'disconnected',
+                'page_id': page_id,
+                'page_name': page_name,
+                'message': f'Deactivated Facebook page "{page_name}". Messages preserved. Webhooks will be rejected.',
+                'note': 'Page is soft-deleted. Pass hard_delete=true to permanently remove data.'
+            })
+
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.error(f"Failed to disconnect Facebook page {page_id}: {e}")
+        return Response({
+            'error': f'Failed to disconnect page: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -734,8 +839,54 @@ def facebook_send_message(request):
             })
         else:
             error_data = response.json() if response.content else {}
-            error_message = error_data.get('error', {}).get('message', 'Unknown error')
-            
+            error_info = error_data.get('error', {})
+            error_message = error_info.get('message', 'Unknown error')
+            error_code = error_info.get('code')
+            error_type = error_info.get('type', '')
+
+            # Auto-deactivate page on authentication/permission errors
+            OAUTH_ERROR_CODES = [
+                190,  # OAuthException - Access token expired/invalid
+                102,  # API Session - Session expired
+                10,   # API Permission Denied
+                200,  # Permissions Error
+                2500, # Permissions Error - deprecated API
+            ]
+
+            if error_code in OAUTH_ERROR_CODES or 'OAuthException' in error_type:
+                # Automatically deactivate the page
+                from django.utils import timezone
+
+                now = timezone.now()
+
+                # Determine specific deactivation reason
+                if error_code == 190:
+                    deactivation_reason = 'token_expired'
+                elif error_code in [10, 200]:
+                    deactivation_reason = 'permission_revoked'
+                else:
+                    deactivation_reason = 'oauth_error'
+
+                page_connection.is_active = False
+                page_connection.deactivated_at = now
+                page_connection.deactivation_reason = deactivation_reason
+                page_connection.deactivation_error_code = str(error_code) if error_code else None
+                page_connection.updated_at = now
+                page_connection.save()
+
+                logger.warning(
+                    f"🔴 Auto-deactivated Facebook page '{page_connection.page_name}' "
+                    f"(reason: {deactivation_reason}, error {error_code}: {error_message})"
+                )
+
+                return Response({
+                    'error': f'Facebook authentication error: {error_message}',
+                    'facebook_error': error_data,
+                    'page_deactivated': True,
+                    'reason': 'Token expired or permissions revoked. Please reconnect your Facebook page.',
+                    'error_code': error_code
+                }, status=status.HTTP_401_UNAUTHORIZED)
+
             return Response({
                 'error': f'Failed to send message: {error_message}',
                 'facebook_error': error_data

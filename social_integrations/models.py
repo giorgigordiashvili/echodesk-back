@@ -6,13 +6,39 @@ User = get_user_model()
 
 class FacebookPageConnection(models.Model):
     """Stores Facebook page connection details for a tenant"""
+
+    DEACTIVATION_REASONS = [
+        ('manual', 'Manually Disconnected'),
+        ('token_expired', 'Access Token Expired'),
+        ('permission_revoked', 'Permissions Revoked'),
+        ('oauth_error', 'OAuth Error'),
+        ('api_error', 'API Error'),
+    ]
+
     page_id = models.CharField(max_length=100, unique=True)  # Make unique directly
     page_name = models.CharField(max_length=200)
     page_access_token = models.TextField()
     is_active = models.BooleanField(default=True)
+
+    # Deactivation tracking
+    deactivated_at = models.DateTimeField(null=True, blank=True, help_text='When the page was deactivated')
+    deactivation_reason = models.CharField(
+        max_length=50,
+        choices=DEACTIVATION_REASONS,
+        null=True,
+        blank=True,
+        help_text='Reason why the page was deactivated'
+    )
+    deactivation_error_code = models.CharField(
+        max_length=20,
+        null=True,
+        blank=True,
+        help_text='Facebook error code if deactivated due to error'
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     def __str__(self):
         return f"{self.page_name} - Tenant Page"
 
