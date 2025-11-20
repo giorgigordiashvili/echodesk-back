@@ -10,7 +10,7 @@ from .models import (
     FacebookPageConnection, FacebookMessage,
     InstagramAccountConnection, InstagramMessage,
     WhatsAppBusinessAccount, WhatsAppMessage,
-    SocialIntegrationSettings
+    SocialIntegrationSettings, OrphanedFacebookMessage
 )
 
 
@@ -201,6 +201,142 @@ class WhatsAppMessageAdmin(TenantAwareAdminMixin, admin.ModelAdmin):
             return f"[{obj.message_type.upper()}] Media message"
         return "[No content]"
     message_preview.short_description = 'Message Preview'
+
+
+class PublicSchemaOnlyAdminMixin:
+    """Mixin to restrict admin models to public schema only"""
+
+    def has_module_permission(self, request):
+        """Only show this admin in public schema, not tenant schemas"""
+        if hasattr(connection, 'schema_name'):
+            schema_name = connection.schema_name
+        else:
+            schema_name = get_public_schema_name()
+
+        # Only show in public schema
+        if schema_name != get_public_schema_name():
+            return False
+
+        return super().has_module_permission(request)
+
+
+@admin.register(OrphanedFacebookMessage)
+class OrphanedFacebookMessageAdmin(PublicSchemaOnlyAdminMixin, admin.ModelAdmin):
+    """
+    Admin interface for orphaned Facebook messages.
+    These are messages that couldn't be matched to any tenant.
+    """
+    list_display = [
+        'created_at',
+        'page_id',
+        'sender_name_or_id',
+        'message_preview',
+        'timestamp',
+        'reviewed_status',
+        'error_reason'
+    ]
+    list_filter = [
+        'reviewed',
+        'error_reason',
+        'created_at',
+        'timestamp'
+    ]
+    search_fields = [
+        'page_id',
+        'sender_id',
+        'sender_name',
+        'message_text',
+        'message_id'
+    ]
+    readonly_fields = [
+        'page_id',
+        'sender_id',
+        'sender_name',
+        'message_id',
+        'message_text',
+        'timestamp',
+        'raw_webhook_data',
+        'error_reason',
+        'created_at'
+    ]
+    date_hierarchy = 'created_at'
+
+    fieldsets = (
+        ('Message Information', {
+            'fields': ('page_id', 'sender_id', 'sender_name', 'message_id')
+        }),
+        ('Message Content', {
+            'fields': ('message_text', 'timestamp')
+        }),
+        ('Error Details', {
+            'fields': ('error_reason', 'raw_webhook_data'),
+            'classes': ('collapse',)
+        }),
+        ('Review Status', {
+            'fields': ('reviewed', 'reviewed_at', 'reviewed_by', 'notes')
+        }),
+        ('Metadata', {
+            'fields': ('created_at',),
+            'classes': ('collapse',)
+        }),
+    )
+
+    actions = ['mark_as_reviewed', 'mark_as_unreviewed']
+
+    def sender_name_or_id(self, obj):
+        """Display sender name or ID"""
+        return obj.sender_name or obj.sender_id
+    sender_name_or_id.short_description = 'Sender'
+    sender_name_or_id.admin_order_field = 'sender_name'
+
+    def message_preview(self, obj):
+        """Show first 50 characters of message"""
+        return obj.message_text[:50] + '...' if len(obj.message_text) > 50 else obj.message_text
+    message_preview.short_description = 'Message Preview'
+
+    def reviewed_status(self, obj):
+        """Display reviewed status with color"""
+        if obj.reviewed:
+            return format_html(
+                '<span style="color: green;">✓ Reviewed</span>'
+            )
+        return format_html(
+            '<span style="color: orange;">⚠ Needs Review</span>'
+        )
+    reviewed_status.short_description = 'Status'
+    reviewed_status.admin_order_field = 'reviewed'
+
+    def mark_as_reviewed(self, request, queryset):
+        """Mark selected messages as reviewed"""
+        from django.utils import timezone
+        updated = queryset.update(
+            reviewed=True,
+            reviewed_at=timezone.now(),
+            reviewed_by=request.user
+        )
+        self.message_user(request, f"{updated} message(s) marked as reviewed.", messages.SUCCESS)
+    mark_as_reviewed.short_description = "Mark selected messages as reviewed"
+
+    def mark_as_unreviewed(self, request, queryset):
+        """Mark selected messages as unreviewed"""
+        updated = queryset.update(
+            reviewed=False,
+            reviewed_at=None,
+            reviewed_by=None
+        )
+        self.message_user(request, f"{updated} message(s) marked as unreviewed.", messages.SUCCESS)
+    mark_as_unreviewed.short_description = "Mark selected messages as unreviewed"
+
+    def save_model(self, request, obj, form, change):
+        """Automatically set reviewed_by and reviewed_at when reviewed is checked"""
+        if obj.reviewed and not obj.reviewed_at:
+            from django.utils import timezone
+            obj.reviewed_at = timezone.now()
+            obj.reviewed_by = request.user
+        elif not obj.reviewed:
+            obj.reviewed_at = None
+            obj.reviewed_by = None
+        super().save_model(request, obj, form, change)
 
 
 @admin.register(SocialIntegrationSettings)

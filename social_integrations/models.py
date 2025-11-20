@@ -66,6 +66,54 @@ class FacebookMessage(models.Model):
         return f"Message from {self.sender_name} - {self.message_text[:50]}"
 
 
+class OrphanedFacebookMessage(models.Model):
+    """
+    Stores Facebook messages that couldn't be matched to any tenant.
+    This happens when:
+    1. A page is deactivated but still receives messages
+    2. A webhook is received for an unknown page_id
+    3. The tenant connection was deleted
+
+    These messages are saved in the PUBLIC schema for admin review.
+    """
+    page_id = models.CharField(max_length=100, db_index=True, help_text="Facebook page ID that sent the message")
+    sender_id = models.CharField(max_length=100, help_text="ID of the person who sent the message")
+    sender_name = models.CharField(max_length=200, blank=True, help_text="Name of the sender if available")
+    message_id = models.CharField(max_length=100, blank=True, help_text="Facebook message ID if available")
+    message_text = models.TextField(help_text="Content of the message")
+    timestamp = models.DateTimeField(help_text="When the message was sent")
+    raw_webhook_data = models.JSONField(help_text="Full webhook payload for debugging")
+    error_reason = models.CharField(
+        max_length=255,
+        default='page_not_found',
+        help_text="Why this message was orphaned"
+    )
+    reviewed = models.BooleanField(default=False, help_text="Whether an admin has reviewed this message")
+    reviewed_at = models.DateTimeField(null=True, blank=True, help_text="When the message was reviewed")
+    reviewed_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='reviewed_orphaned_messages',
+        help_text="Admin who reviewed this message"
+    )
+    notes = models.TextField(blank=True, help_text="Admin notes about this orphaned message")
+    created_at = models.DateTimeField(auto_now_add=True, help_text="When this record was created")
+
+    class Meta:
+        ordering = ['-timestamp']
+        indexes = [
+            models.Index(fields=['page_id', 'timestamp']),
+            models.Index(fields=['reviewed', 'created_at']),
+        ]
+        verbose_name = "Orphaned Facebook Message"
+        verbose_name_plural = "Orphaned Facebook Messages"
+
+    def __str__(self):
+        return f"Orphaned message from {self.sender_name or self.sender_id} to page {self.page_id} - {self.message_text[:50]}"
+
+
 class InstagramAccountConnection(models.Model):
     """Stores Instagram Business account connection details for a tenant"""
     instagram_account_id = models.CharField(max_length=100, unique=True)

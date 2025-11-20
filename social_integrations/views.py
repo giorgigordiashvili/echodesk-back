@@ -21,7 +21,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from drf_spectacular.utils import extend_schema
 from .models import (
-    FacebookPageConnection, FacebookMessage,
+    FacebookPageConnection, FacebookMessage, OrphanedFacebookMessage,
     InstagramAccountConnection, InstagramMessage,
     WhatsAppBusinessAccount, WhatsAppMessage, WhatsAppMessageTemplate,
     SocialIntegrationSettings
@@ -962,8 +962,79 @@ def facebook_webhook(request):
             tenant_schema = find_tenant_by_page_id(page_id)
 
             if not tenant_schema:
-                logger.error(f"No tenant found for page_id: {page_id}")
-                return JsonResponse({'error': f'No tenant found for page_id: {page_id}'}, status=404)
+                logger.warning(f"No tenant found for page_id: {page_id} - Saving as orphaned message")
+
+                # Extract message details from webhook data
+                try:
+                    # Extract messages from webhook data
+                    messages_to_save = []
+
+                    # Handle test format
+                    if 'field' in data and 'value' in data and data['field'] == 'messages':
+                        test_value = data['value']
+                        sender_id = test_value.get('sender', {}).get('id', 'unknown')
+                        message_data = test_value.get('message', {})
+                        timestamp = test_value.get('timestamp', 0)
+
+                        messages_to_save.append({
+                            'sender_id': sender_id,
+                            'sender_name': test_value.get('sender', {}).get('name', ''),
+                            'message_id': message_data.get('mid', ''),
+                            'message_text': message_data.get('text', '[No text content]'),
+                            'timestamp': convert_facebook_timestamp(int(timestamp) if timestamp else 0)
+                        })
+
+                    # Handle standard webhook format
+                    elif 'entry' in data:
+                        for entry in data['entry']:
+                            if 'messaging' in entry:
+                                for message_event in entry['messaging']:
+                                    if 'message' in message_event:
+                                        message_data = message_event['message']
+                                        # Skip echo messages
+                                        if not message_data.get('is_echo'):
+                                            sender_id = message_event.get('sender', {}).get('id', 'unknown')
+                                            timestamp = message_event.get('timestamp', 0)
+
+                                            messages_to_save.append({
+                                                'sender_id': sender_id,
+                                                'sender_name': '',  # Not available in standard webhook
+                                                'message_id': message_data.get('mid', ''),
+                                                'message_text': message_data.get('text', '[No text content]'),
+                                                'timestamp': convert_facebook_timestamp(int(timestamp) if timestamp else 0)
+                                            })
+
+                    # Save orphaned messages to public schema
+                    saved_count = 0
+                    for msg in messages_to_save:
+                        OrphanedFacebookMessage.objects.create(
+                            page_id=page_id,
+                            sender_id=msg['sender_id'],
+                            sender_name=msg['sender_name'],
+                            message_id=msg['message_id'],
+                            message_text=msg['message_text'],
+                            timestamp=msg['timestamp'],
+                            raw_webhook_data=data,
+                            error_reason='page_not_found'
+                        )
+                        saved_count += 1
+                        logger.info(f"✅ Saved orphaned message from {msg['sender_id']}: {msg['message_text'][:50]}")
+
+                    logger.info(f"✅ Saved {saved_count} orphaned message(s) for page_id: {page_id}")
+
+                    # Return success so Facebook doesn't keep retrying
+                    return JsonResponse({
+                        'status': 'received',
+                        'message': f'Saved {saved_count} orphaned message(s) for review'
+                    })
+
+                except Exception as e:
+                    logger.error(f"Failed to save orphaned message: {e}")
+                    # Still return success to avoid Facebook retries
+                    return JsonResponse({
+                        'status': 'received',
+                        'message': 'Page not found, webhook acknowledged'
+                    })
 
             logger.info(f"Processing webhook for page_id {page_id} in tenant: {tenant_schema}")
             
