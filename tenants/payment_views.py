@@ -2238,7 +2238,7 @@ def list_invoices(request):
     """
     try:
         # Get invoices for the current tenant
-        invoices = Invoice.objects.filter(tenant=request.tenant).select_related('package', 'payment_order')
+        invoices = Invoice.objects.filter(tenant=request.tenant).select_related('payment_order')
 
         invoices_data = []
         for invoice in invoices:
@@ -2248,7 +2248,7 @@ def list_invoices(request):
                 'amount': float(invoice.amount),
                 'currency': invoice.currency,
                 'description': invoice.description,
-                'package_name': invoice.package.name if invoice.package else None,
+                'package_name': None,  # Package system removed
                 'agent_count': invoice.agent_count,
                 'invoice_date': invoice.invoice_date.isoformat(),
                 'paid_date': invoice.paid_date.isoformat() if invoice.paid_date else None,

@@ -50,7 +50,7 @@ class Command(BaseCommand):
             trial_converted=False,
             is_active=True,
             trial_ends_at__lte=expiration_date
-        ).select_related('tenant', 'package')
+        ).select_related('tenant')
 
         total = expiring_trials.count()
         self.stdout.write(f"Found {total} trials to process")
@@ -64,11 +64,9 @@ class Command(BaseCommand):
 
         for subscription in expiring_trials:
             tenant = subscription.tenant
-            package = subscription.package
 
             self.stdout.write(f"\nProcessing: {tenant.name} ({tenant.schema_name})")
             self.stdout.write(f"  Trial ends: {subscription.trial_ends_at}")
-            self.stdout.write(f"  Package: {package.display_name}")
             self.stdout.write(f"  Agent count: {subscription.agent_count}")
 
             # Check if we have a saved card
@@ -82,12 +80,8 @@ class Command(BaseCommand):
                     self.stdout.write(f"  Subscription deactivated")
                 continue
 
-            # Calculate subscription amount
-            from tenants.models import PricingModel
-            if package.pricing_model == PricingModel.AGENT_BASED:
-                amount = float(package.price_gel) * subscription.agent_count
-            else:
-                amount = float(package.price_gel)
+            # Calculate subscription amount using monthly_cost
+            amount = float(subscription.monthly_cost)
 
             self.stdout.write(f"  Amount to charge: {amount} GEL")
 
@@ -118,13 +112,11 @@ class Command(BaseCommand):
                     order_id=order_id,
                     bog_order_id=charge_result['order_id'],
                     tenant=tenant,
-                    package=package,
                     amount=amount,
                     currency='GEL',
                     agent_count=subscription.agent_count,
                     status='processing',
                     card_saved=False,  # Using parent's saved card
-                    is_trial_payment=False,
                     metadata={
                         'type': 'trial_conversion',
                         'parent_order_id': subscription.parent_order_id,

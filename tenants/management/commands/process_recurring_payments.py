@@ -47,7 +47,7 @@ class Command(BaseCommand):
             is_active=True,
             next_billing_date__lte=cutoff_date,
             tenant__is_active=True
-        ).select_related('tenant', 'package', 'pending_package')
+        ).select_related('tenant')
 
         self.stdout.write(f'Found {subscriptions_to_renew.count()} subscriptions to process')
 
@@ -57,18 +57,8 @@ class Command(BaseCommand):
 
         for subscription in subscriptions_to_renew:
             tenant = subscription.tenant
-            package = subscription.package
 
             try:
-                # Check for scheduled upgrades that should take effect now
-                if subscription.pending_package and subscription.upgrade_scheduled_for:
-                    if subscription.upgrade_scheduled_for <= timezone.now():
-                        self.stdout.write(
-                            f'🔄 {tenant.schema_name}: Processing scheduled upgrade to {subscription.pending_package.display_name}'
-                        )
-                        # Update package for this billing cycle
-                        package = subscription.pending_package
-
                 # Check if tenant has saved card
                 if not subscription.parent_order_id:
                     self.stdout.write(self.style.WARNING(
@@ -78,13 +68,11 @@ class Command(BaseCommand):
                     continue
 
                 # Calculate amount based on subscription type
-                # Use subscription.monthly_cost which handles both feature-based and package-based pricing
+                # Use subscription.monthly_cost which handles feature-based pricing
                 amount = float(subscription.monthly_cost)
 
-                package_name = package.display_name if package else "Feature-based"
-
                 self.stdout.write(
-                    f'📋 {tenant.schema_name}: Charging {amount} GEL for {package_name} '
+                    f'📋 {tenant.schema_name}: Charging {amount} GEL for subscription '
                     f'(expires: {subscription.expires_at.date() if subscription.expires_at else "N/A"})'
                 )
 
@@ -110,23 +98,15 @@ class Command(BaseCommand):
                     'subscription_id': subscription.id
                 }
 
-                # Track if this was an upgrade
-                if subscription.pending_package and subscription.upgrade_scheduled_for:
-                    metadata['scheduled_upgrade'] = True
-                    metadata['previous_package_id'] = subscription.package.id
-
                 new_payment_order = PaymentOrder.objects.create(
                     order_id=new_order_id,
                     bog_order_id=charge_result['order_id'],
                     tenant=tenant,
-                    package=package,
-                    previous_package=subscription.package if subscription.pending_package else None,
                     amount=amount,
                     currency='GEL',
                     agent_count=subscription.agent_count,  # Use actual agent count from subscription
                     status='pending',
                     card_saved=False,  # This is a charge, not a new card save
-                    is_immediate_upgrade=False,  # This is scheduled/recurring, not immediate
                     metadata=metadata
                 )
 
