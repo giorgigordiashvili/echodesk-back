@@ -553,10 +553,12 @@ def facebook_oauth_callback(request):
 def facebook_connection_status(request):
     """Check Facebook connection status for current tenant"""
     try:
-        pages = FacebookPageConnection.objects.all()  # All pages for this tenant
+        # Only count ACTIVE pages for connection status
+        active_pages = FacebookPageConnection.objects.filter(is_active=True)
+        all_pages = FacebookPageConnection.objects.all()
+
         pages_data = []
-        
-        for page in pages:
+        for page in all_pages:
             pages_data.append({
                 'id': page.id,
                 'page_id': page.page_id,
@@ -564,11 +566,11 @@ def facebook_connection_status(request):
                 'is_active': page.is_active,
                 'connected_at': page.created_at.isoformat()
             })
-        
+
         return Response({
-            'connected': pages.exists(),
-            'pages_count': pages.count(),
-            'pages': pages_data
+            'connected': active_pages.exists(),  # Only active pages count as connected
+            'pages_count': active_pages.count(),  # Only count active pages
+            'pages': pages_data  # But show all pages with their is_active status
         })
     except Exception as e:
         return Response({
