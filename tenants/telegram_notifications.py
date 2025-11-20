@@ -82,14 +82,15 @@ def notify_subscription_created(subscription):
         subscription: TenantSubscription instance
     """
     tenant = subscription.tenant
-    package = subscription.package
+    selected_features = subscription.selected_features.filter(is_active=True)
+    features_list = ', '.join([f.name for f in selected_features]) if selected_features.exists() else 'None'
 
     message = f"""
 🎉 <b>New Subscription Created!</b>
 
 👤 <b>Tenant:</b> {tenant.name}
 📧 <b>Email:</b> {tenant.admin_email}
-📦 <b>Package:</b> {package.display_name if package else 'Feature-based'}
+✨ <b>Features:</b> {features_list}
 💰 <b>Monthly Cost:</b> {subscription.monthly_cost} GEL
 👥 <b>Agents:</b> {subscription.agent_count}
 
@@ -215,12 +216,15 @@ def notify_subscription_suspended(subscription, reason='Payment failures'):
     """
     tenant = subscription.tenant
 
+    selected_features = subscription.selected_features.filter(is_active=True)
+    features_list = ', '.join([f.name for f in selected_features]) if selected_features.exists() else 'None'
+
     message = f"""
 🚨 <b>Subscription SUSPENDED!</b>
 
 👤 <b>Tenant:</b> {tenant.name}
 📧 <b>Email:</b> {tenant.admin_email}
-📦 <b>Package:</b> {subscription.package.display_name if subscription.package else 'Feature-based'}
+✨ <b>Features:</b> {features_list}
 
 ⚠️ <b>Reason:</b> {reason}
 💰 <b>Monthly Cost:</b> {subscription.monthly_cost} GEL

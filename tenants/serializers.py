@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model, authenticate
 from rest_framework.authtoken.models import Token
-from .models import Tenant, SavedCard, TenantSubscription, Package
+from .models import Tenant, SavedCard, TenantSubscription
 
 User = get_user_model()
 
@@ -80,22 +80,20 @@ class TenantRegistrationSerializer(serializers.Serializer):
     company_name = serializers.CharField(max_length=100, help_text="Your company or organization name")
     domain = serializers.CharField(max_length=63, help_text="Subdomain for your tenant (e.g., 'acme' for acme.echodesk.ge)")
     description = serializers.CharField(max_length=500, required=False, help_text="Brief description of your organization")
-    
-    # Package selection
-    package_id = serializers.IntegerField(required=False, help_text="Selected package ID (required if is_custom=false)")
-    is_custom = serializers.BooleanField(default=False, help_text="Whether this is a custom package")
+
+    # Feature-based subscription selection
     feature_ids = serializers.ListField(
         child=serializers.IntegerField(),
-        required=False,
-        help_text="List of feature IDs for custom package (required if is_custom=true)"
+        required=True,
+        help_text="List of feature IDs for subscription"
     )
     pricing_model = serializers.ChoiceField(
         choices=[('agent', 'Agent-based'), ('crm', 'CRM-based')],
         help_text="Pricing model preference"
     )
     agent_count = serializers.IntegerField(
-        default=1,
-        min_value=1,
+        default=10,
+        min_value=10,
         help_text="Number of agents (required for agent-based pricing)"
     )
     
@@ -115,67 +113,30 @@ class TenantRegistrationSerializer(serializers.Serializer):
         default='en',
         help_text="Preferred language for the frontend dashboard"
     )
-    
-    def validate_package_id(self, value):
-        """Validate that package exists and is active (only if provided)"""
-        if value is None:
-            return value
-        from .models import Package
-        try:
-            package = Package.objects.get(id=value, is_active=True)
-            return value
-        except Package.DoesNotExist:
-            raise serializers.ValidationError("Invalid or inactive package selected")
 
     def validate(self, attrs):
         """Cross-field validation"""
-        from .models import Package, Feature
+        from .feature_models import Feature
 
-        is_custom = attrs.get('is_custom', False)
-        package_id = attrs.get('package_id')
-        feature_ids = attrs.get('feature_ids')
+        feature_ids = attrs.get('feature_ids', [])
         pricing_model = attrs.get('pricing_model')
-        agent_count = attrs.get('agent_count', 1)
+        agent_count = attrs.get('agent_count', 10)
 
-        # Validate based on is_custom flag
-        if is_custom:
-            # Custom package: feature_ids is required
-            if not feature_ids:
-                raise serializers.ValidationError({
-                    'feature_ids': 'This field is required when is_custom is true'
-                })
-
-            # Validate all features exist
+        # Validate all features exist and are active
+        if feature_ids:
             valid_features = Feature.objects.filter(id__in=feature_ids, is_active=True)
             if valid_features.count() != len(feature_ids):
                 raise serializers.ValidationError({
                     'feature_ids': 'One or more invalid or inactive features selected'
                 })
-        else:
-            # Standard package: package_id is required
-            if not package_id:
-                raise serializers.ValidationError({
-                    'package_id': 'This field is required when is_custom is false'
-                })
-
-            # Validate package matches pricing model
-            try:
-                package = Package.objects.get(id=package_id, is_active=True)
-                if package.pricing_model != pricing_model:
-                    raise serializers.ValidationError(
-                        f"Selected package uses {package.get_pricing_model_display()} pricing, "
-                        f"but you selected {dict(self.fields['pricing_model'].choices)[pricing_model]} pricing"
-                    )
-            except Package.DoesNotExist:
-                raise serializers.ValidationError("Invalid package selected")
 
         # Validate agent count for agent-based pricing
-        if pricing_model == 'agent' and agent_count < 1:
-            raise serializers.ValidationError("Agent count must be at least 1 for agent-based pricing")
+        if pricing_model == 'agent' and agent_count < 10:
+            raise serializers.ValidationError("Agent count must be at least 10 for agent-based pricing")
 
         # For CRM-based pricing, agent_count is not used
         if pricing_model == 'crm':
-            attrs['agent_count'] = 1  # Set default for CRM-based
+            attrs['agent_count'] = 10  # Set default for CRM-based
 
         return attrs
     
@@ -405,32 +366,16 @@ class SavedCardSerializer(serializers.ModelSerializer):
         read_only_fields = ('id', 'card_type', 'masked_card_number', 'card_expiry', 'saved_at', 'card_save_type')
 
 
-class PackageSerializer(serializers.ModelSerializer):
-    """Serializer for Package model"""
-
-    class Meta:
-        model = Package
-        fields = (
-            'id', 'name', 'display_name', 'description', 'pricing_model',
-            'price_gel', 'is_active', 'is_custom', 'max_users',
-            'max_storage_gb', 'max_whatsapp_messages'
-        )
-        read_only_fields = ('id',)
-
-
 class TenantSubscriptionSerializer(serializers.ModelSerializer):
-    """Serializer for TenantSubscription model with upgrade information"""
-
-    package = PackageSerializer(read_only=True)
-    pending_package = PackageSerializer(read_only=True)
+    """Serializer for TenantSubscription model"""
 
     class Meta:
         model = TenantSubscription
         fields = (
-            'id', 'tenant', 'package', 'is_active', 'starts_at', 'expires_at',
+            'id', 'tenant', 'is_active', 'starts_at', 'expires_at',
             'current_users', 'whatsapp_messages_used', 'storage_used_gb',
             'last_billed_at', 'next_billing_date', 'is_trial', 'trial_ends_at',
-            'subscription_type', 'pending_package', 'upgrade_scheduled_for',
+            'subscription_type', 'agent_count',
             'created_at', 'updated_at'
         )
         read_only_fields = (

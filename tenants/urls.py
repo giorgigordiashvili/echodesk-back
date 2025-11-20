@@ -7,17 +7,10 @@ from .views import (
     tenant_dashboard, tenant_profile, update_tenant_profile, change_tenant_password,
     tenant_settings, upload_logo, remove_logo, forced_password_change, upload_image
 )
-from .package_views import (
-    PackageViewSet, list_packages_by_model, calculate_pricing, get_package_features,
-    get_my_subscription, calculate_custom_package_price, list_available_features
-)
 from .payment_views import (
     create_subscription_payment, check_payment_status, bog_webhook, cancel_subscription,
     get_saved_card, remove_saved_card, set_default_card, manual_payment, add_new_card, list_invoices,
     reactivate_subscription_payment, add_ecommerce_card
-)
-from .upgrade_views import (
-    upgrade_preview, upgrade_immediate, upgrade_scheduled, cancel_scheduled_upgrade
 )
 from .cron_views import (
     cron_recurring_payments, cron_subscription_check, cron_health_check,
@@ -37,7 +30,6 @@ from .deployment_views import (
 
 router = DefaultRouter()
 router.register(r'tenants', TenantViewSet)
-router.register(r'packages', PackageViewSet, basename='packages')
 router.register(r'features', FeatureViewSet, basename='features')
 router.register(r'permissions', PermissionViewSet, basename='permissions')
 router.register(r'tenant-features', TenantFeatureViewSet, basename='tenant-features')
@@ -48,18 +40,8 @@ urlpatterns = [
     path('register-tenant/', register_tenant_form, name='register_tenant_form'),
     path('api/register/', register_tenant, name='register_tenant'),
     path('api/register-with-payment/', register_tenant_with_payment, name='register_tenant_with_payment'),
-    
-    # Package endpoints (public access for registration)
-    path('api/packages/', include([
-        path('by-model/', list_packages_by_model, name='list_packages_by_model'),
-        path('calculate-pricing/', calculate_pricing, name='calculate_pricing'),
-        path('calculate-custom-price/', calculate_custom_package_price, name='calculate_custom_package_price'),
-        path('available-features/', list_available_features, name='list_available_features'),
-        path('<int:package_id>/features/', get_package_features, name='get_package_features'),
-    ])),
 
     # Subscription endpoints (authenticated access)
-    path('api/subscription/me/', get_my_subscription, name='get_my_subscription'),
     path('api/subscription/features/add/', add_feature_to_subscription, name='add_feature_to_subscription'),
     path('api/subscription/features/remove/', remove_feature_from_subscription, name='remove_feature_from_subscription'),
     path('api/subscription/features/available/', get_available_features, name='get_available_features'),
@@ -78,12 +60,6 @@ urlpatterns = [
     path('api/payments/manual/', manual_payment, name='manual_payment'),
     path('api/payments/reactivate/', reactivate_subscription_payment, name='reactivate_subscription_payment'),
     path('api/payments/invoices/', list_invoices, name='list_invoices'),
-
-    # Package upgrade endpoints (authenticated access)
-    path('api/upgrade/preview/', upgrade_preview, name='upgrade_preview'),
-    path('api/upgrade/immediate/', upgrade_immediate, name='upgrade_immediate'),
-    path('api/upgrade/scheduled/', upgrade_scheduled, name='upgrade_scheduled'),
-    path('api/upgrade/cancel-scheduled/', cancel_scheduled_upgrade, name='cancel_scheduled_upgrade'),
 
     # Cron job endpoints (called by DigitalOcean Functions)
     path('api/cron/recurring-payments/', cron_recurring_payments, name='cron_recurring_payments'),

@@ -8,8 +8,8 @@ from django.contrib.auth.models import Permission
 from tenant_schemas.utils import get_public_schema_name
 import logging
 from .models import (
-    Tenant, Package, TenantSubscription, UsageLog, PaymentOrder, PendingRegistration,
-    SavedCard, Feature, FeaturePermission, PackageFeature,
+    Tenant, TenantSubscription, UsageLog, PaymentOrder, PendingRegistration,
+    SavedCard, Feature, FeaturePermission,
     TenantFeature, TenantPermission, PaymentAttempt, SubscriptionEvent,
     PaymentRetrySchedule, PlatformMetrics
 )
@@ -18,140 +18,20 @@ from .subscription_utils import get_subscription_health, get_failed_payments_sum
 logger = logging.getLogger(__name__)
 
 
-class PackageFeatureInline(admin.TabularInline):
-    """Inline for managing package features"""
-    model = PackageFeature
-    extra = 1
-    autocomplete_fields = ['feature']
-    fields = ['feature', 'is_highlighted', 'sort_order', 'custom_value']
-
-    def formfield_for_dbfield(self, db_field, request, **kwargs):
-        """Customize JSON field display"""
-        field = super().formfield_for_dbfield(db_field, request, **kwargs)
-        if db_field.name == 'custom_value':
-            field.help_text = 'JSON format: {"max_limit": 1000, "custom_setting": true}'
-        return field
-
-
-class PackageAdminForm(forms.ModelForm):
-    """Custom form for Package admin with features selector"""
-    features = forms.ModelMultipleChoiceField(
-        queryset=Feature.objects.filter(is_active=True).order_by('category', 'sort_order', 'name'),
-        required=False,
-        widget=admin.widgets.FilteredSelectMultiple('Features', False),
-        help_text='Select features that this package will include'
-    )
-
-    class Meta:
-        model = Package
-        fields = '__all__'
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        if self.instance.pk:
-            # Load existing features for this package
-            self.initial['features'] = Feature.objects.filter(
-                package_features__package=self.instance
-            )
-
-    def save(self, commit=True):
-        from decimal import Decimal
-
-        package = super().save(commit=False)
-
-        # For custom packages, auto-calculate price based on selected features
-        if package.is_custom and self.cleaned_data.get('features'):
-            total = Decimal('0')
-            for feature in self.cleaned_data['features']:
-                if package.pricing_model == 'agent':
-                    # For agent-based, use base per-user price (will be multiplied by user count at runtime)
-                    total += feature.price_per_user_gel
-                else:  # CRM-based
-                    total += feature.price_unlimited_gel
-
-            package.price_gel = total
-
-        if commit:
-            package.save()
-        if package.pk:
-            # Clear existing features
-            PackageFeature.objects.filter(package=package).delete()
-            # Add new features
-            for feature in self.cleaned_data['features']:
-                PackageFeature.objects.create(
-                    package=package,
-                    feature=feature,
-                    is_highlighted=False,
-                    sort_order=feature.sort_order
-                )
-        return package
-
-
-@admin.register(Package)
-class PackageAdmin(admin.ModelAdmin):
-    """Admin interface for Package model"""
-    form = PackageAdminForm
-    list_display = [
-        'display_name', 'pricing_model', 'price_gel', 'max_users',
-        'max_whatsapp_messages', 'feature_count', 'is_highlighted', 'is_active', 'sort_order'
-    ]
-    list_filter = ['pricing_model', 'is_active', 'is_highlighted', 'is_custom']
-    search_fields = ['name', 'display_name', 'description']
-    ordering = ['pricing_model', 'sort_order', 'price_gel']
-
-    fieldsets = (
-        ('Basic Information', {
-            'fields': ('name', 'display_name', 'description', 'pricing_model', 'is_custom')
-        }),
-        ('Features', {
-            'fields': ('features',),
-            'description': 'Select features that this package includes. For custom packages, price is auto-calculated.'
-        }),
-        ('Pricing', {
-            'fields': ('price_gel', 'billing_period'),
-            'description': 'For custom packages, price_gel is auto-calculated from selected features'
-        }),
-        ('Limits', {
-            'fields': ('max_users', 'max_whatsapp_messages', 'max_storage_gb')
-        }),
-        ('Display Settings', {
-            'fields': ('is_highlighted', 'is_active', 'sort_order')
-        })
-    )
-
-    def get_readonly_fields(self, request, obj=None):
-        """Make price_gel readonly for custom packages"""
-        readonly = list(super().get_readonly_fields(request, obj))
-        if obj and obj.is_custom:
-            readonly.append('price_gel')
-        return readonly
-
-    def get_queryset(self, request):
-        return super().get_queryset(request).select_related()
-
-    @admin.display(description='Features')
-    def feature_count(self, obj):
-        """Display count of features"""
-        count = obj.package_features.count()
-        return f"{count} feature{'s' if count != 1 else ''}"
-
-
 @admin.register(TenantSubscription)
 class TenantSubscriptionAdmin(admin.ModelAdmin):
     """Admin interface for TenantSubscription model"""
     list_display = [
-        'tenant', 'package', 'status_badge', 'payment_health_display',
+        'tenant', 'status_badge', 'payment_health_display',
         'agent_count', 'monthly_cost', 'current_users',
         'next_billing_date', 'failed_payment_count'
     ]
     list_filter = [
         'is_active',
         'payment_status',
-        'package__pricing_model',
-        'package',
         'is_trial',
     ]
-    search_fields = ['tenant__name', 'tenant__admin_email', 'package__display_name']
+    search_fields = ['tenant__name', 'tenant__admin_email']
     ordering = ['-created_at']
     readonly_fields = [
         'monthly_cost', 'created_at', 'updated_at',
@@ -168,7 +48,7 @@ class TenantSubscriptionAdmin(admin.ModelAdmin):
 
     fieldsets = (
         ('Subscription Details', {
-            'fields': ('tenant', 'package', 'is_active', 'is_trial', 'trial_ends_at', 'starts_at', 'expires_at')
+            'fields': ('tenant', 'is_active', 'is_trial', 'trial_ends_at', 'starts_at', 'expires_at')
         }),
         ('Payment Health', {
             'fields': (
@@ -202,7 +82,7 @@ class TenantSubscriptionAdmin(admin.ModelAdmin):
     )
 
     def get_queryset(self, request):
-        return super().get_queryset(request).select_related('tenant', 'package')
+        return super().get_queryset(request).select_related('tenant').prefetch_related('selected_features')
 
     @admin.display(description='Status')
     def status_badge(self, obj):
@@ -240,32 +120,28 @@ class TenantSubscriptionAdmin(admin.ModelAdmin):
     @admin.display(description='Usage Summary')
     def usage_summary(self, obj):
         """Display detailed usage summary"""
-        package = obj.package
-
         html = '<table style="width: 100%; border-collapse: collapse; margin-bottom: 10px;">'
         html += '<tr style="background-color: #f0f0f0;"><th>Resource</th><th>Current</th><th>Limit</th><th>Status</th></tr>'
 
         # Subscription Info (Agents)
-        if package.pricing_model == 'Agent-based':
-            html += f'<tr style="background-color: #e8f4f8;"><td><strong>Agents (Paid For)</strong></td><td colspan="3"><strong>{obj.agent_count} agents</strong> @ {package.price_gel}₾/agent/month</td></tr>'
+        html += f'<tr style="background-color: #e8f4f8;"><td><strong>Agents (Paid For)</strong></td><td colspan="3"><strong>{obj.agent_count} agents</strong> @ {obj.monthly_cost}₾/month</td></tr>'
 
-        # Users (Actual)
-        if package.max_users:
-            users_pct = (obj.current_users / package.max_users * 100) if package.max_users else 0
-            users_color = 'red' if obj.is_over_user_limit else ('orange' if users_pct > 80 else 'green')
-            html += f'<tr><td>Active Users</td><td>{obj.current_users}</td><td>{package.max_users}</td><td style="color: {users_color};">{users_pct:.0f}%</td></tr>'
-        else:
-            html += f'<tr><td>Active Users</td><td>{obj.current_users}</td><td>Unlimited</td><td style="color: green;">✓</td></tr>'
+        # Users (Actual) - compare against agent_count
+        users_pct = (obj.current_users / obj.agent_count * 100) if obj.agent_count else 0
+        users_color = 'red' if obj.is_over_user_limit else ('orange' if users_pct > 80 else 'green')
+        html += f'<tr><td>Active Users</td><td>{obj.current_users}</td><td>{obj.agent_count}</td><td style="color: {users_color};">{users_pct:.0f}%</td></tr>'
 
-        # WhatsApp
-        wa_pct = (obj.whatsapp_messages_used / package.max_whatsapp_messages * 100) if package.max_whatsapp_messages else 0
+        # WhatsApp - default 10k limit
+        wa_limit = 10000
+        wa_pct = (obj.whatsapp_messages_used / wa_limit * 100) if wa_limit else 0
         wa_color = 'red' if obj.is_over_whatsapp_limit else ('orange' if wa_pct > 80 else 'green')
-        html += f'<tr><td>WhatsApp</td><td>{obj.whatsapp_messages_used:,}</td><td>{package.max_whatsapp_messages:,}</td><td style="color: {wa_color};">{wa_pct:.0f}%</td></tr>'
+        html += f'<tr><td>WhatsApp</td><td>{obj.whatsapp_messages_used:,}</td><td>{wa_limit:,}</td><td style="color: {wa_color};">{wa_pct:.0f}%</td></tr>'
 
-        # Storage
-        storage_pct = (float(obj.storage_used_gb) / package.max_storage_gb * 100) if package.max_storage_gb else 0
+        # Storage - default 100GB limit
+        storage_limit = 100
+        storage_pct = (float(obj.storage_used_gb) / storage_limit * 100) if storage_limit else 0
         storage_color = 'red' if obj.is_over_storage_limit else ('orange' if storage_pct > 80 else 'green')
-        html += f'<tr><td>Storage (Manual)</td><td>{obj.storage_used_gb} GB</td><td>{package.max_storage_gb} GB</td><td style="color: {storage_color};">{storage_pct:.0f}%</td></tr>'
+        html += f'<tr><td>Storage (Manual)</td><td>{obj.storage_used_gb} GB</td><td>{storage_limit} GB</td><td style="color: {storage_color};">{storage_pct:.0f}%</td></tr>'
 
         html += '</table>'
 
@@ -282,31 +158,14 @@ class TenantSubscriptionAdmin(admin.ModelAdmin):
     @admin.display(description='Features')
     def feature_summary(self, obj):
         """Display enabled features"""
-        package = obj.package
-        features = []
+        selected_features = obj.selected_features.filter(is_active=True)
 
-        if package.ticket_management:
-            features.append('✓ Ticket Management')
-        if package.email_integration:
-            features.append('✓ Email Integration')
-        if package.sip_calling:
-            features.append('✓ SIP Calling')
-        if package.facebook_integration:
-            features.append('✓ Facebook')
-        if package.instagram_integration:
-            features.append('✓ Instagram')
-        if package.whatsapp_integration:
-            features.append('✓ WhatsApp')
-        if package.advanced_analytics:
-            features.append('✓ Advanced Analytics')
-        if package.api_access:
-            features.append('✓ API Access')
-        if package.custom_integrations:
-            features.append('✓ Custom Integrations')
-        if package.priority_support:
-            features.append('✓ Priority Support')
-        if package.dedicated_account_manager:
-            features.append('✓ Dedicated Account Manager')
+        if not selected_features.exists():
+            return format_html('<span style="color: red;">No features selected</span>')
+
+        features = []
+        for feature in selected_features:
+            features.append(f'✓ {feature.name}')
 
         return format_html('<br>'.join(features))
 
@@ -516,7 +375,7 @@ class SavedCardAdmin(admin.ModelAdmin):
 class PaymentOrderAdmin(admin.ModelAdmin):
     """Admin interface for PaymentOrder model"""
     list_display = [
-        'order_id', 'tenant', 'package', 'amount', 'currency',
+        'order_id', 'tenant', 'amount', 'currency',
         'status_badge', 'created_at', 'paid_at'
     ]
     list_filter = ['status', 'currency', 'created_at']
@@ -526,7 +385,7 @@ class PaymentOrderAdmin(admin.ModelAdmin):
 
     fieldsets = (
         ('Order Information', {
-            'fields': ('order_id', 'tenant', 'package', 'status')
+            'fields': ('order_id', 'tenant', 'status')
         }),
         ('Payment Details', {
             'fields': ('amount', 'currency', 'agent_count', 'payment_url')
@@ -557,7 +416,7 @@ class PaymentOrderAdmin(admin.ModelAdmin):
         )
 
     def get_queryset(self, request):
-        return super().get_queryset(request).select_related('tenant', 'package')
+        return super().get_queryset(request).select_related('tenant')
 
 
 # Inline admin for better UX
@@ -569,7 +428,7 @@ class TenantSubscriptionInline(admin.StackedInline):
     
     fieldsets = (
         ('Subscription', {
-            'fields': ('package', 'is_active', 'starts_at', 'expires_at', 'agent_count')
+            'fields': ('is_active', 'starts_at', 'expires_at', 'agent_count')
         }),
         ('Usage', {
             'fields': ('current_users', 'whatsapp_messages_used', 'storage_used_gb'),
@@ -581,15 +440,15 @@ class TenantSubscriptionInline(admin.StackedInline):
 class TenantAdmin(admin.ModelAdmin):
     """Admin interface for Tenant model"""
     list_display = [
-        'name', 'schema_name', 'admin_email', 'current_package_name',
+        'name', 'schema_name', 'admin_email',
         'subscription_status', 'is_active', 'deployment_status', 'created_on'
     ]
     list_filter = ['is_active', 'deployment_status', 'preferred_language', 'plan']
     search_fields = ['name', 'admin_email', 'schema_name', 'domain_url']
     ordering = ['-created_on']
-    readonly_fields = ['schema_name', 'created_on', 'current_package_name', 'subscription_details']
+    readonly_fields = ['schema_name', 'created_on', 'subscription_details']
     inlines = [TenantSubscriptionInline]
-    actions = ['create_basic_subscription', 'activate_tenants', 'deactivate_tenants']
+    actions = ['activate_tenants', 'deactivate_tenants']
 
     fieldsets = (
         ('Basic Information', {
@@ -598,9 +457,9 @@ class TenantAdmin(admin.ModelAdmin):
         ('Admin Contact', {
             'fields': ('admin_email', 'admin_name')
         }),
-        ('Current Package', {
-            'fields': ('current_package_name', 'subscription_details'),
-            'description': 'Current package information (manage via inline below or Tenant Subscriptions)'
+        ('Subscription', {
+            'fields': ('subscription_details',),
+            'description': 'Current subscription information (manage via inline below or Tenant Subscriptions)'
         }),
         ('Preferences', {
             'fields': ('preferred_language',)
@@ -612,13 +471,6 @@ class TenantAdmin(admin.ModelAdmin):
             'fields': ('is_active', 'created_on')
         })
     )
-
-    @admin.display(description='Current Package')
-    def current_package_name(self, obj):
-        """Display current package name"""
-        if obj.current_package:
-            return f"{obj.current_package.display_name} ({obj.current_package.get_pricing_model_display()})"
-        return format_html('<span style="color: red;">⚠ No package assigned</span>')
 
     @admin.display(description='Subscription')
     def subscription_status(self, obj):
@@ -640,14 +492,18 @@ class TenantAdmin(admin.ModelAdmin):
         if not subscription:
             return format_html('<p style="color: red;">No active subscription found. Create one using the inline form below.</p>')
 
-        package = subscription.package
-
         html = '<div style="background-color: #f9f9f9; padding: 15px; border-radius: 5px;">'
-        html += f'<h3 style="margin-top: 0;">{package.display_name}</h3>'
-        html += f'<p><strong>Pricing:</strong> {subscription.monthly_cost}₾/month ({package.get_pricing_model_display()})</p>'
+        html += f'<h3 style="margin-top: 0;">Feature-based Subscription</h3>'
+        html += f'<p><strong>Monthly Cost:</strong> {subscription.monthly_cost}₾/month</p>'
+        html += f'<p><strong>Agent Count:</strong> {subscription.agent_count}</p>'
 
-        if package.pricing_model == 'agent':
-            html += f'<p><strong>Agent Count:</strong> {subscription.agent_count}</p>'
+        # Show selected features
+        selected_features = subscription.selected_features.filter(is_active=True)
+        if selected_features.exists():
+            html += '<p><strong>Features:</strong></p><ul style="margin: 5px 0;">'
+            for feature in selected_features:
+                html += f'<li>{feature.name} ({feature.price_per_user_gel}₾/agent)</li>'
+            html += '</ul>'
 
         html += f'<p><strong>Status:</strong> {"Active" if subscription.is_active else "Inactive"}</p>'
         html += f'<p><strong>Period:</strong> {subscription.starts_at.strftime("%Y-%m-%d")} to {subscription.expires_at.strftime("%Y-%m-%d") if subscription.expires_at else "No expiry"}</p>'
@@ -661,7 +517,7 @@ class TenantAdmin(admin.ModelAdmin):
         return format_html(html)
 
     def get_queryset(self, request):
-        return super().get_queryset(request).prefetch_related('subscription__package')
+        return super().get_queryset(request).prefetch_related('subscription__selected_features')
 
     def has_module_permission(self, request):
         # Only allow access in public schema
@@ -669,48 +525,7 @@ class TenantAdmin(admin.ModelAdmin):
             return False
         return super().has_module_permission(request)
 
-    # Admin Actions
-
-    @admin.action(description='Create basic subscription for selected tenants')
-    def create_basic_subscription(self, request, queryset):
-        """Create a basic subscription for tenants without one"""
-        from datetime import timedelta
-
-        # Get the first available package (or create a default one)
-        try:
-            basic_package = Package.objects.filter(is_active=True).first()
-            if not basic_package:
-                self.message_user(request, 'No active packages found. Please create a package first.', messages.ERROR)
-                return
-        except Package.DoesNotExist:
-            self.message_user(request, 'No packages available. Please create a package first.', messages.ERROR)
-            return
-
-        created_count = 0
-        skipped_count = 0
-
-        for tenant in queryset:
-            # Skip if already has subscription
-            if hasattr(tenant, 'subscription'):
-                skipped_count += 1
-                continue
-
-            # Create subscription
-            TenantSubscription.objects.create(
-                tenant=tenant,
-                package=basic_package,
-                is_active=True,
-                starts_at=timezone.now(),
-                expires_at=timezone.now() + timedelta(days=30),
-                agent_count=1
-            )
-            created_count += 1
-
-        self.message_user(
-            request,
-            f'Created {created_count} subscription(s). Skipped {skipped_count} tenant(s) with existing subscriptions.',
-            messages.SUCCESS
-        )
+    # Admin Actions removed - create_basic_subscription removed as packages no longer exist
 
     @admin.action(description='Activate selected tenants')
     def activate_tenants(self, request, queryset):
@@ -729,10 +544,10 @@ class TenantAdmin(admin.ModelAdmin):
 class PendingRegistrationAdmin(admin.ModelAdmin):
     """Admin interface for PendingRegistration model"""
     list_display = [
-        'schema_name', 'name', 'admin_email', 'package',
+        'schema_name', 'name', 'admin_email',
         'agent_count', 'status_badge', 'created_at', 'expires_at'
     ]
-    list_filter = ['is_processed', 'package', 'created_at']
+    list_filter = ['is_processed', 'created_at']
     search_fields = ['schema_name', 'name', 'admin_email', 'order_id']
     readonly_fields = ['created_at', 'expires_at', 'admin_password']
     ordering = ['-created_at']
@@ -867,7 +682,7 @@ class FeatureAdmin(admin.ModelAdmin):
             'fields': ('key', 'name', 'description')
         }),
         # Permissions fieldset removed - only available with custom form
-        ('Pricing for Custom Packages', {
+        ('Pricing', {
             'fields': ('price_per_user_gel', 'price_unlimited_gel'),
             'description': 'Agent-based uses per-user price, CRM-based uses unlimited price (with 10% discount)'
         }),
@@ -926,35 +741,6 @@ class FeaturePermissionAdmin(admin.ModelAdmin):
             'fields': ('is_required',)
         })
     )
-
-
-@admin.register(PackageFeature)
-class PackageFeatureAdmin(admin.ModelAdmin):
-    """Admin interface for PackageFeature model"""
-    list_display = [
-        'package', 'feature', 'is_highlighted', 'sort_order', 'has_custom_value'
-    ]
-    list_filter = ['is_highlighted', 'package', 'feature__category']
-    search_fields = ['package__display_name', 'feature__name']
-    autocomplete_fields = ['package', 'feature']
-
-    fieldsets = (
-        ('Relationship', {
-            'fields': ('package', 'feature')
-        }),
-        ('Display Settings', {
-            'fields': ('is_highlighted', 'sort_order')
-        }),
-        ('Custom Configuration', {
-            'fields': ('custom_value',),
-            'description': 'Optional JSON configuration for package-specific limits or settings'
-        })
-    )
-
-    @admin.display(description='Custom Config', boolean=True)
-    def has_custom_value(self, obj):
-        """Show if custom value is set"""
-        return bool(obj.custom_value)
 
 
 @admin.register(TenantFeature)
@@ -1038,7 +824,7 @@ class TenantPermissionAdmin(admin.ModelAdmin):
 
 # UserPermission admin removed - tenant admins manage user permissions
 # via the existing User model fields (can_view_all_tickets, can_manage_users, etc.)
-# TenantPermission shows which permissions are available to the tenant based on their package
+# TenantPermission shows which permissions are available to the tenant based on their selected features
 
 
 # ====================================================================================
@@ -1321,8 +1107,6 @@ class PlatformMetricsAdmin(admin.ModelAdmin):
         'retry_success_rate',
         'churn_rate',
         'retention_rate',
-        'package_distribution',
-        'revenue_by_package',
         'calculated_at',
         'payment_success_rate',
     ]

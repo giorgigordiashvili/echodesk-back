@@ -11,7 +11,8 @@ from tenant_schemas.utils import get_public_schema_name, schema_context
 from django.contrib.auth import get_user_model
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse
 from drf_spectacular.openapi import OpenApiTypes
-from .models import Tenant, Package, PendingRegistration, PaymentOrder, Feature
+from .models import Tenant, PendingRegistration, PaymentOrder
+from .feature_models import Feature
 from .serializers import (
     TenantSerializer, TenantCreateSerializer, TenantRegistrationSerializer,
     TenantLoginSerializer, TenantDashboardDataSerializer
@@ -559,38 +560,22 @@ def register_tenant_with_payment(request):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            # Determine if this is feature-based or legacy package-based
-            is_custom = validated_data.get('is_custom', False)
-            package = None
-            selected_features = []
+            # Feature-based pricing
             agent_count = validated_data.get('agent_count', 10)
+            feature_ids = validated_data.get('feature_ids', [])
+            selected_features = Feature.objects.filter(id__in=feature_ids, is_active=True)
 
-            if is_custom:
-                # Feature-based pricing
-                feature_ids = validated_data.get('feature_ids', [])
-                selected_features = Feature.objects.filter(id__in=feature_ids, is_active=True)
-
-                if not selected_features.exists():
-                    return Response(
-                        {'error': 'At least one valid feature must be selected'},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-
-                # Calculate monthly subscription amount from features
-                subscription_amount = sum(
-                    float(feature.price_per_user_gel) * agent_count
-                    for feature in selected_features
+            if not selected_features.exists():
+                return Response(
+                    {'error': 'At least one valid feature must be selected'},
+                    status=status.HTTP_400_BAD_REQUEST
                 )
-            else:
-                # Legacy package-based pricing
-                package_id = validated_data.get('package_id')
-                if not package_id:
-                    return Response(
-                        {'error': 'package_id is required when is_custom=false'},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-                package = Package.objects.get(id=package_id, is_active=True, is_custom=False)
-                subscription_amount = float(package.price_gel)
+
+            # Calculate monthly subscription amount from features
+            subscription_amount = sum(
+                float(feature.price_per_user_gel) * agent_count
+                for feature in selected_features
+            )
 
             # Generate unique order ID
             order_id = f"REG-{uuid.uuid4().hex[:12].upper()}"
@@ -604,13 +589,12 @@ def register_tenant_with_payment(request):
                 admin_first_name=validated_data['admin_first_name'],
                 admin_last_name=validated_data['admin_last_name'],
                 preferred_language=validated_data.get('preferred_language', 'en'),
-                package=package,  # Will be None for feature-based
                 agent_count=agent_count,
                 order_id=order_id
             )
 
-            # Add selected features for feature-based model
-            if is_custom and selected_features:
+            # Add selected features
+            if selected_features:
                 pending_registration.selected_features.set(selected_features)
 
             # Create payment order for first month subscription (without tenant)
@@ -668,11 +652,6 @@ def register_tenant_with_payment(request):
                 'message': 'Subscription payment initiated - card will be saved for automatic recurring billing'
             }, status=status.HTTP_200_OK)
 
-    except Package.DoesNotExist:
-        return Response(
-            {'error': 'Selected package not found or inactive'},
-            status=status.HTTP_400_BAD_REQUEST
-        )
     except Exception as e:
         logger.error(f"Error initiating registration payment: {str(e)}")
         return Response(
@@ -726,17 +705,19 @@ def register_tenant(request):
     
     try:
         with transaction.atomic():
-            # Get selected package
-            from .models import Package, TenantSubscription
+            # Get selected features
+            from .models import TenantSubscription
             from datetime import datetime, timedelta
             from django.utils import timezone
-            
-            package = Package.objects.get(id=validated_data['package_id'], is_active=True)
-            
+
+            feature_ids = validated_data.get('feature_ids', [])
+            selected_features = Feature.objects.filter(id__in=feature_ids, is_active=True)
+            agent_count = validated_data.get('agent_count', 10)
+
             # Create tenant
             domain_name = validated_data['domain']
             schema_name = domain_name.lower().replace('-', '_')
-            
+
             tenant = Tenant.objects.create(
                 schema_name=schema_name,
                 domain_url=f"{domain_name}.api.echodesk.ge",  # Backend API domain
@@ -746,25 +727,28 @@ def register_tenant(request):
                 admin_name=f"{validated_data['admin_first_name']} {validated_data['admin_last_name']}",
                 preferred_language=validated_data.get('preferred_language', 'en'),
                 plan='basic',  # Legacy field
-                max_users=package.max_users or 1000,  # Set from package
-                max_storage=package.max_storage_gb * 1024,  # Convert to MB
+                max_users=1000,  # Default limit
+                max_storage=100 * 1024,  # 100GB in MB
                 deployment_status='deploying'  # Set initial status
             )
-            
+
             # Create subscription
             subscription = TenantSubscription.objects.create(
                 tenant=tenant,
-                package=package,
+                agent_count=agent_count,
                 is_active=True,
                 starts_at=timezone.now(),
                 expires_at=timezone.now() + timedelta(days=30),  # 30-day trial
-                agent_count=validated_data.get('agent_count', 1),
                 current_users=1,  # Admin user will be created
                 whatsapp_messages_used=0,
                 storage_used_gb=0,
                 next_billing_date=timezone.now() + timedelta(days=30)
             )
-            
+
+            # Add selected features to subscription
+            if selected_features:
+                subscription.selected_features.set(selected_features)
+
             # Create admin user in tenant schema
             with schema_context(tenant.schema_name):
                 admin_user = User.objects.create_user(

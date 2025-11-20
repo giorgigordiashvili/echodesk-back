@@ -8,9 +8,9 @@ a tenant subscribes to a package or changes packages.
 from django.db import transaction
 from django.utils import timezone
 from .models import (
-    TenantSubscription, TenantFeature, TenantPermission,
-    PackageFeature, FeaturePermission
+    TenantSubscription, TenantFeature, TenantPermission
 )
+from .feature_models import FeaturePermission
 import logging
 
 logger = logging.getLogger(__name__)
@@ -22,12 +22,12 @@ class SubscriptionService:
     @staticmethod
     def sync_tenant_features(subscription):
         """
-        Sync tenant features based on their subscription package
+        Sync tenant features based on their selected features
 
         This method:
-        1. Gets all features from the package
+        1. Gets all features from the subscription
         2. Creates/activates TenantFeature records
-        3. Deactivates features not in the package
+        3. Deactivates features not in the subscription
         4. Syncs permissions for each feature
 
         Args:
@@ -38,29 +38,23 @@ class SubscriptionService:
         """
         with transaction.atomic():
             tenant = subscription.tenant
-            package = subscription.package
 
-            # Get all active package features
-            package_features = PackageFeature.objects.filter(
-                package=package,
-                feature__is_active=True
-            ).select_related('feature')
+            # Get all selected features
+            selected_features = subscription.selected_features.filter(is_active=True)
 
             enabled_features = []
             disabled_features = []
             permissions_granted = 0
 
-            # Enable features from package
-            for pf in package_features:
-                feature = pf.feature
-
+            # Enable features from subscription
+            for feature in selected_features:
                 # Get or create tenant feature
                 tenant_feature, created = TenantFeature.objects.get_or_create(
                     tenant=tenant,
                     feature=feature,
                     defaults={
                         'is_active': True,
-                        'custom_value': pf.custom_value
+                        'custom_value': None
                     }
                 )
 
@@ -70,11 +64,6 @@ class SubscriptionService:
                     tenant_feature.disabled_at = None
                     tenant_feature.save()
                     enabled_features.append(feature.name)
-
-                # Update custom value if changed
-                if tenant_feature.custom_value != pf.custom_value:
-                    tenant_feature.custom_value = pf.custom_value
-                    tenant_feature.save()
 
                 if created:
                     enabled_features.append(feature.name)

@@ -19,7 +19,6 @@ from tenants.models import (
     PaymentRetrySchedule,
     SubscriptionEvent,
     PlatformMetrics,
-    Package,
 )
 from tenants.subscription_utils import calculate_mrr, calculate_churn_rate
 
@@ -135,44 +134,6 @@ class Command(BaseCommand):
         metrics.retention_rate = 100 - metrics.churn_rate
 
         self.stdout.write(f'  Churn: {metrics.churn_rate}%, Retention: {metrics.retention_rate}%')
-
-        # 5. Package distribution
-        package_dist = {}
-        revenue_by_pkg = {}
-
-        # Active subscriptions by package
-        for pkg in Package.objects.all():
-            subs_count = TenantSubscription.objects.filter(
-                package=pkg,
-                is_active=True
-            ).count()
-
-            if subs_count > 0:
-                package_dist[pkg.name] = subs_count
-
-                # Calculate revenue for this package
-                pkg_revenue = sum(
-                    sub.monthly_cost
-                    for sub in TenantSubscription.objects.filter(package=pkg, is_active=True)
-                )
-                revenue_by_pkg[pkg.name] = float(pkg_revenue)
-
-        # Feature-based subscriptions (no package)
-        feature_based = TenantSubscription.objects.filter(
-            package__isnull=True,
-            is_active=True
-        ).count()
-
-        if feature_based > 0:
-            package_dist['feature_based'] = feature_based
-            feature_revenue = sum(
-                sub.monthly_cost
-                for sub in TenantSubscription.objects.filter(package__isnull=True, is_active=True)
-            )
-            revenue_by_pkg['feature_based'] = float(feature_revenue)
-
-        metrics.package_distribution = package_dist
-        metrics.revenue_by_package = revenue_by_pkg
 
         # Save metrics
         metrics.save()

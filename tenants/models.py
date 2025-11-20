@@ -9,165 +9,12 @@ from amanati_crm.file_utils import sanitized_upload_to
 # Import feature models
 from .feature_models import (
     Feature, FeaturePermission,
-    PackageFeature, TenantFeature, TenantPermission,
+    TenantFeature, TenantPermission,
     FeatureCategory
 )
 from django.contrib.auth.models import Permission
 
 
-class PricingModel(models.TextChoices):
-    """Pricing model choices"""
-    AGENT_BASED = 'agent', 'Agent-based'
-    CRM_BASED = 'crm', 'CRM-based'
-
-
-class Package(models.Model):
-    """
-    Package/Plan definition model
-    Defines available subscription packages
-    """
-    name = models.CharField(max_length=50, unique=True)
-    display_name = models.CharField(max_length=100)
-    description = models.TextField()
-    pricing_model = models.CharField(
-        max_length=10,
-        choices=PricingModel.choices,
-        default=PricingModel.AGENT_BASED
-    )
-    
-    # Pricing
-    price_gel = models.DecimalField(max_digits=10, decimal_places=2, help_text="Price in Georgian Lari")
-    billing_period = models.CharField(
-        max_length=20,
-        choices=[
-            ('monthly', 'Monthly'),
-            ('yearly', 'Yearly'),
-        ],
-        default='monthly'
-    )
-    
-    # Limits
-    max_users = models.IntegerField(null=True, blank=True, help_text="Maximum users (null = unlimited for agent-based)")
-    max_whatsapp_messages = models.IntegerField(null=True, blank=True, help_text="WhatsApp messages per month (deprecated)")
-    max_storage_gb = models.IntegerField(default=5, help_text="Storage limit in GB")
-    
-    # Features
-    ticket_management = models.BooleanField(default=True)
-    email_integration = models.BooleanField(default=True)
-    sip_calling = models.BooleanField(default=False)
-    facebook_integration = models.BooleanField(default=False)
-    instagram_integration = models.BooleanField(default=False)
-    whatsapp_integration = models.BooleanField(default=False)
-    advanced_analytics = models.BooleanField(default=False)
-    api_access = models.BooleanField(default=False)
-    custom_integrations = models.BooleanField(default=False)
-    priority_support = models.BooleanField(default=False)
-    dedicated_account_manager = models.BooleanField(default=False)
-    
-    # Display settings
-    is_highlighted = models.BooleanField(default=False, help_text="Show as featured/recommended")
-    is_active = models.BooleanField(default=True)
-    is_custom = models.BooleanField(default=False, help_text="Custom package created for specific tenant")
-    sort_order = models.IntegerField(default=0)
-
-    # Metadata
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-    
-    class Meta:
-        ordering = ['pricing_model', 'sort_order', 'price_gel']
-    
-    def __str__(self):
-        pricing_suffix = "/agent/month" if self.pricing_model == PricingModel.AGENT_BASED else "/month"
-        return f"{self.display_name} - {self.price_gel}₾{pricing_suffix}"
-    
-    def clean(self):
-        """Validate package configuration"""
-        if self.pricing_model == PricingModel.CRM_BASED and not self.max_users:
-            raise ValidationError("CRM-based packages must have a user limit")
-        
-        if self.pricing_model == PricingModel.AGENT_BASED and self.max_users:
-            raise ValidationError("Agent-based packages should not have user limits")
-    
-    @property
-    def features_list(self):
-        """Return list of enabled features (legacy + dynamic)"""
-        features = []
-
-        # Legacy boolean features (for backward compatibility)
-        if self.ticket_management:
-            features.append("Complete Ticket Management System")
-        if self.email_integration:
-            features.append("Email Integration")
-        if self.sip_calling:
-            features.append("Integrated SIP Phone System")
-        if self.facebook_integration:
-            features.append("Facebook Messenger Integration")
-        if self.instagram_integration:
-            features.append("Instagram DM Integration")
-        if self.whatsapp_integration:
-            features.append("WhatsApp Business API")
-        if self.advanced_analytics:
-            features.append("Advanced Analytics Dashboard")
-        if self.api_access:
-            features.append("API Access")
-        if self.custom_integrations:
-            features.append("Custom Integrations")
-        if self.priority_support:
-            features.append("Priority Support")
-        if self.dedicated_account_manager:
-            features.append("Dedicated Account Manager")
-
-        # Dynamic features from PackageFeature model
-        for pf in self.package_features.select_related('feature').filter(feature__is_active=True):
-            features.append(pf.feature.name)
-
-        # Add limits info
-        if self.max_users:
-            features.insert(0, f"Up to {self.max_users} Users")
-        if self.max_whatsapp_messages:
-            features.append(f"Up to {self.max_whatsapp_messages:,} WhatsApp messages/month")
-        features.append(f"{self.max_storage_gb}GB Storage")
-
-        return features
-
-    def get_dynamic_features(self):
-        """Get all dynamic features for this package"""
-        return self.package_features.select_related('feature').filter(feature__is_active=True)
-
-    def has_feature(self, feature_key):
-        """Check if package has a specific feature by key"""
-        return self.package_features.filter(feature__key=feature_key, feature__is_active=True).exists()
-
-    def calculate_custom_price(self, user_count=None):
-        """
-        Calculate price for custom package based on selected features
-
-        For agent-based (per-user): sum of (feature.price_per_user_gel * user_count)
-        For CRM-based (unlimited): sum of feature.price_unlimited_gel
-
-        Args:
-            user_count: Number of users for agent-based pricing (overrides max_users)
-        """
-        if not self.is_custom:
-            return self.price_gel
-
-        total = 0
-        package_features = self.package_features.filter(feature__is_active=True).select_related('feature')
-
-        for pf in package_features:
-            feature = pf.feature
-
-            # Agent-based: per-user pricing
-            if self.pricing_model == PricingModel.AGENT_BASED:
-                users = user_count if user_count is not None else (self.max_users or 1)
-                total += feature.price_per_user_gel * users
-
-            # CRM-based: unlimited pricing
-            else:
-                total += feature.price_unlimited_gel
-
-        return total
 
 
 class Tenant(TenantMixin):
@@ -278,14 +125,6 @@ class TenantSubscription(models.Model):
     Tracks tenant's current subscription and usage
     """
     tenant = models.OneToOneField(Tenant, on_delete=models.CASCADE, related_name='subscription')
-    package = models.ForeignKey(
-        Package,
-        on_delete=models.CASCADE,
-        related_name='subscriptions',
-        null=True,
-        blank=True,
-        help_text="DEPRECATED: Legacy package reference (kept for backward compatibility)"
-    )
 
     # Feature-based subscription
     selected_features = models.ManyToManyField(
@@ -337,26 +176,11 @@ class TenantSubscription(models.Model):
     last_payment_failure = models.DateTimeField(null=True, blank=True, help_text='When last payment failed')
     failed_payment_count = models.IntegerField(default=0, help_text='Number of consecutive failed payments')
 
-    # Package upgrade tracking
-    pending_package = models.ForeignKey(
-        Package,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='pending_upgrades',
-        help_text='Package to upgrade to at next billing cycle'
-    )
-    upgrade_scheduled_for = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text='Date when scheduled upgrade will take effect'
-    )
     subscription_type = models.CharField(
         max_length=20,
         choices=[
             ('trial', 'Trial'),
             ('paid', 'Paid'),
-            ('upgrading', 'Upgrading'),
         ],
         default='paid',
         help_text='Current subscription type'
@@ -370,15 +194,13 @@ class TenantSubscription(models.Model):
         db_table = 'tenants_tenant_subscription'
     
     def __str__(self):
-        if self.package:
-            return f"{self.tenant.name} - {self.package.display_name}"
         feature_count = self.selected_features.count()
         return f"{self.tenant.name} - {self.agent_count} agents, {feature_count} features"
     
     @property
     def monthly_cost(self):
         """Calculate monthly cost based on selected features and agent count"""
-        # New feature-based pricing model
+        # Feature-based pricing model
         if self.selected_features.exists():
             total_cost_per_agent = sum(
                 feature.price_per_user_gel
@@ -386,63 +208,31 @@ class TenantSubscription(models.Model):
             )
             return total_cost_per_agent * self.agent_count
 
-        # Legacy package-based pricing (for backward compatibility)
-        if self.package:
-            if self.package.pricing_model == PricingModel.AGENT_BASED:
-                return self.package.price_gel * self.agent_count
-            return self.package.price_gel
-
-        # No package and no features = free
+        # No features = free
         return 0
     
     @property
     def is_over_user_limit(self):
         """Check if tenant is over user limit"""
-        # New model: check against agent_count
-        if self.selected_features.exists():
-            return self.current_users > self.agent_count
-
-        # Legacy model: check against package max_users
-        if self.package and self.package.max_users:
-            return self.current_users > self.package.max_users
-
-        return False
+        # Check against agent_count
+        return self.current_users > self.agent_count
     
     @property
     def is_over_whatsapp_limit(self):
         """Check if tenant is over WhatsApp message limit"""
-        # Feature-based subscriptions: default 10k limit
-        if self.selected_features.exists():
-            return self.whatsapp_messages_used > 10000
-
-        # Package-based subscriptions
-        if not self.package or not self.package.max_whatsapp_messages:
-            return False  # No limit set
-        return self.whatsapp_messages_used > self.package.max_whatsapp_messages
+        # Default 10k limit
+        return self.whatsapp_messages_used > 10000
 
     @property
     def is_over_storage_limit(self):
         """Check if tenant is over storage limit"""
-        # Feature-based subscriptions: default 100GB limit
-        if self.selected_features.exists():
-            return self.storage_used_gb > 100
-
-        # Package-based subscriptions
-        if not self.package:
-            return False  # No limit set
-        return self.storage_used_gb > self.package.max_storage_gb
+        # Default 100GB limit
+        return self.storage_used_gb > 100
     
     def can_add_user(self):
         """Check if tenant can add another user"""
-        # New model: check against agent_count
-        if self.selected_features.exists():
-            return self.current_users < self.agent_count
-
-        # Legacy model: check against package max_users
-        if self.package and self.package.max_users:
-            return self.current_users < self.package.max_users
-
-        return True  # No limit
+        # Check against agent_count
+        return self.current_users < self.agent_count
     
     def can_send_whatsapp_message(self):
         """Check if tenant can send WhatsApp message (deprecated - always returns True)"""
@@ -615,7 +405,6 @@ class PaymentOrder(models.Model):
     order_id = models.CharField(max_length=100, unique=True, db_index=True)
     bog_order_id = models.CharField(max_length=100, blank=True, null=True, help_text='BOG internal order ID for saved card charging')
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, null=True, blank=True)
-    package = models.ForeignKey(Package, on_delete=models.CASCADE, null=True, blank=True, related_name='payment_orders', help_text='Package for subscription payments. Null for card-only payments.')
 
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     currency = models.CharField(max_length=3, default='GEL')
@@ -635,20 +424,6 @@ class PaymentOrder(models.Model):
     payment_url = models.URLField(max_length=500, blank=True)
     card_saved = models.BooleanField(default=False, help_text='Whether card was saved for recurring payments')
     is_trial_payment = models.BooleanField(default=False, help_text='Whether this is a 0 GEL trial payment')
-
-    # Package upgrade tracking
-    is_immediate_upgrade = models.BooleanField(
-        default=False,
-        help_text='Whether this payment is for an immediate package upgrade'
-    )
-    previous_package = models.ForeignKey(
-        Package,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='upgrade_from_orders',
-        help_text='Previous package before upgrade (for audit trail)'
-    )
 
     metadata = models.JSONField(default=dict, blank=True)
 
@@ -678,7 +453,6 @@ class Invoice(models.Model):
     currency = models.CharField(max_length=3, default='GEL')
 
     # What was invoiced for
-    package = models.ForeignKey(Package, on_delete=models.SET_NULL, null=True, blank=True)
     description = models.TextField()
     agent_count = models.IntegerField(default=1)
 
@@ -741,8 +515,7 @@ class PendingRegistration(models.Model):
     admin_last_name = models.CharField(max_length=100)
     preferred_language = models.CharField(max_length=5, default='en', help_text='User preferred language (en, ka, ru)')
 
-    # Legacy package-based or new feature-based
-    package = models.ForeignKey(Package, on_delete=models.CASCADE, null=True, blank=True)
+    # Feature-based pricing
     selected_features = models.ManyToManyField(Feature, blank=True, help_text='Selected features for feature-based pricing')
     agent_count = models.IntegerField(default=10, help_text='Number of agents (10-200 in increments of 10)')
     order_id = models.CharField(max_length=100, unique=True, db_index=True, blank=True, default='')
@@ -1068,18 +841,6 @@ class PlatformMetrics(models.Model):
         decimal_places=2,
         default=0,
         help_text='Monthly retention rate percentage'
-    )
-
-    # Breakdown data (JSON)
-    package_distribution = models.JSONField(
-        default=dict,
-        blank=True,
-        help_text='Subscription count by package: {package_name: count}'
-    )
-    revenue_by_package = models.JSONField(
-        default=dict,
-        blank=True,
-        help_text='MRR by package: {package_name: revenue}'
     )
 
     # Metadata

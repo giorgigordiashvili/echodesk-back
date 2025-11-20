@@ -12,7 +12,7 @@ from django.conf import settings
 from django.utils import timezone
 from datetime import timedelta
 from .models import (
-    Tenant, Package, TenantSubscription, UsageLog, PaymentOrder,
+    Tenant, TenantSubscription, UsageLog, PaymentOrder,
     PendingRegistration, SavedCard, Invoice, PaymentAttempt,
     SubscriptionEvent, PaymentRetrySchedule
 )

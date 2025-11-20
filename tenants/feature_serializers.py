@@ -4,8 +4,8 @@ Serializers for Feature and Permission models
 
 from rest_framework import serializers
 from django.contrib.auth.models import Permission
-from .models import (
-    Feature, FeaturePermission, PackageFeature,
+from .feature_models import (
+    Feature, FeaturePermission,
     TenantFeature, TenantPermission
 )
 
@@ -44,23 +44,6 @@ class FeatureSerializer(serializers.ModelSerializer):
             'is_active', 'permissions', 'created_at', 'updated_at'
         ]
         read_only_fields = ['created_at', 'updated_at']
-
-
-class PackageFeatureSerializer(serializers.ModelSerializer):
-    """Serializer for PackageFeature with feature details"""
-    feature = FeatureSerializer(read_only=True)
-    feature_id = serializers.PrimaryKeyRelatedField(
-        queryset=Feature.objects.all(),
-        source='feature',
-        write_only=True
-    )
-
-    class Meta:
-        model = PackageFeature
-        fields = [
-            'id', 'feature', 'feature_id', 'custom_value',
-            'is_highlighted', 'sort_order'
-        ]
 
 
 class TenantFeatureSerializer(serializers.ModelSerializer):

@@ -128,51 +128,6 @@ class FeaturePermission(models.Model):
         return f"{self.feature.name} → {self.permission.name}"
 
 
-class PackageFeature(models.Model):
-    """
-    Link packages to features with optional custom values
-
-    Allows packages to enable features and override default limits
-    """
-    package = models.ForeignKey(
-        'Package',
-        on_delete=models.CASCADE,
-        related_name='package_features'
-    )
-    feature = models.ForeignKey(
-        Feature,
-        on_delete=models.CASCADE,
-        related_name='package_features'
-    )
-
-    # Optional custom values for this feature in this package
-    # (e.g., max_whatsapp_messages could be stored here)
-    custom_value = models.JSONField(
-        null=True,
-        blank=True,
-        help_text="Custom configuration for this feature (limits, settings, etc.)"
-    )
-
-    # Display settings
-    is_highlighted = models.BooleanField(
-        default=False,
-        help_text="Highlight this feature in package comparison"
-    )
-    sort_order = models.IntegerField(
-        default=0,
-        help_text="Override default feature sort order for this package"
-    )
-
-    class Meta:
-        unique_together = ['package', 'feature']
-        ordering = ['sort_order', 'feature__sort_order']
-        verbose_name = 'Package Feature'
-        verbose_name_plural = 'Package Features'
-
-    def __str__(self):
-        return f"{self.package.display_name} → {self.feature.name}"
-
-
 class TenantFeature(models.Model):
     """
     Track which features are enabled for each tenant
@@ -218,11 +173,11 @@ class TenantPermission(models.Model):
     Track which permissions are AVAILABLE to a tenant for granting to users
 
     This model defines the "permission pool" that tenant admins can grant to users.
-    Based on the tenant's package features, certain permissions become available.
+    Based on the tenant's selected features, certain permissions become available.
 
     Flow:
     1. EchoDesk admin creates Features with Django Permissions
-    2. Package includes Features → Tenant gets TenantPermission records created
+    2. Tenant selects Features → Tenant gets TenantPermission records created
     3. Tenant admin can grant these permissions to users via User model fields
        (e.g., can_view_all_tickets, can_manage_users, etc.)
 
