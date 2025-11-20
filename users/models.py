@@ -364,7 +364,7 @@ class User(AbstractBaseUser):
             list: List of feature keys the user can access
 
         Logic:
-            - Features come from tenant's subscription (package-based OR feature-based)
+            - Features come from tenant's subscription (feature-based)
             - User's tenant groups determine which features they can actually use
             - Returns intersection of subscription features and group features
             - If user has no groups, returns empty list (except superadmin)
@@ -372,7 +372,6 @@ class User(AbstractBaseUser):
         """
         from django.db import connection
         from tenants.models import Tenant
-        from tenants.feature_models import PackageFeature
 
         try:
             # Get tenant's subscription
@@ -381,28 +380,15 @@ class User(AbstractBaseUser):
             if not subscription or not subscription.is_active:
                 return []
 
-            # Determine available features from subscription
-            subscription_feature_keys = set()
-
-            # Check if this is a feature-based subscription
-            if subscription.selected_features.exists():
-                # Feature-based subscription: get features from selected_features
-                subscription_feature_keys = set(
-                    subscription.selected_features.filter(
-                        is_active=True
-                    ).values_list('key', flat=True)
-                )
-            elif subscription.package:
-                # Package-based subscription: get features from package
-                subscription_feature_keys = set(
-                    PackageFeature.objects.filter(
-                        package=subscription.package,
-                        feature__is_active=True
-                    ).values_list('feature__key', flat=True)
-                )
-            else:
-                # No package and no selected features = no access
+            # Get features from subscription's selected_features
+            if not subscription.selected_features.exists():
                 return []
+
+            subscription_feature_keys = set(
+                subscription.selected_features.filter(
+                    is_active=True
+                ).values_list('key', flat=True)
+            )
 
             # Superuser gets all subscription features
             if self.is_superuser:
