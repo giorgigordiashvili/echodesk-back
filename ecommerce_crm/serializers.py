@@ -561,7 +561,7 @@ class EcommerceSettingsSerializer(serializers.ModelSerializer):
         model = EcommerceSettings
         fields = [
             'id', 'tenant', 'bog_client_id', 'bog_client_secret',
-            'bog_use_production', 'bog_return_url_success', 'bog_return_url_fail',
+            'bog_return_url_success', 'bog_return_url_fail',
             'enable_cash_on_delivery', 'enable_card_payment',
             'store_name', 'store_email', 'store_phone',
             'ecommerce_frontend_url', 'deployment_status', 'vercel_project_id', 'custom_domain',

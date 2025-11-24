@@ -139,8 +139,8 @@ DATABASES = {
         'HOST': config('DB_HOST', default='localhost'),
         'PORT': config('DB_PORT', default='5432'),
         'OPTIONS': {
-            'sslmode': 'require',
-        } if config('DB_HOST', default='localhost') != 'localhost' else {},
+            'sslmode': config('DB_SSLMODE', default='require'),
+        } if config('DB_SSLMODE', default=None) else {},
     }
 }
 
@@ -222,8 +222,7 @@ REST_FRAMEWORK = {
         'rest_framework.filters.OrderingFilter',
     ],
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
-    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
-    'PAGE_SIZE': 20,
+    'DEFAULT_PAGINATION_CLASS': 'ecommerce_crm.pagination.DynamicPageSizePagination',
 }
 
 # Simple JWT Settings

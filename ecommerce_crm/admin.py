@@ -183,7 +183,7 @@ class EcommerceSettingsAdmin(admin.ModelAdmin):
             'fields': ('tenant', 'store_name', 'store_email', 'store_phone')
         }),
         ('Payment Settings', {
-            'fields': ('bog_client_id', 'bog_use_production', 'bog_return_url_success', 'bog_return_url_fail', 'enable_cash_on_delivery', 'enable_card_payment')
+            'fields': ('bog_client_id', 'bog_return_url_success', 'bog_return_url_fail', 'enable_cash_on_delivery', 'enable_card_payment')
         }),
         ('Frontend Deployment', {
             'fields': ('get_deployment_status_display', 'get_vercel_project_id', 'frontend_url_link', 'deploy_button'),

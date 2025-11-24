@@ -1506,23 +1506,23 @@ class OrderViewSet(viewsets.ModelViewSet):
             ecommerce_settings = EcommerceSettings.objects.get(tenant=request.tenant)
 
             if ecommerce_settings.has_bog_credentials:
-                # User provided their own credentials - use production URLs
+                # User provided their own credentials
                 client_id = ecommerce_settings.bog_client_id
                 client_secret = ecommerce_settings.get_bog_secret()
-                auth_url = 'https://oauth2.bog.ge/auth/realms/bog/protocol/openid-connect/token'
-                api_base_url = 'https://api.bog.ge/payments/v1'
+                auth_url = settings.BOG_AUTH_URL
+                api_base_url = settings.BOG_API_BASE_URL
             else:
-                # No credentials provided - use test environment with credentials from env
+                # No credentials provided - use platform credentials from env
                 client_id = settings.BOG_CLIENT_ID
                 client_secret = settings.BOG_CLIENT_SECRET
-                auth_url = 'https://oauth2.bog.ge/auth/realms/bog/protocol/openid-connect/token'
-                api_base_url = 'https://api.bog.ge/payments/v1'
+                auth_url = settings.BOG_AUTH_URL
+                api_base_url = settings.BOG_API_BASE_URL
         except:
-            # Fallback to test environment with credentials from env
+            # Fallback to platform credentials from env
             client_id = settings.BOG_CLIENT_ID
             client_secret = settings.BOG_CLIENT_SECRET
-            auth_url = 'https://oauth2.bog.ge/auth/realms/bog/protocol/openid-connect/token'
-            api_base_url = 'https://api.bog.ge/payments/v1'
+            auth_url = settings.BOG_AUTH_URL
+            api_base_url = settings.BOG_API_BASE_URL
 
         # Create BOG service instance with the appropriate credentials
         from tenants.bog_payment import BOGPaymentService
@@ -1662,19 +1662,16 @@ class OrderViewSet(viewsets.ModelViewSet):
             if ecommerce_settings.has_bog_credentials:
                 client_id = ecommerce_settings.bog_client_id
                 client_secret = ecommerce_settings.get_bog_secret()
-                use_production = ecommerce_settings.bog_use_production
             else:
                 # Fall back to default credentials from settings
                 from django.conf import settings
                 client_id = settings.BOG_CLIENT_ID
                 client_secret = settings.BOG_CLIENT_SECRET
-                use_production = not settings.BOG_API_BASE_URL.endswith('-test.bog.ge/payments/v1')
         except EcommerceSettings.DoesNotExist:
             # Use default credentials
             from django.conf import settings
             client_id = settings.BOG_CLIENT_ID
             client_secret = settings.BOG_CLIENT_SECRET
-            use_production = not settings.BOG_API_BASE_URL.endswith('-test.bog.ge/payments/v1')
 
         # Check payment method
         payment_method = request.data.get('payment_method', 'card')

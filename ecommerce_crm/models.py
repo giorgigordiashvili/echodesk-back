@@ -995,10 +995,6 @@ class EcommerceSettings(models.Model):
         null=True,
         help_text="Encrypted Bank of Georgia Client Secret"
     )
-    bog_use_production = models.BooleanField(
-        default=False,
-        help_text="Use production BOG API (unchecked = test environment)"
-    )
     bog_return_url_success = models.URLField(
         max_length=500,
         blank=True,

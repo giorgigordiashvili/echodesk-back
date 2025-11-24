@@ -505,6 +505,10 @@ class ClientProductViewSet(viewsets.ReadOnlyModelViewSet):
         - `?ordering=name` - Sort by name ascending
         - `?ordering=-name` - Sort by name descending
 
+        **Pagination:**
+        - `?page=2` - Get specific page
+        - `?page_size=50` - Items per page (default: 20, max: 100)
+
         **Other Filters:**
         - Basic: `?is_featured=true`
         - On Sale: `?on_sale=true`
@@ -566,6 +570,29 @@ class ClientProductViewSet(viewsets.ReadOnlyModelViewSet):
                 examples=[
                     OpenApiExample('English', value='en'),
                     OpenApiExample('Georgian', value='ka'),
+                ]
+            ),
+            OpenApiParameter(
+                name='page',
+                type=int,
+                location=OpenApiParameter.QUERY,
+                description='Page number for pagination',
+                required=False,
+                examples=[
+                    OpenApiExample('First page', value=1),
+                    OpenApiExample('Second page', value=2),
+                ]
+            ),
+            OpenApiParameter(
+                name='page_size',
+                type=int,
+                location=OpenApiParameter.QUERY,
+                description='Number of items per page (default: 20, max: 100)',
+                required=False,
+                examples=[
+                    OpenApiExample('Default (20)', value=20),
+                    OpenApiExample('50 items', value=50),
+                    OpenApiExample('Maximum (100)', value=100),
                 ]
             ),
             # Dynamic attribute parameters are added via ClientProductAutoSchema
