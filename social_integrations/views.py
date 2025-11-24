@@ -2732,11 +2732,15 @@ def whatsapp_embedded_signup_callback(request):
                     # Subscribe to webhooks
                     try:
                         webhook_url = f"https://graph.facebook.com/{fb_api_version}/{waba_id}/subscribed_apps"
-                        webhook_response = requests.post(webhook_url, params={'access_token': access_token})
+                        webhook_params = {
+                            'access_token': access_token,
+                            'subscribed_fields': 'messages,message_template_status_update'
+                        }
+                        webhook_response = requests.post(webhook_url, params=webhook_params)
                         if webhook_response.status_code == 200:
-                            logger.info(f"✅ Subscribed WABA {waba_id} to webhooks")
+                            logger.info(f"✅ Subscribed WABA {waba_id} to webhooks with fields: messages, message_template_status_update")
                         else:
-                            logger.warning(f"⚠️ Failed to subscribe WABA {waba_id} to webhooks")
+                            logger.warning(f"⚠️ Failed to subscribe WABA {waba_id} to webhooks: {webhook_response.json()}")
                     except Exception as e:
                         logger.error(f"❌ Error subscribing to webhooks: {e}")
 
