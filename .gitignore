@@ -140,3 +140,8 @@ staticfiles/
 
 # Frontend Next.js project
 echodesk-frontend/
+
+# Utility scripts (for manual operations)
+test_bog_auth.py
+register_whatsapp_number.py
+verify_whatsapp_code.py
