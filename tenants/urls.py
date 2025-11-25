@@ -5,7 +5,8 @@ from .views import (
     register_tenant_form, get_tenant_language, update_tenant_language, get_tenant_config,
     get_all_tenants, check_deployment_status, tenant_login, tenant_logout,
     tenant_dashboard, tenant_profile, update_tenant_profile, change_tenant_password,
-    tenant_settings, upload_logo, remove_logo, forced_password_change, upload_image
+    tenant_settings, upload_logo, remove_logo, forced_password_change, upload_image,
+    get_subscription_me
 )
 from .payment_views import (
     create_subscription_payment, check_payment_status, bog_webhook, cancel_subscription,
@@ -42,6 +43,7 @@ urlpatterns = [
     path('api/register-with-payment/', register_tenant_with_payment, name='register_tenant_with_payment'),
 
     # Subscription endpoints (authenticated access)
+    path('api/subscription/me/', get_subscription_me, name='get_subscription_me'),
     path('api/subscription/features/add/', add_feature_to_subscription, name='add_feature_to_subscription'),
     path('api/subscription/features/remove/', remove_feature_from_subscription, name='remove_feature_from_subscription'),
     path('api/subscription/features/available/', get_available_features, name='get_available_features'),

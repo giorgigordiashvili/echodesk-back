@@ -19,6 +19,7 @@ from .serializers import (
 )
 from .services import SingleFrontendDeploymentService, TenantConfigAPI
 from .bog_payment import bog_service
+from .permissions import get_subscription_info
 from django.contrib.auth.hashers import make_password
 import logging
 import uuid
@@ -260,6 +261,91 @@ def tenant_profile(request):
         'all_permissions': list(all_permissions),
         'feature_keys': feature_keys
     }, status=status.HTTP_200_OK)
+
+
+@extend_schema(
+    operation_id='get_subscription_me',
+    summary='Get Current Subscription',
+    description='Get the current tenant subscription information including features, limits, and usage.',
+    responses={
+        200: OpenApiResponse(
+            description='Subscription information',
+            response={
+                'type': 'object',
+                'properties': {
+                    'has_subscription': {'type': 'boolean'},
+                    'subscription': {
+                        'type': 'object',
+                        'properties': {
+                            'is_active': {'type': 'boolean'},
+                            'starts_at': {'type': 'string', 'format': 'date-time'},
+                            'expires_at': {'type': 'string', 'format': 'date-time', 'nullable': True},
+                            'monthly_cost': {'type': 'number'},
+                            'agent_count': {'type': 'integer'},
+                            'subscription_type': {'type': 'string'},
+                            'is_trial': {'type': 'boolean'},
+                            'trial_ends_at': {'type': 'string', 'format': 'date-time', 'nullable': True},
+                            'next_billing_date': {'type': 'string', 'format': 'date-time', 'nullable': True},
+                        }
+                    },
+                    'features': {'type': 'object'},
+                    'selected_features': {
+                        'type': 'array',
+                        'items': {
+                            'type': 'object',
+                            'properties': {
+                                'id': {'type': 'integer'},
+                                'key': {'type': 'string'},
+                                'name': {'type': 'string'},
+                                'price_per_user_gel': {'type': 'number'},
+                                'category': {'type': 'string'},
+                                'description': {'type': 'string'},
+                            }
+                        }
+                    },
+                    'limits': {
+                        'type': 'object',
+                        'properties': {
+                            'max_users': {'type': 'integer', 'nullable': True},
+                            'max_whatsapp_messages': {'type': 'integer'},
+                            'max_storage_gb': {'type': 'integer'},
+                        }
+                    },
+                    'usage': {
+                        'type': 'object',
+                        'properties': {
+                            'current_users': {'type': 'integer'},
+                            'whatsapp_messages_used': {'type': 'integer'},
+                            'storage_used_gb': {'type': 'number'},
+                        }
+                    },
+                    'usage_limits': {'type': 'object'},
+                }
+            }
+        ),
+        403: OpenApiResponse(description='Not available from main domain')
+    },
+    tags=['Subscription']
+)
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def get_subscription_me(request):
+    """
+    Get the current tenant's subscription information.
+
+    Returns complete subscription details including:
+    - Subscription status (active, trial, expires_at)
+    - Available features
+    - Usage limits and current usage
+    """
+    if not hasattr(request, 'tenant') or request.tenant.schema_name == get_public_schema_name():
+        return Response(
+            {'error': 'This endpoint is only available from tenant subdomains'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    subscription_info = get_subscription_info(request)
+    return Response(subscription_info, status=status.HTTP_200_OK)
 
 
 @extend_schema(
