@@ -304,7 +304,7 @@ def check_payment_status(request, payment_id):
     },
     tags=['Payments']
 )
-def generate_invoice_for_payment(payment_order, tenant, package, agent_count):
+def generate_invoice_for_payment(payment_order, tenant, agent_count, description=None):
     """
     Generate an invoice for a successful payment
     Returns the created Invoice object
@@ -320,13 +320,11 @@ def generate_invoice_for_payment(payment_order, tenant, package, agent_count):
             logger.info(f'Skipping invoice generation for 0 GEL payment: {payment_order.order_id}')
             return None
 
-        # Generate invoice description
-        if package:
-            description = f"Subscription to {package.name} package"
+        # Generate invoice description if not provided
+        if not description:
+            description = "Subscription payment"
             if agent_count > 1:
                 description += f" for {agent_count} agents"
-        else:
-            description = "Subscription payment"
 
         # Create invoice
         invoice = Invoice.objects.create(
@@ -334,7 +332,6 @@ def generate_invoice_for_payment(payment_order, tenant, package, agent_count):
             payment_order=payment_order,
             amount=payment_order.amount,
             currency=payment_order.currency,
-            package=package,
             description=description,
             agent_count=agent_count,
             paid_date=payment_order.paid_at or timezone.now(),
@@ -607,8 +604,8 @@ def bog_webhook(request):
                             generate_invoice_for_payment(
                                 payment_order=payment_order,
                                 tenant=tenant,
-                                package=pending_registration.package,
-                                agent_count=pending_registration.agent_count
+                                agent_count=pending_registration.agent_count,
+                                description=f"EchoDesk Subscription - {tenant.name}"
                             )
 
                         # Save card details if card was saved for recurring payments
@@ -710,8 +707,8 @@ def bog_webhook(request):
                             generate_invoice_for_payment(
                                 payment_order=payment_order,
                                 tenant=tenant,
-                                package=pending_registration.package,
-                                agent_count=pending_registration.agent_count
+                                agent_count=pending_registration.agent_count,
+                                description=f"EchoDesk Subscription - {tenant.name}"
                             )
 
                         # Save card details if card was saved for recurring payments
@@ -961,8 +958,8 @@ def bog_webhook(request):
                     generate_invoice_for_payment(
                         payment_order=payment_order,
                         tenant=tenant,
-                        package=None,
-                        agent_count=payment_order.agent_count
+                        agent_count=payment_order.agent_count,
+                        description="Feature addition payment"
                     )
 
                 return Response({
@@ -1025,8 +1022,8 @@ def bog_webhook(request):
                         generate_invoice_for_payment(
                             payment_order=payment_order,
                             tenant=tenant,
-                            package=payment_order.package,
-                            agent_count=subscription.agent_count
+                            agent_count=subscription.agent_count,
+                            description=f"EchoDesk Subscription Reactivation - {tenant.name}"
                         )
 
                         logger.info(f'Subscription reactivated for tenant {tenant.schema_name}')
@@ -1112,17 +1109,18 @@ def bog_webhook(request):
                         logger.info(f'Saved card for immediate upgrade: {card_type} {masked_card}')
 
                     # Generate invoice
+                    package_name = package.display_name if package else "Subscription"
                     generate_invoice_for_payment(
                         payment_order=payment_order,
                         tenant=tenant,
-                        package=package,
-                        agent_count=1
+                        agent_count=1,
+                        description=f"EchoDesk Subscription Upgrade - {package_name}"
                     )
 
                     return Response({
                         'status': 'success',
                         'action': 'immediate_upgrade',
-                        'new_package': package.display_name
+                        'new_package': package.display_name if package else "Subscription"
                     })
 
             # Check if this is a scheduled upgrade from recurring payment
@@ -1151,11 +1149,12 @@ def bog_webhook(request):
                         logger.info(f'Scheduled upgrade completed: {tenant.schema_name} upgraded from {previous_package.display_name} to {package.display_name}')
 
                         # Generate invoice
+                        package_name = package.display_name if package else "Subscription"
                         generate_invoice_for_payment(
                             payment_order=payment_order,
                             tenant=tenant,
-                            package=package,
-                            agent_count=1
+                            agent_count=1,
+                            description=f"EchoDesk Subscription Upgrade - {package_name}"
                         )
 
                         return Response({
@@ -1220,11 +1219,12 @@ def bog_webhook(request):
             logger.info(f'Subscription {action} for tenant {tenant.schema_name}')
 
             # Generate invoice for the payment
+            package_name = package.display_name if package else "Subscription"
             generate_invoice_for_payment(
                 payment_order=payment_order,
                 tenant=tenant,
-                package=package,
-                agent_count=1
+                agent_count=1,
+                description=f"EchoDesk Subscription - {package_name}"
             )
 
             return Response({'status': 'success', 'action': action})
