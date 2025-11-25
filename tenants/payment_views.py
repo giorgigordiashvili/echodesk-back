@@ -1633,23 +1633,19 @@ def reactivate_subscription_payment(request):
         # Get subscription (even if inactive)
         subscription = TenantSubscription.objects.get(tenant=request.tenant)
 
-        # Calculate amount based on subscription type
+        # Calculate amount based on feature-based pricing
         if subscription.selected_features.exists():
-            # Feature-based pricing
             total_per_user = sum(f.price_per_user_gel for f in subscription.selected_features.all())
             amount = float(total_per_user * subscription.agent_count)
-        elif subscription.package:
-            # Package-based pricing
-            from .models import PricingModel
-            if subscription.package.pricing_model == PricingModel.AGENT_BASED:
-                amount = float(subscription.package.price_gel) * subscription.agent_count
-            else:
-                amount = float(subscription.package.price_gel)
         else:
-            return Response(
-                {'error': 'Invalid subscription configuration'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            # No features selected - use stored monthly_cost or return error
+            if subscription.monthly_cost and subscription.monthly_cost > 0:
+                amount = float(subscription.monthly_cost)
+            else:
+                return Response(
+                    {'error': 'No features selected for subscription'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
         # Check if BOG is configured
         if not bog_service.is_configured():
@@ -1705,7 +1701,6 @@ def reactivate_subscription_payment(request):
             order_id=external_order_id,
             bog_order_id=bog_order_id,
             tenant=request.tenant,
-            package=subscription.package,
             amount=amount,
             currency='GEL',
             agent_count=subscription.agent_count,
