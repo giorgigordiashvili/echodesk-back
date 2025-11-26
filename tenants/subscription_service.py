@@ -73,8 +73,8 @@ class SubscriptionService:
                     tenant, feature
                 )
 
-            # Disable features not in package
-            feature_ids = [pf.feature_id for pf in package_features]
+            # Disable features not in subscription
+            feature_ids = list(selected_features.values_list('id', flat=True))
             disabled_tenant_features = TenantFeature.objects.filter(
                 tenant=tenant,
                 is_active=True
@@ -236,9 +236,9 @@ class SubscriptionService:
         Returns:
             bool: True if feature is enabled
         """
-        return TenantFeature.objects.filter(
+        return TenantSubscription.objects.filter(
             tenant=tenant,
-            feature__key=feature_key,
-            feature__is_active=True,
-            is_active=True
+            is_active=True,
+            selected_features__key=feature_key,
+            selected_features__is_active=True
         ).exists()

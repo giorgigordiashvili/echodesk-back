@@ -804,44 +804,10 @@ class FeaturePermissionAdmin(admin.ModelAdmin):
     )
 
 
-@admin.register(TenantFeature)
-class TenantFeatureAdmin(admin.ModelAdmin):
-    """Admin interface for TenantFeature model"""
-    list_display = [
-        'tenant', 'feature', 'is_active', 'enabled_at', 'disabled_at'
-    ]
-    list_filter = ['is_active', 'feature__category', 'enabled_at']
-    search_fields = ['tenant__name', 'tenant__schema_name', 'feature__name']
-    autocomplete_fields = ['tenant', 'feature']
-    readonly_fields = ['enabled_at']
-
-    fieldsets = (
-        ('Relationship', {
-            'fields': ('tenant', 'feature')
-        }),
-        ('Status', {
-            'fields': ('is_active', 'enabled_at', 'disabled_at')
-        }),
-        ('Custom Configuration', {
-            'fields': ('custom_value',),
-            'description': 'Optional tenant-specific overrides',
-            'classes': ['collapse']
-        })
-    )
-
-    actions = ['enable_features', 'disable_features']
-
-    @admin.action(description='Enable selected features')
-    def enable_features(self, request, queryset):
-        """Enable selected tenant features"""
-        count = queryset.update(is_active=True, disabled_at=None)
-        self.message_user(request, f'{count} feature(s) enabled successfully.', messages.SUCCESS)
-
-    @admin.action(description='Disable selected features')
-    def disable_features(self, request, queryset):
-        """Disable selected tenant features"""
-        count = queryset.update(is_active=False, disabled_at=timezone.now())
-        self.message_user(request, f'{count} feature(s) disabled successfully.', messages.SUCCESS)
+# TenantFeatureAdmin removed - feature management should be done through
+# TenantSubscription.selected_features (via TenantSubscriptionAdmin).
+# Direct TenantFeature manipulation can cause inconsistency.
+# TenantFeature model is kept for historical data only.
 
 
 @admin.register(TenantPermission)

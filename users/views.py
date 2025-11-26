@@ -418,8 +418,8 @@ class TenantGroupViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def available_features(self, request):
         """Get all available features that can be assigned to groups based on tenant's subscription"""
-        from tenants.models import Tenant
-        from tenants.feature_models import TenantFeature, Feature
+        from tenants.models import TenantSubscription
+        from tenants.feature_models import Feature
 
         # Get current tenant's available features
         try:
@@ -429,14 +429,17 @@ class TenantGroupViewSet(viewsets.ModelViewSet):
             group_id = request.query_params.get('group_id')
 
             if tenant and hasattr(tenant, 'schema_name') and tenant.schema_name != 'public':
-                # Get features available to this tenant through their subscription
-                tenant_features = TenantFeature.objects.filter(
-                    tenant=tenant,
-                    is_active=True
-                ).select_related('feature').values_list('feature_id', flat=True)
+                # Get features available to this tenant through their subscription's selected_features
+                try:
+                    subscription = TenantSubscription.objects.get(tenant=tenant, is_active=True)
+                    subscription_feature_ids = list(
+                        subscription.selected_features.filter(is_active=True).values_list('id', flat=True)
+                    )
+                except TenantSubscription.DoesNotExist:
+                    subscription_feature_ids = []
 
                 # Start with subscription features
-                feature_ids = list(tenant_features)
+                feature_ids = subscription_feature_ids
 
                 # If editing a group, also include features already assigned to it
                 if group_id:

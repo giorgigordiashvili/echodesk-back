@@ -16,7 +16,7 @@ Usage:
 """
 
 from tenant_schemas.utils import get_public_schema_name
-from .models import TenantSubscription, TenantFeature
+from .models import TenantSubscription
 from .subscription_service import SubscriptionService
 
 
@@ -83,20 +83,9 @@ class SubscriptionMiddleware:
             # Initialize features dict
             request.subscription_features = {}
 
-            # Add features from selected_features (feature-based subscriptions)
-            for feature in subscription.selected_features.all():
+            # Add features from selected_features (single source of truth)
+            for feature in subscription.selected_features.filter(is_active=True):
                 request.subscription_features[feature.key] = True
-
-            # Also add dynamic features from TenantFeature (for backward compatibility)
-            tenant_features = TenantFeature.objects.filter(
-                tenant=request.tenant,
-                is_active=True,
-                feature__is_active=True
-            ).select_related('feature')
-
-            for tf in tenant_features:
-                # Use feature key as dict key
-                request.subscription_features[tf.feature.key] = True
 
         except TenantSubscription.DoesNotExist:
             pass
