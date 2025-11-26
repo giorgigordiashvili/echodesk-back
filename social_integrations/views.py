@@ -2721,6 +2721,30 @@ def whatsapp_embedded_signup_callback(request):
                     action = "Created" if created else "Updated"
                     logger.info(f"✅ {action} WhatsApp Business Account: {verified_name} ({display_phone_number})")
 
+                    # Register the phone number (required to activate it)
+                    try:
+                        register_url = f"https://graph.facebook.com/{fb_api_version}/{phone_number_id}/register"
+                        register_data = {
+                            'messaging_product': 'whatsapp',
+                            'pin': '123456'  # Default PIN for 2FA recovery
+                        }
+                        register_headers = {
+                            'Authorization': f'Bearer {access_token}',
+                            'Content-Type': 'application/json'
+                        }
+                        register_response = requests.post(register_url, headers=register_headers, json=register_data)
+                        if register_response.status_code == 200:
+                            logger.info(f"✅ Registered phone number {phone_number_id}")
+                        else:
+                            # 500 error usually means already registered, which is fine
+                            register_error = register_response.json()
+                            if register_response.status_code == 500:
+                                logger.info(f"ℹ️ Phone number {phone_number_id} likely already registered")
+                            else:
+                                logger.warning(f"⚠️ Phone registration response: {register_error}")
+                    except Exception as e:
+                        logger.error(f"❌ Error registering phone number: {e}")
+
                     saved_accounts.append({
                         'id': account.id,
                         'waba_id': account.waba_id,
