@@ -30,6 +30,7 @@ class TenantSubscriptionAdmin(admin.ModelAdmin):
         'is_active',
         'payment_status',
         'is_trial',
+        'selected_features',
     ]
     search_fields = ['tenant__name', 'tenant__admin_email']
     ordering = ['-created_at']
@@ -38,12 +39,14 @@ class TenantSubscriptionAdmin(admin.ModelAdmin):
         'usage_summary', 'feature_summary', 'payment_health_status',
         'days_until_next_billing', 'view_payment_attempts', 'view_events'
     ]
+    filter_horizontal = ['selected_features']
     actions = [
         'activate_subscriptions',
         'deactivate_subscriptions',
         'reset_usage',
         'extend_subscription_30_days',
         'retry_failed_payments',
+        'sync_tenant_features',
     ]
 
     fieldsets = (
@@ -68,9 +71,9 @@ class TenantSubscriptionAdmin(admin.ModelAdmin):
         ('Usage Tracking', {
             'fields': ('current_users', 'whatsapp_messages_used', 'storage_used_gb', 'usage_summary')
         }),
-        ('Features', {
-            'fields': ('feature_summary',),
-            'classes': ['collapse']
+        ('Feature Management', {
+            'fields': ('selected_features', 'feature_summary'),
+            'description': 'Add or remove features for this tenant. After changing features, use the "Sync tenant features" action to apply changes.',
         }),
         ('Billing', {
             'fields': ('last_billed_at', 'next_billing_date', 'days_until_next_billing')
@@ -83,6 +86,50 @@ class TenantSubscriptionAdmin(admin.ModelAdmin):
 
     def get_queryset(self, request):
         return super().get_queryset(request).select_related('tenant').prefetch_related('selected_features')
+
+    def save_related(self, request, form, formsets, change):
+        """Auto-sync TenantFeature records after saving selected_features"""
+        super().save_related(request, form, formsets, change)
+
+        # Auto-sync features after M2M save
+        subscription = form.instance
+        if subscription.pk:
+            self._sync_single_subscription(subscription)
+            self.message_user(request, 'Features synced automatically.', messages.INFO)
+
+    def _sync_single_subscription(self, subscription):
+        """Helper to sync features for a single subscription"""
+        from tenants.feature_models import TenantFeature
+
+        tenant = subscription.tenant
+        selected_feature_ids = set(subscription.selected_features.values_list('id', flat=True))
+
+        # Get existing TenantFeature records
+        existing_feature_ids = set(
+            TenantFeature.objects.filter(tenant=tenant).values_list('feature_id', flat=True)
+        )
+
+        # Create missing TenantFeature records
+        for feature_id in selected_feature_ids:
+            if feature_id not in existing_feature_ids:
+                TenantFeature.objects.create(
+                    tenant=tenant,
+                    feature_id=feature_id,
+                    is_active=True
+                )
+
+        # Activate features that should be active
+        TenantFeature.objects.filter(
+            tenant=tenant,
+            feature_id__in=selected_feature_ids
+        ).update(is_active=True, disabled_at=None)
+
+        # Deactivate features that are no longer selected
+        TenantFeature.objects.filter(
+            tenant=tenant
+        ).exclude(
+            feature_id__in=selected_feature_ids
+        ).update(is_active=False, disabled_at=timezone.now())
 
     @admin.display(description='Status')
     def status_badge(self, obj):
@@ -207,6 +254,20 @@ class TenantSubscriptionAdmin(admin.ModelAdmin):
         self.message_user(
             request,
             f'{queryset.count()} subscription(s) extended by 30 days.',
+            messages.SUCCESS
+        )
+
+    @admin.action(description='Sync tenant features (create TenantFeature records)')
+    def sync_tenant_features(self, request, queryset):
+        """Sync TenantFeature records based on selected_features"""
+        synced_count = 0
+        for subscription in queryset:
+            self._sync_single_subscription(subscription)
+            synced_count += 1
+
+        self.message_user(
+            request,
+            f'Synced features for {synced_count} subscription(s).',
             messages.SUCCESS
         )
 
