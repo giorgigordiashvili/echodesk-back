@@ -90,3 +90,16 @@ class IsSuperAdmin(permissions.BasePermission):
             return False
 
         return request.user.is_superuser
+
+
+class IsStaffUser(permissions.BasePermission):
+    """
+    Permission that only allows staff users (is_staff=True)
+    """
+    message = "This action is restricted to staff users only."
+
+    def has_permission(self, request, view):
+        if not request.user or not request.user.is_authenticated:
+            return False
+
+        return request.user.is_staff

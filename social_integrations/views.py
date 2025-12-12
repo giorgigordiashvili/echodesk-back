@@ -35,7 +35,7 @@ from .serializers import (
 )
 from .permissions import (
     CanManageSocialConnections, CanViewSocialMessages,
-    CanSendSocialMessages, CanManageSocialSettings, IsSuperAdmin
+    CanSendSocialMessages, CanManageSocialSettings, IsSuperAdmin, IsStaffUser
 )
 
 # Initialize logger
@@ -2615,10 +2615,10 @@ def mark_conversation_read(request):
 
 
 @api_view(['DELETE'])
-@permission_classes([IsAuthenticated, IsSuperAdmin])
+@permission_classes([IsAuthenticated, IsStaffUser])
 def delete_conversation(request):
     """
-    Delete all messages in a conversation. SUPERADMIN ONLY.
+    Delete all messages in a conversation. STAFF USERS ONLY.
 
     Request body:
     {
@@ -2640,15 +2640,13 @@ def delete_conversation(request):
         deleted_count = 0
 
         if platform == 'facebook':
-            # Delete all messages from this conversation (both directions)
+            # Delete all messages from this conversation
+            # For incoming messages: sender_id = customer ID, is_from_page = False
+            # For outgoing messages: sender_id = customer ID (stored this way), is_from_page = True
+            # All messages for a conversation have the customer's sender_id
             deleted_count, _ = FacebookMessage.objects.filter(
                 sender_id=conversation_id
             ).delete()
-            # Also delete messages sent TO this sender
-            deleted_to, _ = FacebookMessage.objects.filter(
-                recipient_id=conversation_id
-            ).delete()
-            deleted_count += deleted_to
 
         elif platform == 'instagram':
             # Delete all messages from this conversation (both directions)
@@ -2671,7 +2669,7 @@ def delete_conversation(request):
                 'error': f'Invalid platform: {platform}'
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        logger.info(f"SUPERADMIN {request.user.email} deleted {deleted_count} messages for {platform} conversation {conversation_id}")
+        logger.info(f"Staff user {request.user.email} deleted {deleted_count} messages for {platform} conversation {conversation_id}")
 
         return Response({
             'success': True,
