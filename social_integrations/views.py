@@ -2419,6 +2419,50 @@ def social_settings(request):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def unread_messages_count(request):
+    """
+    Get the total count of unread messages across all social platforms.
+    Returns counts for Facebook, Instagram, WhatsApp, and total.
+    """
+    logger = logging.getLogger(__name__)
+
+    try:
+        # Count unread Facebook messages (incoming messages not read by staff)
+        facebook_unread = FacebookMessage.objects.filter(
+            is_from_page=False,  # Messages FROM customers TO the page
+            is_read=False
+        ).count()
+
+        # Count unread Instagram messages (incoming messages not read by staff)
+        instagram_unread = InstagramMessage.objects.filter(
+            is_from_business=False,  # Messages FROM customers TO the business
+            is_read=False
+        ).count()
+
+        # Count unread WhatsApp messages (incoming messages not read by staff)
+        whatsapp_unread = WhatsAppMessage.objects.filter(
+            is_from_business=False,  # Messages FROM customers TO the business
+            is_read=False
+        ).count()
+
+        total_unread = facebook_unread + instagram_unread + whatsapp_unread
+
+        return Response({
+            'total': total_unread,
+            'facebook': facebook_unread,
+            'instagram': instagram_unread,
+            'whatsapp': whatsapp_unread
+        })
+
+    except Exception as e:
+        logger.error(f"Error getting unread message count: {e}")
+        return Response({
+            'error': f'Failed to get unread count: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 # ===========================
 # WHATSAPP BUSINESS API VIEWS
 # ===========================

@@ -60,6 +60,9 @@ urlpatterns = [
     # Settings endpoint
     path('settings/', views.social_settings, name='social_settings'),
 
+    # Unread messages count endpoint
+    path('unread-count/', views.unread_messages_count, name='unread_messages_count'),
+
     # Admin OAuth endpoints
     path('admin/facebook/oauth/start/', admin_views.facebook_oauth_admin_start, name='admin_facebook_oauth_start'),
     path('admin/facebook/oauth/callback/', admin_views.facebook_oauth_admin_callback, name='admin_facebook_oauth_callback'),
