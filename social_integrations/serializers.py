@@ -51,7 +51,7 @@ class InstagramMessageSerializer(serializers.ModelSerializer):
     class Meta:
         model = InstagramMessage
         fields = [
-            'id', 'message_id', 'sender_id', 'sender_username', 'sender_profile_pic',
+            'id', 'message_id', 'sender_id', 'sender_name', 'sender_username', 'sender_profile_pic',
             'message_text', 'attachment_type', 'attachment_url', 'attachments',
             'timestamp', 'is_from_business', 'is_delivered', 'delivered_at', 'is_read', 'read_at', 'account_username', 'created_at'
         ]

@@ -1217,7 +1217,24 @@ def facebook_webhook(request):
                                                     logger.warning(f"Could not fetch message info: status={message_response.status_code}")
                                             except Exception as e:
                                                 logger.warning(f"Exception fetching message info: {e}")
-                                    
+
+                                        # Fetch profile picture for the sender
+                                        try:
+                                            profile_pic_url_api = f"https://graph.facebook.com/v23.0/{sender_id}/picture"
+                                            profile_pic_params = {
+                                                'type': 'large',
+                                                'redirect': 'false',
+                                                'access_token': page_connection.page_access_token
+                                            }
+                                            profile_pic_response = requests.get(profile_pic_url_api, params=profile_pic_params, timeout=10)
+                                            if profile_pic_response.status_code == 200:
+                                                pic_data = profile_pic_response.json().get('data', {})
+                                                if not pic_data.get('is_silhouette', True):
+                                                    profile_pic_url = pic_data.get('url')
+                                                    logger.info(f"👤 Fetched profile picture for {sender_name}")
+                                        except Exception as e:
+                                            logger.warning(f"Exception fetching profile picture: {e}")
+
                                     # Save the message (avoid duplicates)
                                     message_id = message_data.get('mid', '')
                                     message_text = message_data.get('text', '')
@@ -2150,16 +2167,17 @@ def instagram_webhook(request):
                                     continue
 
                                 # Get sender info - fetch from Instagram Graph API
+                                sender_name = ''  # Display name
                                 sender_username = sender_id  # Use the ID as username by default
                                 sender_profile_pic = None
 
-                                # Try to fetch the sender's Instagram username and profile pic
+                                # Try to fetch the sender's Instagram username, name and profile pic
                                 if sender_id != instagram_account_id:  # Don't fetch profile for business account itself
                                     try:
                                         # Use Instagram Graph API to get user info
                                         profile_url = f"https://graph.facebook.com/v23.0/{sender_id}"
                                         profile_params = {
-                                            'fields': 'username,profile_pic',
+                                            'fields': 'name,username,profile_pic',
                                             'access_token': account_connection.access_token
                                         }
                                         logger.info(f"👤 Fetching Instagram profile for sender {sender_id}")
@@ -2169,9 +2187,10 @@ def instagram_webhook(request):
                                         if profile_response.status_code == 200:
                                             profile_data = profile_response.json()
                                             logger.info(f"👤 Instagram profile data received: {profile_data}")
+                                            sender_name = profile_data.get('name', '')
                                             sender_username = profile_data.get('username', sender_id)
                                             sender_profile_pic = profile_data.get('profile_pic')
-                                            logger.info(f"👤 Set sender_username to: {sender_username}")
+                                            logger.info(f"👤 Set sender_name to: {sender_name}, sender_username to: {sender_username}")
 
                                             # Validate URL length to prevent database errors
                                             if sender_profile_pic and len(sender_profile_pic) > 500:
@@ -2226,6 +2245,7 @@ def instagram_webhook(request):
                                             account_connection=account_connection,
                                             message_id=message_id,
                                             sender_id=sender_id,
+                                            sender_name=sender_name,
                                             sender_username=sender_username,
                                             sender_profile_pic=sender_profile_pic,
                                             message_text=message_text,
@@ -2245,6 +2265,7 @@ def instagram_webhook(request):
                                                 'id': message_obj.id,
                                                 'message_id': message_obj.message_id,
                                                 'sender_id': message_obj.sender_id,
+                                                'sender_name': message_obj.sender_name,
                                                 'sender_username': message_obj.sender_username,
                                                 'message_text': message_obj.message_text,
                                                 'attachment_type': message_obj.attachment_type,

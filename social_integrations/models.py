@@ -174,7 +174,8 @@ class InstagramMessage(models.Model):
     )
     message_id = models.CharField(max_length=255, unique=True)  # Instagram IDs are base64 encoded, need more space
     sender_id = models.CharField(max_length=100)
-    sender_username = models.CharField(max_length=200, blank=True)
+    sender_name = models.CharField(max_length=200, blank=True)  # Display name
+    sender_username = models.CharField(max_length=200, blank=True)  # @username
     sender_profile_pic = models.URLField(max_length=500, blank=True, null=True)
     message_text = models.TextField(blank=True)  # Can be empty for media-only messages
     # Attachment fields
