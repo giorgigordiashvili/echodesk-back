@@ -66,6 +66,9 @@ urlpatterns = [
     # Mark conversation as read endpoint
     path('mark-read/', views.mark_conversation_read, name='mark_conversation_read'),
 
+    # Delete conversation endpoint (superadmin only)
+    path('delete-conversation/', views.delete_conversation, name='delete_conversation'),
+
     # Admin OAuth endpoints
     path('admin/facebook/oauth/start/', admin_views.facebook_oauth_admin_start, name='admin_facebook_oauth_start'),
     path('admin/facebook/oauth/callback/', admin_views.facebook_oauth_admin_callback, name='admin_facebook_oauth_callback'),

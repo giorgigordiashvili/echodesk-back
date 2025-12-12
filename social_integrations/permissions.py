@@ -77,3 +77,16 @@ class CanManageSocialSettings(permissions.BasePermission):
             request.user.role == 'admin' or
             request.user.has_permission('manage_social_settings')
         )
+
+
+class IsSuperAdmin(permissions.BasePermission):
+    """
+    Permission that only allows superadmins (is_superuser=True)
+    """
+    message = "This action is restricted to superadmins only."
+
+    def has_permission(self, request, view):
+        if not request.user or not request.user.is_authenticated:
+            return False
+
+        return request.user.is_superuser

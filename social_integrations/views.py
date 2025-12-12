@@ -35,7 +35,7 @@ from .serializers import (
 )
 from .permissions import (
     CanManageSocialConnections, CanViewSocialMessages,
-    CanSendSocialMessages, CanManageSocialSettings
+    CanSendSocialMessages, CanManageSocialSettings, IsSuperAdmin
 )
 
 # Initialize logger
@@ -2611,6 +2611,77 @@ def mark_conversation_read(request):
         logger.error(f"Error marking conversation as read: {e}")
         return Response({
             'error': f'Failed to mark conversation as read: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated, IsSuperAdmin])
+def delete_conversation(request):
+    """
+    Delete all messages in a conversation. SUPERADMIN ONLY.
+
+    Request body:
+    {
+        "platform": "facebook" | "instagram" | "whatsapp",
+        "conversation_id": "sender_id for fb/ig, or from_number for whatsapp"
+    }
+    """
+    logger = logging.getLogger(__name__)
+
+    try:
+        platform = request.data.get('platform')
+        conversation_id = request.data.get('conversation_id')
+
+        if not platform or not conversation_id:
+            return Response({
+                'error': 'platform and conversation_id are required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        deleted_count = 0
+
+        if platform == 'facebook':
+            # Delete all messages from this conversation (both directions)
+            deleted_count, _ = FacebookMessage.objects.filter(
+                sender_id=conversation_id
+            ).delete()
+            # Also delete messages sent TO this sender
+            deleted_to, _ = FacebookMessage.objects.filter(
+                recipient_id=conversation_id
+            ).delete()
+            deleted_count += deleted_to
+
+        elif platform == 'instagram':
+            # Delete all messages from this conversation (both directions)
+            deleted_count, _ = InstagramMessage.objects.filter(
+                sender_id=conversation_id
+            ).delete()
+
+        elif platform == 'whatsapp':
+            # Delete all messages from/to this phone number
+            deleted_from, _ = WhatsAppMessage.objects.filter(
+                from_number=conversation_id
+            ).delete()
+            deleted_to, _ = WhatsAppMessage.objects.filter(
+                to_number=conversation_id
+            ).delete()
+            deleted_count = deleted_from + deleted_to
+
+        else:
+            return Response({
+                'error': f'Invalid platform: {platform}'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        logger.info(f"SUPERADMIN {request.user.email} deleted {deleted_count} messages for {platform} conversation {conversation_id}")
+
+        return Response({
+            'success': True,
+            'messages_deleted': deleted_count
+        })
+
+    except Exception as e:
+        logger.error(f"Error deleting conversation: {e}")
+        return Response({
+            'error': f'Failed to delete conversation: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
