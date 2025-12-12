@@ -70,6 +70,8 @@ class FacebookMessage(models.Model):
     delivered_at = models.DateTimeField(null=True, blank=True)  # When the message was delivered
     is_read = models.BooleanField(default=False)  # True if customer has read the message
     read_at = models.DateTimeField(null=True, blank=True)  # When the message was read
+    is_read_by_staff = models.BooleanField(default=False)  # True if staff has read this incoming message
+    read_by_staff_at = models.DateTimeField(null=True, blank=True)  # When staff read the message
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -185,6 +187,8 @@ class InstagramMessage(models.Model):
     delivered_at = models.DateTimeField(null=True, blank=True)  # When the message was delivered
     is_read = models.BooleanField(default=False)  # True if customer has read the message
     read_at = models.DateTimeField(null=True, blank=True)  # When the message was read
+    is_read_by_staff = models.BooleanField(default=False)  # True if staff has read this incoming message
+    read_by_staff_at = models.DateTimeField(null=True, blank=True)  # When staff read the message
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -313,6 +317,8 @@ class WhatsAppMessage(models.Model):
     delivered_at = models.DateTimeField(null=True, blank=True)  # When the message was delivered
     is_read = models.BooleanField(default=False)  # True if customer has read the message
     read_at = models.DateTimeField(null=True, blank=True)  # When the message was read
+    is_read_by_staff = models.BooleanField(default=False)  # True if staff has read this incoming message
+    read_by_staff_at = models.DateTimeField(null=True, blank=True)  # When staff read the message
     error_message = models.TextField(blank=True)  # Error message if failed
     created_at = models.DateTimeField(auto_now_add=True)
 

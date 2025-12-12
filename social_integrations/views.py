@@ -2498,6 +2498,7 @@ def unread_messages_count(request):
     """
     Get the total count of unread messages across all social platforms.
     Returns counts for Facebook, Instagram, WhatsApp, and total.
+    Unread = incoming messages from customers that staff hasn't read yet.
     """
     logger = logging.getLogger(__name__)
 
@@ -2505,19 +2506,19 @@ def unread_messages_count(request):
         # Count unread Facebook messages (incoming messages not read by staff)
         facebook_unread = FacebookMessage.objects.filter(
             is_from_page=False,  # Messages FROM customers TO the page
-            is_read=False
+            is_read_by_staff=False  # Staff hasn't read this message yet
         ).count()
 
         # Count unread Instagram messages (incoming messages not read by staff)
         instagram_unread = InstagramMessage.objects.filter(
             is_from_business=False,  # Messages FROM customers TO the business
-            is_read=False
+            is_read_by_staff=False  # Staff hasn't read this message yet
         ).count()
 
         # Count unread WhatsApp messages (incoming messages not read by staff)
         whatsapp_unread = WhatsAppMessage.objects.filter(
             is_from_business=False,  # Messages FROM customers TO the business
-            is_read=False
+            is_read_by_staff=False  # Staff hasn't read this message yet
         ).count()
 
         total_unread = facebook_unread + instagram_unread + whatsapp_unread
@@ -2533,6 +2534,83 @@ def unread_messages_count(request):
         logger.error(f"Error getting unread message count: {e}")
         return Response({
             'error': f'Failed to get unread count: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def mark_conversation_read(request):
+    """
+    Mark all messages in a conversation as read by staff.
+
+    Request body:
+    {
+        "platform": "facebook" | "instagram" | "whatsapp",
+        "conversation_id": "sender_id for fb/ig, or from_number for whatsapp"
+    }
+    """
+    logger = logging.getLogger(__name__)
+
+    try:
+        platform = request.data.get('platform')
+        conversation_id = request.data.get('conversation_id')
+
+        if not platform or not conversation_id:
+            return Response({
+                'error': 'platform and conversation_id are required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        now = timezone.now()
+        updated_count = 0
+
+        if platform == 'facebook':
+            # Mark all incoming messages from this sender as read by staff
+            updated_count = FacebookMessage.objects.filter(
+                sender_id=conversation_id,
+                is_from_page=False,
+                is_read_by_staff=False
+            ).update(
+                is_read_by_staff=True,
+                read_by_staff_at=now
+            )
+
+        elif platform == 'instagram':
+            # Mark all incoming messages from this sender as read by staff
+            updated_count = InstagramMessage.objects.filter(
+                sender_id=conversation_id,
+                is_from_business=False,
+                is_read_by_staff=False
+            ).update(
+                is_read_by_staff=True,
+                read_by_staff_at=now
+            )
+
+        elif platform == 'whatsapp':
+            # Mark all incoming messages from this phone number as read by staff
+            updated_count = WhatsAppMessage.objects.filter(
+                from_number=conversation_id,
+                is_from_business=False,
+                is_read_by_staff=False
+            ).update(
+                is_read_by_staff=True,
+                read_by_staff_at=now
+            )
+        else:
+            return Response({
+                'error': f'Invalid platform: {platform}'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        logger.info(f"Marked {updated_count} {platform} messages as read for conversation {conversation_id}")
+
+        return Response({
+            'success': True,
+            'messages_marked_read': updated_count
+        })
+
+    except Exception as e:
+        logger.error(f"Error marking conversation as read: {e}")
+        return Response({
+            'error': f'Failed to mark conversation as read: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 

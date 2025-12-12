@@ -63,6 +63,9 @@ urlpatterns = [
     # Unread messages count endpoint
     path('unread-count/', views.unread_messages_count, name='unread_messages_count'),
 
+    # Mark conversation as read endpoint
+    path('mark-read/', views.mark_conversation_read, name='mark_conversation_read'),
+
     # Admin OAuth endpoints
     path('admin/facebook/oauth/start/', admin_views.facebook_oauth_admin_start, name='admin_facebook_oauth_start'),
     path('admin/facebook/oauth/callback/', admin_views.facebook_oauth_admin_callback, name='admin_facebook_oauth_callback'),
