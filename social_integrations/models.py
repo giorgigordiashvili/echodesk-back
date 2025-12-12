@@ -45,12 +45,25 @@ class FacebookPageConnection(models.Model):
 
 class FacebookMessage(models.Model):
     """Stores Facebook page messages"""
+    ATTACHMENT_TYPE_CHOICES = [
+        ('image', 'Image'),
+        ('video', 'Video'),
+        ('audio', 'Audio'),
+        ('file', 'File'),
+        ('location', 'Location'),
+        ('fallback', 'Fallback'),
+    ]
+
     page_connection = models.ForeignKey(FacebookPageConnection, on_delete=models.CASCADE, related_name='messages')
     message_id = models.CharField(max_length=100, unique=True)
     sender_id = models.CharField(max_length=100)
     sender_name = models.CharField(max_length=200, blank=True)
     profile_pic_url = models.URLField(max_length=500, blank=True, null=True)  # User's profile picture
-    message_text = models.TextField()
+    message_text = models.TextField(blank=True)  # Can be empty for attachment-only messages
+    # Attachment fields
+    attachment_type = models.CharField(max_length=20, choices=ATTACHMENT_TYPE_CHOICES, blank=True)
+    attachment_url = models.URLField(max_length=1000, blank=True, null=True)  # URL for media attachments
+    attachments = models.JSONField(default=list, blank=True)  # Array for multiple attachments
     timestamp = models.DateTimeField()
     is_from_page = models.BooleanField(default=False)  # True if message is from page to user
     is_delivered = models.BooleanField(default=False)  # True if message was delivered to customer
@@ -63,7 +76,11 @@ class FacebookMessage(models.Model):
         ordering = ['-timestamp']
 
     def __str__(self):
-        return f"Message from {self.sender_name} - {self.message_text[:50]}"
+        if self.message_text:
+            return f"Message from {self.sender_name} - {self.message_text[:50]}"
+        elif self.attachment_type:
+            return f"Message from {self.sender_name} - [{self.attachment_type}]"
+        return f"Message from {self.sender_name}"
 
 
 class OrphanedFacebookMessage(models.Model):
@@ -138,6 +155,16 @@ class InstagramAccountConnection(models.Model):
 
 class InstagramMessage(models.Model):
     """Stores Instagram Direct messages"""
+    ATTACHMENT_TYPE_CHOICES = [
+        ('image', 'Image'),
+        ('video', 'Video'),
+        ('audio', 'Audio'),
+        ('file', 'File'),
+        ('share', 'Share'),  # Instagram story/post shares
+        ('story_mention', 'Story Mention'),
+        ('story_reply', 'Story Reply'),
+    ]
+
     account_connection = models.ForeignKey(
         InstagramAccountConnection,
         on_delete=models.CASCADE,
@@ -148,6 +175,10 @@ class InstagramMessage(models.Model):
     sender_username = models.CharField(max_length=200, blank=True)
     sender_profile_pic = models.URLField(max_length=500, blank=True, null=True)
     message_text = models.TextField(blank=True)  # Can be empty for media-only messages
+    # Attachment fields
+    attachment_type = models.CharField(max_length=20, choices=ATTACHMENT_TYPE_CHOICES, blank=True)
+    attachment_url = models.URLField(max_length=1000, blank=True, null=True)  # URL for media attachments
+    attachments = models.JSONField(default=list, blank=True)  # Array for multiple attachments
     timestamp = models.DateTimeField()
     is_from_business = models.BooleanField(default=False)  # True if sent by business
     is_delivered = models.BooleanField(default=False)  # True if message was delivered to customer
@@ -160,7 +191,11 @@ class InstagramMessage(models.Model):
         ordering = ['-timestamp']
 
     def __str__(self):
-        return f"Instagram DM from @{self.sender_username} - {self.message_text[:50]}"
+        if self.message_text:
+            return f"Instagram DM from @{self.sender_username} - {self.message_text[:50]}"
+        elif self.attachment_type:
+            return f"Instagram DM from @{self.sender_username} - [{self.attachment_type}]"
+        return f"Instagram DM from @{self.sender_username}"
 
 
 class WhatsAppBusinessAccount(models.Model):
@@ -234,6 +269,7 @@ class WhatsAppMessage(models.Model):
         ('video', 'Video'),
         ('audio', 'Audio'),
         ('document', 'Document'),
+        ('sticker', 'Sticker'),
         ('location', 'Location'),
         ('contacts', 'Contacts'),
         ('interactive', 'Interactive'),
@@ -258,8 +294,9 @@ class WhatsAppMessage(models.Model):
     profile_pic_url = models.URLField(max_length=500, blank=True, null=True)  # Contact's profile picture
     message_text = models.TextField(blank=True)  # Message text content
     message_type = models.CharField(max_length=20, choices=MESSAGE_TYPE_CHOICES, default='text')
-    media_url = models.URLField(max_length=500, blank=True, null=True)  # URL for media messages
+    media_url = models.URLField(max_length=1000, blank=True, null=True)  # URL for media messages
     media_mime_type = models.CharField(max_length=100, blank=True)  # MIME type for media
+    attachments = models.JSONField(default=list, blank=True)  # Array for multiple attachments
     # Template-related fields
     template = models.ForeignKey(
         WhatsAppMessageTemplate,

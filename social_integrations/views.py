@@ -1222,6 +1222,37 @@ def facebook_webhook(request):
                                     message_id = message_data.get('mid', '')
                                     message_text = message_data.get('text', '')
 
+                                    # Extract attachment information
+                                    attachment_type = ''
+                                    attachment_url = None
+                                    attachments = []
+
+                                    if 'attachments' in message_data:
+                                        raw_attachments = message_data.get('attachments', [])
+                                        for att in raw_attachments:
+                                            att_type = att.get('type', '')
+                                            payload = att.get('payload', {})
+                                            att_url = payload.get('url', '')
+
+                                            # Build attachment object for storage
+                                            attachment_obj = {
+                                                'type': att_type,
+                                                'url': att_url,
+                                            }
+
+                                            # Add sticker_id if present (for stickers)
+                                            if payload.get('sticker_id'):
+                                                attachment_obj['sticker_id'] = payload.get('sticker_id')
+
+                                            attachments.append(attachment_obj)
+
+                                            # Set primary attachment type and URL (first attachment)
+                                            if not attachment_type:
+                                                attachment_type = att_type
+                                                attachment_url = att_url
+
+                                        logger.info(f"📎 Found {len(attachments)} attachment(s): {[a['type'] for a in attachments]}")
+
                                     if message_id and not FacebookMessage.objects.filter(message_id=message_id).exists():
                                         try:
                                             message_obj = FacebookMessage.objects.create(
@@ -1230,11 +1261,14 @@ def facebook_webhook(request):
                                                 sender_id=sender_id,
                                                 sender_name=sender_name,
                                                 message_text=message_text,
+                                                attachment_type=attachment_type,
+                                                attachment_url=attachment_url,
+                                                attachments=attachments,
                                                 timestamp=convert_facebook_timestamp(message_event.get('timestamp', 0)),
                                                 is_from_page=(sender_id == page_id),
                                                 profile_pic_url=profile_pic_url
                                             )
-                                            logger.info(f"✅ Saved message from {sender_name}: {message_text[:50]}")
+                                            logger.info(f"✅ Saved message from {sender_name}: {message_text[:50] if message_text else f'[{attachment_type}]'}")
 
                                             # Send WebSocket notification for real-time updates
                                             from django.db import connection
@@ -1246,6 +1280,9 @@ def facebook_webhook(request):
                                                     'sender_id': message_obj.sender_id,
                                                     'sender_name': message_obj.sender_name,
                                                     'message_text': message_obj.message_text,
+                                                    'attachment_type': message_obj.attachment_type,
+                                                    'attachment_url': message_obj.attachment_url,
+                                                    'attachments': message_obj.attachments,
                                                     'timestamp': message_obj.timestamp.isoformat() if message_obj.timestamp else None,
                                                     'is_from_page': message_obj.is_from_page,
                                                 }
@@ -2151,6 +2188,36 @@ def instagram_webhook(request):
                                 message_id = message_data.get('mid', '')
                                 message_text = message_data.get('text', '')
 
+                                # Extract attachment information for Instagram
+                                attachment_type = ''
+                                attachment_url = None
+                                attachments = []
+
+                                if 'attachments' in message_data:
+                                    raw_attachments = message_data.get('attachments', [])
+                                    for att in raw_attachments:
+                                        att_type = att.get('type', '')
+                                        payload = att.get('payload', {})
+                                        att_url = payload.get('url', '')
+
+                                        attachment_obj = {
+                                            'type': att_type,
+                                            'url': att_url,
+                                        }
+
+                                        # Add sticker_id if present
+                                        if payload.get('sticker_id'):
+                                            attachment_obj['sticker_id'] = payload.get('sticker_id')
+
+                                        attachments.append(attachment_obj)
+
+                                        # Set primary attachment type and URL (first attachment)
+                                        if not attachment_type:
+                                            attachment_type = att_type
+                                            attachment_url = att_url
+
+                                    logger.info(f"📎 Found {len(attachments)} Instagram attachment(s): {[a['type'] for a in attachments]}")
+
                                 logger.info(f"💾 Saving Instagram message from sender_id: {sender_id}, username: {sender_username}")
 
                                 if message_id and not InstagramMessage.objects.filter(message_id=message_id).exists():
@@ -2162,10 +2229,13 @@ def instagram_webhook(request):
                                             sender_username=sender_username,
                                             sender_profile_pic=sender_profile_pic,
                                             message_text=message_text,
+                                            attachment_type=attachment_type,
+                                            attachment_url=attachment_url,
+                                            attachments=attachments,
                                             timestamp=convert_facebook_timestamp(message_event.get('timestamp', 0)),
                                             is_from_business=False
                                         )
-                                        logger.info(f"✅ Saved Instagram message from {sender_username}: {message_text[:50]}")
+                                        logger.info(f"✅ Saved Instagram message from {sender_username}: {message_text[:50] if message_text else f'[{attachment_type}]'}")
 
                                         # Send WebSocket notification for real-time updates
                                         from django.db import connection
@@ -2177,6 +2247,9 @@ def instagram_webhook(request):
                                                 'sender_id': message_obj.sender_id,
                                                 'sender_username': message_obj.sender_username,
                                                 'message_text': message_obj.message_text,
+                                                'attachment_type': message_obj.attachment_type,
+                                                'attachment_url': message_obj.attachment_url,
+                                                'attachments': message_obj.attachments,
                                                 'timestamp': message_obj.timestamp.isoformat() if message_obj.timestamp else None,
                                                 'is_from_business': message_obj.is_from_business,
                                             }
@@ -3130,24 +3203,129 @@ def whatsapp_webhook(request):
                     message_text = ''
                     media_url = ''
                     media_mime_type = ''
+                    attachments = []
 
                     if message_type == 'text':
                         message_text = message.get('text', {}).get('body', '')
                     elif message_type == 'image':
-                        message_text = message.get('image', {}).get('caption', '')
-                        media_url = message.get('image', {}).get('link', '')
-                        media_mime_type = message.get('image', {}).get('mime_type', '')
+                        image_data = message.get('image', {})
+                        message_text = image_data.get('caption', '')
+                        media_id = image_data.get('id', '')
+                        media_mime_type = image_data.get('mime_type', '')
+                        # Fetch media URL using WhatsApp API
+                        if media_id and account.access_token:
+                            try:
+                                media_info_url = f"https://graph.facebook.com/v23.0/{media_id}"
+                                media_response = requests.get(
+                                    media_info_url,
+                                    headers={'Authorization': f'Bearer {account.access_token}'},
+                                    timeout=10
+                                )
+                                if media_response.status_code == 200:
+                                    media_url = media_response.json().get('url', '')
+                                    logger.info(f"📎 Fetched WhatsApp image URL: {media_url[:50]}...")
+                            except Exception as e:
+                                logger.error(f"Failed to fetch WhatsApp media URL: {e}")
+                        attachments.append({
+                            'type': 'image',
+                            'media_id': media_id,
+                            'url': media_url,
+                            'mime_type': media_mime_type,
+                        })
                     elif message_type == 'video':
-                        message_text = message.get('video', {}).get('caption', '')
-                        media_url = message.get('video', {}).get('link', '')
-                        media_mime_type = message.get('video', {}).get('mime_type', '')
+                        video_data = message.get('video', {})
+                        message_text = video_data.get('caption', '')
+                        media_id = video_data.get('id', '')
+                        media_mime_type = video_data.get('mime_type', '')
+                        if media_id and account.access_token:
+                            try:
+                                media_info_url = f"https://graph.facebook.com/v23.0/{media_id}"
+                                media_response = requests.get(
+                                    media_info_url,
+                                    headers={'Authorization': f'Bearer {account.access_token}'},
+                                    timeout=10
+                                )
+                                if media_response.status_code == 200:
+                                    media_url = media_response.json().get('url', '')
+                                    logger.info(f"📎 Fetched WhatsApp video URL")
+                            except Exception as e:
+                                logger.error(f"Failed to fetch WhatsApp media URL: {e}")
+                        attachments.append({
+                            'type': 'video',
+                            'media_id': media_id,
+                            'url': media_url,
+                            'mime_type': media_mime_type,
+                        })
                     elif message_type == 'document':
-                        message_text = message.get('document', {}).get('filename', '')
-                        media_url = message.get('document', {}).get('link', '')
-                        media_mime_type = message.get('document', {}).get('mime_type', '')
+                        doc_data = message.get('document', {})
+                        message_text = doc_data.get('filename', '')
+                        media_id = doc_data.get('id', '')
+                        media_mime_type = doc_data.get('mime_type', '')
+                        if media_id and account.access_token:
+                            try:
+                                media_info_url = f"https://graph.facebook.com/v23.0/{media_id}"
+                                media_response = requests.get(
+                                    media_info_url,
+                                    headers={'Authorization': f'Bearer {account.access_token}'},
+                                    timeout=10
+                                )
+                                if media_response.status_code == 200:
+                                    media_url = media_response.json().get('url', '')
+                            except Exception as e:
+                                logger.error(f"Failed to fetch WhatsApp media URL: {e}")
+                        attachments.append({
+                            'type': 'document',
+                            'media_id': media_id,
+                            'url': media_url,
+                            'mime_type': media_mime_type,
+                            'filename': doc_data.get('filename', ''),
+                        })
                     elif message_type == 'audio':
-                        media_url = message.get('audio', {}).get('link', '')
-                        media_mime_type = message.get('audio', {}).get('mime_type', '')
+                        audio_data = message.get('audio', {})
+                        media_id = audio_data.get('id', '')
+                        media_mime_type = audio_data.get('mime_type', '')
+                        if media_id and account.access_token:
+                            try:
+                                media_info_url = f"https://graph.facebook.com/v23.0/{media_id}"
+                                media_response = requests.get(
+                                    media_info_url,
+                                    headers={'Authorization': f'Bearer {account.access_token}'},
+                                    timeout=10
+                                )
+                                if media_response.status_code == 200:
+                                    media_url = media_response.json().get('url', '')
+                                    logger.info(f"📎 Fetched WhatsApp audio URL")
+                            except Exception as e:
+                                logger.error(f"Failed to fetch WhatsApp media URL: {e}")
+                        attachments.append({
+                            'type': 'audio',
+                            'media_id': media_id,
+                            'url': media_url,
+                            'mime_type': media_mime_type,
+                        })
+                    elif message_type == 'sticker':
+                        sticker_data = message.get('sticker', {})
+                        media_id = sticker_data.get('id', '')
+                        media_mime_type = sticker_data.get('mime_type', 'image/webp')
+                        if media_id and account.access_token:
+                            try:
+                                media_info_url = f"https://graph.facebook.com/v23.0/{media_id}"
+                                media_response = requests.get(
+                                    media_info_url,
+                                    headers={'Authorization': f'Bearer {account.access_token}'},
+                                    timeout=10
+                                )
+                                if media_response.status_code == 200:
+                                    media_url = media_response.json().get('url', '')
+                                    logger.info(f"📎 Fetched WhatsApp sticker URL")
+                            except Exception as e:
+                                logger.error(f"Failed to fetch WhatsApp media URL: {e}")
+                        attachments.append({
+                            'type': 'sticker',
+                            'media_id': media_id,
+                            'url': media_url,
+                            'mime_type': media_mime_type,
+                        })
 
                     # Get contact name
                     contacts = value.get('contacts', [])
@@ -3169,6 +3347,7 @@ def whatsapp_webhook(request):
                         message_type=message_type,
                         media_url=media_url,
                         media_mime_type=media_mime_type,
+                        attachments=attachments,
                         timestamp=message_timestamp,
                         is_from_business=False,
                         status='delivered',
@@ -3176,7 +3355,7 @@ def whatsapp_webhook(request):
                         delivered_at=timezone.now()
                     )
 
-                    logger.info(f"✅ Saved WhatsApp message from {contact_name or from_number}: {message_text[:50]}")
+                    logger.info(f"✅ Saved WhatsApp message from {contact_name or from_number}: {message_text[:50] if message_text else f'[{message_type}]'}")
 
                     # Send WebSocket notification
                     ws_message_data = {
@@ -3186,6 +3365,8 @@ def whatsapp_webhook(request):
                         'contact_name': message_obj.contact_name,
                         'message_text': message_obj.message_text,
                         'message_type': message_obj.message_type,
+                        'media_url': message_obj.media_url,
+                        'attachments': message_obj.attachments,
                         'timestamp': message_obj.timestamp.isoformat(),
                         'is_from_business': message_obj.is_from_business,
                     }
