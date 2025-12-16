@@ -825,7 +825,7 @@ def facebook_send_message(request):
                 FacebookMessage.objects.create(
                     page_connection=page_connection,
                     message_id=message_id or f"sent_{datetime.now().timestamp()}",
-                    sender_id=page_id,  # Page is the sender
+                    sender_id=recipient_id,  # Use recipient_id for conversation grouping (same as incoming messages)
                     sender_name=page_connection.page_name,
                     message_text=message_text,
                     timestamp=datetime.now(),
@@ -2011,7 +2011,7 @@ def instagram_send_message(request):
                 InstagramMessage.objects.create(
                     account_connection=account_connection,
                     message_id=message_id or f"sent_{datetime.now().timestamp()}",
-                    sender_id=instagram_account_id,  # Account is the sender
+                    sender_id=recipient_id,  # Use recipient_id for conversation grouping (same as incoming messages)
                     sender_username=account_connection.username,
                     message_text=message_text,
                     timestamp=datetime.now(),
@@ -2177,7 +2177,7 @@ def instagram_webhook(request):
                                         # Use Instagram Graph API to get user info
                                         profile_url = f"https://graph.facebook.com/v23.0/{sender_id}"
                                         profile_params = {
-                                            'fields': 'name,username,profile_pic',
+                                            'fields': 'name,username,profile_picture_url',
                                             'access_token': account_connection.access_token
                                         }
                                         logger.info(f"👤 Fetching Instagram profile for sender {sender_id}")
@@ -2189,8 +2189,8 @@ def instagram_webhook(request):
                                             logger.info(f"👤 Instagram profile data received: {profile_data}")
                                             sender_name = profile_data.get('name', '')
                                             sender_username = profile_data.get('username', sender_id)
-                                            sender_profile_pic = profile_data.get('profile_pic')
-                                            logger.info(f"👤 Set sender_name to: {sender_name}, sender_username to: {sender_username}")
+                                            sender_profile_pic = profile_data.get('profile_picture_url')
+                                            logger.info(f"👤 Set sender_name to: {sender_name}, sender_username to: {sender_username}, profile_pic: {sender_profile_pic}")
 
                                             # Validate URL length to prevent database errors
                                             if sender_profile_pic and len(sender_profile_pic) > 500:
