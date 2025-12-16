@@ -2171,13 +2171,15 @@ def instagram_webhook(request):
                                 sender_username = sender_id  # Use the ID as username by default
                                 sender_profile_pic = None
 
-                                # Try to fetch the sender's Instagram username, name and profile pic
+                                # Try to fetch the sender's Instagram username and name
+                                # Note: profile_picture_url is NOT available for IGBusinessScopedID (users who message business)
                                 if sender_id != instagram_account_id:  # Don't fetch profile for business account itself
                                     try:
                                         # Use Instagram Graph API to get user info
+                                        # Only name and username are available for IGBusinessScopedID nodes
                                         profile_url = f"https://graph.facebook.com/v23.0/{sender_id}"
                                         profile_params = {
-                                            'fields': 'name,username,profile_picture_url',
+                                            'fields': 'name,username',
                                             'access_token': account_connection.access_token
                                         }
                                         logger.info(f"👤 Fetching Instagram profile for sender {sender_id}")
@@ -2189,8 +2191,7 @@ def instagram_webhook(request):
                                             logger.info(f"👤 Instagram profile data received: {profile_data}")
                                             sender_name = profile_data.get('name', '')
                                             sender_username = profile_data.get('username', sender_id)
-                                            sender_profile_pic = profile_data.get('profile_picture_url')
-                                            logger.info(f"👤 Set sender_name to: {sender_name}, sender_username to: {sender_username}, profile_pic: {sender_profile_pic}")
+                                            logger.info(f"👤 Set sender_name to: {sender_name}, sender_username to: {sender_username}")
 
                                             # Validate URL length to prevent database errors
                                             if sender_profile_pic and len(sender_profile_pic) > 500:
