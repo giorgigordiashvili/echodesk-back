@@ -968,6 +968,49 @@ def bog_webhook(request):
                     'feature_id': feature_id
                 })
 
+            # Check if this is a recurring subscription payment
+            if payment_type == 'recurring':
+                logger.info(f'Processing recurring subscription payment for order {external_order_id}')
+
+                tenant = payment_order.tenant
+                subscription_id = payment_order.metadata.get('subscription_id')
+
+                with transaction.atomic():
+                    try:
+                        subscription = TenantSubscription.objects.select_for_update().get(id=subscription_id)
+
+                        # Update subscription dates for next billing cycle
+                        subscription.last_billed_at = timezone.now()
+                        subscription.expires_at = get_next_billing_date()
+                        subscription.next_billing_date = get_next_billing_date()
+                        subscription.failed_payment_count = 0  # Reset failed count on successful payment
+                        subscription.save()
+
+                        # Mark payment order as complete
+                        payment_order.status = 'paid'
+                        payment_order.save()
+
+                        # Generate invoice
+                        generate_invoice_for_payment(
+                            payment_order=payment_order,
+                            tenant=tenant,
+                            agent_count=subscription.agent_count,
+                            description=f"EchoDesk Subscription Renewal - {tenant.name}"
+                        )
+
+                        logger.info(f'Recurring payment processed for tenant {tenant.schema_name}, next billing: {subscription.next_billing_date}')
+
+                        return Response({
+                            'status': 'success',
+                            'action': 'recurring_renewed',
+                            'subscription_id': subscription.id,
+                            'next_billing_date': subscription.next_billing_date.isoformat()
+                        })
+
+                    except TenantSubscription.DoesNotExist:
+                        logger.error(f'Subscription {subscription_id} not found for recurring payment')
+                        return Response({'error': 'Subscription not found'}, status=status.HTTP_404_NOT_FOUND)
+
             # Check if this is a reactivation payment
             if payment_type == 'reactivation':
                 logger.info(f'Processing reactivation payment for order {external_order_id}')
