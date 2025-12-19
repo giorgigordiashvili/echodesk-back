@@ -1503,15 +1503,23 @@ def resolve_ecommerce_domain(request):
             tenant = custom_domain.tenant
 
     # Pattern 3: Custom domain in EcommerceSettings.custom_domain field
+    # EcommerceSettings is in tenant schemas, so we need to check each active tenant
     if not tenant:
         try:
             from ecommerce_crm.models import EcommerceSettings
-            ecommerce_with_domain = EcommerceSettings.objects.filter(
-                custom_domain=domain
-            ).select_related('tenant').first()
-
-            if ecommerce_with_domain and ecommerce_with_domain.tenant.is_active:
-                tenant = ecommerce_with_domain.tenant
+            # Get all active tenants and check their EcommerceSettings
+            for candidate_tenant in Tenant.objects.filter(is_active=True).exclude(schema_name='public'):
+                try:
+                    with schema_context(candidate_tenant.schema_name):
+                        settings = EcommerceSettings.objects.filter(
+                            custom_domain=domain,
+                            tenant=candidate_tenant
+                        ).first()
+                        if settings:
+                            tenant = candidate_tenant
+                            break
+                except Exception:
+                    continue
         except Exception as e:
             logger.debug(f"Error checking EcommerceSettings.custom_domain: {e}")
 
