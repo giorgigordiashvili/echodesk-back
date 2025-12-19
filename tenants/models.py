@@ -862,3 +862,68 @@ class PlatformMetrics(models.Model):
         if total == 0:
             return 0
         return round((self.successful_payments / total) * 100, 2)
+
+
+class TenantDomain(models.Model):
+    """
+    Stores custom domains for tenant ecommerce stores.
+    Used by the multi-tenant ecommerce frontend to resolve tenant from hostname.
+
+    Subdomains (e.g., store1.ecommerce.echodesk.ge) are resolved automatically
+    from the hostname pattern. This model stores custom domains like mystore.com.
+    """
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name='ecommerce_domains',
+        help_text='Tenant that owns this domain'
+    )
+    domain = models.CharField(
+        max_length=255,
+        unique=True,
+        db_index=True,
+        help_text='Custom domain name (e.g., shop.example.com or mystore.com)'
+    )
+    is_verified = models.BooleanField(
+        default=False,
+        help_text='Whether DNS has been verified for this domain'
+    )
+    is_primary = models.BooleanField(
+        default=False,
+        help_text='Whether this is the primary custom domain for the tenant'
+    )
+
+    # Verification metadata
+    verification_record = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text='Vercel DNS verification record data'
+    )
+
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    verified_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'tenants_tenant_domain'
+        verbose_name = 'Tenant Domain'
+        verbose_name_plural = 'Tenant Domains'
+        ordering = ['-is_primary', '-created_at']
+
+    def __str__(self):
+        status = "✓" if self.is_verified else "⏳"
+        primary = " (Primary)" if self.is_primary else ""
+        return f"{self.domain} - {self.tenant.name} {status}{primary}"
+
+    def save(self, *args, **kwargs):
+        # Normalize domain to lowercase
+        self.domain = self.domain.lower().strip()
+
+        # If this is being set as primary, unset other primary domains for this tenant
+        if self.is_primary:
+            TenantDomain.objects.filter(
+                tenant=self.tenant,
+                is_primary=True
+            ).exclude(id=self.id).update(is_primary=False)
+
+        super().save(*args, **kwargs)

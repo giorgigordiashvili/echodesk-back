@@ -6,7 +6,7 @@ from .views import (
     get_all_tenants, check_deployment_status, tenant_login, tenant_logout,
     tenant_dashboard, tenant_profile, update_tenant_profile, change_tenant_password,
     tenant_settings, upload_logo, remove_logo, forced_password_change, upload_image,
-    get_subscription_me
+    get_subscription_me, resolve_ecommerce_domain
 )
 from .payment_views import (
     create_subscription_payment, check_payment_status, bog_webhook, cancel_subscription,
@@ -107,4 +107,7 @@ urlpatterns = [
 
     # Admin API endpoints
     path('api/', include(router.urls)),
+
+    # Public Ecommerce API - Multi-tenant frontend domain resolution
+    path('api/public/resolve-domain/', resolve_ecommerce_domain, name='resolve_ecommerce_domain'),
 ]

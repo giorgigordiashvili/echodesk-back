@@ -11,7 +11,7 @@ from tenant_schemas.utils import get_public_schema_name, schema_context
 from django.contrib.auth import get_user_model
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse
 from drf_spectacular.openapi import OpenApiTypes
-from .models import Tenant, PendingRegistration, PaymentOrder
+from .models import Tenant, PendingRegistration, PaymentOrder, TenantDomain
 from .feature_models import Feature
 from .serializers import (
     TenantSerializer, TenantCreateSerializer, TenantRegistrationSerializer,
@@ -1394,5 +1394,189 @@ def upload_image(request):
         logger.error(f'Failed to upload image: {str(e)}')
         return Response(
             {'error': f'Failed to upload image: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+# ==============================================================================
+# MULTI-TENANT ECOMMERCE - Domain Resolution
+# ==============================================================================
+
+@extend_schema(
+    operation_id='resolve_ecommerce_domain',
+    summary='Resolve Ecommerce Domain to Tenant',
+    description='''
+    Public endpoint for the multi-tenant ecommerce frontend to resolve a hostname to tenant configuration.
+
+    The frontend middleware calls this endpoint on every request to determine which tenant to serve.
+
+    Supports two domain patterns:
+    1. Subdomain pattern: {schema}.ecommerce.echodesk.ge
+    2. Custom domains: mystore.com (stored in TenantDomain table)
+
+    Returns tenant configuration including API URL, store name, theme, and features.
+    Responses are cached by the frontend for 5 minutes.
+    ''',
+    parameters=[
+        OpenApiParameter(
+            name='domain',
+            type=OpenApiTypes.STR,
+            location=OpenApiParameter.QUERY,
+            required=True,
+            description='The hostname to resolve (e.g., store1.ecommerce.echodesk.ge or mystore.com)'
+        )
+    ],
+    responses={
+        200: OpenApiResponse(
+            description='Tenant found - returns configuration',
+            response={
+                'type': 'object',
+                'properties': {
+                    'tenant_id': {'type': 'integer'},
+                    'schema': {'type': 'string'},
+                    'api_url': {'type': 'string'},
+                    'store_name': {'type': 'string'},
+                    'store_logo': {'type': 'string', 'nullable': True},
+                    'primary_color': {'type': 'string'},
+                    'currency': {'type': 'string'},
+                    'locale': {'type': 'string'},
+                    'features': {
+                        'type': 'object',
+                        'properties': {
+                            'ecommerce': {'type': 'boolean'},
+                            'wishlist': {'type': 'boolean'},
+                            'reviews': {'type': 'boolean'}
+                        }
+                    }
+                }
+            }
+        ),
+        400: OpenApiResponse(description='Missing domain parameter'),
+        404: OpenApiResponse(description='Domain not found or tenant inactive')
+    },
+    tags=['Ecommerce - Public']
+)
+@api_view(['GET'])
+@permission_classes([])  # Public endpoint - no authentication required
+def resolve_ecommerce_domain(request):
+    """
+    Resolve a domain/subdomain to tenant configuration for the multi-tenant ecommerce frontend.
+
+    This endpoint is called by the Next.js middleware to determine which tenant to serve.
+
+    Supported patterns:
+    1. Subdomain: {schema}.ecommerce.echodesk.ge → extracts schema from subdomain
+    2. Custom domain: mystore.com → looks up in TenantDomain table
+
+    Returns tenant configuration including API URL, store settings, and theme.
+    """
+    domain = request.GET.get('domain', '').lower().strip()
+
+    if not domain:
+        return Response(
+            {'error': 'domain parameter is required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    tenant = None
+
+    # Pattern 1: Subdomain - {schema}.ecommerce.echodesk.ge
+    if domain.endswith('.ecommerce.echodesk.ge'):
+        schema = domain.replace('.ecommerce.echodesk.ge', '')
+        # Validate schema name (alphanumeric and underscores only)
+        if schema and schema.replace('_', '').replace('-', '').isalnum():
+            # Convert dashes to underscores for schema lookup
+            schema_name = schema.replace('-', '_')
+            tenant = Tenant.objects.filter(
+                schema_name=schema_name,
+                is_active=True
+            ).first()
+
+    # Pattern 2: Custom domain - look up in TenantDomain table
+    if not tenant:
+        custom_domain = TenantDomain.objects.filter(
+            domain=domain,
+            is_verified=True
+        ).select_related('tenant').first()
+
+        if custom_domain and custom_domain.tenant.is_active:
+            tenant = custom_domain.tenant
+
+    # Not found
+    if not tenant:
+        logger.debug(f"Ecommerce domain resolution failed for: {domain}")
+        return Response(
+            {'error': 'Domain not found or tenant inactive'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    # Build tenant configuration response
+    try:
+        # Get ecommerce settings if available
+        ecommerce_settings = None
+        try:
+            from ecommerce_crm.models import EcommerceSettings
+            ecommerce_settings = EcommerceSettings.objects.filter(tenant=tenant).first()
+        except Exception:
+            pass
+
+        # Build response
+        config = {
+            'tenant_id': tenant.id,
+            'schema': tenant.schema_name,
+            'api_url': f'https://{tenant.schema_name}.api.echodesk.ge',
+            'store_name': tenant.name,
+            'store_logo': None,
+            'primary_color': None,
+            'secondary_color': None,
+            'accent_color': None,
+            'currency': 'GEL',
+            'locale': tenant.preferred_language or 'en',
+            'features': {
+                'ecommerce': True,
+                'wishlist': True,
+                'reviews': False,
+                'compare': False
+            },
+            'contact': {
+                'email': tenant.admin_email or '',
+                'phone': '',
+                'address': ''
+            },
+            'social': {
+                'facebook': '',
+                'instagram': '',
+                'twitter': ''
+            }
+        }
+
+        # Add ecommerce-specific settings if available
+        if ecommerce_settings:
+            if ecommerce_settings.store_name:
+                config['store_name'] = ecommerce_settings.store_name
+            if ecommerce_settings.store_email:
+                config['contact']['email'] = ecommerce_settings.store_email
+            if ecommerce_settings.store_phone:
+                config['contact']['phone'] = ecommerce_settings.store_phone
+
+            # Theme colors
+            if ecommerce_settings.primary_color:
+                config['primary_color'] = ecommerce_settings.primary_color
+            if ecommerce_settings.secondary_color:
+                config['secondary_color'] = ecommerce_settings.secondary_color
+            if ecommerce_settings.accent_color:
+                config['accent_color'] = ecommerce_settings.accent_color
+
+        # Logo
+        if tenant.logo:
+            config['store_logo'] = request.build_absolute_uri(tenant.logo.url)
+
+        logger.debug(f"Ecommerce domain resolved: {domain} → {tenant.schema_name}")
+        return Response(config, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        logger.error(f"Error building tenant config for {domain}: {str(e)}")
+        return Response(
+            {'error': 'Failed to build tenant configuration'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
