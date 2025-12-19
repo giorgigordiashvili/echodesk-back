@@ -675,6 +675,16 @@ def deploy_tenant_frontend(tenant) -> Dict[str, Any]:
     if domain_result.get("success"):
         logger.info(f"Subdomain {subdomain} added to shared project successfully")
 
+        # Include DNS configuration for unverified domains
+        dns_config = None
+        if not domain_result.get("verified", False):
+            verification = domain_result.get("verification", [])
+            dns_config = {
+                "instructions": "Configure the following DNS record at your domain provider:",
+                "records": verification,
+                "note": "DNS propagation may take up to 48 hours, but usually completes within minutes."
+            }
+
         return {
             "success": True,
             "project_id": project_id,
@@ -682,7 +692,8 @@ def deploy_tenant_frontend(tenant) -> Dict[str, Any]:
             "url": frontend_url,
             "domain": subdomain,
             "verified": domain_result.get("verified", False),
-            "message": f"Tenant storefront is now available at {frontend_url}"
+            "dns_config": dns_config,
+            "message": f"Tenant storefront is now available at {frontend_url}" if domain_result.get("verified", False) else f"Domain {subdomain} added. Configure DNS to activate."
         }
     else:
         # Check if domain already exists (which is fine)

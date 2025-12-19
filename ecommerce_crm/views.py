@@ -2042,14 +2042,21 @@ class EcommerceSettingsViewSet(viewsets.ModelViewSet):
                 settings.deployment_status = 'deployed'
                 settings.save(update_fields=['vercel_project_id', 'ecommerce_frontend_url', 'deployment_status'])
 
-                return Response({
+                response_data = {
                     "success": True,
                     "message": result.get("message", "Frontend deployed successfully"),
                     "url": result.get("url"),
                     "project_id": result.get("project_id"),
                     "project_name": result.get("project_name"),
-                    "domain": result.get("domain")
-                }, status=status.HTTP_201_CREATED)
+                    "domain": result.get("domain"),
+                    "verified": result.get("verified", False),
+                }
+
+                # Include DNS configuration if domain is not yet verified
+                if result.get("dns_config"):
+                    response_data["dns_config"] = result.get("dns_config")
+
+                return Response(response_data, status=status.HTTP_201_CREATED)
             else:
                 # Deployment failed
                 settings.deployment_status = 'failed'
