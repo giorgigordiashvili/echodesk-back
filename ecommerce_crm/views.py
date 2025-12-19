@@ -2124,9 +2124,9 @@ class EcommerceSettingsViewSet(viewsets.ModelViewSet):
                     "message": f"Subdomain {subdomain} removed successfully"
                 }, status=status.HTTP_200_OK)
             else:
-                # If domain not found, still reset the settings
-                error_msg = result.get("error", "")
-                if "not found" in error_msg.lower():
+                # If domain not found or not assigned, still reset the settings
+                error_msg = result.get("error", "").lower()
+                if "not found" in error_msg or "not assigned" in error_msg or "does not exist" in error_msg:
                     settings.vercel_project_id = None
                     settings.ecommerce_frontend_url = None
                     settings.deployment_status = 'pending'
