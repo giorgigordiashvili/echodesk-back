@@ -69,7 +69,7 @@ class WhatsAppBusinessAccountSerializer(serializers.ModelSerializer):
         model = WhatsAppBusinessAccount
         fields = [
             'id', 'waba_id', 'business_name', 'phone_number_id', 'phone_number',
-            'display_phone_number', 'quality_rating', 'is_active', 'verified_name',
+            'display_phone_number', 'quality_rating', 'is_active',
             # Coexistence fields
             'coex_enabled', 'is_on_biz_app', 'platform_type', 'sync_status',
             'onboarded_at', 'contacts_synced_at', 'history_synced_at', 'throughput_limit',
