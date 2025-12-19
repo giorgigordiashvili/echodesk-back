@@ -2667,16 +2667,17 @@ def assign_chat(request):
             status=status.HTTP_400_BAD_REQUEST
         )
 
-    # Create assignment
+    # Create assignment and automatically start session
     assignment = ChatAssignment.objects.create(
         platform=platform,
         conversation_id=conversation_id,
         account_id=account_id,
         assigned_user=request.user,
-        status='active'
+        status='in_session',
+        session_started_at=timezone.now()
     )
 
-    logger.info(f"Chat assigned: {assignment.full_conversation_id} -> {request.user.email}")
+    logger.info(f"Chat assigned and session started: {assignment.full_conversation_id} -> {request.user.email}")
     return Response(ChatAssignmentSerializer(assignment).data, status=status.HTTP_201_CREATED)
 
 
@@ -2784,11 +2785,7 @@ def end_session(request):
             status=status.HTTP_404_NOT_FOUND
         )
 
-    assignment.status = 'completed'
-    assignment.session_ended_at = timezone.now()
-    assignment.save()
-
-    # Send rating request message
+    # Send rating request message before deleting assignment
     rating_message = "Thank you for chatting with us! Please rate your experience from 1 to 5 (reply with a number)."
     message_id = None
 
@@ -2802,18 +2799,16 @@ def end_session(request):
     except Exception as e:
         logger.error(f"Failed to send rating request: {e}")
 
-    # Create pending rating
-    if message_id:
-        ChatRating.objects.create(
-            assignment=assignment,
-            rating=0,  # Pending
-            rating_request_message_id=message_id
-        )
+    # Store assignment info for logging before deletion
+    full_conversation_id = assignment.full_conversation_id
+    user_email = request.user.email
 
-    logger.info(f"Session ended: {assignment.full_conversation_id} by {request.user.email}")
+    # Delete the assignment (unassign the chat)
+    assignment.delete()
+
+    logger.info(f"Session ended and chat unassigned: {full_conversation_id} by {user_email}")
     return Response({
-        'message': 'Session ended, rating request sent' if message_id else 'Session ended',
-        'assignment': ChatAssignmentSerializer(assignment).data
+        'message': 'Session ended, rating request sent, chat unassigned' if message_id else 'Session ended, chat unassigned'
     })
 
 
