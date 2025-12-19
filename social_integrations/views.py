@@ -2571,10 +2571,12 @@ def social_settings(request):
 
         if request.method == 'GET':
             serializer = SocialIntegrationSettingsSerializer(settings_obj)
+            logger.info(f"GET social settings: {serializer.data}")
             return Response(serializer.data)
 
         elif request.method in ['PUT', 'PATCH']:
             partial = request.method == 'PATCH'
+            logger.info(f"Received settings update request: {request.data}")
             serializer = SocialIntegrationSettingsSerializer(
                 settings_obj,
                 data=request.data,
@@ -2586,6 +2588,7 @@ def social_settings(request):
                 logger.info(f"Updated social integration settings: {serializer.data}")
                 return Response(serializer.data)
             else:
+                logger.error(f"Settings validation failed: {serializer.errors}")
                 return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     except Exception as e:
@@ -2828,6 +2831,12 @@ def get_assignment_status(request):
             status=status.HTTP_400_BAD_REQUEST
         )
 
+    # Get settings to include in response
+    settings_obj = SocialIntegrationSettings.objects.first()
+    settings_data = {
+        'chat_assignment_enabled': settings_obj.chat_assignment_enabled if settings_obj else False
+    }
+
     try:
         assignment = ChatAssignment.objects.select_related('assigned_user').get(
             platform=platform,
@@ -2835,12 +2844,14 @@ def get_assignment_status(request):
             account_id=account_id
         )
         return Response({
-            'assigned': True,
-            'is_mine': assignment.assigned_user == request.user,
-            'assignment': ChatAssignmentSerializer(assignment).data
+            'assignment': ChatAssignmentSerializer(assignment).data,
+            'settings': settings_data
         })
     except ChatAssignment.DoesNotExist:
-        return Response({'assigned': False, 'is_mine': False})
+        return Response({
+            'assignment': None,
+            'settings': settings_data
+        })
 
 
 def send_rating_request_facebook(conversation_id, page_id, message):
