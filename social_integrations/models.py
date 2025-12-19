@@ -1,5 +1,6 @@
 from django.db import models
 from django.contrib.auth import get_user_model
+from django.core.validators import MinValueValidator, MaxValueValidator
 
 User = get_user_model()
 
@@ -501,6 +502,13 @@ class SocialIntegrationSettings(models.Model):
         default=5000,
         help_text="Auto-refresh interval in milliseconds for messages page (min: 1000, max: 60000)"
     )
+
+    # Chat assignment mode
+    chat_assignment_enabled = models.BooleanField(
+        default=False,
+        help_text="When enabled, users can claim chats. Assigned chats are hidden from other users (except admins)."
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -518,3 +526,127 @@ class SocialIntegrationSettings(models.Model):
         elif self.refresh_interval > 60000:
             self.refresh_interval = 60000
         super().save(*args, **kwargs)
+
+
+class ChatAssignment(models.Model):
+    """Tracks chat assignments to users for session management"""
+    PLATFORM_CHOICES = [
+        ('facebook', 'Facebook'),
+        ('instagram', 'Instagram'),
+        ('whatsapp', 'WhatsApp'),
+    ]
+
+    STATUS_CHOICES = [
+        ('active', 'Active'),           # Chat is assigned, session not started
+        ('in_session', 'In Session'),   # User has started a session
+        ('completed', 'Completed'),     # Session ended, waiting for rating or rated
+    ]
+
+    # Composite key for conversation: platform + conversation_id + account_id
+    platform = models.CharField(
+        max_length=20,
+        choices=PLATFORM_CHOICES,
+        help_text="Messaging platform"
+    )
+    conversation_id = models.CharField(
+        max_length=255,
+        help_text="Customer identifier (sender_id for FB/IG, from_number for WhatsApp)"
+    )
+    account_id = models.CharField(
+        max_length=255,
+        help_text="Account identifier (page_id for FB, account_id for IG, waba_id for WhatsApp)"
+    )
+
+    # Assignment details
+    assigned_user = models.ForeignKey(
+        'users.User',
+        on_delete=models.CASCADE,
+        related_name='chat_assignments',
+        help_text="User this chat is assigned to"
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='active',
+        help_text="Current status of the assignment"
+    )
+
+    # Session tracking
+    session_started_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the session was started"
+    )
+    session_ended_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the session was ended"
+    )
+
+    # Timestamps
+    assigned_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        # Only one active assignment per conversation at a time
+        unique_together = [['platform', 'conversation_id', 'account_id']]
+        indexes = [
+            models.Index(fields=['assigned_user', 'status']),
+            models.Index(fields=['platform', 'conversation_id']),
+            models.Index(fields=['platform', 'account_id']),
+        ]
+        verbose_name = "Chat Assignment"
+        verbose_name_plural = "Chat Assignments"
+
+    def __str__(self):
+        return f"{self.platform} - {self.conversation_id} -> {self.assigned_user.email}"
+
+    @property
+    def full_conversation_id(self):
+        """Returns the full conversation ID as used in frontend"""
+        prefix = {'facebook': 'fb', 'instagram': 'ig', 'whatsapp': 'wa'}[self.platform]
+        return f"{prefix}_{self.account_id}_{self.conversation_id}"
+
+
+class ChatRating(models.Model):
+    """Stores customer ratings for chat sessions"""
+
+    assignment = models.ForeignKey(
+        ChatAssignment,
+        on_delete=models.CASCADE,
+        related_name='ratings',
+        help_text="The assignment this rating is for"
+    )
+    rating = models.IntegerField(
+        validators=[MinValueValidator(1), MaxValueValidator(5)],
+        default=0,
+        help_text="Customer rating from 1-5 (0 = pending response)"
+    )
+
+    # Message tracking for the rating flow
+    rating_request_message_id = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Message ID of the rating request sent to customer"
+    )
+    rating_response_message_id = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Message ID of the customer's rating response"
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        # One rating per assignment
+        unique_together = [['assignment']]
+        indexes = [
+            models.Index(fields=['rating', 'created_at']),
+        ]
+        verbose_name = "Chat Rating"
+        verbose_name_plural = "Chat Ratings"
+
+    def __str__(self):
+        if self.rating == 0:
+            return f"Pending rating for {self.assignment}"
+        return f"Rating {self.rating}/5 for {self.assignment}"

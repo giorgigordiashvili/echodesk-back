@@ -8,7 +8,7 @@ from channels.layers import get_channel_layer
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from tenant_schemas.utils import schema_context
-from django.db.models import F
+from django.db.models import F, Q
 from django.http import JsonResponse, HttpResponse
 from django.utils import timezone
 from django.shortcuts import redirect
@@ -24,14 +24,16 @@ from .models import (
     FacebookPageConnection, FacebookMessage, OrphanedFacebookMessage,
     InstagramAccountConnection, InstagramMessage,
     WhatsAppBusinessAccount, WhatsAppMessage, WhatsAppMessageTemplate,
-    WhatsAppContact, SocialIntegrationSettings
+    WhatsAppContact, SocialIntegrationSettings,
+    ChatAssignment, ChatRating
 )
 from .serializers import (
     FacebookPageConnectionSerializer, FacebookMessageSerializer, FacebookSendMessageSerializer,
     InstagramAccountConnectionSerializer, InstagramMessageSerializer, InstagramSendMessageSerializer,
     WhatsAppBusinessAccountSerializer, WhatsAppMessageSerializer, WhatsAppSendMessageSerializer,
     WhatsAppMessageTemplateSerializer, WhatsAppTemplateCreateSerializer, WhatsAppTemplateSendSerializer,
-    WhatsAppContactSerializer, SocialIntegrationSettingsSerializer
+    WhatsAppContactSerializer, SocialIntegrationSettingsSerializer,
+    ChatAssignmentSerializer, ChatAssignmentCreateSerializer, ChatRatingSerializer
 )
 from .permissions import (
     CanManageSocialConnections, CanViewSocialMessages,
@@ -179,7 +181,37 @@ class FacebookMessageViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         tenant_pages = FacebookPageConnection.objects.all()  # All pages for this tenant
-        return FacebookMessage.objects.filter(page_connection__in=tenant_pages)
+        base_queryset = FacebookMessage.objects.filter(page_connection__in=tenant_pages)
+
+        # Check if assignment mode is enabled
+        settings_obj = SocialIntegrationSettings.objects.first()
+        if not settings_obj or not settings_obj.chat_assignment_enabled:
+            return base_queryset  # Return all messages
+
+        # Admin/superuser sees all messages
+        if self.request.user.is_superuser or self.request.user.is_staff:
+            return base_queryset
+
+        # Get page IDs for this tenant
+        page_ids = list(tenant_pages.values_list('page_id', flat=True))
+
+        # Get conversations assigned to current user
+        my_assigned = ChatAssignment.objects.filter(
+            assigned_user=self.request.user,
+            platform='facebook',
+            account_id__in=page_ids
+        ).values_list('conversation_id', flat=True)
+
+        # Get all assigned conversations for Facebook
+        all_assigned = ChatAssignment.objects.filter(
+            platform='facebook',
+            account_id__in=page_ids
+        ).values_list('conversation_id', flat=True)
+
+        # Return: assigned to me OR not assigned to anyone
+        return base_queryset.filter(
+            Q(sender_id__in=my_assigned) | ~Q(sender_id__in=all_assigned)
+        )
 
 
 @api_view(['GET'])
@@ -1287,6 +1319,16 @@ def facebook_webhook(request):
                                             )
                                             logger.info(f"✅ Saved message from {sender_name}: {message_text[:50] if message_text else f'[{attachment_type}]'}")
 
+                                            # Check if this is a rating response (only for customer messages)
+                                            if sender_id != page_id:
+                                                process_potential_rating_response(
+                                                    message_text=message_text,
+                                                    platform='facebook',
+                                                    conversation_id=sender_id,
+                                                    account_id=page_id,
+                                                    message_id=message_id
+                                                )
+
                                             # Send WebSocket notification for real-time updates
                                             from django.db import connection
                                             current_schema = getattr(connection, 'schema_name', None)
@@ -1786,7 +1828,37 @@ class InstagramMessageViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         tenant_accounts = InstagramAccountConnection.objects.all()  # All accounts for this tenant
-        return InstagramMessage.objects.filter(account_connection__in=tenant_accounts)
+        base_queryset = InstagramMessage.objects.filter(account_connection__in=tenant_accounts)
+
+        # Check if assignment mode is enabled
+        settings_obj = SocialIntegrationSettings.objects.first()
+        if not settings_obj or not settings_obj.chat_assignment_enabled:
+            return base_queryset  # Return all messages
+
+        # Admin/superuser sees all messages
+        if self.request.user.is_superuser or self.request.user.is_staff:
+            return base_queryset
+
+        # Get account IDs for this tenant
+        account_ids = list(tenant_accounts.values_list('instagram_account_id', flat=True))
+
+        # Get conversations assigned to current user
+        my_assigned = ChatAssignment.objects.filter(
+            assigned_user=self.request.user,
+            platform='instagram',
+            account_id__in=account_ids
+        ).values_list('conversation_id', flat=True)
+
+        # Get all assigned conversations for Instagram
+        all_assigned = ChatAssignment.objects.filter(
+            platform='instagram',
+            account_id__in=account_ids
+        ).values_list('conversation_id', flat=True)
+
+        # Return: assigned to me OR not assigned to anyone
+        return base_queryset.filter(
+            Q(sender_id__in=my_assigned) | ~Q(sender_id__in=all_assigned)
+        )
 
 
 @api_view(['GET'])
@@ -2258,6 +2330,15 @@ def instagram_webhook(request):
                                         )
                                         logger.info(f"✅ Saved Instagram message from {sender_username}: {message_text[:50] if message_text else f'[{attachment_type}]'}")
 
+                                        # Check if this is a rating response
+                                        process_potential_rating_response(
+                                            message_text=message_text,
+                                            platform='instagram',
+                                            conversation_id=sender_id,
+                                            account_id=account_connection.instagram_account_id,
+                                            message_id=message_id
+                                        )
+
                                         # Send WebSocket notification for real-time updates
                                         from django.db import connection
                                         current_schema = getattr(connection, 'schema_name', None)
@@ -2512,6 +2593,376 @@ def social_settings(request):
         return Response({
             'error': f'Failed to manage settings: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# =====================
+# CHAT ASSIGNMENT ENDPOINTS
+# =====================
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, CanViewSocialMessages])
+def my_assignments(request):
+    """Get all chat assignments for the current user"""
+    assignments = ChatAssignment.objects.filter(
+        assigned_user=request.user
+    ).select_related('assigned_user').order_by('-updated_at')
+
+    serializer = ChatAssignmentSerializer(assignments, many=True)
+    return Response(serializer.data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, CanViewSocialMessages])
+def all_assignments(request):
+    """Get all chat assignments (admin only)"""
+    if not request.user.is_superuser and not request.user.is_staff:
+        return Response(
+            {'error': 'Only admins can view all assignments'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    assignments = ChatAssignment.objects.all().select_related('assigned_user').order_by('-updated_at')
+    serializer = ChatAssignmentSerializer(assignments, many=True)
+    return Response(serializer.data)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, CanViewSocialMessages])
+def assign_chat(request):
+    """Assign a chat to the current user"""
+    serializer = ChatAssignmentCreateSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    # Check if assignment mode is enabled
+    settings_obj = SocialIntegrationSettings.objects.first()
+    if not settings_obj or not settings_obj.chat_assignment_enabled:
+        return Response(
+            {'error': 'Assignment mode is not enabled'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    platform = serializer.validated_data['platform']
+    conversation_id = serializer.validated_data['conversation_id']
+    account_id = serializer.validated_data['account_id']
+
+    # Check if already assigned
+    existing = ChatAssignment.objects.filter(
+        platform=platform,
+        conversation_id=conversation_id,
+        account_id=account_id
+    ).first()
+
+    if existing:
+        if existing.assigned_user == request.user:
+            return Response({
+                'message': 'Already assigned to you',
+                'assignment': ChatAssignmentSerializer(existing).data
+            })
+        return Response(
+            {'error': 'Chat is already assigned to another user'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # Create assignment
+    assignment = ChatAssignment.objects.create(
+        platform=platform,
+        conversation_id=conversation_id,
+        account_id=account_id,
+        assigned_user=request.user,
+        status='active'
+    )
+
+    logger.info(f"Chat assigned: {assignment.full_conversation_id} -> {request.user.email}")
+    return Response(ChatAssignmentSerializer(assignment).data, status=status.HTTP_201_CREATED)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, CanViewSocialMessages])
+def unassign_chat(request):
+    """Unassign a chat (only the assigned user or admin can do this)"""
+    platform = request.data.get('platform')
+    conversation_id = request.data.get('conversation_id')
+    account_id = request.data.get('account_id')
+
+    if not all([platform, conversation_id, account_id]):
+        return Response(
+            {'error': 'platform, conversation_id, and account_id are required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        assignment = ChatAssignment.objects.get(
+            platform=platform,
+            conversation_id=conversation_id,
+            account_id=account_id
+        )
+    except ChatAssignment.DoesNotExist:
+        return Response({'error': 'Assignment not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Only assigned user or admin can unassign
+    if assignment.assigned_user != request.user and not request.user.is_staff and not request.user.is_superuser:
+        return Response(
+            {'error': 'You cannot unassign this chat'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    logger.info(f"Chat unassigned: {assignment.full_conversation_id} by {request.user.email}")
+    assignment.delete()
+    return Response({'message': 'Chat unassigned successfully'})
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, CanViewSocialMessages])
+def start_session(request):
+    """Start a session for an assigned chat"""
+    platform = request.data.get('platform')
+    conversation_id = request.data.get('conversation_id')
+    account_id = request.data.get('account_id')
+
+    if not all([platform, conversation_id, account_id]):
+        return Response(
+            {'error': 'platform, conversation_id, and account_id are required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        assignment = ChatAssignment.objects.get(
+            platform=platform,
+            conversation_id=conversation_id,
+            account_id=account_id,
+            assigned_user=request.user
+        )
+    except ChatAssignment.DoesNotExist:
+        return Response(
+            {'error': 'Assignment not found or not assigned to you'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    if assignment.status == 'in_session':
+        return Response({
+            'message': 'Session already active',
+            'assignment': ChatAssignmentSerializer(assignment).data
+        })
+
+    assignment.status = 'in_session'
+    assignment.session_started_at = timezone.now()
+    assignment.save()
+
+    logger.info(f"Session started: {assignment.full_conversation_id} by {request.user.email}")
+    return Response(ChatAssignmentSerializer(assignment).data)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, CanViewSocialMessages])
+def end_session(request):
+    """End a session and send rating request"""
+    platform = request.data.get('platform')
+    conversation_id = request.data.get('conversation_id')
+    account_id = request.data.get('account_id')
+
+    if not all([platform, conversation_id, account_id]):
+        return Response(
+            {'error': 'platform, conversation_id, and account_id are required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        assignment = ChatAssignment.objects.get(
+            platform=platform,
+            conversation_id=conversation_id,
+            account_id=account_id,
+            assigned_user=request.user,
+            status='in_session'
+        )
+    except ChatAssignment.DoesNotExist:
+        return Response(
+            {'error': 'Active session not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    assignment.status = 'completed'
+    assignment.session_ended_at = timezone.now()
+    assignment.save()
+
+    # Send rating request message
+    rating_message = "Thank you for chatting with us! Please rate your experience from 1 to 5 (reply with a number)."
+    message_id = None
+
+    try:
+        if platform == 'facebook':
+            message_id = send_rating_request_facebook(conversation_id, account_id, rating_message)
+        elif platform == 'instagram':
+            message_id = send_rating_request_instagram(conversation_id, account_id, rating_message)
+        elif platform == 'whatsapp':
+            message_id = send_rating_request_whatsapp(conversation_id, account_id, rating_message)
+    except Exception as e:
+        logger.error(f"Failed to send rating request: {e}")
+
+    # Create pending rating
+    if message_id:
+        ChatRating.objects.create(
+            assignment=assignment,
+            rating=0,  # Pending
+            rating_request_message_id=message_id
+        )
+
+    logger.info(f"Session ended: {assignment.full_conversation_id} by {request.user.email}")
+    return Response({
+        'message': 'Session ended, rating request sent' if message_id else 'Session ended',
+        'assignment': ChatAssignmentSerializer(assignment).data
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, CanViewSocialMessages])
+def get_assignment_status(request):
+    """Get assignment status for a specific conversation"""
+    platform = request.query_params.get('platform')
+    conversation_id = request.query_params.get('conversation_id')
+    account_id = request.query_params.get('account_id')
+
+    if not all([platform, conversation_id, account_id]):
+        return Response(
+            {'error': 'platform, conversation_id, and account_id are required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        assignment = ChatAssignment.objects.select_related('assigned_user').get(
+            platform=platform,
+            conversation_id=conversation_id,
+            account_id=account_id
+        )
+        return Response({
+            'assigned': True,
+            'is_mine': assignment.assigned_user == request.user,
+            'assignment': ChatAssignmentSerializer(assignment).data
+        })
+    except ChatAssignment.DoesNotExist:
+        return Response({'assigned': False, 'is_mine': False})
+
+
+def send_rating_request_facebook(conversation_id, page_id, message):
+    """Send a rating request via Facebook Messenger"""
+    try:
+        page = FacebookPageConnection.objects.get(page_id=page_id, is_active=True)
+        url = f"https://graph.facebook.com/v21.0/{page_id}/messages"
+        payload = {
+            "recipient": {"id": conversation_id},
+            "message": {"text": message}
+        }
+        headers = {"Authorization": f"Bearer {page.page_access_token}"}
+        response = requests.post(url, json=payload, headers=headers)
+        if response.ok:
+            return response.json().get('message_id')
+    except Exception as e:
+        logger.error(f"Failed to send FB rating request: {e}")
+    return None
+
+
+def send_rating_request_instagram(conversation_id, account_id, message):
+    """Send a rating request via Instagram DM"""
+    try:
+        account = InstagramAccountConnection.objects.get(instagram_account_id=account_id, is_active=True)
+        url = f"https://graph.facebook.com/v21.0/{account_id}/messages"
+        payload = {
+            "recipient": {"id": conversation_id},
+            "message": {"text": message}
+        }
+        headers = {"Authorization": f"Bearer {account.access_token}"}
+        response = requests.post(url, json=payload, headers=headers)
+        if response.ok:
+            return response.json().get('message_id')
+    except Exception as e:
+        logger.error(f"Failed to send IG rating request: {e}")
+    return None
+
+
+def send_rating_request_whatsapp(conversation_id, waba_id, message):
+    """Send a rating request via WhatsApp"""
+    try:
+        account = WhatsAppBusinessAccount.objects.get(waba_id=waba_id, is_active=True)
+        # Format phone number (add + if not present)
+        to_number = conversation_id if conversation_id.startswith('+') else f"+{conversation_id}"
+        url = f"https://graph.facebook.com/v21.0/{account.phone_number_id}/messages"
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": to_number,
+            "type": "text",
+            "text": {"body": message}
+        }
+        headers = {
+            "Authorization": f"Bearer {account.access_token}",
+            "Content-Type": "application/json"
+        }
+        response = requests.post(url, json=payload, headers=headers)
+        if response.ok:
+            data = response.json()
+            return data.get('messages', [{}])[0].get('id')
+    except Exception as e:
+        logger.error(f"Failed to send WA rating request: {e}")
+    return None
+
+
+def process_potential_rating_response(message_text, platform, conversation_id, account_id, message_id=None):
+    """
+    Check if an incoming message is a rating response (1-5).
+    If a pending rating exists for this conversation, store the rating.
+    Returns True if the message was a rating, False otherwise.
+    """
+    # Only process if it's a single digit 1-5
+    text = (message_text or '').strip()
+    if text not in ['1', '2', '3', '4', '5']:
+        return False
+
+    rating_value = int(text)
+
+    try:
+        # Find completed assignment for this conversation (waiting for rating)
+        assignment = ChatAssignment.objects.filter(
+            platform=platform,
+            conversation_id=conversation_id,
+            account_id=account_id,
+            status='completed'
+        ).first()
+
+        if not assignment:
+            return False
+
+        # Find pending rating (rating=0 means waiting for response)
+        rating = ChatRating.objects.filter(
+            assignment=assignment,
+            rating=0
+        ).first()
+
+        if rating:
+            rating.rating = rating_value
+            if message_id:
+                rating.rating_response_message_id = message_id
+            rating.save()
+
+            logger.info(f"Rating received: {rating_value}/5 for {platform} conversation {conversation_id}")
+
+            # Optionally send thank you message
+            thank_you_message = f"Thank you for your feedback! You rated our service {rating_value}/5."
+            try:
+                if platform == 'facebook':
+                    send_rating_request_facebook(conversation_id, account_id, thank_you_message)
+                elif platform == 'instagram':
+                    send_rating_request_instagram(conversation_id, account_id, thank_you_message)
+                elif platform == 'whatsapp':
+                    send_rating_request_whatsapp(conversation_id, account_id, thank_you_message)
+            except Exception as e:
+                logger.warning(f"Failed to send thank you message: {e}")
+
+            return True
+
+    except Exception as e:
+        logger.error(f"Error processing rating response: {e}")
+
+    return False
 
 
 @api_view(['GET'])
@@ -2946,7 +3397,40 @@ class WhatsAppMessageViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         tenant_accounts = WhatsAppBusinessAccount.objects.all()  # All accounts for this tenant
-        return WhatsAppMessage.objects.filter(business_account__in=tenant_accounts)
+        base_queryset = WhatsAppMessage.objects.filter(business_account__in=tenant_accounts)
+
+        # Check if assignment mode is enabled
+        settings_obj = SocialIntegrationSettings.objects.first()
+        if not settings_obj or not settings_obj.chat_assignment_enabled:
+            return base_queryset  # Return all messages
+
+        # Admin/superuser sees all messages
+        if self.request.user.is_superuser or self.request.user.is_staff:
+            return base_queryset
+
+        # Get WABA IDs for this tenant
+        waba_ids = list(tenant_accounts.values_list('waba_id', flat=True))
+
+        # Get conversations assigned to current user
+        my_assigned = ChatAssignment.objects.filter(
+            assigned_user=self.request.user,
+            platform='whatsapp',
+            account_id__in=waba_ids
+        ).values_list('conversation_id', flat=True)
+
+        # Get all assigned conversations for WhatsApp
+        all_assigned = ChatAssignment.objects.filter(
+            platform='whatsapp',
+            account_id__in=waba_ids
+        ).values_list('conversation_id', flat=True)
+
+        # For WhatsApp, we need to check both from_number and to_number
+        # conversation_id is the customer's phone number (from_number for incoming, to_number for outgoing)
+        # Return: messages where customer is in my_assigned OR customer is not in all_assigned
+        return base_queryset.filter(
+            Q(from_number__in=my_assigned) | Q(to_number__in=my_assigned) |
+            (~Q(from_number__in=all_assigned) & ~Q(to_number__in=all_assigned))
+        )
 
 
 class WhatsAppContactViewSet(viewsets.ReadOnlyModelViewSet):
@@ -3851,6 +4335,15 @@ def whatsapp_webhook(request):
                     )
 
                     logger.info(f"✅ Saved WhatsApp message from {contact_name or from_number}: {message_text[:50] if message_text else f'[{message_type}]'}")
+
+                    # Check if this is a rating response
+                    process_potential_rating_response(
+                        message_text=message_text,
+                        platform='whatsapp',
+                        conversation_id=from_number.lstrip('+'),  # Remove + for matching
+                        account_id=account.waba_id,
+                        message_id=message_id
+                    )
 
                     # Send WebSocket notification
                     ws_message_data = {

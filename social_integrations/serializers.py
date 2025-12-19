@@ -3,7 +3,8 @@ from .models import (
     FacebookPageConnection, FacebookMessage,
     InstagramAccountConnection, InstagramMessage,
     WhatsAppBusinessAccount, WhatsAppMessage, WhatsAppMessageTemplate,
-    WhatsAppContact, SocialIntegrationSettings
+    WhatsAppContact, SocialIntegrationSettings,
+    ChatAssignment, ChatRating
 )
 
 
@@ -215,7 +216,7 @@ class WhatsAppTemplateSendSerializer(serializers.Serializer):
 class SocialIntegrationSettingsSerializer(serializers.ModelSerializer):
     class Meta:
         model = SocialIntegrationSettings
-        fields = ['id', 'refresh_interval', 'created_at', 'updated_at']
+        fields = ['id', 'refresh_interval', 'chat_assignment_enabled', 'created_at', 'updated_at']
         read_only_fields = ['id', 'created_at', 'updated_at']
 
     def validate_refresh_interval(self, value):
@@ -225,3 +226,46 @@ class SocialIntegrationSettingsSerializer(serializers.ModelSerializer):
         if value > 60000:
             raise serializers.ValidationError("Refresh interval must be at most 60000ms (60 seconds)")
         return value
+
+
+class ChatAssignmentSerializer(serializers.ModelSerializer):
+    """Serializer for chat assignments"""
+    assigned_user_name = serializers.SerializerMethodField()
+    assigned_user_email = serializers.EmailField(source='assigned_user.email', read_only=True)
+    full_conversation_id = serializers.CharField(read_only=True)
+
+    class Meta:
+        model = ChatAssignment
+        fields = [
+            'id', 'platform', 'conversation_id', 'account_id', 'full_conversation_id',
+            'assigned_user', 'assigned_user_name', 'assigned_user_email',
+            'status', 'session_started_at', 'session_ended_at',
+            'assigned_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'assigned_at', 'updated_at', 'full_conversation_id']
+
+    def get_assigned_user_name(self, obj):
+        return obj.assigned_user.get_full_name() or obj.assigned_user.email
+
+
+class ChatAssignmentCreateSerializer(serializers.Serializer):
+    """Serializer for assigning a chat"""
+    platform = serializers.ChoiceField(choices=['facebook', 'instagram', 'whatsapp'])
+    conversation_id = serializers.CharField(max_length=255)
+    account_id = serializers.CharField(max_length=255)
+
+
+class ChatRatingSerializer(serializers.ModelSerializer):
+    """Serializer for chat ratings"""
+    assignment_id = serializers.IntegerField(source='assignment.id', read_only=True)
+    platform = serializers.CharField(source='assignment.platform', read_only=True)
+    conversation_id = serializers.CharField(source='assignment.conversation_id', read_only=True)
+
+    class Meta:
+        model = ChatRating
+        fields = [
+            'id', 'assignment', 'assignment_id', 'platform', 'conversation_id',
+            'rating', 'rating_request_message_id', 'rating_response_message_id',
+            'created_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'assignment_id', 'platform', 'conversation_id']

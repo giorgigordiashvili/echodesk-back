@@ -61,6 +61,15 @@ urlpatterns = [
     # Settings endpoint
     path('settings/', views.social_settings, name='social_settings'),
 
+    # Chat Assignment endpoints
+    path('assignments/', views.my_assignments, name='my_assignments'),
+    path('assignments/all/', views.all_assignments, name='all_assignments'),
+    path('assignments/assign/', views.assign_chat, name='assign_chat'),
+    path('assignments/unassign/', views.unassign_chat, name='unassign_chat'),
+    path('assignments/status/', views.get_assignment_status, name='assignment_status'),
+    path('assignments/start-session/', views.start_session, name='start_session'),
+    path('assignments/end-session/', views.end_session, name='end_session'),
+
     # Unread messages count endpoint
     path('unread-count/', views.unread_messages_count, name='unread_messages_count'),
 
