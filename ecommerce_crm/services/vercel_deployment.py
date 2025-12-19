@@ -3,6 +3,12 @@ Vercel Deployment Service for E-commerce Frontend
 
 This service handles automated deployment of tenant-specific
 e-commerce frontends to Vercel.
+
+Multi-Tenant Architecture:
+- A single shared Vercel project serves all tenants
+- Each tenant is identified by their subdomain: {schema}.ecommerce.echodesk.ge
+- Custom domains are also supported via the TenantDomain model
+- Tenant configuration is resolved at runtime via middleware (not build-time env vars)
 """
 import requests
 import logging
@@ -13,6 +19,12 @@ from django.conf import settings
 from typing import Dict, Any, Optional, List
 
 logger = logging.getLogger(__name__)
+
+# Shared multi-tenant Vercel project configuration
+# This project serves all tenants via wildcard domain *.ecommerce.echodesk.ge
+SHARED_ECOMMERCE_PROJECT_ID = getattr(settings, 'VERCEL_SHARED_ECOMMERCE_PROJECT_ID', '')
+SHARED_ECOMMERCE_PROJECT_NAME = getattr(settings, 'VERCEL_SHARED_ECOMMERCE_PROJECT_NAME', 'echodesk-ecommerce')
+ECOMMERCE_DOMAIN_SUFFIX = '.ecommerce.echodesk.ge'
 
 
 class VercelDeploymentService:
@@ -625,6 +637,81 @@ class VercelDeploymentService:
 def deploy_tenant_frontend(tenant) -> Dict[str, Any]:
     """
     High-level function to deploy a tenant's e-commerce frontend
+
+    Multi-Tenant Approach:
+    - Adds tenant's subdomain to a single shared Vercel project
+    - No new project is created; all tenants share one deployment
+    - Tenant config is resolved at runtime via middleware (not build-time env vars)
+
+    Args:
+        tenant: Tenant model instance
+
+    Returns:
+        Deployment result with URL and status
+    """
+    service = VercelDeploymentService()
+
+    # Use shared multi-tenant project
+    project_id = SHARED_ECOMMERCE_PROJECT_ID
+    project_name = SHARED_ECOMMERCE_PROJECT_NAME
+
+    if not project_id:
+        logger.error("VERCEL_SHARED_ECOMMERCE_PROJECT_ID not configured")
+        return {
+            "success": False,
+            "error": "Multi-tenant Vercel project not configured. Please set VERCEL_SHARED_ECOMMERCE_PROJECT_ID in settings."
+        }
+
+    # Generate subdomain for this tenant
+    subdomain = f"{tenant.schema_name}{ECOMMERCE_DOMAIN_SUFFIX}"
+    frontend_url = f"https://{subdomain}"
+
+    logger.info(f"Adding tenant {tenant.schema_name} to shared ecommerce project")
+    logger.info(f"Subdomain: {subdomain}")
+
+    # Add subdomain to the shared project
+    domain_result = service.add_domain(project_id, subdomain)
+
+    if domain_result.get("success"):
+        logger.info(f"Subdomain {subdomain} added to shared project successfully")
+
+        return {
+            "success": True,
+            "project_id": project_id,
+            "project_name": project_name,
+            "url": frontend_url,
+            "domain": subdomain,
+            "verified": domain_result.get("verified", False),
+            "message": f"Tenant storefront is now available at {frontend_url}"
+        }
+    else:
+        # Check if domain already exists (which is fine)
+        error_msg = domain_result.get("error", "")
+        if "already exists" in error_msg.lower() or "domain is already" in error_msg.lower():
+            logger.info(f"Subdomain {subdomain} already exists on shared project - this is fine")
+            return {
+                "success": True,
+                "project_id": project_id,
+                "project_name": project_name,
+                "url": frontend_url,
+                "domain": subdomain,
+                "verified": True,
+                "message": f"Tenant storefront is available at {frontend_url}"
+            }
+
+        logger.error(f"Failed to add subdomain for {tenant.schema_name}: {domain_result.get('error')}")
+        return {
+            "success": False,
+            "error": domain_result.get("error", "Failed to add subdomain to shared project")
+        }
+
+
+def deploy_tenant_frontend_legacy(tenant) -> Dict[str, Any]:
+    """
+    LEGACY: Creates a separate Vercel project per tenant.
+
+    This is the old approach - kept for reference/rollback purposes.
+    The new approach uses a single shared multi-tenant project.
 
     Args:
         tenant: Tenant model instance

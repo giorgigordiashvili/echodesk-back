@@ -257,7 +257,10 @@ class EcommerceSettingsAdmin(admin.ModelAdmin):
         return custom_urls + urls
 
     def deploy_view(self, request, settings_id):
-        """Handle deploy button click"""
+        """Handle deploy button click (Multi-Tenant)
+
+        Adds tenant's subdomain to the shared multi-tenant Vercel project.
+        """
         from .services.vercel_deployment import deploy_tenant_frontend
 
         try:
@@ -268,11 +271,19 @@ class EcommerceSettingsAdmin(admin.ModelAdmin):
                 messages.error(request, "No tenant associated with these settings")
                 return HttpResponseRedirect(reverse('admin:ecommerce_crm_ecommercesettings_change', args=[settings_id]))
 
+            # Check if already deployed
+            if settings.deployment_status == 'deployed' and settings.ecommerce_frontend_url:
+                messages.info(
+                    request,
+                    f"Frontend is already deployed at {settings.ecommerce_frontend_url}. Code updates propagate automatically."
+                )
+                return HttpResponseRedirect(reverse('admin:ecommerce_crm_ecommercesettings_change', args=[settings_id]))
+
             # Update status to deploying
             settings.deployment_status = 'deploying'
             settings.save(update_fields=['deployment_status'])
 
-            # Deploy to Vercel
+            # Add subdomain to shared Vercel project
             with schema_context(get_public_schema_name()):
                 tenant_obj = Tenant.objects.get(id=tenant.id)
                 result = deploy_tenant_frontend(tenant_obj)

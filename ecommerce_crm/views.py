@@ -1968,7 +1968,7 @@ class EcommerceSettingsViewSet(viewsets.ModelViewSet):
     @extend_schema(
         tags=['Ecommerce Admin - Settings'],
         summary='Deploy frontend website',
-        description='Deploy the ecommerce frontend website to Vercel. Creates a new Vercel project with tenant-specific configuration and environment variables.',
+        description='Deploy the ecommerce frontend website. Adds the tenant subdomain to the shared multi-tenant Vercel project.',
         responses={
             201: inline_serializer(
                 name='DeploymentResponse',
@@ -1987,12 +1987,15 @@ class EcommerceSettingsViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'], url_path='deploy-frontend')
     def deploy_frontend(self, request):
         """
-        Deploy frontend website to Vercel
+        Deploy frontend website to Vercel (Multi-Tenant)
 
-        This will create a new Vercel project with tenant-specific environment variables
-        and deploy the ecommerce frontend template.
+        This adds the tenant's subdomain to a shared multi-tenant Vercel project.
+        All tenants share a single deployment - tenant configuration is resolved
+        at runtime via middleware based on the hostname.
+
+        The subdomain format is: {schema_name}.ecommerce.echodesk.ge
         """
-        from .services.vercel_deployment import deploy_tenant_frontend
+        from .services.vercel_deployment import deploy_tenant_frontend, ECOMMERCE_DOMAIN_SUFFIX
         from tenant_schemas.utils import get_public_schema_name, schema_context
 
         tenant = request.tenant
@@ -2010,58 +2013,24 @@ class EcommerceSettingsViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Check if already deployed - if so, trigger redeploy
-        if settings.deployment_status == 'deployed' and settings.vercel_project_id:
-            # Trigger a redeploy of the existing project
-            from .services.vercel_deployment import VercelDeploymentService
-            service = VercelDeploymentService()
-
-            project_name = f"store-{tenant.schema_name}".lower().replace("_", "-")
-
-            # Update status to deploying
-            settings.deployment_status = 'deploying'
-            settings.save(update_fields=['deployment_status'])
-
-            # Trigger deployment
-            deployment_result = service.trigger_deployment(project_name)
-
-            if deployment_result.get("success"):
-                # Wait for deployment
-                wait_result = service.wait_for_deployment(settings.vercel_project_id, max_wait=300)
-
-                if wait_result.get("success"):
-                    settings.ecommerce_frontend_url = wait_result.get("production_url")
-                    settings.deployment_status = 'deployed'
-                    settings.save(update_fields=['ecommerce_frontend_url', 'deployment_status'])
-
-                    return Response({
-                        "success": True,
-                        "message": "Frontend redeployed successfully",
-                        "url": wait_result.get("production_url"),
-                        "project_id": settings.vercel_project_id,
-                        "project_name": project_name
-                    }, status=status.HTTP_200_OK)
-                else:
-                    settings.deployment_status = 'failed'
-                    settings.save(update_fields=['deployment_status'])
-                    return Response({
-                        "success": False,
-                        "error": wait_result.get("error", "Deployment did not complete")
-                    }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-            else:
-                settings.deployment_status = 'failed'
-                settings.save(update_fields=['deployment_status'])
-                return Response({
-                    "success": False,
-                    "error": deployment_result.get("error", "Failed to trigger deployment")
-                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        # If already deployed, just return the existing URL
+        # With multi-tenant architecture, there's no need for "redeployment"
+        # since all tenants share the same project and code updates propagate automatically
+        if settings.deployment_status == 'deployed' and settings.vercel_project_id and settings.ecommerce_frontend_url:
+            return Response({
+                "success": True,
+                "message": "Frontend is already deployed. Code updates propagate automatically.",
+                "url": settings.ecommerce_frontend_url,
+                "project_id": settings.vercel_project_id,
+                "project_name": "echodesk-ecommerce"
+            }, status=status.HTTP_200_OK)
 
         # Update status to deploying
         settings.deployment_status = 'deploying'
         settings.save(update_fields=['deployment_status'])
 
         try:
-            # Deploy to Vercel
+            # Add subdomain to shared Vercel project
             with schema_context(get_public_schema_name()):
                 tenant_obj = Tenant.objects.get(id=tenant.id)
                 result = deploy_tenant_frontend(tenant_obj)
@@ -2075,10 +2044,11 @@ class EcommerceSettingsViewSet(viewsets.ModelViewSet):
 
                 return Response({
                     "success": True,
-                    "message": "Frontend deployed successfully",
+                    "message": result.get("message", "Frontend deployed successfully"),
                     "url": result.get("url"),
                     "project_id": result.get("project_id"),
-                    "project_name": result.get("project_name")
+                    "project_name": result.get("project_name"),
+                    "domain": result.get("domain")
                 }, status=status.HTTP_201_CREATED)
             else:
                 # Deployment failed
@@ -2103,7 +2073,7 @@ class EcommerceSettingsViewSet(viewsets.ModelViewSet):
 
     @extend_schema(
         summary="Delete frontend deployment",
-        description="Delete the Vercel project and reset deployment status",
+        description="Remove the tenant's subdomain from the shared Vercel project and reset deployment status",
         responses={
             200: OpenApiResponse(description='Deployment deleted successfully'),
             400: OpenApiResponse(description='No deployment to delete'),
@@ -2113,9 +2083,12 @@ class EcommerceSettingsViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['delete'], url_path='delete-deployment')
     def delete_deployment(self, request):
         """
-        Delete frontend deployment from Vercel and reset status
+        Remove frontend deployment (Multi-Tenant)
+
+        This removes the tenant's subdomain from the shared Vercel project.
+        It does NOT delete the shared project itself (which would break other tenants).
         """
-        from .services.vercel_deployment import VercelDeploymentService
+        from .services.vercel_deployment import VercelDeploymentService, ECOMMERCE_DOMAIN_SUFFIX
 
         tenant = request.tenant
 
@@ -2126,7 +2099,7 @@ class EcommerceSettingsViewSet(viewsets.ModelViewSet):
         )
 
         # Check if there's a deployment to delete
-        if not settings.vercel_project_id:
+        if not settings.vercel_project_id or settings.deployment_status == 'pending':
             return Response(
                 {"error": "No deployment to delete"},
                 status=status.HTTP_400_BAD_REQUEST
@@ -2135,8 +2108,9 @@ class EcommerceSettingsViewSet(viewsets.ModelViewSet):
         try:
             service = VercelDeploymentService()
 
-            # Delete the project from Vercel
-            result = service.delete_project(settings.vercel_project_id)
+            # Remove the subdomain from the shared project (not delete the project!)
+            subdomain = f"{tenant.schema_name}{ECOMMERCE_DOMAIN_SUFFIX}"
+            result = service.remove_domain(settings.vercel_project_id, subdomain)
 
             if result.get("success"):
                 # Reset deployment info
@@ -2147,12 +2121,25 @@ class EcommerceSettingsViewSet(viewsets.ModelViewSet):
 
                 return Response({
                     "success": True,
-                    "message": "Deployment deleted successfully"
+                    "message": f"Subdomain {subdomain} removed successfully"
                 }, status=status.HTTP_200_OK)
             else:
+                # If domain not found, still reset the settings
+                error_msg = result.get("error", "")
+                if "not found" in error_msg.lower():
+                    settings.vercel_project_id = None
+                    settings.ecommerce_frontend_url = None
+                    settings.deployment_status = 'pending'
+                    settings.save(update_fields=['vercel_project_id', 'ecommerce_frontend_url', 'deployment_status'])
+
+                    return Response({
+                        "success": True,
+                        "message": "Deployment reset (subdomain was already removed)"
+                    }, status=status.HTTP_200_OK)
+
                 return Response({
                     "success": False,
-                    "error": result.get("error", "Failed to delete deployment")
+                    "error": result.get("error", "Failed to remove subdomain")
                 }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         except Exception as e:

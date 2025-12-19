@@ -506,6 +506,11 @@ VERCEL_TOKEN = config('VERCEL_TOKEN', default='')
 VERCEL_TEAM_ID = config('VERCEL_TEAM_ID', default='')
 VERCEL_GITHUB_REPO = config('VERCEL_GITHUB_REPO', default='echodeskge/echodesk-frontend-template-one')
 
+# Multi-tenant Ecommerce Vercel Project Configuration
+# This is the shared project that serves all tenant storefronts via wildcard domain
+VERCEL_SHARED_ECOMMERCE_PROJECT_ID = config('VERCEL_SHARED_ECOMMERCE_PROJECT_ID', default='')
+VERCEL_SHARED_ECOMMERCE_PROJECT_NAME = config('VERCEL_SHARED_ECOMMERCE_PROJECT_NAME', default='echodesk-ecommerce')
+
 # Netlify Deployment Configuration
 NETLIFY_TOKEN = config('NETLIFY_TOKEN', default='')
 NETLIFY_TEAM_SLUG = config('NETLIFY_TEAM_SLUG', default='')
