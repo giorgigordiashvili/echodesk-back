@@ -216,6 +216,60 @@ class WhatsAppBusinessAccount(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    # WhatsApp Business App Coexistence fields
+    SYNC_STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('syncing', 'Syncing'),
+        ('completed', 'Completed'),
+        ('failed', 'Failed'),
+    ]
+    PLATFORM_TYPE_CHOICES = [
+        ('CLOUD_API', 'Cloud API'),
+        ('ON_PREMISE', 'On-Premise'),
+        ('SMB', 'Small/Medium Business App'),
+    ]
+
+    is_on_biz_app = models.BooleanField(
+        default=False,
+        help_text="Whether this number is linked to WhatsApp Business App"
+    )
+    platform_type = models.CharField(
+        max_length=50,
+        choices=PLATFORM_TYPE_CHOICES,
+        blank=True,
+        null=True,
+        help_text="Platform type: CLOUD_API, ON_PREMISE, or SMB"
+    )
+    coex_enabled = models.BooleanField(
+        default=False,
+        help_text="Whether coexistence mode is enabled for this account"
+    )
+    sync_status = models.CharField(
+        max_length=20,
+        choices=SYNC_STATUS_CHOICES,
+        default='pending',
+        help_text="Status of data sync from Business App"
+    )
+    contacts_synced_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When contacts were last synced from Business App"
+    )
+    history_synced_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When message history was last synced from Business App"
+    )
+    onboarded_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When coexistence onboarding was completed (24hr sync window starts)"
+    )
+    throughput_limit = models.IntegerField(
+        default=80,
+        help_text="Messages per second limit (20 for coex accounts, 80 for standard)"
+    )
+
     def __str__(self):
         return f"{self.business_name} - {self.display_phone_number or self.phone_number}"
 
@@ -287,6 +341,13 @@ class WhatsAppMessage(models.Model):
         ('failed', 'Failed'),
     ]
 
+    # Message source choices for coexistence
+    SOURCE_CHOICES = [
+        ('cloud_api', 'Cloud API'),
+        ('business_app', 'Business App'),
+        ('synced', 'Synced from History'),
+    ]
+
     business_account = models.ForeignKey(
         WhatsAppBusinessAccount,
         on_delete=models.CASCADE,
@@ -323,6 +384,45 @@ class WhatsAppMessage(models.Model):
     error_message = models.TextField(blank=True)  # Error message if failed
     created_at = models.DateTimeField(auto_now_add=True)
 
+    # WhatsApp Business App Coexistence fields
+    source = models.CharField(
+        max_length=20,
+        choices=SOURCE_CHOICES,
+        default='cloud_api',
+        help_text="Source of the message: Cloud API, Business App, or Synced from History"
+    )
+    is_echo = models.BooleanField(
+        default=False,
+        help_text="Message echoed from Business App (sent by user on app, echoed to API)"
+    )
+
+    # Edit support
+    is_edited = models.BooleanField(
+        default=False,
+        help_text="Whether this message has been edited"
+    )
+    edited_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the message was edited"
+    )
+    original_text = models.TextField(
+        blank=True,
+        null=True,
+        help_text="Original message text before edit"
+    )
+
+    # Revoke (delete for everyone) support
+    is_revoked = models.BooleanField(
+        default=False,
+        help_text="Whether this message has been revoked (deleted for everyone)"
+    )
+    revoked_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the message was revoked"
+    )
+
     class Meta:
         ordering = ['-timestamp']
         indexes = [
@@ -334,6 +434,64 @@ class WhatsAppMessage(models.Model):
         direction = "to" if self.is_from_business else "from"
         contact = self.contact_name or self.from_number
         return f"WhatsApp {direction} {contact} - {self.message_text[:50]}"
+
+
+class WhatsAppContact(models.Model):
+    """
+    Stores contacts synced from WhatsApp Business App during coexistence onboarding.
+    These contacts represent users who have previously interacted with the business
+    on the WhatsApp Business App.
+    """
+    CONTACT_TYPE_CHOICES = [
+        ('USER', 'User'),
+        ('BUSINESS', 'Business'),
+    ]
+
+    account = models.ForeignKey(
+        WhatsAppBusinessAccount,
+        on_delete=models.CASCADE,
+        related_name='contacts'
+    )
+    wa_id = models.CharField(
+        max_length=50,
+        help_text="WhatsApp ID (phone number in international format without +)"
+    )
+    profile_name = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        help_text="Contact's WhatsApp profile name"
+    )
+    is_business = models.BooleanField(
+        default=False,
+        help_text="Whether this contact is a business account"
+    )
+    contact_type = models.CharField(
+        max_length=50,
+        choices=CONTACT_TYPE_CHOICES,
+        default='USER',
+        help_text="Type of contact: USER or BUSINESS"
+    )
+    synced_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text="When this contact was synced from Business App"
+    )
+    last_message_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the last message was exchanged with this contact"
+    )
+
+    class Meta:
+        unique_together = ['account', 'wa_id']
+        ordering = ['-last_message_at', '-synced_at']
+        indexes = [
+            models.Index(fields=['account', 'wa_id']),
+            models.Index(fields=['account', 'last_message_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.profile_name or self.wa_id} - {self.account.business_name}"
 
 
 class SocialIntegrationSettings(models.Model):

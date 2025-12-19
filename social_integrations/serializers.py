@@ -3,7 +3,7 @@ from .models import (
     FacebookPageConnection, FacebookMessage,
     InstagramAccountConnection, InstagramMessage,
     WhatsAppBusinessAccount, WhatsAppMessage, WhatsAppMessageTemplate,
-    SocialIntegrationSettings
+    WhatsAppContact, SocialIntegrationSettings
 )
 
 
@@ -69,9 +69,17 @@ class WhatsAppBusinessAccountSerializer(serializers.ModelSerializer):
         model = WhatsAppBusinessAccount
         fields = [
             'id', 'waba_id', 'business_name', 'phone_number_id', 'phone_number',
-            'display_phone_number', 'quality_rating', 'is_active', 'created_at', 'updated_at'
+            'display_phone_number', 'quality_rating', 'is_active', 'verified_name',
+            # Coexistence fields
+            'coex_enabled', 'is_on_biz_app', 'platform_type', 'sync_status',
+            'onboarded_at', 'contacts_synced_at', 'history_synced_at', 'throughput_limit',
+            'created_at', 'updated_at'
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        read_only_fields = [
+            'id', 'coex_enabled', 'is_on_biz_app', 'platform_type', 'sync_status',
+            'onboarded_at', 'contacts_synced_at', 'history_synced_at', 'throughput_limit',
+            'created_at', 'updated_at'
+        ]
 
 
 class WhatsAppMessageSerializer(serializers.ModelSerializer):
@@ -87,9 +95,16 @@ class WhatsAppMessageSerializer(serializers.ModelSerializer):
             'message_text', 'message_type', 'media_url', 'media_mime_type', 'attachments', 'timestamp',
             'is_from_business', 'status', 'is_delivered', 'delivered_at', 'is_read', 'read_at',
             'error_message', 'business_name', 'business_phone', 'waba_id', 'template', 'template_name',
-            'template_parameters', 'created_at'
+            'template_parameters',
+            # Coexistence fields
+            'source', 'is_echo', 'is_edited', 'edited_at', 'original_text', 'is_revoked', 'revoked_at',
+            'created_at'
         ]
-        read_only_fields = ['id', 'status', 'is_delivered', 'delivered_at', 'is_read', 'read_at', 'created_at']
+        read_only_fields = [
+            'id', 'status', 'is_delivered', 'delivered_at', 'is_read', 'read_at',
+            'source', 'is_echo', 'is_edited', 'edited_at', 'original_text', 'is_revoked', 'revoked_at',
+            'created_at'
+        ]
 
 
 class WhatsAppSendMessageSerializer(serializers.Serializer):
@@ -102,6 +117,20 @@ class WhatsAppSendMessageSerializer(serializers.Serializer):
         if not value.startswith('+'):
             raise serializers.ValidationError("Phone number must be in E.164 format (start with +)")
         return value
+
+
+class WhatsAppContactSerializer(serializers.ModelSerializer):
+    """Serializer for WhatsApp contacts synced from Business App (Coexistence feature)"""
+    account_phone = serializers.CharField(source='account.display_phone_number', read_only=True)
+    account_name = serializers.CharField(source='account.business_name', read_only=True)
+
+    class Meta:
+        model = WhatsAppContact
+        fields = [
+            'id', 'account', 'wa_id', 'profile_name', 'is_business', 'contact_type',
+            'synced_at', 'last_message_at', 'account_phone', 'account_name'
+        ]
+        read_only_fields = ['id', 'synced_at', 'account_phone', 'account_name']
 
 
 class WhatsAppMessageTemplateSerializer(serializers.ModelSerializer):

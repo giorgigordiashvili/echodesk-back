@@ -16,7 +16,7 @@ from django.urls import reverse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from rest_framework import viewsets, status
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from drf_spectacular.utils import extend_schema
@@ -24,14 +24,14 @@ from .models import (
     FacebookPageConnection, FacebookMessage, OrphanedFacebookMessage,
     InstagramAccountConnection, InstagramMessage,
     WhatsAppBusinessAccount, WhatsAppMessage, WhatsAppMessageTemplate,
-    SocialIntegrationSettings
+    WhatsAppContact, SocialIntegrationSettings
 )
 from .serializers import (
     FacebookPageConnectionSerializer, FacebookMessageSerializer, FacebookSendMessageSerializer,
     InstagramAccountConnectionSerializer, InstagramMessageSerializer, InstagramSendMessageSerializer,
     WhatsAppBusinessAccountSerializer, WhatsAppMessageSerializer, WhatsAppSendMessageSerializer,
     WhatsAppMessageTemplateSerializer, WhatsAppTemplateCreateSerializer, WhatsAppTemplateSendSerializer,
-    SocialIntegrationSettingsSerializer
+    WhatsAppContactSerializer, SocialIntegrationSettingsSerializer
 )
 from .permissions import (
     CanManageSocialConnections, CanViewSocialMessages,
@@ -2719,6 +2719,226 @@ class WhatsAppBusinessAccountViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save()  # No user assignment needed in multi-tenant setup
 
+    @action(detail=True, methods=['post'], url_path='sync-contacts')
+    def sync_contacts(self, request, pk=None):
+        """
+        Sync contacts from WhatsApp Business App (Coexistence feature).
+        Must be called within 24 hours of onboarding.
+        Calls Meta API: POST /{PHONE_NUMBER_ID}/smb_app_data with {"types": ["contacts"]}
+        """
+        account = self.get_object()
+
+        if not account.coex_enabled:
+            return Response({
+                'error': 'Coexistence is not enabled for this account'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check if within 24-hour window
+        if account.onboarded_at:
+            time_since_onboarding = timezone.now() - account.onboarded_at
+            if time_since_onboarding.total_seconds() > 24 * 60 * 60:
+                return Response({
+                    'error': 'Sync window expired. Contacts must be synced within 24 hours of onboarding.'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            # Update sync status
+            account.sync_status = 'syncing'
+            account.save(update_fields=['sync_status'])
+
+            # Call Meta API to request contacts sync
+            url = f"https://graph.facebook.com/v23.0/{account.phone_number_id}/smb_app_data"
+            response = requests.post(
+                url,
+                headers={
+                    'Authorization': f'Bearer {account.access_token}',
+                    'Content-Type': 'application/json'
+                },
+                json={'types': ['contacts']},
+                timeout=30
+            )
+
+            if response.status_code == 200:
+                account.sync_status = 'completed'
+                account.contacts_synced_at = timezone.now()
+                account.save(update_fields=['sync_status', 'contacts_synced_at'])
+
+                return Response({
+                    'status': 'success',
+                    'message': 'Contacts sync initiated. Contacts will be delivered via webhook.'
+                })
+            else:
+                account.sync_status = 'failed'
+                account.save(update_fields=['sync_status'])
+                error_data = response.json() if response.content else {}
+                return Response({
+                    'error': 'Failed to initiate contacts sync',
+                    'details': error_data
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        except Exception as e:
+            account.sync_status = 'failed'
+            account.save(update_fields=['sync_status'])
+            logger.error(f"Failed to sync contacts for account {account.id}: {e}")
+            return Response({
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=True, methods=['post'], url_path='sync-history')
+    def sync_history(self, request, pk=None):
+        """
+        Sync message history from WhatsApp Business App (Coexistence feature).
+        Must be called within 24 hours of onboarding.
+        Supports phases: 0-1 days, 1-90 days, 90-180 days.
+        """
+        account = self.get_object()
+
+        if not account.coex_enabled:
+            return Response({
+                'error': 'Coexistence is not enabled for this account'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check if within 24-hour window
+        if account.onboarded_at:
+            time_since_onboarding = timezone.now() - account.onboarded_at
+            if time_since_onboarding.total_seconds() > 24 * 60 * 60:
+                return Response({
+                    'error': 'Sync window expired. History must be synced within 24 hours of onboarding.'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Get phase from request (default: 0-1 days)
+        phase = request.data.get('phase', '0-1')
+        valid_phases = ['0-1', '1-90', '90-180']
+        if phase not in valid_phases:
+            return Response({
+                'error': f'Invalid phase. Must be one of: {valid_phases}'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            # Update sync status
+            account.sync_status = 'syncing'
+            account.save(update_fields=['sync_status'])
+
+            # Call Meta API to request history sync
+            url = f"https://graph.facebook.com/v23.0/{account.phone_number_id}/smb_app_data"
+
+            # Build request payload based on phase
+            payload = {'types': ['history']}
+            if phase == '0-1':
+                payload['history'] = {'start_days_ago': 0, 'end_days_ago': 1}
+            elif phase == '1-90':
+                payload['history'] = {'start_days_ago': 1, 'end_days_ago': 90}
+            elif phase == '90-180':
+                payload['history'] = {'start_days_ago': 90, 'end_days_ago': 180}
+
+            response = requests.post(
+                url,
+                headers={
+                    'Authorization': f'Bearer {account.access_token}',
+                    'Content-Type': 'application/json'
+                },
+                json=payload,
+                timeout=30
+            )
+
+            if response.status_code == 200:
+                account.sync_status = 'completed'
+                account.history_synced_at = timezone.now()
+                account.save(update_fields=['sync_status', 'history_synced_at'])
+
+                return Response({
+                    'status': 'success',
+                    'message': f'History sync initiated for phase {phase}. Messages will be delivered via webhook.',
+                    'phase': phase
+                })
+            else:
+                account.sync_status = 'failed'
+                account.save(update_fields=['sync_status'])
+                error_data = response.json() if response.content else {}
+                return Response({
+                    'error': 'Failed to initiate history sync',
+                    'details': error_data
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        except Exception as e:
+            account.sync_status = 'failed'
+            account.save(update_fields=['sync_status'])
+            logger.error(f"Failed to sync history for account {account.id}: {e}")
+            return Response({
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=True, methods=['get'], url_path='coex-status')
+    def coex_status(self, request, pk=None):
+        """
+        Get coexistence status for a WhatsApp Business Account.
+        Fetches current status from Meta API and returns local state.
+        """
+        account = self.get_object()
+
+        # Prepare local status data
+        local_status = {
+            'coex_enabled': account.coex_enabled,
+            'is_on_biz_app': account.is_on_biz_app,
+            'platform_type': account.platform_type,
+            'sync_status': account.sync_status,
+            'onboarded_at': account.onboarded_at.isoformat() if account.onboarded_at else None,
+            'contacts_synced_at': account.contacts_synced_at.isoformat() if account.contacts_synced_at else None,
+            'history_synced_at': account.history_synced_at.isoformat() if account.history_synced_at else None,
+            'throughput_limit': account.throughput_limit,
+        }
+
+        # Check if within 24-hour sync window
+        sync_window_open = False
+        sync_window_remaining = None
+        if account.onboarded_at:
+            time_since_onboarding = timezone.now() - account.onboarded_at
+            if time_since_onboarding.total_seconds() < 24 * 60 * 60:
+                sync_window_open = True
+                sync_window_remaining = int(24 * 60 * 60 - time_since_onboarding.total_seconds())
+
+        local_status['sync_window_open'] = sync_window_open
+        local_status['sync_window_remaining_seconds'] = sync_window_remaining
+
+        # Optionally fetch from Meta API for fresh data
+        fetch_from_api = request.query_params.get('refresh', 'false').lower() == 'true'
+        api_status = None
+
+        if fetch_from_api and account.access_token:
+            try:
+                url = f"https://graph.facebook.com/v23.0/{account.phone_number_id}"
+                response = requests.get(
+                    url,
+                    params={'fields': 'id,is_on_biz_app,platform_type,verified_name,quality_rating'},
+                    headers={'Authorization': f'Bearer {account.access_token}'},
+                    timeout=10
+                )
+
+                if response.status_code == 200:
+                    api_data = response.json()
+                    api_status = {
+                        'is_on_biz_app': api_data.get('is_on_biz_app', False),
+                        'platform_type': api_data.get('platform_type', ''),
+                        'verified_name': api_data.get('verified_name', ''),
+                        'quality_rating': api_data.get('quality_rating', ''),
+                    }
+
+                    # Update local fields if different
+                    if api_data.get('is_on_biz_app') != account.is_on_biz_app:
+                        account.is_on_biz_app = api_data.get('is_on_biz_app', False)
+                        account.save(update_fields=['is_on_biz_app'])
+                    if api_data.get('platform_type') != account.platform_type:
+                        account.platform_type = api_data.get('platform_type', '')
+                        account.save(update_fields=['platform_type'])
+
+            except Exception as e:
+                logger.warning(f"Failed to fetch coex status from API: {e}")
+
+        return Response({
+            'local_status': local_status,
+            'api_status': api_status,
+        })
+
 
 class WhatsAppMessageViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = WhatsAppMessageSerializer
@@ -2727,6 +2947,28 @@ class WhatsAppMessageViewSet(viewsets.ReadOnlyModelViewSet):
     def get_queryset(self):
         tenant_accounts = WhatsAppBusinessAccount.objects.all()  # All accounts for this tenant
         return WhatsAppMessage.objects.filter(business_account__in=tenant_accounts)
+
+
+class WhatsAppContactViewSet(viewsets.ReadOnlyModelViewSet):
+    """ViewSet for viewing WhatsApp contacts synced from Business App (Coexistence feature)"""
+    serializer_class = WhatsAppContactSerializer
+    permission_classes = [IsAuthenticated, CanViewSocialMessages]
+
+    def get_queryset(self):
+        tenant_accounts = WhatsAppBusinessAccount.objects.all()
+        queryset = WhatsAppContact.objects.filter(account__in=tenant_accounts)
+
+        # Filter by account if provided
+        account_id = self.request.query_params.get('account')
+        if account_id:
+            queryset = queryset.filter(account_id=account_id)
+
+        # Filter by business contacts
+        is_business = self.request.query_params.get('is_business')
+        if is_business is not None:
+            queryset = queryset.filter(is_business=is_business.lower() == 'true')
+
+        return queryset.order_by('-last_message_at', '-synced_at')
 
 
 @api_view(['GET'])
@@ -2766,7 +3008,16 @@ def whatsapp_oauth_start(request):
         logger.info(f"WhatsApp OAuth - Tenant: {tenant_name}")
         logger.info(f"WhatsApp OAuth - State parameter: {state}")
 
-        # WhatsApp Embedded Signup OAuth URL
+        # WhatsApp Business App Coexistence extras parameter
+        # This enables linking both Business App and Cloud API on the same number
+        import json
+        extras = {
+            "featureType": "whatsapp_business_app_onboarding",  # Enable coexistence
+            "sessionInfoVersion": 3  # Required for coexistence
+        }
+        extras_encoded = quote(json.dumps(extras))
+
+        # WhatsApp Embedded Signup OAuth URL with coexistence support
         oauth_url = (
             f"https://www.facebook.com/v23.0/dialog/oauth?"
             f"client_id={fb_app_id}&"
@@ -2774,7 +3025,8 @@ def whatsapp_oauth_start(request):
             f"config_id={config_id}&"
             f"response_type=code&"
             f"scope=whatsapp_business_management,whatsapp_business_messaging&"
-            f"state={state}"
+            f"state={state}&"
+            f"extras={extras_encoded}"
         )
 
         logger.info(f"WhatsApp OAuth URL: {oauth_url}")
@@ -2968,11 +3220,11 @@ def whatsapp_embedded_signup_callback(request):
             for wa_account in whatsapp_accounts:
                 waba_id = wa_account.get('id')
 
-                # Get phone numbers for this WABA
+                # Get phone numbers for this WABA (including coexistence fields)
                 phone_url = f"https://graph.facebook.com/{fb_api_version}/{waba_id}/phone_numbers"
                 phone_params = {
                     'access_token': access_token,
-                    'fields': 'id,verified_name,display_phone_number,quality_rating'
+                    'fields': 'id,verified_name,display_phone_number,quality_rating,is_on_biz_app,platform_type'
                 }
 
                 phone_response = requests.get(phone_url, params=phone_params)
@@ -2990,6 +3242,17 @@ def whatsapp_embedded_signup_callback(request):
                     verified_name = phone.get('verified_name', wa_account.get('name', 'WhatsApp Business'))
                     quality_rating = phone.get('quality_rating', '')
 
+                    # WhatsApp Business App Coexistence fields
+                    is_on_biz_app = phone.get('is_on_biz_app', False)
+                    platform_type = phone.get('platform_type', '')
+
+                    # Determine if coexistence is enabled based on platform type
+                    coex_enabled = is_on_biz_app and platform_type == 'SMB'
+                    throughput_limit = 20 if coex_enabled else 80  # Coex accounts have 20 mps limit
+
+                    if coex_enabled:
+                        logger.info(f"📱 Coexistence enabled for {display_phone_number} (Business App linked)")
+
                     # Create or update WhatsApp Business Account
                     account, created = WhatsAppBusinessAccount.objects.update_or_create(
                         waba_id=waba_id,
@@ -3000,9 +3263,20 @@ def whatsapp_embedded_signup_callback(request):
                             'display_phone_number': display_phone_number,
                             'access_token': access_token,
                             'quality_rating': quality_rating,
-                            'is_active': True
+                            'is_active': True,
+                            # Coexistence fields
+                            'is_on_biz_app': is_on_biz_app,
+                            'platform_type': platform_type,
+                            'coex_enabled': coex_enabled,
+                            'throughput_limit': throughput_limit,
                         }
                     )
+
+                    # Set onboarded_at if coexistence just enabled (for 24-hour sync window)
+                    if created and coex_enabled:
+                        from django.utils import timezone
+                        account.onboarded_at = timezone.now()
+                        account.save(update_fields=['onboarded_at'])
 
                     action = "Created" if created else "Updated"
                     logger.info(f"✅ {action} WhatsApp Business Account: {verified_name} ({display_phone_number})")
@@ -3039,16 +3313,30 @@ def whatsapp_embedded_signup_callback(request):
                         'quality_rating': account.quality_rating
                     })
 
-                    # Subscribe to webhooks
+                    # Subscribe to webhooks (including coexistence webhook fields)
                     try:
                         webhook_url = f"https://graph.facebook.com/{fb_api_version}/{waba_id}/subscribed_apps"
+
+                        # Standard fields plus coexistence fields
+                        # - history: Synced message history from Business App
+                        # - smb_app_state_sync: Business App state changes
+                        # - smb_message_echoes: Messages sent from Business App
+                        # - account_update: Account status changes (including PARTNER_REMOVED)
+                        webhook_fields = [
+                            'messages',
+                            'message_template_status_update',
+                            'history',              # Coexistence: synced history
+                            'smb_app_state_sync',   # Coexistence: app state
+                            'smb_message_echoes',   # Coexistence: echoed messages
+                            'account_update',       # Coexistence: account changes
+                        ]
                         webhook_params = {
                             'access_token': access_token,
-                            'subscribed_fields': 'messages,message_template_status_update'
+                            'subscribed_fields': ','.join(webhook_fields)
                         }
                         webhook_response = requests.post(webhook_url, params=webhook_params)
                         if webhook_response.status_code == 200:
-                            logger.info(f"✅ Subscribed WABA {waba_id} to webhooks with fields: messages, message_template_status_update")
+                            logger.info(f"✅ Subscribed WABA {waba_id} to webhooks with fields: {', '.join(webhook_fields)}")
                         else:
                             logger.warning(f"⚠️ Failed to subscribe WABA {waba_id} to webhooks: {webhook_response.json()}")
                     except Exception as e:
@@ -3355,6 +3643,9 @@ def whatsapp_webhook(request):
                     logger.error(f"No active WhatsApp Business Account found for phone_number_id: {phone_number_id}")
                     return JsonResponse({'status': 'error', 'message': 'Account not found'}, status=404)
 
+                # Get the webhook field to determine the type of event
+                webhook_field = changes.get('field', 'messages')
+
                 # Handle messages
                 messages = value.get('messages', [])
                 for message in messages:
@@ -3362,6 +3653,41 @@ def whatsapp_webhook(request):
                     from_number = message.get('from')
                     timestamp = message.get('timestamp', '')
                     message_type = message.get('type', 'text')
+
+                    # Handle edit message type (coexistence feature)
+                    if message_type == 'edit':
+                        edit_data = message.get('edit', {})
+                        original_msg_id = edit_data.get('message_id')
+                        new_text = edit_data.get('text', {}).get('body', '')
+
+                        try:
+                            existing_msg = WhatsAppMessage.objects.get(message_id=original_msg_id)
+                            # Store original text before updating
+                            if not existing_msg.original_text:
+                                existing_msg.original_text = existing_msg.message_text
+                            existing_msg.message_text = new_text
+                            existing_msg.is_edited = True
+                            existing_msg.edited_at = timezone.now()
+                            existing_msg.save()
+                            logger.info(f"✏️ Updated edited WhatsApp message: {original_msg_id}")
+                        except WhatsAppMessage.DoesNotExist:
+                            logger.warning(f"Cannot find original message for edit: {original_msg_id}")
+                        continue
+
+                    # Handle revoke message type (coexistence feature)
+                    if message_type == 'revoke':
+                        revoke_data = message.get('revoke', {})
+                        revoked_msg_id = revoke_data.get('message_id')
+
+                        try:
+                            existing_msg = WhatsAppMessage.objects.get(message_id=revoked_msg_id)
+                            existing_msg.is_revoked = True
+                            existing_msg.revoked_at = timezone.now()
+                            existing_msg.save()
+                            logger.info(f"🗑️ Marked WhatsApp message as revoked: {revoked_msg_id}")
+                        except WhatsAppMessage.DoesNotExist:
+                            logger.warning(f"Cannot find message to revoke: {revoked_msg_id}")
+                        continue
 
                     # Skip if message already exists
                     if WhatsAppMessage.objects.filter(message_id=message_id).exists():
@@ -3567,6 +3893,143 @@ def whatsapp_webhook(request):
                         logger.info(f"✅ Updated WhatsApp message status: {message_id} -> {status_value}")
                     except WhatsAppMessage.DoesNotExist:
                         logger.warning(f"Message not found for status update: {message_id}")
+
+                # ==================== COEXISTENCE WEBHOOK HANDLERS ====================
+
+                # Handle history webhook (synced messages from WhatsApp Business App)
+                if webhook_field == 'history':
+                    history_entries = value.get('history', [])
+                    for entry in history_entries:
+                        history_messages = entry.get('messages', [])
+                        for hist_msg in history_messages:
+                            hist_msg_id = hist_msg.get('id')
+
+                            # Skip if message already exists
+                            if WhatsAppMessage.objects.filter(message_id=hist_msg_id).exists():
+                                logger.debug(f"Skipping duplicate history message: {hist_msg_id}")
+                                continue
+
+                            hist_from = hist_msg.get('from', '')
+                            hist_to = hist_msg.get('to', '')
+                            hist_timestamp = hist_msg.get('timestamp', '')
+                            hist_type = hist_msg.get('type', 'text')
+                            hist_text = ''
+
+                            if hist_type == 'text':
+                                hist_text = hist_msg.get('text', {}).get('body', '')
+                            elif hist_type == 'image':
+                                hist_text = hist_msg.get('image', {}).get('caption', '')
+                            elif hist_type == 'video':
+                                hist_text = hist_msg.get('video', {}).get('caption', '')
+                            elif hist_type == 'document':
+                                hist_text = hist_msg.get('document', {}).get('filename', '')
+
+                            # Determine direction: if 'from' is our phone number, it's outbound
+                            is_outbound = hist_from == account.phone_number or hist_from == account.phone_number_id
+
+                            message_timestamp = datetime.fromtimestamp(int(hist_timestamp), tz=timezone.utc) if hist_timestamp else timezone.now()
+
+                            WhatsAppMessage.objects.create(
+                                business_account=account,
+                                message_id=hist_msg_id,
+                                from_number=hist_from if not is_outbound else account.phone_number,
+                                to_number=hist_to if is_outbound else account.phone_number,
+                                message_text=hist_text,
+                                message_type=hist_type,
+                                timestamp=message_timestamp,
+                                is_from_business=is_outbound,
+                                source='synced',
+                                status='delivered',
+                                is_delivered=True,
+                            )
+                            logger.info(f"📥 Synced history message: {hist_msg_id} (source: synced)")
+
+                    # Update sync timestamp
+                    account.history_synced_at = timezone.now()
+                    account.save(update_fields=['history_synced_at'])
+
+                # Handle smb_message_echoes webhook (messages sent from WhatsApp Business App)
+                if webhook_field == 'smb_message_echoes':
+                    echo_entries = value.get('smb_message_echoes', [])
+                    for entry in echo_entries:
+                        echo_messages = entry.get('messages', [])
+                        for echo_msg in echo_messages:
+                            echo_msg_id = echo_msg.get('id')
+
+                            # Skip if message already exists
+                            if WhatsAppMessage.objects.filter(message_id=echo_msg_id).exists():
+                                logger.debug(f"Skipping duplicate echo message: {echo_msg_id}")
+                                continue
+
+                            echo_to = echo_msg.get('to', '')
+                            echo_timestamp = echo_msg.get('timestamp', '')
+                            echo_type = echo_msg.get('type', 'text')
+                            echo_text = ''
+
+                            if echo_type == 'text':
+                                echo_text = echo_msg.get('text', {}).get('body', '')
+                            elif echo_type == 'image':
+                                echo_text = echo_msg.get('image', {}).get('caption', '')
+                            elif echo_type == 'video':
+                                echo_text = echo_msg.get('video', {}).get('caption', '')
+                            elif echo_type == 'document':
+                                echo_text = echo_msg.get('document', {}).get('filename', '')
+
+                            message_timestamp = datetime.fromtimestamp(int(echo_timestamp), tz=timezone.utc) if echo_timestamp else timezone.now()
+
+                            echo_message_obj = WhatsAppMessage.objects.create(
+                                business_account=account,
+                                message_id=echo_msg_id,
+                                from_number=account.phone_number,
+                                to_number=echo_to,
+                                message_text=echo_text,
+                                message_type=echo_type,
+                                timestamp=message_timestamp,
+                                is_from_business=True,
+                                source='business_app',
+                                is_echo=True,
+                                status='sent',
+                            )
+                            logger.info(f"📤 Received SMB echo message: {echo_msg_id} to {echo_to}")
+
+                            # Send WebSocket notification for echo
+                            ws_echo_data = {
+                                'id': echo_message_obj.id,
+                                'message_id': echo_message_obj.message_id,
+                                'from_number': echo_message_obj.from_number,
+                                'to_number': echo_message_obj.to_number,
+                                'message_text': echo_message_obj.message_text,
+                                'message_type': echo_message_obj.message_type,
+                                'timestamp': echo_message_obj.timestamp.isoformat(),
+                                'is_from_business': True,
+                                'is_echo': True,
+                                'source': 'business_app',
+                            }
+                            send_websocket_notification(tenant_schema, ws_echo_data, echo_to)
+
+                # Handle account_update webhook (coexistence account status changes)
+                if webhook_field == 'account_update':
+                    event = value.get('event')
+                    logger.info(f"📱 WhatsApp account_update event: {event}")
+
+                    if event == 'PARTNER_REMOVED':
+                        # User removed Cloud API partner - disable coexistence
+                        account.is_on_biz_app = False
+                        account.coex_enabled = False
+                        account.save(update_fields=['is_on_biz_app', 'coex_enabled'])
+                        logger.warning(f"⚠️ WhatsApp partner removed for account {account.id}, coexistence disabled")
+
+                    elif event == 'VERIFIED_ACCOUNT':
+                        # Account verified - may need to refresh status
+                        logger.info(f"✅ WhatsApp account verified: {account.id}")
+
+                    elif event == 'PHONE_NUMBER_NAME_UPDATE':
+                        # Phone number display name updated
+                        new_name = value.get('new_name_info', {}).get('new_name', '')
+                        if new_name:
+                            account.verified_name = new_name
+                            account.save(update_fields=['verified_name'])
+                            logger.info(f"📝 WhatsApp phone name updated: {new_name}")
 
             return JsonResponse({'status': 'success'})
 

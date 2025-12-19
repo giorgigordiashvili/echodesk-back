@@ -10,6 +10,7 @@ router.register(r'instagram-accounts', views.InstagramAccountConnectionViewSet, 
 router.register(r'instagram-messages', views.InstagramMessageViewSet, basename='instagram_messages')
 router.register(r'whatsapp-accounts', views.WhatsAppBusinessAccountViewSet, basename='whatsapp_accounts')
 router.register(r'whatsapp-messages', views.WhatsAppMessageViewSet, basename='whatsapp_messages')
+router.register(r'whatsapp-contacts', views.WhatsAppContactViewSet, basename='whatsapp_contacts')
 
 # URL patterns for the social integrations app
 urlpatterns = [
