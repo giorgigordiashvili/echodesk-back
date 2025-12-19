@@ -1502,6 +1502,19 @@ def resolve_ecommerce_domain(request):
         if custom_domain and custom_domain.tenant.is_active:
             tenant = custom_domain.tenant
 
+    # Pattern 3: Custom domain in EcommerceSettings.custom_domain field
+    if not tenant:
+        try:
+            from ecommerce_crm.models import EcommerceSettings
+            ecommerce_with_domain = EcommerceSettings.objects.filter(
+                custom_domain=domain
+            ).select_related('tenant').first()
+
+            if ecommerce_with_domain and ecommerce_with_domain.tenant.is_active:
+                tenant = ecommerce_with_domain.tenant
+        except Exception as e:
+            logger.debug(f"Error checking EcommerceSettings.custom_domain: {e}")
+
     # Not found
     if not tenant:
         logger.debug(f"Ecommerce domain resolution failed for: {domain}")
