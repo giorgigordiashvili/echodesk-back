@@ -2785,8 +2785,13 @@ def end_session(request):
             status=status.HTTP_404_NOT_FOUND
         )
 
-    # Send rating request message before deleting assignment
-    rating_message = "Thank you for chatting with us! Please rate your experience from 1 to 5 (reply with a number)."
+    # Mark assignment as completed (needed for rating tracking)
+    assignment.status = 'completed'
+    assignment.session_ended_at = timezone.now()
+    assignment.save()
+
+    # Send rating request message in Georgian
+    rating_message = "გმადლობთ ჩვენთან საუბრისთვის! გთხოვთ შეაფასოთ თქვენი გამოცდილება 1-დან 5-მდე (უპასუხეთ ციფრით)."
     message_id = None
 
     try:
@@ -2799,16 +2804,18 @@ def end_session(request):
     except Exception as e:
         logger.error(f"Failed to send rating request: {e}")
 
-    # Store assignment info for logging before deletion
-    full_conversation_id = assignment.full_conversation_id
-    user_email = request.user.email
+    # Create pending rating to track the response
+    if message_id:
+        ChatRating.objects.create(
+            assignment=assignment,
+            rating=0,  # Pending - waiting for customer response
+            rating_request_message_id=message_id
+        )
 
-    # Delete the assignment (unassign the chat)
-    assignment.delete()
-
-    logger.info(f"Session ended and chat unassigned: {full_conversation_id} by {user_email}")
+    logger.info(f"Session ended: {assignment.full_conversation_id} by {request.user.email}")
     return Response({
-        'message': 'Session ended, rating request sent, chat unassigned' if message_id else 'Session ended, chat unassigned'
+        'message': 'Session ended, rating request sent' if message_id else 'Session ended',
+        'assignment': ChatAssignmentSerializer(assignment).data
     })
 
 
@@ -2850,7 +2857,7 @@ def get_assignment_status(request):
 
 
 def send_rating_request_facebook(conversation_id, page_id, message):
-    """Send a rating request via Facebook Messenger"""
+    """Send a rating request via Facebook Messenger and store locally"""
     try:
         page = FacebookPageConnection.objects.get(page_id=page_id, is_active=True)
         url = f"https://graph.facebook.com/v21.0/{page_id}/messages"
@@ -2861,14 +2868,28 @@ def send_rating_request_facebook(conversation_id, page_id, message):
         headers = {"Authorization": f"Bearer {page.page_access_token}"}
         response = requests.post(url, json=payload, headers=headers)
         if response.ok:
-            return response.json().get('message_id')
+            message_id = response.json().get('message_id')
+            # Store the message locally so it appears in the chat
+            try:
+                FacebookMessage.objects.create(
+                    page_connection=page,
+                    message_id=message_id or f"rating_{datetime.now().timestamp()}",
+                    sender_id=conversation_id,
+                    sender_name=page.page_name,
+                    message_text=message,
+                    timestamp=datetime.now(),
+                    is_from_page=True
+                )
+            except Exception as e:
+                logger.warning(f"Failed to save rating message: {e}")
+            return message_id
     except Exception as e:
         logger.error(f"Failed to send FB rating request: {e}")
     return None
 
 
 def send_rating_request_instagram(conversation_id, account_id, message):
-    """Send a rating request via Instagram DM"""
+    """Send a rating request via Instagram DM and store locally"""
     try:
         account = InstagramAccountConnection.objects.get(instagram_account_id=account_id, is_active=True)
         url = f"https://graph.facebook.com/v21.0/{account_id}/messages"
@@ -2879,14 +2900,28 @@ def send_rating_request_instagram(conversation_id, account_id, message):
         headers = {"Authorization": f"Bearer {account.access_token}"}
         response = requests.post(url, json=payload, headers=headers)
         if response.ok:
-            return response.json().get('message_id')
+            message_id = response.json().get('message_id')
+            # Store the message locally so it appears in the chat
+            try:
+                InstagramMessage.objects.create(
+                    account_connection=account,
+                    message_id=message_id or f"rating_{datetime.now().timestamp()}",
+                    sender_id=conversation_id,
+                    sender_username=account.username or account.instagram_account_id,
+                    message_text=message,
+                    timestamp=datetime.now(),
+                    is_from_account=True
+                )
+            except Exception as e:
+                logger.warning(f"Failed to save rating message: {e}")
+            return message_id
     except Exception as e:
         logger.error(f"Failed to send IG rating request: {e}")
     return None
 
 
 def send_rating_request_whatsapp(conversation_id, waba_id, message):
-    """Send a rating request via WhatsApp"""
+    """Send a rating request via WhatsApp and store locally"""
     try:
         account = WhatsAppBusinessAccount.objects.get(waba_id=waba_id, is_active=True)
         # Format phone number (add + if not present)
@@ -2906,7 +2941,22 @@ def send_rating_request_whatsapp(conversation_id, waba_id, message):
         response = requests.post(url, json=payload, headers=headers)
         if response.ok:
             data = response.json()
-            return data.get('messages', [{}])[0].get('id')
+            message_id = data.get('messages', [{}])[0].get('id')
+            # Store the message locally so it appears in the chat
+            try:
+                WhatsAppMessage.objects.create(
+                    business_account=account,
+                    message_id=message_id or f"rating_{datetime.now().timestamp()}",
+                    from_number=account.display_phone_number or account.phone_number_id,
+                    to_number=to_number,
+                    message_text=message,
+                    message_type='text',
+                    timestamp=datetime.now(),
+                    is_from_business=True
+                )
+            except Exception as e:
+                logger.warning(f"Failed to save rating message: {e}")
+            return message_id
     except Exception as e:
         logger.error(f"Failed to send WA rating request: {e}")
     return None
@@ -2951,8 +3001,8 @@ def process_potential_rating_response(message_text, platform, conversation_id, a
 
             logger.info(f"Rating received: {rating_value}/5 for {platform} conversation {conversation_id}")
 
-            # Optionally send thank you message
-            thank_you_message = f"Thank you for your feedback! You rated our service {rating_value}/5."
+            # Send thank you message in Georgian
+            thank_you_message = f"გმადლობთ თქვენი გამოხმაურებისთვის! თქვენ შეაფასეთ ჩვენი სერვისი {rating_value}/5."
             try:
                 if platform == 'facebook':
                     send_rating_request_facebook(conversation_id, account_id, thank_you_message)
@@ -2962,6 +3012,10 @@ def process_potential_rating_response(message_text, platform, conversation_id, a
                     send_rating_request_whatsapp(conversation_id, account_id, thank_you_message)
             except Exception as e:
                 logger.warning(f"Failed to send thank you message: {e}")
+
+            # Delete the assignment after rating is received (chat becomes available again)
+            assignment.delete()
+            logger.info(f"Assignment deleted after rating received for {platform} conversation {conversation_id}")
 
             return True
 
