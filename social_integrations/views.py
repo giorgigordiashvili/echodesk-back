@@ -5794,13 +5794,30 @@ def tiktok_oauth_start(request):
 
 
 @csrf_exempt
-@require_http_methods(["GET"])
+@require_http_methods(["GET", "POST"])
 def tiktok_oauth_callback(request):
     """
     Handle TikTok OAuth callback.
     Exchanges the authorization code for tokens and creates/updates the account connection.
+
+    Also handles TikTok ping events sent via POST for URL validation.
     """
+    import json
     from .tiktok_utils import exchange_code_for_token, get_user_info
+
+    # Handle POST requests (TikTok sends ping events to validate URL)
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body) if request.body else {}
+            event = data.get('event', '')
+            if event == 'tiktok.ping':
+                logger.info(f"TikTok ping received: {data}")
+                return JsonResponse({'status': 'ok', 'message': 'Ping received'})
+            # Return success for any other POST to pass validation
+            return JsonResponse({'status': 'ok'})
+        except Exception as e:
+            logger.error(f"TikTok callback POST error: {e}")
+            return JsonResponse({'status': 'ok'})
 
     code = request.GET.get('code')
     state = request.GET.get('state', '')
