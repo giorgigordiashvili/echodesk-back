@@ -14,6 +14,7 @@ router.register(r'whatsapp-contacts', views.WhatsAppContactViewSet, basename='wh
 router.register(r'email-messages', views.EmailMessageViewSet, basename='email_messages')
 router.register(r'email-drafts', views.EmailDraftViewSet, basename='email_drafts')
 router.register(r'tiktok-messages', views.TikTokMessageViewSet, basename='tiktok_messages')
+router.register(r'quick-replies', views.QuickReplyViewSet, basename='quick_replies')
 
 # URL patterns for the social integrations app
 urlpatterns = [
@@ -64,6 +65,7 @@ urlpatterns = [
     path('email/action/', views.email_action, name='email_action'),
     path('email/folders/', views.email_folders, name='email_folders'),
     path('email/sync/', views.email_sync, name='email_sync'),
+    path('email/signature/', views.email_signature_view, name='email_signature'),
 
     # TikTok endpoints
     path('tiktok/oauth/start/', views.tiktok_oauth_start, name='tiktok_oauth_start'),

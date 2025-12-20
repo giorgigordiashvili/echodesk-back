@@ -27,7 +27,8 @@ from .models import (
     WhatsAppContact, SocialIntegrationSettings,
     ChatAssignment, ChatRating,
     EmailConnection, EmailMessage, EmailDraft,
-    TikTokCreatorAccount, TikTokMessage
+    TikTokCreatorAccount, TikTokMessage,
+    EmailSignature, QuickReply
 )
 from .serializers import (
     FacebookPageConnectionSerializer, FacebookMessageSerializer, FacebookSendMessageSerializer,
@@ -38,7 +39,8 @@ from .serializers import (
     ChatAssignmentSerializer, ChatAssignmentCreateSerializer, ChatRatingSerializer,
     EmailConnectionSerializer, EmailConnectionCreateSerializer, EmailMessageSerializer,
     EmailSendSerializer, EmailDraftSerializer, EmailMessageActionSerializer, EmailFolderSerializer,
-    TikTokCreatorAccountSerializer, TikTokMessageSerializer, TikTokSendMessageSerializer
+    TikTokCreatorAccountSerializer, TikTokMessageSerializer, TikTokSendMessageSerializer,
+    EmailSignatureSerializer, QuickReplySerializer, QuickReplyUseSerializer, QuickReplyVariablesSerializer
 )
 from .permissions import (
     CanManageSocialConnections, CanViewSocialMessages,
@@ -6242,3 +6244,144 @@ class TikTokMessageViewSet(viewsets.ReadOnlyModelViewSet):
                 result.append(msg_data)
 
         return Response(result)
+
+
+# =============================================================================
+# Email Signature Views
+# =============================================================================
+
+@api_view(['GET', 'PATCH'])
+@permission_classes([IsAuthenticated, CanManageSocialSettings])
+def email_signature_view(request):
+    """
+    GET: Retrieve the email signature settings (singleton per tenant)
+    PATCH: Update the email signature settings
+    """
+    # Get or create the singleton signature
+    signature, created = EmailSignature.objects.get_or_create(
+        defaults={'created_by': request.user}
+    )
+
+    if request.method == 'GET':
+        serializer = EmailSignatureSerializer(signature)
+        return Response(serializer.data)
+
+    elif request.method == 'PATCH':
+        serializer = EmailSignatureSerializer(signature, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+# =============================================================================
+# Quick Reply Views
+# =============================================================================
+
+class QuickReplyViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing quick reply templates"""
+    serializer_class = QuickReplySerializer
+    permission_classes = [IsAuthenticated, IsStaffUser]
+
+    def get_queryset(self):
+        queryset = QuickReply.objects.all().order_by('position', '-use_count', 'title')
+
+        # Filter by platform
+        platform = self.request.query_params.get('platform')
+        if platform:
+            # Match 'all' or the specific platform
+            queryset = queryset.filter(
+                Q(platforms__contains=['all']) | Q(platforms__contains=[platform])
+            )
+
+        # Filter by category
+        category = self.request.query_params.get('category')
+        if category:
+            queryset = queryset.filter(category=category)
+
+        # Search in title or message
+        search = self.request.query_params.get('search')
+        if search:
+            queryset = queryset.filter(
+                Q(title__icontains=search) | Q(message__icontains=search)
+            )
+
+        # Filter by shortcut
+        shortcut = self.request.query_params.get('shortcut')
+        if shortcut:
+            queryset = queryset.filter(shortcut=shortcut)
+
+        return queryset
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
+
+    @action(detail=True, methods=['post'])
+    def use(self, request, pk=None):
+        """
+        Use a quick reply - replaces variables and increments use count.
+        Returns the processed message with variables replaced.
+        """
+        quick_reply = self.get_object()
+
+        # Get variable values from request
+        use_serializer = QuickReplyUseSerializer(data=request.data)
+        use_serializer.is_valid(raise_exception=True)
+        variables = use_serializer.validated_data
+
+        # Add current date/time variables
+        variables['current_date'] = datetime.now().strftime('%Y-%m-%d')
+        variables['current_time'] = datetime.now().strftime('%H:%M')
+
+        # Process the message - replace variables
+        processed_message = quick_reply.message
+        for var_name, var_value in variables.items():
+            if var_value:
+                processed_message = processed_message.replace(f'{{{{{var_name}}}}}', str(var_value))
+
+        # Increment use count
+        quick_reply.use_count = F('use_count') + 1
+        quick_reply.save(update_fields=['use_count'])
+        quick_reply.refresh_from_db()
+
+        return Response({
+            'original_message': quick_reply.message,
+            'processed_message': processed_message,
+            'use_count': quick_reply.use_count
+        })
+
+    @action(detail=False, methods=['get'])
+    def variables(self, request):
+        """Get the list of available variables for quick replies"""
+        variables = QuickReply.get_available_variables()
+        serializer = QuickReplyVariablesSerializer(variables, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'])
+    def categories(self, request):
+        """Get the list of distinct categories"""
+        categories = QuickReply.objects.exclude(
+            category=''
+        ).values_list('category', flat=True).distinct()
+        return Response(list(categories))
+
+    @action(detail=False, methods=['post'])
+    def reorder(self, request):
+        """
+        Reorder quick replies by updating their position values.
+        Expects a list of {id: position} pairs.
+        """
+        items = request.data.get('items', [])
+        if not items:
+            return Response(
+                {'error': 'No items provided'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        for item in items:
+            quick_reply_id = item.get('id')
+            position = item.get('position')
+            if quick_reply_id is not None and position is not None:
+                QuickReply.objects.filter(id=quick_reply_id).update(position=position)
+
+        return Response({'status': 'reordered'})

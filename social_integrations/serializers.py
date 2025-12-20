@@ -6,7 +6,8 @@ from .models import (
     WhatsAppContact, SocialIntegrationSettings,
     ChatAssignment, ChatRating,
     EmailConnection, EmailMessage, EmailDraft,
-    TikTokCreatorAccount, TikTokMessage
+    TikTokCreatorAccount, TikTokMessage,
+    EmailSignature, QuickReply
 )
 
 
@@ -535,3 +536,77 @@ class TikTokStatusSerializer(serializers.Serializer):
 class TikTokOAuthStartSerializer(serializers.Serializer):
     """Serializer for TikTok OAuth start response"""
     oauth_url = serializers.URLField(help_text="TikTok OAuth authorization URL")
+
+
+# =============================================================================
+# Email Signature Serializers
+# =============================================================================
+
+class EmailSignatureSerializer(serializers.ModelSerializer):
+    """Serializer for email signature settings"""
+    created_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = EmailSignature
+        fields = [
+            'id', 'signature_html', 'signature_text',
+            'is_enabled', 'include_on_reply',
+            'created_by', 'created_by_name',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_by', 'created_by_name', 'created_at', 'updated_at']
+
+    def get_created_by_name(self, obj):
+        if obj.created_by:
+            return obj.created_by.get_full_name() or obj.created_by.email
+        return None
+
+
+# =============================================================================
+# Quick Reply Serializers
+# =============================================================================
+
+class QuickReplySerializer(serializers.ModelSerializer):
+    """Serializer for quick reply templates"""
+    created_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = QuickReply
+        fields = [
+            'id', 'title', 'message', 'platforms', 'shortcut',
+            'category', 'use_count', 'position',
+            'created_by', 'created_by_name',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'use_count', 'created_by', 'created_by_name', 'created_at', 'updated_at']
+
+    def get_created_by_name(self, obj):
+        if obj.created_by:
+            return obj.created_by.get_full_name() or obj.created_by.email
+        return None
+
+    def validate_platforms(self, value):
+        """Validate platforms list"""
+        valid_platforms = {'all', 'facebook', 'instagram', 'whatsapp', 'email', 'tiktok'}
+        if not value:
+            return ['all']  # Default to all platforms
+        for platform in value:
+            if platform not in valid_platforms:
+                raise serializers.ValidationError(
+                    f"Invalid platform: {platform}. Valid options are: {', '.join(valid_platforms)}"
+                )
+        return value
+
+
+class QuickReplyUseSerializer(serializers.Serializer):
+    """Serializer for using a quick reply (replaces variables)"""
+    customer_name = serializers.CharField(required=False, allow_blank=True, help_text="Customer display name")
+    order_number = serializers.CharField(required=False, allow_blank=True, help_text="Most recent order number")
+    agent_name = serializers.CharField(required=False, allow_blank=True, help_text="Current agent name")
+    company_name = serializers.CharField(required=False, allow_blank=True, help_text="Company/business name")
+
+
+class QuickReplyVariablesSerializer(serializers.Serializer):
+    """Serializer for available quick reply variables"""
+    name = serializers.CharField()
+    description = serializers.CharField()

@@ -1095,3 +1095,137 @@ class TikTokMessage(models.Model):
         elif self.message_type:
             return f"TikTok DM {direction} @{sender} - [{self.message_type}]"
         return f"TikTok DM {direction} @{sender}"
+
+
+class EmailSignature(models.Model):
+    """Stores email signature configuration for a tenant - singleton per tenant"""
+
+    # Signature content
+    signature_html = models.TextField(
+        blank=True,
+        help_text="HTML signature content"
+    )
+    signature_text = models.TextField(
+        blank=True,
+        help_text="Plain text signature content (fallback for non-HTML clients)"
+    )
+
+    # Settings
+    is_enabled = models.BooleanField(
+        default=True,
+        help_text="Whether to append signature to outgoing emails"
+    )
+    include_on_reply = models.BooleanField(
+        default=True,
+        help_text="Whether to include signature when replying to emails"
+    )
+
+    # Timestamps and ownership
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_email_signatures',
+        help_text="User who created/last updated the signature"
+    )
+
+    class Meta:
+        verbose_name = "Email Signature"
+        verbose_name_plural = "Email Signatures"
+
+    def __str__(self):
+        status = "enabled" if self.is_enabled else "disabled"
+        return f"Email Signature ({status})"
+
+
+class QuickReply(models.Model):
+    """
+    Stores quick reply messages that can be used across all messaging platforms.
+    Supports variable placeholders like {{customer_name}}, {{order_number}}, etc.
+    """
+
+    PLATFORM_CHOICES = [
+        ('all', 'All Platforms'),
+        ('facebook', 'Facebook'),
+        ('instagram', 'Instagram'),
+        ('whatsapp', 'WhatsApp'),
+        ('email', 'Email'),
+        ('tiktok', 'TikTok'),
+    ]
+
+    # Content
+    title = models.CharField(
+        max_length=100,
+        help_text="Short title for identifying the quick reply"
+    )
+    message = models.TextField(
+        help_text="Message content with optional variables like {{customer_name}}, {{order_number}}"
+    )
+
+    # Platform targeting (empty list means all platforms)
+    platforms = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="List of platforms this quick reply is available on (empty = all platforms)"
+    )
+
+    # Optional metadata
+    shortcut = models.CharField(
+        max_length=20,
+        blank=True,
+        help_text="Optional shortcut command (e.g., /thanks, /hello)"
+    )
+    category = models.CharField(
+        max_length=50,
+        blank=True,
+        help_text="Optional category for grouping (e.g., 'Greetings', 'Support', 'Orders')"
+    )
+
+    # Usage tracking
+    use_count = models.IntegerField(
+        default=0,
+        help_text="Number of times this quick reply has been used"
+    )
+
+    # Ordering
+    position = models.IntegerField(
+        default=0,
+        help_text="Order position for display (lower = higher priority)"
+    )
+
+    # Ownership
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_quick_replies',
+        help_text="User who created this quick reply"
+    )
+
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['position', '-use_count', 'title']
+        verbose_name = "Quick Reply"
+        verbose_name_plural = "Quick Replies"
+
+    def __str__(self):
+        return f"{self.title}"
+
+    @staticmethod
+    def get_available_variables():
+        """Returns list of available template variables with descriptions"""
+        return [
+            {'name': 'customer_name', 'description': 'Customer display name'},
+            {'name': 'order_number', 'description': 'Most recent order number'},
+            {'name': 'agent_name', 'description': 'Current agent/staff name'},
+            {'name': 'company_name', 'description': 'Company/business name'},
+            {'name': 'current_date', 'description': 'Current date (YYYY-MM-DD)'},
+            {'name': 'current_time', 'description': 'Current time (HH:MM)'},
+        ]

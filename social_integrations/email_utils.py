@@ -283,11 +283,40 @@ def send_email_smtp(connection, to_emails: List[str], cc_emails: List[str] = Non
     Returns:
         Tuple of (message_id, saved_EmailMessage)
     """
-    from .models import EmailMessage
+    from .models import EmailMessage, EmailSignature
 
     cc_emails = cc_emails or []
     bcc_emails = bcc_emails or []
     attachments = attachments or []
+
+    # Check if we should append email signature
+    is_reply = reply_to_message_id is not None
+    try:
+        signature = EmailSignature.objects.first()
+        if signature and signature.is_enabled:
+            # Check if signature should be included (always for new emails, conditional for replies)
+            should_include = not is_reply or signature.include_on_reply
+            if should_include:
+                # Append signature to HTML body
+                if body_html:
+                    if signature.signature_html:
+                        body_html = f"{body_html}<br><br>{signature.signature_html}"
+                    elif signature.signature_text:
+                        # Fallback to plain text signature in HTML
+                        sig_html = signature.signature_text.replace('\n', '<br>')
+                        body_html = f"{body_html}<br><br>{sig_html}"
+                # Append signature to plain text body
+                if body_text:
+                    if signature.signature_text:
+                        body_text = f"{body_text}\n\n{signature.signature_text}"
+                    elif signature.signature_html:
+                        # Simple HTML to text fallback - strip tags
+                        import re
+                        sig_text = re.sub(r'<[^>]+>', '', signature.signature_html)
+                        sig_text = sig_text.replace('&nbsp;', ' ').strip()
+                        body_text = f"{body_text}\n\n{sig_text}"
+    except Exception as e:
+        logger.warning(f"Failed to append email signature: {e}")
 
     # Create message
     if body_html and body_text:
