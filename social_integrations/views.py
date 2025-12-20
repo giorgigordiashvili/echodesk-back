@@ -3140,6 +3140,102 @@ def rating_statistics(request):
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
+def user_chat_sessions(request, user_id):
+    """
+    Get detailed chat sessions for a specific user.
+    Superadmin only - allows investigating chat history.
+    """
+    # Only superadmins can view this
+    if not request.user.is_staff:
+        return Response(
+            {'error': 'Only superadmins can view user chat sessions'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    # Get date range from query params
+    start_date_str = request.query_params.get('start_date')
+    end_date_str = request.query_params.get('end_date')
+
+    # Default to current month
+    today = timezone.now().date()
+    if start_date_str:
+        try:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+        except ValueError:
+            start_date = today.replace(day=1)
+    else:
+        start_date = today.replace(day=1)
+
+    if end_date_str:
+        try:
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+        except ValueError:
+            end_date = today
+    else:
+        end_date = today
+
+    # Get ratings for this user
+    ratings = ChatRating.objects.filter(
+        rated_user_id=user_id,
+        created_at__date__gte=start_date,
+        created_at__date__lte=end_date,
+    ).order_by('-created_at')
+
+    sessions = []
+    for rating in ratings:
+        # Try to get customer info from the conversation
+        customer_name = None
+        customer_identifier = rating.conversation_id
+
+        if rating.platform == 'facebook':
+            # Try to get sender name from messages
+            msg = FacebookMessage.objects.filter(sender_id=rating.conversation_id).first()
+            if msg and msg.sender_name:
+                customer_name = msg.sender_name
+        elif rating.platform == 'instagram':
+            msg = InstagramMessage.objects.filter(sender_id=rating.conversation_id).first()
+            if msg and msg.sender_username:
+                customer_name = msg.sender_username
+        elif rating.platform == 'whatsapp':
+            msg = WhatsAppMessage.objects.filter(from_number=rating.conversation_id).first()
+            if msg and msg.contact_name:
+                customer_name = msg.contact_name
+
+        sessions.append({
+            'id': rating.id,
+            'platform': rating.platform,
+            'conversation_id': rating.conversation_id,
+            'account_id': rating.account_id,
+            'customer_name': customer_name or customer_identifier,
+            'rating': rating.rating if rating.rating > 0 else None,
+            'session_started_at': rating.session_started_at.isoformat() if rating.session_started_at else None,
+            'session_ended_at': rating.session_ended_at.isoformat() if rating.session_ended_at else None,
+            'created_at': rating.created_at.isoformat(),
+        })
+
+    # Get user info
+    from users.models import User
+    try:
+        user = User.objects.get(id=user_id)
+        user_info = {
+            'id': user.id,
+            'email': user.email,
+            'name': f"{user.first_name or ''} {user.last_name or ''}".strip() or user.email,
+        }
+    except User.DoesNotExist:
+        user_info = {'id': user_id, 'email': 'Unknown', 'name': 'Unknown User'}
+
+    return Response({
+        'user': user_info,
+        'start_date': start_date.isoformat(),
+        'end_date': end_date.isoformat(),
+        'sessions': sessions,
+        'total_sessions': len(sessions),
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def unread_messages_count(request):
     """
     Get the total count of unread messages across all social platforms.
