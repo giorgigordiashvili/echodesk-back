@@ -2657,15 +2657,21 @@ def assign_chat(request):
     ).first()
 
     if existing:
-        if existing.assigned_user == request.user:
+        # If assignment is 'completed' (waiting for rating), delete it and allow new assignment
+        # Rating is optional - users can start new sessions without waiting for rating
+        if existing.status == 'completed':
+            existing.delete()
+            logger.info(f"Deleted completed assignment for new session: {platform}/{conversation_id}")
+        elif existing.assigned_user == request.user:
             return Response({
                 'message': 'Already assigned to you',
                 'assignment': ChatAssignmentSerializer(existing).data
             })
-        return Response(
-            {'error': 'Chat is already assigned to another user'},
-            status=status.HTTP_400_BAD_REQUEST
-        )
+        else:
+            return Response(
+                {'error': 'Chat is already assigned to another user'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
     # Create assignment and automatically start session
     assignment = ChatAssignment.objects.create(
