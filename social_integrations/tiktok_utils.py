@@ -54,11 +54,23 @@ def get_oauth_url(state: str) -> str:
     """
     config = get_tiktok_config()
 
-    # Scopes for messaging access
-    # user.info.basic - Basic user info
-    # user.info.profile - Profile info including avatar
-    # Messaging scopes depend on TikTok's current API offerings
-    scopes = "user.info.basic,user.info.profile"
+    # Scopes for TikTok Business Account messaging
+    # User info scopes
+    # user.info.basic - Basic user info (open_id, avatar, display_name)
+    # user.info.username - Username access
+    # user.info.profile - Profile info including bio, deep links
+    # Messaging scopes (requires TikTok Business Account)
+    # message.list.read - Read direct messages
+    # message.list.send - Send direct messages
+    # message.list.manage - Manage messages (delete, etc.)
+    scopes = ",".join([
+        "user.info.basic",
+        "user.info.username",
+        "user.info.profile",
+        "message.list.read",
+        "message.list.send",
+        "message.list.manage",
+    ])
 
     params = {
         'client_key': config['client_id'],
