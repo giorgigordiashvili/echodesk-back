@@ -5675,7 +5675,7 @@ class EmailMessageViewSet(viewsets.ReadOnlyModelViewSet):
     def threads(self, request):
         """
         Get email threads (grouped conversations).
-        Returns the latest message from each unique thread.
+        Returns the latest message from each unique thread with customer info.
         """
         # Get distinct thread_ids with their latest message
         threads = EmailMessage.objects.filter(
@@ -5699,6 +5699,37 @@ class EmailMessageViewSet(viewsets.ReadOnlyModelViewSet):
                 msg_data = EmailMessageSerializer(latest_msg).data
                 msg_data['message_count'] = thread['message_count']
                 msg_data['unread_count'] = thread['unread_count']
+
+                # Find customer email (the external party, not the business)
+                # First, try to find a message from customer (is_from_business=False)
+                customer_msg = EmailMessage.objects.filter(
+                    thread_id=thread['thread_id'],
+                    is_from_business=False,
+                    is_deleted=False
+                ).first()
+
+                if customer_msg:
+                    msg_data['customer_email'] = customer_msg.from_email
+                    msg_data['customer_name'] = customer_msg.from_name or customer_msg.from_email
+                else:
+                    # All messages are from business, get recipient from our sent messages
+                    business_msg = EmailMessage.objects.filter(
+                        thread_id=thread['thread_id'],
+                        is_from_business=True,
+                        is_deleted=False
+                    ).first()
+                    if business_msg and business_msg.to_emails:
+                        first_recipient = business_msg.to_emails[0]
+                        if isinstance(first_recipient, dict):
+                            msg_data['customer_email'] = first_recipient.get('email', '')
+                            msg_data['customer_name'] = first_recipient.get('name') or first_recipient.get('email', '')
+                        else:
+                            msg_data['customer_email'] = first_recipient
+                            msg_data['customer_name'] = first_recipient
+                    else:
+                        msg_data['customer_email'] = ''
+                        msg_data['customer_name'] = 'Unknown'
+
                 result.append(msg_data)
 
         return Response(result)
