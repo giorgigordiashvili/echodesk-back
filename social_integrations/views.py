@@ -5609,21 +5609,13 @@ def email_sync(request):
                 'error': 'No active email connection found'
             }, status=status.HTTP_404_NOT_FOUND)
 
-        # Perform sync
-        result = sync_imap_messages(connection)
+        # Perform sync - returns number of new messages synced
+        new_messages = sync_imap_messages(connection)
 
-        if result['success']:
-            return Response({
-                'status': 'success',
-                'new_messages': result.get('new_messages', 0),
-                'updated_messages': result.get('updated_messages', 0),
-                'total_processed': result.get('total_processed', 0)
-            })
-        else:
-            return Response({
-                'error': 'Sync failed',
-                'details': result.get('error', 'Unknown error')
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({
+            'status': 'success',
+            'new_messages': new_messages
+        })
 
     except Exception as e:
         logger.error(f"Failed to sync email: {e}")
