@@ -5476,7 +5476,7 @@ def email_send(request):
             body_html=data.get('body_html', ''),
             cc_emails=data.get('cc_emails', []),
             bcc_emails=data.get('bcc_emails', []),
-            reply_to_message=reply_to_message
+            reply_to_message_id=reply_to_message.message_id if reply_to_message else None
         )
 
         if result['success']:
