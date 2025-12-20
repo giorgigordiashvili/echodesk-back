@@ -4,7 +4,7 @@ from django.contrib.auth.models import Group, Permission
 from django.contrib.auth.password_validation import validate_password
 from django.contrib.contenttypes.models import ContentType
 from django.utils import timezone
-from .models import Department, TenantGroup, Notification
+from .models import Department, TenantGroup, Notification, UserOnlineStatus, TeamChatConversation, TeamChatMessage
 from tenants.feature_models import Feature
 
 User = get_user_model()
@@ -440,3 +440,172 @@ class NotificationSerializer(serializers.ModelSerializer):
         """Get human-readable time ago"""
         from django.utils.timesince import timesince
         return timesince(obj.created_at)
+
+
+# Team Chat Serializers
+
+class UserOnlineStatusSerializer(serializers.ModelSerializer):
+    """Serializer for user online status"""
+    class Meta:
+        model = UserOnlineStatus
+        fields = ['is_online', 'last_seen']
+
+
+class TeamChatUserSerializer(serializers.ModelSerializer):
+    """Lightweight user serializer for team chat"""
+    full_name = serializers.SerializerMethodField()
+    is_online = serializers.SerializerMethodField()
+    last_seen = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = ['id', 'email', 'first_name', 'last_name', 'full_name', 'is_online', 'last_seen']
+
+    def get_full_name(self, obj):
+        return obj.get_full_name()
+
+    def get_is_online(self, obj):
+        try:
+            return obj.online_status.is_online
+        except UserOnlineStatus.DoesNotExist:
+            return False
+
+    def get_last_seen(self, obj):
+        try:
+            return obj.online_status.last_seen
+        except UserOnlineStatus.DoesNotExist:
+            return None
+
+
+class TeamChatMessageSerializer(serializers.ModelSerializer):
+    """Serializer for team chat messages"""
+    sender = TeamChatUserSerializer(read_only=True)
+    sender_id = serializers.IntegerField(write_only=True, required=False)
+    file_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TeamChatMessage
+        fields = [
+            'id', 'conversation', 'sender', 'sender_id',
+            'message_type', 'text', 'file', 'file_url', 'file_name',
+            'file_size', 'file_mime_type', 'voice_duration',
+            'is_read', 'read_at', 'created_at'
+        ]
+        read_only_fields = ['id', 'sender', 'created_at']
+
+    def get_file_url(self, obj):
+        if obj.file:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.file.url)
+            return obj.file.url
+        return None
+
+    def create(self, validated_data):
+        # Remove sender_id if present, sender is set from request.user
+        validated_data.pop('sender_id', None)
+        validated_data['sender'] = self.context['request'].user
+        return super().create(validated_data)
+
+
+class TeamChatConversationSerializer(serializers.ModelSerializer):
+    """Serializer for team chat conversations"""
+    participants = TeamChatUserSerializer(many=True, read_only=True)
+    last_message = serializers.SerializerMethodField()
+    unread_count = serializers.SerializerMethodField()
+    other_participant = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TeamChatConversation
+        fields = [
+            'id', 'participants', 'other_participant',
+            'last_message', 'unread_count',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def get_last_message(self, obj):
+        last_msg = obj.get_last_message()
+        if last_msg:
+            return TeamChatMessageSerializer(last_msg, context=self.context).data
+        return None
+
+    def get_unread_count(self, obj):
+        user = self.context.get('request').user
+        return obj.get_unread_count(user)
+
+    def get_other_participant(self, obj):
+        user = self.context.get('request').user
+        other = obj.get_other_participant(user)
+        if other:
+            return TeamChatUserSerializer(other).data
+        return None
+
+
+class TeamChatConversationDetailSerializer(TeamChatConversationSerializer):
+    """Detailed serializer including messages"""
+    messages = serializers.SerializerMethodField()
+
+    class Meta(TeamChatConversationSerializer.Meta):
+        fields = TeamChatConversationSerializer.Meta.fields + ['messages']
+
+    def get_messages(self, obj):
+        # Get messages with pagination
+        messages = obj.messages.all()[:50]  # Default last 50 messages
+        return TeamChatMessageSerializer(messages, many=True, context=self.context).data
+
+
+class TeamChatCreateMessageSerializer(serializers.Serializer):
+    """Serializer for creating a new message"""
+    recipient_id = serializers.IntegerField(required=False)
+    conversation_id = serializers.IntegerField(required=False)
+    message_type = serializers.ChoiceField(
+        choices=TeamChatMessage.MESSAGE_TYPE_CHOICES,
+        default='text'
+    )
+    text = serializers.CharField(required=False, allow_blank=True)
+    file = serializers.FileField(required=False)
+    voice_duration = serializers.IntegerField(required=False)
+
+    def validate(self, attrs):
+        if not attrs.get('recipient_id') and not attrs.get('conversation_id'):
+            raise serializers.ValidationError(
+                "Either recipient_id or conversation_id is required"
+            )
+
+        message_type = attrs.get('message_type', 'text')
+        if message_type == 'text' and not attrs.get('text'):
+            raise serializers.ValidationError("Text is required for text messages")
+
+        if message_type in ['file', 'image', 'voice'] and not attrs.get('file'):
+            raise serializers.ValidationError(f"File is required for {message_type} messages")
+
+        return attrs
+
+
+class TeamChatFileUploadSerializer(serializers.Serializer):
+    """Serializer for file uploads"""
+    file = serializers.FileField()
+    message_type = serializers.ChoiceField(
+        choices=['image', 'file', 'voice'],
+        default='file'
+    )
+    voice_duration = serializers.IntegerField(required=False)
+
+    def validate_file(self, value):
+        # File size limits
+        max_sizes = {
+            'image': 10 * 1024 * 1024,  # 10MB
+            'file': 25 * 1024 * 1024,   # 25MB
+            'voice': 5 * 1024 * 1024,   # 5MB
+        }
+
+        message_type = self.initial_data.get('message_type', 'file')
+        max_size = max_sizes.get(message_type, max_sizes['file'])
+
+        if value.size > max_size:
+            raise serializers.ValidationError(
+                f"File size exceeds maximum allowed ({max_size // (1024 * 1024)}MB)"
+            )
+
+        return value

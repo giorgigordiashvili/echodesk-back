@@ -554,3 +554,133 @@ class Notification(models.Model):
             self.is_read = True
             self.read_at = timezone.now()
             self.save(update_fields=['is_read', 'read_at'])
+
+
+class UserOnlineStatus(models.Model):
+    """
+    Tracks user online/offline status for team chat
+    """
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name='online_status'
+    )
+    is_online = models.BooleanField(default=False)
+    last_seen = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'User Online Status'
+        verbose_name_plural = 'User Online Statuses'
+
+    def __str__(self):
+        status = 'online' if self.is_online else 'offline'
+        return f"{self.user.email} - {status}"
+
+
+class TeamChatConversation(models.Model):
+    """
+    Represents a 1-on-1 conversation between two team members.
+    Uses ManyToMany for flexibility (could support group chats in future).
+    """
+    participants = models.ManyToManyField(
+        User,
+        related_name='team_conversations'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-updated_at']
+        verbose_name = 'Team Chat Conversation'
+        verbose_name_plural = 'Team Chat Conversations'
+
+    def __str__(self):
+        participant_emails = list(self.participants.values_list('email', flat=True)[:3])
+        return f"Chat: {', '.join(participant_emails)}"
+
+    def get_other_participant(self, user):
+        """Get the other participant in a 1-on-1 conversation"""
+        return self.participants.exclude(id=user.id).first()
+
+    def get_last_message(self):
+        """Get the most recent message in this conversation"""
+        return self.messages.order_by('-created_at').first()
+
+    def get_unread_count(self, user):
+        """Get count of unread messages for a user"""
+        return self.messages.filter(is_read=False).exclude(sender=user).count()
+
+
+class TeamChatMessage(models.Model):
+    """
+    Individual message in a team chat conversation
+    """
+    MESSAGE_TYPE_CHOICES = [
+        ('text', 'Text'),
+        ('image', 'Image'),
+        ('file', 'File'),
+        ('voice', 'Voice Recording'),
+    ]
+
+    conversation = models.ForeignKey(
+        TeamChatConversation,
+        on_delete=models.CASCADE,
+        related_name='messages'
+    )
+    sender = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='sent_team_messages'
+    )
+
+    # Content
+    message_type = models.CharField(
+        max_length=20,
+        choices=MESSAGE_TYPE_CHOICES,
+        default='text'
+    )
+    text = models.TextField(blank=True)
+
+    # File attachment
+    file = models.FileField(
+        upload_to='team_chat/%Y/%m/',
+        null=True,
+        blank=True
+    )
+    file_name = models.CharField(max_length=255, blank=True)
+    file_size = models.PositiveIntegerField(null=True, blank=True)
+    file_mime_type = models.CharField(max_length=100, blank=True)
+
+    # Voice recording duration
+    voice_duration = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text='Voice recording duration in seconds'
+    )
+
+    # Status
+    is_read = models.BooleanField(default=False)
+    read_at = models.DateTimeField(null=True, blank=True)
+
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
+        verbose_name = 'Team Chat Message'
+        verbose_name_plural = 'Team Chat Messages'
+        indexes = [
+            models.Index(fields=['conversation', 'created_at']),
+            models.Index(fields=['sender', 'created_at']),
+        ]
+
+    def __str__(self):
+        preview = self.text[:50] if self.text else f"[{self.message_type}]"
+        return f"{self.sender.email}: {preview}"
+
+    def mark_as_read(self):
+        """Mark this message as read"""
+        if not self.is_read:
+            self.is_read = True
+            self.read_at = timezone.now()
+            self.save(update_fields=['is_read', 'read_at'])

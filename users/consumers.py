@@ -9,7 +9,7 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
 from django.contrib.auth.models import AnonymousUser
 from tenant_schemas.utils import schema_context
-from .models import Notification
+from .models import Notification, UserOnlineStatus, TeamChatConversation, TeamChatMessage
 
 
 class NotificationConsumer(AsyncWebsocketConsumer):
@@ -745,5 +745,461 @@ async def broadcast_ticket_deleted(tenant_schema, board_id, ticket_id, deleted_b
             'deleted_by_id': deleted_by.id if deleted_by else None,
             'deleted_by_name': deleted_by.get_full_name() or deleted_by.email if deleted_by else 'System',
             'exclude_channel': exclude_channel
+        }
+    )
+
+
+class TeamChatConsumer(AsyncWebsocketConsumer):
+    """
+    WebSocket consumer for real-time team chat messaging.
+
+    Handles:
+    - User online/offline status
+    - Real-time messaging between team members
+    - Typing indicators
+    - Read receipts
+
+    WebSocket URL: /ws/team-chat/{tenant_schema}/?token={auth_token}
+
+    Client -> Server messages:
+    - {"type": "message", "recipient_id": 123, "text": "Hello", "message_type": "text"}
+    - {"type": "typing", "recipient_id": 123, "is_typing": true}
+    - {"type": "read", "message_ids": [1, 2, 3]}
+
+    Server -> Client messages:
+    - {"type": "new_message", "message": {...}}
+    - {"type": "typing_indicator", "user_id": 123, "is_typing": true}
+    - {"type": "read_receipt", "message_ids": [...], "read_by": 123}
+    - {"type": "user_online", "user_id": 123, "is_online": true}
+    """
+
+    async def connect(self):
+        self.tenant_schema = self.scope['url_route']['kwargs']['tenant_schema']
+        self.user = self.scope.get('user', AnonymousUser())
+
+        print(f"[TeamChatWS] Connection attempt - User: {self.user}, Tenant: {self.tenant_schema}")
+
+        # Only allow authenticated users
+        if self.user.is_anonymous:
+            print(f"[TeamChatWS] Rejecting connection - User not authenticated")
+            await self.accept()
+            await self.send(text_data=json.dumps({
+                'type': 'error',
+                'message': 'Authentication required',
+                'code': 'UNAUTHENTICATED'
+            }))
+            await self.close(code=4001)
+            return
+
+        # Join personal channel group for receiving messages
+        self.personal_group_name = f'team_chat_{self.tenant_schema}_{self.user.id}'
+
+        # Join tenant-wide group for online status updates
+        self.tenant_group_name = f'team_chat_presence_{self.tenant_schema}'
+
+        await self.channel_layer.group_add(
+            self.personal_group_name,
+            self.channel_name
+        )
+
+        await self.channel_layer.group_add(
+            self.tenant_group_name,
+            self.channel_name
+        )
+
+        await self.accept()
+
+        # Update online status
+        await self.set_online_status(True)
+
+        # Notify other users that this user is online
+        await self.channel_layer.group_send(
+            self.tenant_group_name,
+            {
+                'type': 'user_status_changed',
+                'user_id': self.user.id,
+                'is_online': True,
+                'user_name': self.user.get_full_name() or self.user.email,
+                'exclude_channel': self.channel_name
+            }
+        )
+
+        # Get online users list
+        online_users = await self.get_online_users()
+
+        # Send connection confirmation
+        await self.send(text_data=json.dumps({
+            'type': 'connection',
+            'status': 'connected',
+            'tenant': self.tenant_schema,
+            'user_id': self.user.id,
+            'online_users': online_users
+        }))
+
+        print(f"[TeamChatWS] Connected successfully for user {self.user.email} in tenant {self.tenant_schema}")
+
+    async def disconnect(self, close_code):
+        if hasattr(self, 'personal_group_name'):
+            # Update online status
+            await self.set_online_status(False)
+
+            # Notify other users that this user is offline
+            if hasattr(self, 'tenant_group_name'):
+                await self.channel_layer.group_send(
+                    self.tenant_group_name,
+                    {
+                        'type': 'user_status_changed',
+                        'user_id': self.user.id,
+                        'is_online': False,
+                        'user_name': self.user.get_full_name() or self.user.email
+                    }
+                )
+
+            # Leave groups
+            await self.channel_layer.group_discard(
+                self.personal_group_name,
+                self.channel_name
+            )
+
+            if hasattr(self, 'tenant_group_name'):
+                await self.channel_layer.group_discard(
+                    self.tenant_group_name,
+                    self.channel_name
+                )
+
+            print(f"[TeamChatWS] Disconnected user {self.user.id if not self.user.is_anonymous else 'anonymous'}")
+
+    async def receive(self, text_data):
+        """Handle incoming WebSocket messages from client"""
+        try:
+            data = json.loads(text_data)
+            message_type = data.get('type')
+
+            if message_type == 'ping':
+                await self.send(text_data=json.dumps({
+                    'type': 'pong',
+                    'timestamp': data.get('timestamp')
+                }))
+
+            elif message_type == 'message':
+                # Send a new message
+                await self.handle_send_message(data)
+
+            elif message_type == 'typing':
+                # Handle typing indicator
+                await self.handle_typing(data)
+
+            elif message_type == 'read':
+                # Handle read receipts
+                await self.handle_read_receipt(data)
+
+            elif message_type == 'get_online_users':
+                # Get list of online users
+                online_users = await self.get_online_users()
+                await self.send(text_data=json.dumps({
+                    'type': 'online_users',
+                    'users': online_users
+                }))
+
+        except json.JSONDecodeError:
+            await self.send(text_data=json.dumps({
+                'type': 'error',
+                'message': 'Invalid JSON format'
+            }))
+        except Exception as e:
+            print(f"[TeamChatWS] Error handling message: {str(e)}")
+            await self.send(text_data=json.dumps({
+                'type': 'error',
+                'message': 'Internal server error'
+            }))
+
+    async def handle_send_message(self, data):
+        """Handle sending a new message"""
+        recipient_id = data.get('recipient_id')
+        conversation_id = data.get('conversation_id')
+        text = data.get('text', '')
+        message_type = data.get('message_type', 'text')
+
+        if not recipient_id and not conversation_id:
+            await self.send(text_data=json.dumps({
+                'type': 'error',
+                'message': 'recipient_id or conversation_id required'
+            }))
+            return
+
+        # Create message in database
+        message_data = await self.create_message(
+            recipient_id=recipient_id,
+            conversation_id=conversation_id,
+            text=text,
+            message_type=message_type
+        )
+
+        if message_data:
+            # Send to recipient
+            recipient_group = f"team_chat_{self.tenant_schema}_{message_data['recipient_id']}"
+
+            await self.channel_layer.group_send(
+                recipient_group,
+                {
+                    'type': 'chat_message',
+                    'message': message_data['message'],
+                    'conversation_id': message_data['conversation_id']
+                }
+            )
+
+            # Confirm to sender
+            await self.send(text_data=json.dumps({
+                'type': 'message_sent',
+                'message': message_data['message'],
+                'conversation_id': message_data['conversation_id']
+            }))
+
+    async def handle_typing(self, data):
+        """Handle typing indicator"""
+        recipient_id = data.get('recipient_id')
+        is_typing = data.get('is_typing', False)
+
+        if recipient_id:
+            recipient_group = f"team_chat_{self.tenant_schema}_{recipient_id}"
+
+            await self.channel_layer.group_send(
+                recipient_group,
+                {
+                    'type': 'typing_indicator',
+                    'user_id': self.user.id,
+                    'user_name': self.user.get_full_name() or self.user.email,
+                    'is_typing': is_typing
+                }
+            )
+
+    async def handle_read_receipt(self, data):
+        """Handle read receipt"""
+        message_ids = data.get('message_ids', [])
+        conversation_id = data.get('conversation_id')
+
+        if message_ids:
+            # Mark messages as read in database
+            await self.mark_messages_read(message_ids)
+
+            # Get the other participant to notify them
+            other_user_id = await self.get_conversation_other_participant(conversation_id)
+
+            if other_user_id:
+                other_user_group = f"team_chat_{self.tenant_schema}_{other_user_id}"
+
+                await self.channel_layer.group_send(
+                    other_user_group,
+                    {
+                        'type': 'read_receipt',
+                        'message_ids': message_ids,
+                        'read_by': self.user.id,
+                        'conversation_id': conversation_id
+                    }
+                )
+
+    # Event handlers for messages from channel layer
+    async def chat_message(self, event):
+        """Send new message to WebSocket"""
+        await self.send(text_data=json.dumps({
+            'type': 'new_message',
+            'message': event['message'],
+            'conversation_id': event['conversation_id']
+        }))
+
+    async def typing_indicator(self, event):
+        """Send typing indicator to WebSocket"""
+        await self.send(text_data=json.dumps({
+            'type': 'typing_indicator',
+            'user_id': event['user_id'],
+            'user_name': event['user_name'],
+            'is_typing': event['is_typing']
+        }))
+
+    async def read_receipt(self, event):
+        """Send read receipt to WebSocket"""
+        await self.send(text_data=json.dumps({
+            'type': 'read_receipt',
+            'message_ids': event['message_ids'],
+            'read_by': event['read_by'],
+            'conversation_id': event['conversation_id']
+        }))
+
+    async def user_status_changed(self, event):
+        """Send user online status change to WebSocket"""
+        if event.get('exclude_channel') == self.channel_name:
+            return
+
+        await self.send(text_data=json.dumps({
+            'type': 'user_online',
+            'user_id': event['user_id'],
+            'is_online': event['is_online'],
+            'user_name': event['user_name']
+        }))
+
+    # Database operations
+    @database_sync_to_async
+    def set_online_status(self, is_online):
+        """Update user's online status"""
+        try:
+            with schema_context(self.tenant_schema):
+                status, created = UserOnlineStatus.objects.get_or_create(
+                    user=self.user,
+                    defaults={'is_online': is_online}
+                )
+                if not created:
+                    status.is_online = is_online
+                    status.save(update_fields=['is_online', 'last_seen'])
+                return True
+        except Exception as e:
+            print(f"[TeamChatWS] Error setting online status: {e}")
+            return False
+
+    @database_sync_to_async
+    def get_online_users(self):
+        """Get list of online users"""
+        try:
+            with schema_context(self.tenant_schema):
+                online_statuses = UserOnlineStatus.objects.filter(
+                    is_online=True
+                ).exclude(user=self.user).select_related('user')
+
+                return [
+                    {
+                        'user_id': status.user.id,
+                        'user_name': status.user.get_full_name() or status.user.email,
+                        'email': status.user.email
+                    }
+                    for status in online_statuses
+                ]
+        except Exception as e:
+            print(f"[TeamChatWS] Error getting online users: {e}")
+            return []
+
+    @database_sync_to_async
+    def create_message(self, recipient_id=None, conversation_id=None, text='', message_type='text'):
+        """Create a new message in the database"""
+        try:
+            with schema_context(self.tenant_schema):
+                from django.contrib.auth import get_user_model
+                User = get_user_model()
+
+                # Get or create conversation
+                if conversation_id:
+                    conversation = TeamChatConversation.objects.get(
+                        id=conversation_id,
+                        participants=self.user
+                    )
+                    recipient = conversation.get_other_participant(self.user)
+                else:
+                    recipient = User.objects.get(id=recipient_id)
+
+                    # Find existing conversation
+                    conversation = TeamChatConversation.objects.filter(
+                        participants=self.user
+                    ).filter(
+                        participants=recipient
+                    ).first()
+
+                    if not conversation:
+                        conversation = TeamChatConversation.objects.create()
+                        conversation.participants.add(self.user, recipient)
+
+                # Create message
+                message = TeamChatMessage.objects.create(
+                    conversation=conversation,
+                    sender=self.user,
+                    message_type=message_type,
+                    text=text
+                )
+
+                # Update conversation timestamp
+                conversation.save()
+
+                # Serialize message
+                message_data = {
+                    'id': message.id,
+                    'conversation_id': conversation.id,
+                    'sender': {
+                        'id': self.user.id,
+                        'email': self.user.email,
+                        'full_name': self.user.get_full_name()
+                    },
+                    'message_type': message.message_type,
+                    'text': message.text,
+                    'is_read': message.is_read,
+                    'created_at': message.created_at.isoformat()
+                }
+
+                return {
+                    'message': message_data,
+                    'conversation_id': conversation.id,
+                    'recipient_id': recipient.id
+                }
+
+        except Exception as e:
+            print(f"[TeamChatWS] Error creating message: {e}")
+            return None
+
+    @database_sync_to_async
+    def mark_messages_read(self, message_ids):
+        """Mark messages as read"""
+        try:
+            with schema_context(self.tenant_schema):
+                from django.utils import timezone
+                TeamChatMessage.objects.filter(
+                    id__in=message_ids,
+                    conversation__participants=self.user,
+                    is_read=False
+                ).exclude(
+                    sender=self.user
+                ).update(
+                    is_read=True,
+                    read_at=timezone.now()
+                )
+                return True
+        except Exception as e:
+            print(f"[TeamChatWS] Error marking messages read: {e}")
+            return False
+
+    @database_sync_to_async
+    def get_conversation_other_participant(self, conversation_id):
+        """Get the other participant in a conversation"""
+        try:
+            with schema_context(self.tenant_schema):
+                conversation = TeamChatConversation.objects.get(
+                    id=conversation_id,
+                    participants=self.user
+                )
+                other = conversation.get_other_participant(self.user)
+                return other.id if other else None
+        except Exception as e:
+            print(f"[TeamChatWS] Error getting other participant: {e}")
+            return None
+
+
+# Utility function for sending team chat messages from REST views
+async def send_team_chat_message(tenant_schema, recipient_id, message_data, conversation_id):
+    """
+    Send a team chat message notification via WebSocket.
+
+    Args:
+        tenant_schema: The tenant schema name
+        recipient_id: The recipient user ID
+        message_data: Serialized message data
+        conversation_id: The conversation ID
+    """
+    from channels.layers import get_channel_layer
+
+    channel_layer = get_channel_layer()
+    if not channel_layer:
+        return
+
+    await channel_layer.group_send(
+        f'team_chat_{tenant_schema}_{recipient_id}',
+        {
+            'type': 'chat_message',
+            'message': message_data,
+            'conversation_id': conversation_id
         }
     )

@@ -11,12 +11,14 @@ import secrets
 import string
 import logging
 from tenants.email_service import email_service
-from .models import Department, TenantGroup, Notification
+from .models import Department, TenantGroup, Notification, UserOnlineStatus, TeamChatConversation, TeamChatMessage
 from .serializers import (
     UserSerializer, UserCreateSerializer, UserUpdateSerializer,
     GroupSerializer, GroupCreateSerializer, PermissionSerializer,
     BulkUserActionSerializer, PasswordChangeSerializer, DepartmentSerializer,
-    TenantGroupSerializer, TenantGroupCreateSerializer, NotificationSerializer
+    TenantGroupSerializer, TenantGroupCreateSerializer, NotificationSerializer,
+    TeamChatUserSerializer, TeamChatConversationSerializer, TeamChatConversationDetailSerializer,
+    TeamChatMessageSerializer, TeamChatCreateMessageSerializer, TeamChatFileUploadSerializer
 )
 
 logger = logging.getLogger(__name__)
@@ -538,3 +540,269 @@ def tenant_homepage(request):
         'tenant': getattr(request, 'tenant', None),
         'version': '1.0.0'
     })
+
+
+# Team Chat Views
+
+from rest_framework.views import APIView
+from rest_framework.decorators import api_view
+from rest_framework.parsers import MultiPartParser, FormParser
+from django.db.models import Q, Max
+import mimetypes
+
+
+class TeamChatUserListView(APIView):
+    """List all users in tenant with online status for team chat"""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        # Get all active users except the current user
+        users = User.objects.filter(
+            is_active=True,
+            status='active'
+        ).exclude(id=request.user.id).order_by('first_name', 'last_name', 'email')
+
+        serializer = TeamChatUserSerializer(users, many=True)
+        return Response(serializer.data)
+
+
+class TeamChatConversationViewSet(viewsets.ModelViewSet):
+    """ViewSet for team chat conversations"""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        """Only show conversations the user is part of"""
+        return TeamChatConversation.objects.filter(
+            participants=self.request.user
+        ).annotate(
+            latest_message_time=Max('messages__created_at')
+        ).order_by('-latest_message_time', '-updated_at')
+
+    def get_serializer_class(self):
+        if self.action == 'retrieve':
+            return TeamChatConversationDetailSerializer
+        return TeamChatConversationSerializer
+
+    @action(detail=False, methods=['get', 'post'], url_path='with/(?P<user_id>[^/.]+)')
+    def with_user(self, request, user_id=None):
+        """Get or create a conversation with a specific user"""
+        try:
+            other_user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response(
+                {'error': 'User not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Find existing conversation between these two users
+        conversation = TeamChatConversation.objects.filter(
+            participants=request.user
+        ).filter(
+            participants=other_user
+        ).first()
+
+        if not conversation:
+            # Create new conversation
+            conversation = TeamChatConversation.objects.create()
+            conversation.participants.add(request.user, other_user)
+
+        serializer = TeamChatConversationDetailSerializer(
+            conversation,
+            context={'request': request}
+        )
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'])
+    def mark_read(self, request, pk=None):
+        """Mark all messages in conversation as read"""
+        conversation = self.get_object()
+
+        # Mark all unread messages from other participants as read
+        updated = conversation.messages.filter(
+            is_read=False
+        ).exclude(
+            sender=request.user
+        ).update(
+            is_read=True,
+            read_at=timezone.now()
+        )
+
+        return Response({'marked_read': updated})
+
+
+class TeamChatMessageViewSet(viewsets.ModelViewSet):
+    """ViewSet for team chat messages"""
+    serializer_class = TeamChatMessageSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def get_queryset(self):
+        """Only show messages from conversations the user is part of"""
+        return TeamChatMessage.objects.filter(
+            conversation__participants=self.request.user
+        ).select_related('sender', 'conversation')
+
+    def create(self, request, *args, **kwargs):
+        """Create a new message"""
+        serializer = TeamChatCreateMessageSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        data = serializer.validated_data
+        recipient_id = data.get('recipient_id')
+        conversation_id = data.get('conversation_id')
+
+        # Get or create conversation
+        if conversation_id:
+            try:
+                conversation = TeamChatConversation.objects.get(
+                    id=conversation_id,
+                    participants=request.user
+                )
+            except TeamChatConversation.DoesNotExist:
+                return Response(
+                    {'error': 'Conversation not found'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+        else:
+            # Get recipient and find/create conversation
+            try:
+                recipient = User.objects.get(id=recipient_id)
+            except User.DoesNotExist:
+                return Response(
+                    {'error': 'Recipient not found'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            conversation = TeamChatConversation.objects.filter(
+                participants=request.user
+            ).filter(
+                participants=recipient
+            ).first()
+
+            if not conversation:
+                conversation = TeamChatConversation.objects.create()
+                conversation.participants.add(request.user, recipient)
+
+        # Create message
+        message_data = {
+            'conversation': conversation,
+            'sender': request.user,
+            'message_type': data.get('message_type', 'text'),
+            'text': data.get('text', ''),
+        }
+
+        # Handle file upload
+        file = data.get('file')
+        if file:
+            message_data['file'] = file
+            message_data['file_name'] = file.name
+            message_data['file_size'] = file.size
+            message_data['file_mime_type'] = mimetypes.guess_type(file.name)[0] or 'application/octet-stream'
+
+        # Handle voice duration
+        voice_duration = data.get('voice_duration')
+        if voice_duration:
+            message_data['voice_duration'] = voice_duration
+
+        message = TeamChatMessage.objects.create(**message_data)
+
+        # Update conversation timestamp
+        conversation.save()  # This triggers auto_now on updated_at
+
+        # Return serialized message
+        response_serializer = TeamChatMessageSerializer(
+            message,
+            context={'request': request}
+        )
+
+        # Send WebSocket notification
+        self._notify_recipient(conversation, message)
+
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+    def _notify_recipient(self, conversation, message):
+        """Send WebSocket notification to recipient"""
+        try:
+            from channels.layers import get_channel_layer
+            from asgiref.sync import async_to_sync
+
+            channel_layer = get_channel_layer()
+            if not channel_layer:
+                return
+
+            # Get recipient (other participant)
+            recipient = conversation.get_other_participant(message.sender)
+            if not recipient:
+                return
+
+            # Get tenant schema
+            from django.db import connection
+            tenant_schema = connection.schema_name
+
+            # Send to recipient's channel group
+            group_name = f"team_chat_{tenant_schema}_{recipient.id}"
+
+            message_data = TeamChatMessageSerializer(message).data
+
+            async_to_sync(channel_layer.group_send)(
+                group_name,
+                {
+                    'type': 'chat_message',
+                    'message': message_data,
+                    'conversation_id': conversation.id,
+                }
+            )
+        except Exception as e:
+            logger.error(f"Failed to send WebSocket notification: {e}")
+
+    @action(detail=True, methods=['post'])
+    def mark_read(self, request, pk=None):
+        """Mark a single message as read"""
+        message = self.get_object()
+
+        # Only mark if user is not the sender
+        if message.sender != request.user:
+            message.mark_as_read()
+
+        serializer = self.get_serializer(message)
+        return Response(serializer.data)
+
+
+@api_view(['POST'])
+def upload_team_chat_file(request):
+    """Upload a file for team chat"""
+    serializer = TeamChatFileUploadSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+
+    file = serializer.validated_data['file']
+    message_type = serializer.validated_data.get('message_type', 'file')
+
+    # Determine content type
+    content_type = mimetypes.guess_type(file.name)[0] or 'application/octet-stream'
+
+    # For images, verify it's actually an image
+    if message_type == 'image' and not content_type.startswith('image/'):
+        return Response(
+            {'error': 'File is not a valid image'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    return Response({
+        'file_name': file.name,
+        'file_size': file.size,
+        'file_mime_type': content_type,
+        'message': 'File validated successfully. Include this file in your message creation request.'
+    })
+
+
+@api_view(['GET'])
+def team_chat_unread_count(request):
+    """Get total unread message count for team chat"""
+    count = TeamChatMessage.objects.filter(
+        conversation__participants=request.user,
+        is_read=False
+    ).exclude(
+        sender=request.user
+    ).count()
+
+    return Response({'count': count})
