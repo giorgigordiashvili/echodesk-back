@@ -5479,19 +5479,13 @@ def email_send(request):
             reply_to_message_id=reply_to_message.message_id if reply_to_message else None
         )
 
-        if result['success']:
-            # The message was saved to database by send_email_smtp
-            message = result.get('message')
-            return Response({
-                'status': 'success',
-                'message_id': message.id if message else None,
-                'data': EmailMessageSerializer(message).data if message else None
-            })
-        else:
-            return Response({
-                'error': 'Failed to send email',
-                'details': result.get('error', 'Unknown error')
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        # send_email_smtp returns (message_id, sent_message) tuple
+        message_id, message = result
+        return Response({
+            'status': 'success',
+            'message_id': message.id if message else None,
+            'data': EmailMessageSerializer(message).data if message else None
+        })
 
     except Exception as e:
         logger.error(f"Failed to send email: {e}")
