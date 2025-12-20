@@ -5769,13 +5769,11 @@ def tiktok_oauth_start(request):
     Start TikTok OAuth flow.
     Returns the OAuth authorization URL for TikTok login.
     """
-    from django_tenants.utils import get_current_schema
-
     try:
         from .tiktok_utils import get_oauth_url
 
         # Get current tenant for state parameter
-        current_schema = get_current_schema()
+        current_schema = request.tenant.schema_name
 
         # Build state with tenant info
         state = f"tenant={current_schema}"
