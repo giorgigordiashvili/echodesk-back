@@ -216,7 +216,12 @@ class WhatsAppTemplateSendSerializer(serializers.Serializer):
 class SocialIntegrationSettingsSerializer(serializers.ModelSerializer):
     class Meta:
         model = SocialIntegrationSettings
-        fields = ['id', 'refresh_interval', 'chat_assignment_enabled', 'created_at', 'updated_at']
+        fields = [
+            'id', 'refresh_interval',
+            'chat_assignment_enabled', 'session_management_enabled',
+            'hide_assigned_chats', 'collect_customer_rating',
+            'created_at', 'updated_at'
+        ]
         read_only_fields = ['id', 'created_at', 'updated_at']
 
     def validate_refresh_interval(self, value):

@@ -187,10 +187,10 @@ class FacebookMessageViewSet(viewsets.ReadOnlyModelViewSet):
             is_deleted=False
         )
 
-        # Check if assignment mode is enabled
+        # Check if hiding assigned chats is enabled
         settings_obj = SocialIntegrationSettings.objects.first()
-        if not settings_obj or not settings_obj.chat_assignment_enabled:
-            return base_queryset  # Return all messages
+        if not settings_obj or not settings_obj.hide_assigned_chats:
+            return base_queryset  # Return all messages (no hiding)
 
         # Admin/superuser sees all messages
         if self.request.user.is_superuser or self.request.user.is_staff:
@@ -1838,10 +1838,10 @@ class InstagramMessageViewSet(viewsets.ReadOnlyModelViewSet):
             is_deleted=False
         )
 
-        # Check if assignment mode is enabled
+        # Check if hiding assigned chats is enabled
         settings_obj = SocialIntegrationSettings.objects.first()
-        if not settings_obj or not settings_obj.chat_assignment_enabled:
-            return base_queryset  # Return all messages
+        if not settings_obj or not settings_obj.hide_assigned_chats:
+            return base_queryset  # Return all messages (no hiding)
 
         # Admin/superuser sees all messages
         if self.request.user.is_superuser or self.request.user.is_staff:
@@ -2734,6 +2734,14 @@ def unassign_chat(request):
 @permission_classes([IsAuthenticated, CanViewSocialMessages])
 def start_session(request):
     """Start a session for an assigned chat"""
+    # Check if session management is enabled
+    settings_obj = SocialIntegrationSettings.objects.first()
+    if not settings_obj or not settings_obj.session_management_enabled:
+        return Response(
+            {'error': 'Session management is not enabled'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
     platform = request.data.get('platform')
     conversation_id = request.data.get('conversation_id')
     account_id = request.data.get('account_id')
@@ -2774,7 +2782,15 @@ def start_session(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated, CanViewSocialMessages])
 def end_session(request):
-    """End a session and send rating request"""
+    """End a session and optionally send rating request"""
+    # Check if session management is enabled
+    settings_obj = SocialIntegrationSettings.objects.first()
+    if not settings_obj or not settings_obj.session_management_enabled:
+        return Response(
+            {'error': 'Session management is not enabled'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
     platform = request.data.get('platform')
     conversation_id = request.data.get('conversation_id')
     account_id = request.data.get('account_id')
@@ -2804,33 +2820,37 @@ def end_session(request):
     assignment.session_ended_at = timezone.now()
     assignment.save()
 
-    # Send rating request message in Georgian
-    rating_message = "გმადლობთ ჩვენთან საუბრისთვის! გთხოვთ შეაფასოთ თქვენი გამოცდილება 1-დან 5-მდე (უპასუხეთ ციფრით)."
+    # Check if customer rating collection is enabled
+    collect_rating = settings_obj.collect_customer_rating if settings_obj else False
+
     message_id = None
+    if collect_rating:
+        # Send rating request message in Georgian
+        rating_message = "გმადლობთ ჩვენთან საუბრისთვის! გთხოვთ შეაფასოთ თქვენი გამოცდილება 1-დან 5-მდე (უპასუხეთ ციფრით)."
 
-    try:
-        if platform == 'facebook':
-            message_id = send_rating_request_facebook(conversation_id, account_id, rating_message)
-        elif platform == 'instagram':
-            message_id = send_rating_request_instagram(conversation_id, account_id, rating_message)
-        elif platform == 'whatsapp':
-            message_id = send_rating_request_whatsapp(conversation_id, account_id, rating_message)
-    except Exception as e:
-        logger.error(f"Failed to send rating request: {e}")
+        try:
+            if platform == 'facebook':
+                message_id = send_rating_request_facebook(conversation_id, account_id, rating_message)
+            elif platform == 'instagram':
+                message_id = send_rating_request_instagram(conversation_id, account_id, rating_message)
+            elif platform == 'whatsapp':
+                message_id = send_rating_request_whatsapp(conversation_id, account_id, rating_message)
+        except Exception as e:
+            logger.error(f"Failed to send rating request: {e}")
 
-    # Create pending rating to track the response
-    if message_id:
-        ChatRating.objects.create(
-            assignment=assignment,
-            rated_user=request.user,
-            platform=platform,
-            conversation_id=conversation_id,
-            account_id=account_id,
-            session_started_at=assignment.session_started_at,
-            session_ended_at=assignment.session_ended_at,
-            rating=0,  # Pending - waiting for customer response
-            rating_request_message_id=message_id
-        )
+        # Create pending rating to track the response
+        if message_id:
+            ChatRating.objects.create(
+                assignment=assignment,
+                rated_user=request.user,
+                platform=platform,
+                conversation_id=conversation_id,
+                account_id=account_id,
+                session_started_at=assignment.session_started_at,
+                session_ended_at=assignment.session_ended_at,
+                rating=0,  # Pending - waiting for customer response
+                rating_request_message_id=message_id
+            )
 
     logger.info(f"Session ended: {assignment.full_conversation_id} by {request.user.email}")
     return Response({
@@ -2856,7 +2876,10 @@ def get_assignment_status(request):
     # Get settings to include in response
     settings_obj = SocialIntegrationSettings.objects.first()
     settings_data = {
-        'chat_assignment_enabled': settings_obj.chat_assignment_enabled if settings_obj else False
+        'chat_assignment_enabled': settings_obj.chat_assignment_enabled if settings_obj else False,
+        'session_management_enabled': settings_obj.session_management_enabled if settings_obj else False,
+        'hide_assigned_chats': settings_obj.hide_assigned_chats if settings_obj else False,
+        'collect_customer_rating': settings_obj.collect_customer_rating if settings_obj else False,
     }
 
     try:
@@ -3699,10 +3722,10 @@ class WhatsAppMessageViewSet(viewsets.ReadOnlyModelViewSet):
             is_deleted=False
         )
 
-        # Check if assignment mode is enabled
+        # Check if hiding assigned chats is enabled
         settings_obj = SocialIntegrationSettings.objects.first()
-        if not settings_obj or not settings_obj.chat_assignment_enabled:
-            return base_queryset  # Return all messages
+        if not settings_obj or not settings_obj.hide_assigned_chats:
+            return base_queryset  # Return all messages (no hiding)
 
         # Admin/superuser sees all messages
         if self.request.user.is_superuser or self.request.user.is_staff:

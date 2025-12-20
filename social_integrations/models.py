@@ -539,10 +539,28 @@ class SocialIntegrationSettings(models.Model):
         help_text="Auto-refresh interval in milliseconds for messages page (min: 1000, max: 60000)"
     )
 
-    # Chat assignment mode
+    # Chat assignment mode - allows users to claim/assign chats to themselves
     chat_assignment_enabled = models.BooleanField(
         default=False,
-        help_text="When enabled, users can claim chats. Assigned chats are hidden from other users (except admins)."
+        help_text="When enabled, users can claim chats and assign them to themselves."
+    )
+
+    # Session management - allows start/end session functionality
+    session_management_enabled = models.BooleanField(
+        default=False,
+        help_text="When enabled, users can start and end chat sessions."
+    )
+
+    # Hide assigned chats from other users
+    hide_assigned_chats = models.BooleanField(
+        default=False,
+        help_text="When enabled, assigned chats are hidden from other users (except admins)."
+    )
+
+    # Collect customer rating after session ends
+    collect_customer_rating = models.BooleanField(
+        default=False,
+        help_text="When enabled, customers will be asked to rate the session after it ends."
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
