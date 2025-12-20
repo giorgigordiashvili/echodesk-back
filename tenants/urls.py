@@ -15,7 +15,8 @@ from .payment_views import (
 )
 from .cron_views import (
     cron_recurring_payments, cron_subscription_check, cron_health_check,
-    cron_process_trial_expirations, cron_payment_retries, cron_calculate_metrics
+    cron_process_trial_expirations, cron_payment_retries, cron_calculate_metrics,
+    cron_email_sync
 )
 from .feature_views import (
     FeatureViewSet, PermissionViewSet, TenantFeatureViewSet,
@@ -69,6 +70,7 @@ urlpatterns = [
     path('api/cron/process-trial-expirations/', cron_process_trial_expirations, name='cron_process_trial_expirations'),
     path('api/cron/payment-retries/', cron_payment_retries, name='cron_payment_retries'),
     path('api/cron/calculate-metrics/', cron_calculate_metrics, name='cron_calculate_metrics'),
+    path('api/cron/email-sync/', cron_email_sync, name='cron_email_sync'),
     path('api/cron/health/', cron_health_check, name='cron_health_check'),
 
     # Authentication endpoints

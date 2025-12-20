@@ -271,6 +271,85 @@ def cron_calculate_metrics(request):
         }, status=500)
 
 
+@api_view(['GET', 'POST'])
+@permission_classes([AllowAny])
+def cron_email_sync(request):
+    """
+    HTTP endpoint to sync emails for all tenants with email connections
+
+    Security: Requires CRON_SECRET_TOKEN in header or query param
+
+    Usage:
+    curl -X GET "https://api.echodesk.ge/api/cron/email-sync/" \
+         -H "X-Cron-Token: your-secret-token"
+    """
+    from tenant_schemas.utils import schema_context
+    from tenants.models import Tenant
+
+    # Verify token
+    token = request.headers.get('X-Cron-Token') or request.GET.get('token')
+    expected_token = getattr(settings, 'CRON_SECRET_TOKEN', None)
+
+    if not expected_token:
+        logger.error('CRON_SECRET_TOKEN not configured in settings')
+        return Response({
+            'error': 'Cron service not configured'
+        }, status=500)
+
+    if not token or token != expected_token:
+        logger.warning(f'Unauthorized cron access attempt from {request.META.get("REMOTE_ADDR")}')
+        return Response({
+            'error': 'Unauthorized'
+        }, status=401)
+
+    # Sync emails for all tenants
+    try:
+        from social_integrations.models import EmailConnection
+        from social_integrations.email_utils import sync_imap_messages
+
+        results = []
+        tenants = Tenant.objects.exclude(schema_name='public')
+
+        for tenant in tenants:
+            try:
+                with schema_context(tenant.schema_name):
+                    connections = EmailConnection.objects.filter(is_active=True)
+                    for connection in connections:
+                        try:
+                            count = sync_imap_messages(connection)
+                            results.append({
+                                'tenant': tenant.schema_name,
+                                'email': connection.email_address,
+                                'synced': count,
+                                'status': 'success'
+                            })
+                            logger.info(f"Email sync for {tenant.schema_name}/{connection.email_address}: {count} new messages")
+                        except Exception as e:
+                            results.append({
+                                'tenant': tenant.schema_name,
+                                'email': connection.email_address,
+                                'error': str(e),
+                                'status': 'error'
+                            })
+                            logger.error(f"Email sync failed for {tenant.schema_name}/{connection.email_address}: {e}")
+            except Exception as e:
+                logger.error(f"Email sync failed for tenant {tenant.schema_name}: {e}")
+
+        logger.info(f'Email sync cron completed: {len(results)} connections processed')
+
+        return Response({
+            'status': 'success',
+            'message': 'Email sync completed',
+            'results': results
+        })
+    except Exception as e:
+        logger.error(f'Email sync cron failed: {e}')
+        return Response({
+            'status': 'error',
+            'error': str(e)
+        }, status=500)
+
+
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def cron_health_check(request):
@@ -288,5 +367,6 @@ def cron_health_check(request):
             'trial_expirations': '/api/cron/process-trial-expirations/',
             'payment_retries': '/api/cron/payment-retries/',
             'calculate_metrics': '/api/cron/calculate-metrics/',
+            'email_sync': '/api/cron/email-sync/',
         }
     })
