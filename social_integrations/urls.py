@@ -11,6 +11,8 @@ router.register(r'instagram-messages', views.InstagramMessageViewSet, basename='
 router.register(r'whatsapp-accounts', views.WhatsAppBusinessAccountViewSet, basename='whatsapp_accounts')
 router.register(r'whatsapp-messages', views.WhatsAppMessageViewSet, basename='whatsapp_messages')
 router.register(r'whatsapp-contacts', views.WhatsAppContactViewSet, basename='whatsapp_contacts')
+router.register(r'email-messages', views.EmailMessageViewSet, basename='email_messages')
+router.register(r'email-drafts', views.EmailDraftViewSet, basename='email_drafts')
 
 # URL patterns for the social integrations app
 urlpatterns = [
@@ -52,6 +54,15 @@ urlpatterns = [
     path('whatsapp/templates/create/', views.whatsapp_create_template, name='whatsapp_create_template'),
     path('whatsapp/templates/<int:template_id>/delete/', views.whatsapp_delete_template, name='whatsapp_delete_template'),
     path('whatsapp/templates/send/', views.whatsapp_send_template_message, name='whatsapp_send_template_message'),
+
+    # Email endpoints
+    path('email/status/', views.email_connection_status, name='email_status'),
+    path('email/connect/', views.email_connect, name='email_connect'),
+    path('email/disconnect/', views.email_disconnect, name='email_disconnect'),
+    path('email/send/', views.email_send, name='email_send'),
+    path('email/action/', views.email_action, name='email_action'),
+    path('email/folders/', views.email_folders, name='email_folders'),
+    path('email/sync/', views.email_sync, name='email_sync'),
 
     # Webhook debugging endpoints
     path('webhook-status/', views.webhook_status, name='webhook_status'),

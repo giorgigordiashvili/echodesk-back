@@ -588,6 +588,7 @@ class ChatAssignment(models.Model):
         ('facebook', 'Facebook'),
         ('instagram', 'Instagram'),
         ('whatsapp', 'WhatsApp'),
+        ('email', 'Email'),
     ]
 
     STATUS_CHOICES = [
@@ -688,7 +689,7 @@ class ChatRating(models.Model):
     # Store conversation info for historical reference
     platform = models.CharField(
         max_length=20,
-        choices=[('facebook', 'Facebook'), ('instagram', 'Instagram'), ('whatsapp', 'WhatsApp')],
+        choices=[('facebook', 'Facebook'), ('instagram', 'Instagram'), ('whatsapp', 'WhatsApp'), ('email', 'Email')],
         default='facebook',  # Default for migration
         help_text="Platform where the chat occurred"
     )
@@ -748,3 +749,183 @@ class ChatRating(models.Model):
         if self.rating == 0:
             return f"Pending rating for {self.rated_user}"
         return f"Rating {self.rating}/5 for {self.rated_user}"
+
+
+class EmailConnection(models.Model):
+    """Stores Email (IMAP/SMTP) connection details for a tenant - one per tenant"""
+
+    # Identity
+    email_address = models.EmailField(unique=True, help_text="Email address for this connection")
+    display_name = models.CharField(max_length=200, blank=True, help_text="Display name for sent emails")
+
+    # IMAP Settings (incoming)
+    imap_server = models.CharField(max_length=255, help_text="IMAP server hostname (e.g., imap.gmail.com)")
+    imap_port = models.IntegerField(default=993, help_text="IMAP port (993 for SSL, 143 for STARTTLS)")
+    imap_use_ssl = models.BooleanField(default=True, help_text="Use SSL for IMAP connection")
+
+    # SMTP Settings (outgoing)
+    smtp_server = models.CharField(max_length=255, help_text="SMTP server hostname (e.g., smtp.gmail.com)")
+    smtp_port = models.IntegerField(default=587, help_text="SMTP port (587 for STARTTLS, 465 for SSL)")
+    smtp_use_tls = models.BooleanField(default=True, help_text="Use TLS/STARTTLS for SMTP")
+    smtp_use_ssl = models.BooleanField(default=False, help_text="Use SSL for SMTP (alternative to TLS)")
+
+    # Credentials (encrypted using Django's Signer)
+    username = models.CharField(max_length=255, help_text="Login username (usually email address)")
+    encrypted_password = models.TextField(help_text="Encrypted password - DO NOT store plain text")
+
+    # Status
+    is_active = models.BooleanField(default=True)
+    last_sync_at = models.DateTimeField(null=True, blank=True, help_text="Last successful IMAP sync")
+    last_sync_error = models.TextField(blank=True, help_text="Last sync error message if any")
+
+    # Sync settings
+    sync_folder = models.CharField(max_length=100, default='INBOX', help_text="IMAP folder to sync")
+    sync_days_back = models.IntegerField(default=30, help_text="Number of days of history to sync")
+
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Email Connection"
+        verbose_name_plural = "Email Connections"
+
+    def __str__(self):
+        return f"{self.display_name or self.email_address}"
+
+    def set_password(self, raw_password):
+        """Encrypt and store the password using Django's Signer"""
+        from django.core.signing import Signer
+        signer = Signer()
+        self.encrypted_password = signer.sign(raw_password)
+
+    def get_password(self):
+        """Decrypt and return the password"""
+        from django.core.signing import Signer, BadSignature
+        signer = Signer()
+        try:
+            return signer.unsign(self.encrypted_password)
+        except BadSignature:
+            return None
+
+
+class EmailMessage(models.Model):
+    """Stores email messages - both sent and received"""
+
+    connection = models.ForeignKey(
+        EmailConnection,
+        on_delete=models.CASCADE,
+        related_name='messages'
+    )
+
+    # Email identifiers
+    message_id = models.CharField(max_length=500, unique=True, help_text="RFC 2822 Message-ID header")
+    thread_id = models.CharField(max_length=500, blank=True, db_index=True, help_text="Thread grouping identifier")
+    in_reply_to = models.CharField(max_length=500, blank=True, help_text="In-Reply-To header for threading")
+    references = models.TextField(blank=True, help_text="References header for threading")
+
+    # Sender/Recipients
+    from_email = models.EmailField(help_text="Sender email address")
+    from_name = models.CharField(max_length=200, blank=True, help_text="Sender display name")
+    to_emails = models.JSONField(default=list, help_text="List of To recipients [{email, name}]")
+    cc_emails = models.JSONField(default=list, blank=True, help_text="List of CC recipients")
+    bcc_emails = models.JSONField(default=list, blank=True, help_text="List of BCC recipients")
+    reply_to = models.EmailField(blank=True, help_text="Reply-To address if different from from_email")
+
+    # Content
+    subject = models.CharField(max_length=1000, blank=True)
+    body_text = models.TextField(blank=True, help_text="Plain text body")
+    body_html = models.TextField(blank=True, help_text="HTML body")
+    attachments = models.JSONField(default=list, help_text="Array of {filename, content_type, url, size}")
+
+    # Email metadata
+    timestamp = models.DateTimeField(help_text="Email Date header")
+    folder = models.CharField(max_length=100, default='INBOX', help_text="IMAP folder this email is in")
+    uid = models.CharField(max_length=50, blank=True, help_text="IMAP UID for this message in folder")
+
+    # Status flags (from IMAP)
+    is_from_business = models.BooleanField(default=False, help_text="True if sent by business")
+    is_read = models.BooleanField(default=False, help_text="IMAP SEEN flag")
+    is_starred = models.BooleanField(default=False, help_text="IMAP FLAGGED flag")
+    is_answered = models.BooleanField(default=False, help_text="IMAP ANSWERED flag")
+    is_draft = models.BooleanField(default=False, help_text="True if this is a draft")
+
+    # Labels/Folders (for Gmail-like label support)
+    labels = models.JSONField(default=list, help_text="Array of label names")
+
+    # Staff interaction tracking
+    is_read_by_staff = models.BooleanField(default=False)
+    read_by_staff_at = models.DateTimeField(null=True, blank=True)
+
+    # Soft delete
+    is_deleted = models.BooleanField(default=False, help_text='Soft deleted by staff')
+    deleted_at = models.DateTimeField(null=True, blank=True, help_text='When the message was deleted')
+    deleted_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='deleted_email_messages',
+        help_text='Staff member who deleted this message'
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-timestamp']
+        indexes = [
+            models.Index(fields=['connection', 'thread_id']),
+            models.Index(fields=['connection', 'folder', 'timestamp']),
+            models.Index(fields=['from_email', 'timestamp']),
+        ]
+        verbose_name = "Email Message"
+        verbose_name_plural = "Email Messages"
+
+    def __str__(self):
+        return f"Email: {self.subject[:50]} from {self.from_name or self.from_email}"
+
+
+class EmailDraft(models.Model):
+    """Stores email drafts before sending"""
+
+    connection = models.ForeignKey(
+        EmailConnection,
+        on_delete=models.CASCADE,
+        related_name='drafts'
+    )
+
+    # Draft content
+    to_emails = models.JSONField(default=list)
+    cc_emails = models.JSONField(default=list, blank=True)
+    bcc_emails = models.JSONField(default=list, blank=True)
+    subject = models.CharField(max_length=1000, blank=True)
+    body_text = models.TextField(blank=True)
+    body_html = models.TextField(blank=True)
+    attachments = models.JSONField(default=list, help_text="Pending attachments")
+
+    # Reply context
+    reply_to_message = models.ForeignKey(
+        EmailMessage,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='draft_replies',
+        help_text="The message this draft is replying to"
+    )
+    is_reply_all = models.BooleanField(default=False)
+    is_forward = models.BooleanField(default=False)
+
+    # Ownership
+    created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='email_drafts')
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-updated_at']
+        verbose_name = "Email Draft"
+        verbose_name_plural = "Email Drafts"
+
+    def __str__(self):
+        return f"Draft: {self.subject[:50] or 'No subject'}"

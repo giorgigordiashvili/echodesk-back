@@ -4,7 +4,8 @@ from .models import (
     InstagramAccountConnection, InstagramMessage,
     WhatsAppBusinessAccount, WhatsAppMessage, WhatsAppMessageTemplate,
     WhatsAppContact, SocialIntegrationSettings,
-    ChatAssignment, ChatRating
+    ChatAssignment, ChatRating,
+    EmailConnection, EmailMessage, EmailDraft
 )
 
 
@@ -274,3 +275,168 @@ class ChatRatingSerializer(serializers.ModelSerializer):
             'created_at'
         ]
         read_only_fields = ['id', 'created_at', 'assignment_id', 'platform', 'conversation_id']
+
+
+# =============================================================================
+# Email Serializers
+# =============================================================================
+
+class EmailConnectionSerializer(serializers.ModelSerializer):
+    """Read-only serializer for email connections - NEVER exposes password"""
+
+    class Meta:
+        model = EmailConnection
+        fields = [
+            'id', 'email_address', 'display_name',
+            'imap_server', 'imap_port', 'imap_use_ssl',
+            'smtp_server', 'smtp_port', 'smtp_use_tls', 'smtp_use_ssl',
+            'username', 'is_active',
+            'last_sync_at', 'last_sync_error',
+            'sync_folder', 'sync_days_back',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'last_sync_at', 'last_sync_error', 'created_at', 'updated_at']
+
+
+class EmailConnectionCreateSerializer(serializers.Serializer):
+    """Serializer for creating/updating email connections with password"""
+    email_address = serializers.EmailField(help_text="Email address for this connection")
+    display_name = serializers.CharField(max_length=200, required=False, allow_blank=True, help_text="Display name for sent emails")
+
+    # IMAP settings
+    imap_server = serializers.CharField(max_length=255, help_text="IMAP server hostname (e.g., imap.gmail.com)")
+    imap_port = serializers.IntegerField(default=993, help_text="IMAP port (993 for SSL, 143 for STARTTLS)")
+    imap_use_ssl = serializers.BooleanField(default=True, help_text="Use SSL for IMAP connection")
+
+    # SMTP settings
+    smtp_server = serializers.CharField(max_length=255, help_text="SMTP server hostname (e.g., smtp.gmail.com)")
+    smtp_port = serializers.IntegerField(default=587, help_text="SMTP port (587 for STARTTLS, 465 for SSL)")
+    smtp_use_tls = serializers.BooleanField(default=True, help_text="Use TLS/STARTTLS for SMTP")
+    smtp_use_ssl = serializers.BooleanField(default=False, help_text="Use SSL for SMTP (alternative to TLS)")
+
+    # Credentials
+    username = serializers.CharField(max_length=255, help_text="Login username (usually email address)")
+    password = serializers.CharField(max_length=500, write_only=True, help_text="Password or app password")
+
+    # Sync settings
+    sync_folder = serializers.CharField(max_length=100, default='INBOX', help_text="IMAP folder to sync")
+    sync_days_back = serializers.IntegerField(default=30, min_value=1, max_value=365, help_text="Number of days of history to sync")
+
+    def validate(self, data):
+        """Validate that SMTP and IMAP settings are consistent"""
+        # Can't use both TLS and SSL for SMTP
+        if data.get('smtp_use_tls') and data.get('smtp_use_ssl'):
+            raise serializers.ValidationError({
+                'smtp_use_ssl': "Cannot use both TLS and SSL for SMTP. Choose one."
+            })
+        return data
+
+
+class EmailMessageSerializer(serializers.ModelSerializer):
+    """Serializer for email messages"""
+    connection_email = serializers.EmailField(source='connection.email_address', read_only=True)
+    connection_display_name = serializers.CharField(source='connection.display_name', read_only=True)
+
+    class Meta:
+        model = EmailMessage
+        fields = [
+            'id', 'message_id', 'thread_id', 'in_reply_to', 'references',
+            'from_email', 'from_name', 'to_emails', 'cc_emails', 'bcc_emails', 'reply_to',
+            'subject', 'body_text', 'body_html', 'attachments',
+            'timestamp', 'folder', 'uid',
+            'is_from_business', 'is_read', 'is_starred', 'is_answered', 'is_draft', 'labels',
+            'is_read_by_staff', 'read_by_staff_at',
+            'is_deleted', 'deleted_at',
+            'connection_email', 'connection_display_name',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = [
+            'id', 'message_id', 'thread_id', 'in_reply_to', 'references',
+            'timestamp', 'folder', 'uid',
+            'is_from_business', 'is_answered',
+            'connection_email', 'connection_display_name',
+            'created_at', 'updated_at'
+        ]
+
+
+class EmailSendSerializer(serializers.Serializer):
+    """Serializer for sending email messages"""
+    to_emails = serializers.ListField(
+        child=serializers.EmailField(),
+        min_length=1,
+        help_text="List of recipient email addresses"
+    )
+    cc_emails = serializers.ListField(
+        child=serializers.EmailField(),
+        required=False,
+        allow_empty=True,
+        help_text="List of CC email addresses"
+    )
+    bcc_emails = serializers.ListField(
+        child=serializers.EmailField(),
+        required=False,
+        allow_empty=True,
+        help_text="List of BCC email addresses"
+    )
+    subject = serializers.CharField(max_length=1000, required=False, allow_blank=True, help_text="Email subject")
+    body_text = serializers.CharField(required=False, allow_blank=True, help_text="Plain text body")
+    body_html = serializers.CharField(required=False, allow_blank=True, help_text="HTML body")
+    reply_to_message_id = serializers.IntegerField(required=False, allow_null=True, help_text="ID of message being replied to")
+
+    def validate(self, data):
+        """Ensure at least one body is provided"""
+        if not data.get('body_text') and not data.get('body_html'):
+            raise serializers.ValidationError("At least one of body_text or body_html must be provided")
+        return data
+
+
+class EmailDraftSerializer(serializers.ModelSerializer):
+    """Serializer for email drafts"""
+    created_by_name = serializers.SerializerMethodField()
+    reply_to_subject = serializers.CharField(source='reply_to_message.subject', read_only=True, allow_null=True)
+
+    class Meta:
+        model = EmailDraft
+        fields = [
+            'id', 'connection', 'to_emails', 'cc_emails', 'bcc_emails',
+            'subject', 'body_text', 'body_html', 'attachments',
+            'is_reply_all', 'is_forward',
+            'reply_to_message', 'reply_to_subject',
+            'created_by', 'created_by_name',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_by', 'created_by_name', 'created_at', 'updated_at']
+
+    def get_created_by_name(self, obj):
+        return obj.created_by.get_full_name() or obj.created_by.email
+
+
+class EmailMessageActionSerializer(serializers.Serializer):
+    """Serializer for email message actions (star, read, label, move, delete)"""
+    message_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        min_length=1,
+        help_text="List of message IDs to perform action on"
+    )
+    action = serializers.ChoiceField(
+        choices=['mark_read', 'mark_unread', 'star', 'unstar', 'label', 'unlabel', 'move', 'delete', 'restore'],
+        help_text="Action to perform"
+    )
+    # Optional parameters based on action
+    label = serializers.CharField(max_length=100, required=False, help_text="Label name for label/unlabel actions")
+    folder = serializers.CharField(max_length=100, required=False, help_text="Folder name for move action")
+
+    def validate(self, data):
+        action = data.get('action')
+        if action in ['label', 'unlabel'] and not data.get('label'):
+            raise serializers.ValidationError({'label': f"Label is required for {action} action"})
+        if action == 'move' and not data.get('folder'):
+            raise serializers.ValidationError({'folder': "Folder is required for move action"})
+        return data
+
+
+class EmailFolderSerializer(serializers.Serializer):
+    """Serializer for email folder information"""
+    name = serializers.CharField(help_text="Folder name")
+    delimiter = serializers.CharField(help_text="Folder hierarchy delimiter")
+    flags = serializers.ListField(child=serializers.CharField(), help_text="IMAP folder flags")

@@ -8,14 +8,14 @@ from channels.layers import get_channel_layer
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from tenant_schemas.utils import schema_context
-from django.db.models import F, Q
+from django.db.models import F, Q, Max, Count
 from django.http import JsonResponse, HttpResponse
 from django.utils import timezone
 from django.shortcuts import redirect
 from django.urls import reverse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
-from rest_framework import viewsets, status
+from rest_framework import viewsets, status, serializers as drf_serializers
 from rest_framework.decorators import api_view, permission_classes, action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -25,7 +25,8 @@ from .models import (
     InstagramAccountConnection, InstagramMessage,
     WhatsAppBusinessAccount, WhatsAppMessage, WhatsAppMessageTemplate,
     WhatsAppContact, SocialIntegrationSettings,
-    ChatAssignment, ChatRating
+    ChatAssignment, ChatRating,
+    EmailConnection, EmailMessage, EmailDraft
 )
 from .serializers import (
     FacebookPageConnectionSerializer, FacebookMessageSerializer, FacebookSendMessageSerializer,
@@ -33,7 +34,9 @@ from .serializers import (
     WhatsAppBusinessAccountSerializer, WhatsAppMessageSerializer, WhatsAppSendMessageSerializer,
     WhatsAppMessageTemplateSerializer, WhatsAppTemplateCreateSerializer, WhatsAppTemplateSendSerializer,
     WhatsAppContactSerializer, SocialIntegrationSettingsSerializer,
-    ChatAssignmentSerializer, ChatAssignmentCreateSerializer, ChatRatingSerializer
+    ChatAssignmentSerializer, ChatAssignmentCreateSerializer, ChatRatingSerializer,
+    EmailConnectionSerializer, EmailConnectionCreateSerializer, EmailMessageSerializer,
+    EmailSendSerializer, EmailDraftSerializer, EmailMessageActionSerializer, EmailFolderSerializer
 )
 from .permissions import (
     CanManageSocialConnections, CanViewSocialMessages,
@@ -3294,13 +3297,21 @@ def unread_messages_count(request):
             is_read_by_staff=False  # Staff hasn't read this message yet
         ).count()
 
-        total_unread = facebook_unread + instagram_unread + whatsapp_unread
+        # Count unread Email messages (incoming messages not read by staff)
+        email_unread = EmailMessage.objects.filter(
+            is_from_business=False,  # Messages FROM customers TO the business
+            is_read_by_staff=False,  # Staff hasn't read this message yet
+            is_deleted=False  # Not soft-deleted
+        ).count()
+
+        total_unread = facebook_unread + instagram_unread + whatsapp_unread + email_unread
 
         return Response({
             'total': total_unread,
             'facebook': facebook_unread,
             'instagram': instagram_unread,
-            'whatsapp': whatsapp_unread
+            'whatsapp': whatsapp_unread,
+            'email': email_unread
         })
 
     except Exception as e:
@@ -3367,6 +3378,19 @@ def mark_conversation_read(request):
             ).update(
                 is_read_by_staff=True,
                 read_by_staff_at=now
+            )
+
+        elif platform == 'email':
+            # Mark all incoming messages in this thread as read by staff
+            updated_count = EmailMessage.objects.filter(
+                thread_id=conversation_id,
+                is_from_business=False,
+                is_read_by_staff=False,
+                is_deleted=False
+            ).update(
+                is_read_by_staff=True,
+                read_by_staff_at=now,
+                is_read=True
             )
         else:
             return Response({
@@ -3455,6 +3479,17 @@ def delete_conversation(request):
                 deleted_by=request.user
             )
             deleted_count = deleted_from + deleted_to
+
+        elif platform == 'email':
+            # Soft delete all messages in this thread
+            deleted_count = EmailMessage.objects.filter(
+                thread_id=conversation_id,
+                is_deleted=False
+            ).update(
+                is_deleted=True,
+                deleted_at=now,
+                deleted_by=request.user
+            )
 
         else:
             return Response({
@@ -5210,3 +5245,492 @@ def whatsapp_send_template_message(request):
             return Response({
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# =============================================================================
+# Email Integration Views
+# =============================================================================
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def email_connection_status(request):
+    """Check Email connection status for current tenant"""
+    try:
+        connection = EmailConnection.objects.filter(is_active=True).first()
+
+        if connection:
+            return Response({
+                'connected': True,
+                'connection': {
+                    'id': connection.id,
+                    'email_address': connection.email_address,
+                    'display_name': connection.display_name,
+                    'imap_server': connection.imap_server,
+                    'smtp_server': connection.smtp_server,
+                    'is_active': connection.is_active,
+                    'last_sync_at': connection.last_sync_at.isoformat() if connection.last_sync_at else None,
+                    'last_sync_error': connection.last_sync_error,
+                    'sync_folder': connection.sync_folder,
+                    'connected_at': connection.created_at.isoformat()
+                }
+            })
+        else:
+            return Response({
+                'connected': False,
+                'connection': None
+            })
+    except Exception as e:
+        logger.error(f"Failed to get Email connection status: {e}")
+        return Response({
+            'error': f'Failed to get connection status: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, CanManageSocialConnections])
+def email_connect(request):
+    """
+    Connect email account with IMAP/SMTP credentials.
+    Tests both IMAP and SMTP connections before saving.
+    """
+    from .email_utils import test_imap_connection, test_smtp_connection
+
+    serializer = EmailConnectionCreateSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    data = serializer.validated_data
+
+    try:
+        # Test IMAP connection
+        imap_result = test_imap_connection(
+            server=data['imap_server'],
+            port=data['imap_port'],
+            use_ssl=data['imap_use_ssl'],
+            username=data['username'],
+            password=data['password']
+        )
+
+        if not imap_result['success']:
+            return Response({
+                'error': 'IMAP connection failed',
+                'details': imap_result.get('error', 'Unknown error')
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Test SMTP connection
+        smtp_result = test_smtp_connection(
+            server=data['smtp_server'],
+            port=data['smtp_port'],
+            use_tls=data['smtp_use_tls'],
+            use_ssl=data['smtp_use_ssl'],
+            username=data['username'],
+            password=data['password']
+        )
+
+        if not smtp_result['success']:
+            return Response({
+                'error': 'SMTP connection failed',
+                'details': smtp_result.get('error', 'Unknown error')
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check if connection already exists for this email
+        existing = EmailConnection.objects.filter(email_address=data['email_address']).first()
+        if existing:
+            # Update existing connection
+            existing.display_name = data.get('display_name', '')
+            existing.imap_server = data['imap_server']
+            existing.imap_port = data['imap_port']
+            existing.imap_use_ssl = data['imap_use_ssl']
+            existing.smtp_server = data['smtp_server']
+            existing.smtp_port = data['smtp_port']
+            existing.smtp_use_tls = data['smtp_use_tls']
+            existing.smtp_use_ssl = data['smtp_use_ssl']
+            existing.username = data['username']
+            existing.set_password(data['password'])
+            existing.sync_folder = data.get('sync_folder', 'INBOX')
+            existing.sync_days_back = data.get('sync_days_back', 30)
+            existing.is_active = True
+            existing.last_sync_error = ''
+            existing.save()
+            connection = existing
+            created = False
+        else:
+            # Delete any existing connection (only one per tenant)
+            EmailConnection.objects.all().delete()
+
+            # Create new connection
+            connection = EmailConnection.objects.create(
+                email_address=data['email_address'],
+                display_name=data.get('display_name', ''),
+                imap_server=data['imap_server'],
+                imap_port=data['imap_port'],
+                imap_use_ssl=data['imap_use_ssl'],
+                smtp_server=data['smtp_server'],
+                smtp_port=data['smtp_port'],
+                smtp_use_tls=data['smtp_use_tls'],
+                smtp_use_ssl=data['smtp_use_ssl'],
+                username=data['username'],
+                sync_folder=data.get('sync_folder', 'INBOX'),
+                sync_days_back=data.get('sync_days_back', 30),
+                is_active=True
+            )
+            connection.set_password(data['password'])
+            connection.save()
+            created = True
+
+        logger.info(f"Email connection {'created' if created else 'updated'}: {connection.email_address}")
+
+        return Response({
+            'status': 'success',
+            'message': f"Email connected successfully: {connection.email_address}",
+            'created': created,
+            'connection': EmailConnectionSerializer(connection).data
+        }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+    except Exception as e:
+        logger.error(f"Failed to connect email: {e}")
+        return Response({
+            'error': f'Failed to connect email: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, CanManageSocialConnections])
+def email_disconnect(request):
+    """Disconnect email and delete all related data"""
+    try:
+        connection = EmailConnection.objects.first()
+
+        if not connection:
+            return Response({
+                'error': 'No email connection found'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        email_address = connection.email_address
+
+        # Count related data before deletion
+        messages_count = EmailMessage.objects.filter(connection=connection).count()
+        drafts_count = EmailDraft.objects.filter(connection=connection).count()
+
+        # Delete the connection (will cascade delete messages and drafts)
+        connection.delete()
+
+        logger.info(
+            f"Deleted Email connection: {email_address} "
+            f"({messages_count} messages, {drafts_count} drafts)"
+        )
+
+        return Response({
+            'status': 'success',
+            'message': f'Disconnected and deleted email: {email_address}',
+            'deleted': {
+                'messages': messages_count,
+                'drafts': drafts_count
+            }
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to disconnect email: {e}")
+        return Response({
+            'error': f'Failed to disconnect email: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, CanSendSocialMessages])
+def email_send(request):
+    """Send an email message"""
+    from .email_utils import send_email_smtp
+
+    serializer = EmailSendSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        connection = EmailConnection.objects.filter(is_active=True).first()
+        if not connection:
+            return Response({
+                'error': 'No active email connection found'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        data = serializer.validated_data
+
+        # Get reply context if replying to a message
+        reply_to_message = None
+        if data.get('reply_to_message_id'):
+            reply_to_message = EmailMessage.objects.filter(
+                id=data['reply_to_message_id'],
+                connection=connection
+            ).first()
+
+        # Send the email
+        result = send_email_smtp(
+            connection=connection,
+            to_emails=data['to_emails'],
+            subject=data.get('subject', ''),
+            body_text=data.get('body_text', ''),
+            body_html=data.get('body_html', ''),
+            cc_emails=data.get('cc_emails', []),
+            bcc_emails=data.get('bcc_emails', []),
+            reply_to_message=reply_to_message
+        )
+
+        if result['success']:
+            # The message was saved to database by send_email_smtp
+            message = result.get('message')
+            return Response({
+                'status': 'success',
+                'message_id': message.id if message else None,
+                'data': EmailMessageSerializer(message).data if message else None
+            })
+        else:
+            return Response({
+                'error': 'Failed to send email',
+                'details': result.get('error', 'Unknown error')
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    except Exception as e:
+        logger.error(f"Failed to send email: {e}")
+        return Response({
+            'error': f'Failed to send email: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, CanViewSocialMessages])
+def email_action(request):
+    """Perform actions on email messages (star, read, label, move, delete)"""
+    serializer = EmailMessageActionSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        data = serializer.validated_data
+        message_ids = data['message_ids']
+        action = data['action']
+
+        messages = EmailMessage.objects.filter(id__in=message_ids)
+        affected_count = messages.count()
+
+        if affected_count == 0:
+            return Response({
+                'error': 'No messages found with the provided IDs'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        if action == 'mark_read':
+            messages.update(is_read=True, is_read_by_staff=True, read_by_staff_at=timezone.now())
+        elif action == 'mark_unread':
+            messages.update(is_read=False, is_read_by_staff=False, read_by_staff_at=None)
+        elif action == 'star':
+            messages.update(is_starred=True)
+        elif action == 'unstar':
+            messages.update(is_starred=False)
+        elif action == 'delete':
+            messages.update(
+                is_deleted=True,
+                deleted_at=timezone.now(),
+                deleted_by=request.user
+            )
+        elif action == 'restore':
+            messages.update(
+                is_deleted=False,
+                deleted_at=None,
+                deleted_by=None
+            )
+        elif action == 'label':
+            label = data['label']
+            for msg in messages:
+                if label not in msg.labels:
+                    msg.labels.append(label)
+                    msg.save()
+        elif action == 'unlabel':
+            label = data['label']
+            for msg in messages:
+                if label in msg.labels:
+                    msg.labels.remove(label)
+                    msg.save()
+        elif action == 'move':
+            folder = data['folder']
+            messages.update(folder=folder)
+
+        return Response({
+            'status': 'success',
+            'action': action,
+            'affected_count': affected_count
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to perform email action: {e}")
+        return Response({
+            'error': f'Failed to perform action: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def email_folders(request):
+    """List available IMAP folders for the connected email"""
+    from .email_utils import get_imap_folders
+
+    try:
+        connection = EmailConnection.objects.filter(is_active=True).first()
+        if not connection:
+            return Response({
+                'error': 'No active email connection found'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        result = get_imap_folders(connection)
+
+        if result['success']:
+            return Response({
+                'folders': result['folders']
+            })
+        else:
+            return Response({
+                'error': 'Failed to get folders',
+                'details': result.get('error', 'Unknown error')
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    except Exception as e:
+        logger.error(f"Failed to get email folders: {e}")
+        return Response({
+            'error': f'Failed to get folders: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, CanManageSocialConnections])
+def email_sync(request):
+    """Trigger manual email sync"""
+    from .email_utils import sync_imap_messages
+
+    try:
+        connection = EmailConnection.objects.filter(is_active=True).first()
+        if not connection:
+            return Response({
+                'error': 'No active email connection found'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        # Perform sync
+        result = sync_imap_messages(connection)
+
+        if result['success']:
+            return Response({
+                'status': 'success',
+                'new_messages': result.get('new_messages', 0),
+                'updated_messages': result.get('updated_messages', 0),
+                'total_processed': result.get('total_processed', 0)
+            })
+        else:
+            return Response({
+                'error': 'Sync failed',
+                'details': result.get('error', 'Unknown error')
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    except Exception as e:
+        logger.error(f"Failed to sync email: {e}")
+        return Response({
+            'error': f'Failed to sync email: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class EmailMessageViewSet(viewsets.ReadOnlyModelViewSet):
+    """ViewSet for viewing email messages"""
+    serializer_class = EmailMessageSerializer
+    permission_classes = [IsAuthenticated, CanViewSocialMessages]
+
+    def get_queryset(self):
+        queryset = EmailMessage.objects.filter(
+            is_deleted=False
+        ).select_related('connection').order_by('-timestamp')
+
+        # Filter by thread_id for conversation view
+        thread_id = self.request.query_params.get('thread_id')
+        if thread_id:
+            queryset = queryset.filter(thread_id=thread_id)
+
+        # Filter by folder
+        folder = self.request.query_params.get('folder')
+        if folder:
+            queryset = queryset.filter(folder=folder)
+
+        # Filter by starred
+        starred = self.request.query_params.get('starred')
+        if starred and starred.lower() == 'true':
+            queryset = queryset.filter(is_starred=True)
+
+        # Filter by read status
+        is_read = self.request.query_params.get('is_read')
+        if is_read is not None:
+            queryset = queryset.filter(is_read=is_read.lower() == 'true')
+
+        # Filter by label
+        label = self.request.query_params.get('label')
+        if label:
+            queryset = queryset.filter(labels__contains=[label])
+
+        # Search in subject, from_email, body_text
+        search = self.request.query_params.get('search')
+        if search:
+            queryset = queryset.filter(
+                Q(subject__icontains=search) |
+                Q(from_email__icontains=search) |
+                Q(from_name__icontains=search) |
+                Q(body_text__icontains=search)
+            )
+
+        return queryset
+
+    @action(detail=False, methods=['get'])
+    def threads(self, request):
+        """
+        Get email threads (grouped conversations).
+        Returns the latest message from each unique thread.
+        """
+        # Get distinct thread_ids with their latest message
+        threads = EmailMessage.objects.filter(
+            is_deleted=False
+        ).values('thread_id').annotate(
+            latest_timestamp=Max('timestamp'),
+            message_count=Count('id'),
+            unread_count=Count('id', filter=Q(is_read=False))
+        ).order_by('-latest_timestamp')
+
+        # Get the actual latest message for each thread
+        result = []
+        for thread in threads[:50]:  # Limit to 50 threads
+            latest_msg = EmailMessage.objects.filter(
+                thread_id=thread['thread_id'],
+                timestamp=thread['latest_timestamp'],
+                is_deleted=False
+            ).select_related('connection').first()
+
+            if latest_msg:
+                msg_data = EmailMessageSerializer(latest_msg).data
+                msg_data['message_count'] = thread['message_count']
+                msg_data['unread_count'] = thread['unread_count']
+                result.append(msg_data)
+
+        return Response(result)
+
+
+class EmailDraftViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing email drafts"""
+    serializer_class = EmailDraftSerializer
+    permission_classes = [IsAuthenticated, CanSendSocialMessages]
+
+    def get_queryset(self):
+        return EmailDraft.objects.filter(
+            created_by=self.request.user
+        ).select_related('connection', 'reply_to_message').order_by('-updated_at')
+
+    def perform_create(self, serializer):
+        # Get the active email connection
+        connection = EmailConnection.objects.filter(is_active=True).first()
+        if not connection:
+            raise drf_serializers.ValidationError("No active email connection found")
+
+        serializer.save(
+            created_by=self.request.user,
+            connection=connection
+        )
