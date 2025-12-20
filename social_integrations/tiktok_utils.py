@@ -54,22 +54,14 @@ def get_oauth_url(state: str) -> str:
     """
     config = get_tiktok_config()
 
-    # Scopes for TikTok Business Account messaging
-    # User info scopes
-    # user.info.basic - Basic user info (open_id, avatar, display_name)
-    # user.info.username - Username access
-    # user.info.profile - Profile info including bio, deep links
-    # Messaging scopes (requires TikTok Business Account)
-    # message.list.read - Read direct messages
-    # message.list.send - Send direct messages
-    # message.list.manage - Manage messages (delete, etc.)
+    # Scopes for TikTok integration
+    # Currently using only Login Kit scopes (approved by default)
+    #
+    # To enable messaging, apply for these scopes in TikTok Developer Portal:
+    # - message.list.read, message.list.send, message.list.manage
+    # Then add them to this list after approval
     scopes = ",".join([
         "user.info.basic",
-        "user.info.username",
-        "user.info.profile",
-        "message.list.read",
-        "message.list.send",
-        "message.list.manage",
     ])
 
     params = {
