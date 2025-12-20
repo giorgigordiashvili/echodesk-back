@@ -5304,8 +5304,8 @@ def email_connect(request):
     data = serializer.validated_data
 
     try:
-        # Test IMAP connection
-        imap_result = test_imap_connection(
+        # Test IMAP connection (returns tuple: success, error_message)
+        imap_success, imap_error = test_imap_connection(
             server=data['imap_server'],
             port=data['imap_port'],
             use_ssl=data['imap_use_ssl'],
@@ -5313,14 +5313,14 @@ def email_connect(request):
             password=data['password']
         )
 
-        if not imap_result['success']:
+        if not imap_success:
             return Response({
                 'error': 'IMAP connection failed',
-                'details': imap_result.get('error', 'Unknown error')
+                'details': imap_error or 'Unknown error'
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # Test SMTP connection
-        smtp_result = test_smtp_connection(
+        # Test SMTP connection (returns tuple: success, error_message)
+        smtp_success, smtp_error = test_smtp_connection(
             server=data['smtp_server'],
             port=data['smtp_port'],
             use_tls=data['smtp_use_tls'],
@@ -5329,10 +5329,10 @@ def email_connect(request):
             password=data['password']
         )
 
-        if not smtp_result['success']:
+        if not smtp_success:
             return Response({
                 'error': 'SMTP connection failed',
-                'details': smtp_result.get('error', 'Unknown error')
+                'details': smtp_error or 'Unknown error'
             }, status=status.HTTP_400_BAD_REQUEST)
 
         # Check if connection already exists for this email
