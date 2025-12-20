@@ -75,6 +75,18 @@ class FacebookMessage(models.Model):
     read_by_staff_at = models.DateTimeField(null=True, blank=True)  # When staff read the message
     created_at = models.DateTimeField(auto_now_add=True)
 
+    # Soft delete fields for admin investigation
+    is_deleted = models.BooleanField(default=False, help_text='Soft deleted by staff')
+    deleted_at = models.DateTimeField(null=True, blank=True, help_text='When the message was deleted')
+    deleted_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='deleted_facebook_messages',
+        help_text='Staff member who deleted this message'
+    )
+
     class Meta:
         ordering = ['-timestamp']
 
@@ -192,6 +204,18 @@ class InstagramMessage(models.Model):
     is_read_by_staff = models.BooleanField(default=False)  # True if staff has read this incoming message
     read_by_staff_at = models.DateTimeField(null=True, blank=True)  # When staff read the message
     created_at = models.DateTimeField(auto_now_add=True)
+
+    # Soft delete fields for admin investigation
+    is_deleted = models.BooleanField(default=False, help_text='Soft deleted by staff')
+    deleted_at = models.DateTimeField(null=True, blank=True, help_text='When the message was deleted')
+    deleted_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='deleted_instagram_messages',
+        help_text='Staff member who deleted this message'
+    )
 
     class Meta:
         ordering = ['-timestamp']
@@ -422,6 +446,18 @@ class WhatsAppMessage(models.Model):
         null=True,
         blank=True,
         help_text="When the message was revoked"
+    )
+
+    # Soft delete fields for admin investigation
+    is_deleted = models.BooleanField(default=False, help_text='Soft deleted by staff')
+    deleted_at = models.DateTimeField(null=True, blank=True, help_text='When the message was deleted')
+    deleted_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='deleted_whatsapp_messages',
+        help_text='Staff member who deleted this message'
     )
 
     class Meta:

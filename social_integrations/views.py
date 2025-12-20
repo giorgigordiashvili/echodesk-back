@@ -181,7 +181,11 @@ class FacebookMessageViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         tenant_pages = FacebookPageConnection.objects.all()  # All pages for this tenant
-        base_queryset = FacebookMessage.objects.filter(page_connection__in=tenant_pages)
+        # Filter out soft-deleted messages
+        base_queryset = FacebookMessage.objects.filter(
+            page_connection__in=tenant_pages,
+            is_deleted=False
+        )
 
         # Check if assignment mode is enabled
         settings_obj = SocialIntegrationSettings.objects.first()
@@ -1828,7 +1832,11 @@ class InstagramMessageViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         tenant_accounts = InstagramAccountConnection.objects.all()  # All accounts for this tenant
-        base_queryset = InstagramMessage.objects.filter(account_connection__in=tenant_accounts)
+        # Filter out soft-deleted messages
+        base_queryset = InstagramMessage.objects.filter(
+            account_connection__in=tenant_accounts,
+            is_deleted=False
+        )
 
         # Check if assignment mode is enabled
         settings_obj = SocialIntegrationSettings.objects.first()
@@ -3360,7 +3368,8 @@ def mark_conversation_read(request):
 @permission_classes([IsAuthenticated, IsStaffUser])
 def delete_conversation(request):
     """
-    Delete all messages in a conversation. STAFF USERS ONLY.
+    Soft delete all messages in a conversation. STAFF USERS ONLY.
+    Messages are marked as deleted but kept for admin investigation.
 
     Request body:
     {
@@ -3380,30 +3389,48 @@ def delete_conversation(request):
             }, status=status.HTTP_400_BAD_REQUEST)
 
         deleted_count = 0
+        now = timezone.now()
 
         if platform == 'facebook':
-            # Delete all messages from this conversation
-            # For incoming messages: sender_id = customer ID, is_from_page = False
-            # For outgoing messages: sender_id = customer ID (stored this way), is_from_page = True
-            # All messages for a conversation have the customer's sender_id
-            deleted_count, _ = FacebookMessage.objects.filter(
-                sender_id=conversation_id
-            ).delete()
+            # Soft delete all messages from this conversation
+            deleted_count = FacebookMessage.objects.filter(
+                sender_id=conversation_id,
+                is_deleted=False
+            ).update(
+                is_deleted=True,
+                deleted_at=now,
+                deleted_by=request.user
+            )
 
         elif platform == 'instagram':
-            # Delete all messages from this conversation (both directions)
-            deleted_count, _ = InstagramMessage.objects.filter(
-                sender_id=conversation_id
-            ).delete()
+            # Soft delete all messages from this conversation
+            deleted_count = InstagramMessage.objects.filter(
+                sender_id=conversation_id,
+                is_deleted=False
+            ).update(
+                is_deleted=True,
+                deleted_at=now,
+                deleted_by=request.user
+            )
 
         elif platform == 'whatsapp':
-            # Delete all messages from/to this phone number
-            deleted_from, _ = WhatsAppMessage.objects.filter(
-                from_number=conversation_id
-            ).delete()
-            deleted_to, _ = WhatsAppMessage.objects.filter(
-                to_number=conversation_id
-            ).delete()
+            # Soft delete all messages from/to this phone number
+            deleted_from = WhatsAppMessage.objects.filter(
+                from_number=conversation_id,
+                is_deleted=False
+            ).update(
+                is_deleted=True,
+                deleted_at=now,
+                deleted_by=request.user
+            )
+            deleted_to = WhatsAppMessage.objects.filter(
+                to_number=conversation_id,
+                is_deleted=False
+            ).update(
+                is_deleted=True,
+                deleted_at=now,
+                deleted_by=request.user
+            )
             deleted_count = deleted_from + deleted_to
 
         else:
@@ -3411,7 +3438,7 @@ def delete_conversation(request):
                 'error': f'Invalid platform: {platform}'
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        logger.info(f"Staff user {request.user.email} deleted {deleted_count} messages for {platform} conversation {conversation_id}")
+        logger.info(f"Staff user {request.user.email} soft-deleted {deleted_count} messages for {platform} conversation {conversation_id}")
 
         return Response({
             'success': True,
@@ -3666,7 +3693,11 @@ class WhatsAppMessageViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         tenant_accounts = WhatsAppBusinessAccount.objects.all()  # All accounts for this tenant
-        base_queryset = WhatsAppMessage.objects.filter(business_account__in=tenant_accounts)
+        # Filter out soft-deleted messages
+        base_queryset = WhatsAppMessage.objects.filter(
+            business_account__in=tenant_accounts,
+            is_deleted=False
+        )
 
         # Check if assignment mode is enabled
         settings_obj = SocialIntegrationSettings.objects.first()
