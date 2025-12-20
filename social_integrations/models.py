@@ -589,6 +589,7 @@ class ChatAssignment(models.Model):
         ('instagram', 'Instagram'),
         ('whatsapp', 'WhatsApp'),
         ('email', 'Email'),
+        ('tiktok', 'TikTok'),
     ]
 
     STATUS_CHOICES = [
@@ -689,7 +690,7 @@ class ChatRating(models.Model):
     # Store conversation info for historical reference
     platform = models.CharField(
         max_length=20,
-        choices=[('facebook', 'Facebook'), ('instagram', 'Instagram'), ('whatsapp', 'WhatsApp'), ('email', 'Email')],
+        choices=[('facebook', 'Facebook'), ('instagram', 'Instagram'), ('whatsapp', 'WhatsApp'), ('email', 'Email'), ('tiktok', 'TikTok')],
         default='facebook',  # Default for migration
         help_text="Platform where the chat occurred"
     )
@@ -929,3 +930,168 @@ class EmailDraft(models.Model):
 
     def __str__(self):
         return f"Draft: {self.subject[:50] or 'No subject'}"
+
+
+class TikTokCreatorAccount(models.Model):
+    """Stores TikTok Creator/Business account connection details for a tenant"""
+
+    DEACTIVATION_REASONS = [
+        ('expired_token', 'Access Token Expired'),
+        ('revoked_access', 'User Revoked Access'),
+        ('manual', 'Manually Disconnected'),
+        ('api_error', 'API Error'),
+    ]
+
+    # TikTok identifiers
+    open_id = models.CharField(
+        max_length=255,
+        unique=True,
+        help_text="TikTok user unique ID (open_id)"
+    )
+    union_id = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Cross-app user ID for same developer"
+    )
+    username = models.CharField(max_length=100, blank=True)
+    display_name = models.CharField(max_length=200, blank=True)
+    avatar_url = models.URLField(max_length=500, blank=True, null=True)
+
+    # OAuth tokens (encrypted using Django's Signer)
+    access_token = models.TextField(help_text="Encrypted access token")
+    refresh_token = models.TextField(help_text="Encrypted refresh token")
+    token_expires_at = models.DateTimeField(help_text="When the access token expires")
+    scope = models.TextField(blank=True, help_text="Granted OAuth scopes")
+
+    # Status
+    is_active = models.BooleanField(default=True)
+    deactivated_at = models.DateTimeField(null=True, blank=True)
+    deactivation_reason = models.CharField(
+        max_length=50,
+        choices=DEACTIVATION_REASONS,
+        blank=True
+    )
+    deactivation_error = models.TextField(blank=True, help_text="Error details if deactivated due to error")
+
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "TikTok Creator Account"
+        verbose_name_plural = "TikTok Creator Accounts"
+
+    def __str__(self):
+        return f"@{self.username or self.open_id} - TikTok"
+
+    def set_tokens(self, access_token, refresh_token):
+        """Encrypt and store tokens using Django's Signer"""
+        from django.core.signing import Signer
+        signer = Signer()
+        self.access_token = signer.sign(access_token)
+        self.refresh_token = signer.sign(refresh_token)
+
+    def get_access_token(self):
+        """Decrypt and return the access token"""
+        from django.core.signing import Signer, BadSignature
+        signer = Signer()
+        try:
+            return signer.unsign(self.access_token)
+        except BadSignature:
+            return None
+
+    def get_refresh_token(self):
+        """Decrypt and return the refresh token"""
+        from django.core.signing import Signer, BadSignature
+        signer = Signer()
+        try:
+            return signer.unsign(self.refresh_token)
+        except BadSignature:
+            return None
+
+
+class TikTokMessage(models.Model):
+    """Stores TikTok Direct Messages"""
+
+    MESSAGE_TYPE_CHOICES = [
+        ('text', 'Text'),
+        ('image', 'Image'),
+        ('video', 'Video'),
+        ('card', 'Card'),
+        ('sticker', 'Sticker'),
+    ]
+
+    creator_account = models.ForeignKey(
+        TikTokCreatorAccount,
+        on_delete=models.CASCADE,
+        related_name='messages'
+    )
+
+    # Message identifiers
+    message_id = models.CharField(max_length=255, unique=True, help_text="TikTok message ID")
+    conversation_id = models.CharField(
+        max_length=255,
+        db_index=True,
+        help_text="Conversation ID for grouping messages with same user"
+    )
+
+    # Sender info
+    sender_id = models.CharField(max_length=255, help_text="TikTok open_id of sender")
+    sender_username = models.CharField(max_length=100, blank=True)
+    sender_display_name = models.CharField(max_length=200, blank=True)
+    sender_avatar_url = models.URLField(max_length=500, blank=True, null=True)
+
+    # Content
+    message_type = models.CharField(max_length=20, choices=MESSAGE_TYPE_CHOICES, default='text')
+    message_text = models.TextField(blank=True)
+    media_url = models.URLField(max_length=1000, blank=True, null=True)
+    media_mime_type = models.CharField(max_length=100, blank=True)
+    attachments = models.JSONField(default=list, blank=True)
+
+    # Metadata
+    timestamp = models.DateTimeField(help_text="Message timestamp from TikTok")
+    is_from_creator = models.BooleanField(default=False, help_text="True if sent by business/creator")
+
+    # Status tracking
+    is_delivered = models.BooleanField(default=False)
+    delivered_at = models.DateTimeField(null=True, blank=True)
+    is_read = models.BooleanField(default=False)
+    read_at = models.DateTimeField(null=True, blank=True)
+    is_read_by_staff = models.BooleanField(default=False)
+    read_by_staff_at = models.DateTimeField(null=True, blank=True)
+
+    # Error tracking for sent messages
+    error_message = models.TextField(blank=True)
+
+    # Soft delete fields
+    is_deleted = models.BooleanField(default=False, help_text='Soft deleted by staff')
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    deleted_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='deleted_tiktok_messages',
+        help_text='Staff member who deleted this message'
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-timestamp']
+        indexes = [
+            models.Index(fields=['creator_account', 'conversation_id']),
+            models.Index(fields=['creator_account', 'timestamp']),
+            models.Index(fields=['sender_id', 'timestamp']),
+        ]
+        verbose_name = "TikTok Message"
+        verbose_name_plural = "TikTok Messages"
+
+    def __str__(self):
+        direction = "to" if self.is_from_creator else "from"
+        sender = self.sender_display_name or self.sender_username or self.sender_id
+        if self.message_text:
+            return f"TikTok DM {direction} @{sender} - {self.message_text[:50]}"
+        elif self.message_type:
+            return f"TikTok DM {direction} @{sender} - [{self.message_type}]"
+        return f"TikTok DM {direction} @{sender}"

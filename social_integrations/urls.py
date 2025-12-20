@@ -13,6 +13,7 @@ router.register(r'whatsapp-messages', views.WhatsAppMessageViewSet, basename='wh
 router.register(r'whatsapp-contacts', views.WhatsAppContactViewSet, basename='whatsapp_contacts')
 router.register(r'email-messages', views.EmailMessageViewSet, basename='email_messages')
 router.register(r'email-drafts', views.EmailDraftViewSet, basename='email_drafts')
+router.register(r'tiktok-messages', views.TikTokMessageViewSet, basename='tiktok_messages')
 
 # URL patterns for the social integrations app
 urlpatterns = [
@@ -63,6 +64,14 @@ urlpatterns = [
     path('email/action/', views.email_action, name='email_action'),
     path('email/folders/', views.email_folders, name='email_folders'),
     path('email/sync/', views.email_sync, name='email_sync'),
+
+    # TikTok endpoints
+    path('tiktok/oauth/start/', views.tiktok_oauth_start, name='tiktok_oauth_start'),
+    path('tiktok/oauth/callback/', views.tiktok_oauth_callback, name='tiktok_oauth_callback'),
+    path('tiktok/webhook/', views.tiktok_webhook, name='tiktok_webhook'),
+    path('tiktok/status/', views.tiktok_status, name='tiktok_status'),
+    path('tiktok/disconnect/', views.tiktok_disconnect, name='tiktok_disconnect'),
+    path('tiktok/send-message/', views.tiktok_send_message, name='tiktok_send_message'),
 
     # Webhook debugging endpoints
     path('webhook-status/', views.webhook_status, name='webhook_status'),
