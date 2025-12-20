@@ -402,6 +402,12 @@ FACEBOOK_APP_ID = config('FACEBOOK_APP_ID', default='')
 FACEBOOK_APP_SECRET = config('FACEBOOK_APP_SECRET', default='')
 FACEBOOK_APP_VERSION = config('FACEBOOK_APP_VERSION', default='v23.0')
 
+# TikTok Integration Settings
+TIKTOK_CLIENT_ID = config('TIKTOK_CLIENT_ID', default='')
+TIKTOK_CLIENT_SECRET = config('TIKTOK_CLIENT_SECRET', default='')
+TIKTOK_REDIRECT_URI = config('TIKTOK_REDIRECT_URI', default='https://api.echodesk.ge/api/social/tiktok/oauth/callback/')
+TIKTOK_WEBHOOK_SECRET = config('TIKTOK_WEBHOOK_SECRET', default='')
+
 # Social Integration Configuration
 SOCIAL_INTEGRATIONS = {
     'FACEBOOK_APP_ID': FACEBOOK_APP_ID,
@@ -417,6 +423,11 @@ SOCIAL_INTEGRATIONS = {
         'public_profile',  # Basic profile information
         'email',  # Email address
     ],
+    # TikTok Settings
+    'TIKTOK_CLIENT_ID': TIKTOK_CLIENT_ID,
+    'TIKTOK_CLIENT_SECRET': TIKTOK_CLIENT_SECRET,
+    'TIKTOK_REDIRECT_URI': TIKTOK_REDIRECT_URI,
+    'TIKTOK_WEBHOOK_SECRET': TIKTOK_WEBHOOK_SECRET,
 }
 
 # ASGI Application for WebSocket support
