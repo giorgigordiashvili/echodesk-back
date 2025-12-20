@@ -70,6 +70,9 @@ urlpatterns = [
     path('assignments/start-session/', views.start_session, name='start_session'),
     path('assignments/end-session/', views.end_session, name='end_session'),
 
+    # Rating statistics endpoint (superadmin only)
+    path('rating-statistics/', views.rating_statistics, name='rating_statistics'),
+
     # Unread messages count endpoint
     path('unread-count/', views.unread_messages_count, name='unread_messages_count'),
 

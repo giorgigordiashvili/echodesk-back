@@ -611,16 +611,60 @@ class ChatAssignment(models.Model):
 class ChatRating(models.Model):
     """Stores customer ratings for chat sessions"""
 
+    # Store assignment reference (nullable - assignment deleted after rating)
     assignment = models.ForeignKey(
         ChatAssignment,
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
         related_name='ratings',
-        help_text="The assignment this rating is for"
+        help_text="The assignment this rating is for (may be null after completion)"
     )
+
+    # Store user directly so rating persists after assignment deletion
+    rated_user = models.ForeignKey(
+        'users.User',
+        on_delete=models.CASCADE,
+        null=True,  # Nullable for migration, will always be set in code
+        blank=True,
+        related_name='chat_ratings',
+        help_text="The user who handled this chat session"
+    )
+
+    # Store conversation info for historical reference
+    platform = models.CharField(
+        max_length=20,
+        choices=[('facebook', 'Facebook'), ('instagram', 'Instagram'), ('whatsapp', 'WhatsApp')],
+        default='facebook',  # Default for migration
+        help_text="Platform where the chat occurred"
+    )
+    conversation_id = models.CharField(
+        max_length=255,
+        default='',  # Default for migration
+        help_text="Conversation identifier"
+    )
+    account_id = models.CharField(
+        max_length=255,
+        default='',  # Default for migration
+        help_text="Account identifier (page_id, account_id, or waba_id)"
+    )
+
     rating = models.IntegerField(
         validators=[MinValueValidator(1), MaxValueValidator(5)],
         default=0,
         help_text="Customer rating from 1-5 (0 = pending response)"
+    )
+
+    # Session timing
+    session_started_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the session started"
+    )
+    session_ended_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the session ended"
     )
 
     # Message tracking for the rating flow
@@ -638,15 +682,15 @@ class ChatRating(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        # One rating per assignment
-        unique_together = [['assignment']]
         indexes = [
             models.Index(fields=['rating', 'created_at']),
+            models.Index(fields=['rated_user', 'created_at']),
+            models.Index(fields=['platform', 'created_at']),
         ]
         verbose_name = "Chat Rating"
         verbose_name_plural = "Chat Ratings"
 
     def __str__(self):
         if self.rating == 0:
-            return f"Pending rating for {self.assignment}"
-        return f"Rating {self.rating}/5 for {self.assignment}"
+            return f"Pending rating for {self.rated_user}"
+        return f"Rating {self.rating}/5 for {self.rated_user}"

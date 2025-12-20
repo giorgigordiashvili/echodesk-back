@@ -2808,6 +2808,12 @@ def end_session(request):
     if message_id:
         ChatRating.objects.create(
             assignment=assignment,
+            rated_user=request.user,
+            platform=platform,
+            conversation_id=conversation_id,
+            account_id=account_id,
+            session_started_at=assignment.session_started_at,
+            session_ended_at=assignment.session_ended_at,
             rating=0,  # Pending - waiting for customer response
             rating_request_message_id=message_id
         )
@@ -2976,53 +2982,154 @@ def process_potential_rating_response(message_text, platform, conversation_id, a
     rating_value = int(text)
 
     try:
-        # Find completed assignment for this conversation (waiting for rating)
-        assignment = ChatAssignment.objects.filter(
+        # Find pending rating directly by conversation info (rating=0 means waiting for response)
+        # This works even after assignment is deleted because we store conversation info directly
+        rating = ChatRating.objects.filter(
             platform=platform,
             conversation_id=conversation_id,
             account_id=account_id,
-            status='completed'
-        ).first()
-
-        if not assignment:
-            return False
-
-        # Find pending rating (rating=0 means waiting for response)
-        rating = ChatRating.objects.filter(
-            assignment=assignment,
             rating=0
         ).first()
 
-        if rating:
-            rating.rating = rating_value
-            if message_id:
-                rating.rating_response_message_id = message_id
-            rating.save()
+        if not rating:
+            return False
 
-            logger.info(f"Rating received: {rating_value}/5 for {platform} conversation {conversation_id}")
+        # Get the assignment if it still exists (for deletion later)
+        assignment = rating.assignment
 
-            # Send thank you message in Georgian
-            thank_you_message = f"გმადლობთ თქვენი გამოხმაურებისთვის! თქვენ შეაფასეთ ჩვენი სერვისი {rating_value}/5."
-            try:
-                if platform == 'facebook':
-                    send_rating_request_facebook(conversation_id, account_id, thank_you_message)
-                elif platform == 'instagram':
-                    send_rating_request_instagram(conversation_id, account_id, thank_you_message)
-                elif platform == 'whatsapp':
-                    send_rating_request_whatsapp(conversation_id, account_id, thank_you_message)
-            except Exception as e:
-                logger.warning(f"Failed to send thank you message: {e}")
+        # Update the rating with the customer's response
+        rating.rating = rating_value
+        if message_id:
+            rating.rating_response_message_id = message_id
+        rating.save()
 
-            # Delete the assignment after rating is received (chat becomes available again)
+        logger.info(f"Rating received: {rating_value}/5 for {platform} conversation {conversation_id} (user: {rating.rated_user})")
+
+        # Send thank you message in Georgian
+        thank_you_message = f"გმადლობთ თქვენი გამოხმაურებისთვის! თქვენ შეაფასეთ ჩვენი სერვისი {rating_value}/5."
+        try:
+            if platform == 'facebook':
+                send_rating_request_facebook(conversation_id, account_id, thank_you_message)
+            elif platform == 'instagram':
+                send_rating_request_instagram(conversation_id, account_id, thank_you_message)
+            elif platform == 'whatsapp':
+                send_rating_request_whatsapp(conversation_id, account_id, thank_you_message)
+        except Exception as e:
+            logger.warning(f"Failed to send thank you message: {e}")
+
+        # Delete the assignment after rating is received (chat becomes available again)
+        if assignment:
             assignment.delete()
             logger.info(f"Assignment deleted after rating received for {platform} conversation {conversation_id}")
 
-            return True
+        return True
 
     except Exception as e:
         logger.error(f"Error processing rating response: {e}")
 
     return False
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def rating_statistics(request):
+    """
+    Get rating statistics for all users.
+    Superadmin only - returns aggregated stats per user.
+    Supports date filtering via start_date and end_date query params.
+    Default: current month (1st to today)
+    """
+    # Check if user is superadmin
+    if not request.user.is_staff:
+        return Response(
+            {'error': 'Only superadmins can view rating statistics'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    # Parse date filters (default: this month)
+    from datetime import date
+    today = date.today()
+    first_of_month = today.replace(day=1)
+
+    start_date_str = request.query_params.get('start_date')
+    end_date_str = request.query_params.get('end_date')
+
+    try:
+        if start_date_str:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+        else:
+            start_date = first_of_month
+
+        if end_date_str:
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+        else:
+            end_date = today
+    except ValueError:
+        return Response(
+            {'error': 'Invalid date format. Use YYYY-MM-DD'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # Query ratings within date range (only completed ratings, not pending)
+    ratings = ChatRating.objects.filter(
+        created_at__date__gte=start_date,
+        created_at__date__lte=end_date,
+        rating__gt=0  # Exclude pending ratings
+    ).select_related('rated_user')
+
+    # Aggregate stats per user
+    from django.db.models import Avg, Count, Sum
+    from django.db.models.functions import Coalesce
+
+    user_stats = ratings.values(
+        'rated_user__id',
+        'rated_user__email',
+        'rated_user__first_name',
+        'rated_user__last_name'
+    ).annotate(
+        total_ratings=Count('id'),
+        average_rating=Avg('rating'),
+        rating_1=Count('id', filter=models.Q(rating=1)),
+        rating_2=Count('id', filter=models.Q(rating=2)),
+        rating_3=Count('id', filter=models.Q(rating=3)),
+        rating_4=Count('id', filter=models.Q(rating=4)),
+        rating_5=Count('id', filter=models.Q(rating=5)),
+    ).order_by('-average_rating', '-total_ratings')
+
+    # Format response
+    stats_list = []
+    for stat in user_stats:
+        if stat['rated_user__id']:  # Skip if user is null
+            stats_list.append({
+                'user_id': stat['rated_user__id'],
+                'email': stat['rated_user__email'],
+                'name': f"{stat['rated_user__first_name'] or ''} {stat['rated_user__last_name'] or ''}".strip() or stat['rated_user__email'],
+                'total_ratings': stat['total_ratings'],
+                'average_rating': round(stat['average_rating'], 2) if stat['average_rating'] else 0,
+                'rating_breakdown': {
+                    '1': stat['rating_1'],
+                    '2': stat['rating_2'],
+                    '3': stat['rating_3'],
+                    '4': stat['rating_4'],
+                    '5': stat['rating_5'],
+                }
+            })
+
+    # Overall stats
+    overall = ratings.aggregate(
+        total_ratings=Count('id'),
+        average_rating=Avg('rating')
+    )
+
+    return Response({
+        'start_date': start_date.isoformat(),
+        'end_date': end_date.isoformat(),
+        'overall': {
+            'total_ratings': overall['total_ratings'] or 0,
+            'average_rating': round(overall['average_rating'], 2) if overall['average_rating'] else 0,
+        },
+        'users': stats_list
+    })
 
 
 @api_view(['GET'])
