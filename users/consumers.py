@@ -791,52 +791,68 @@ class TeamChatConsumer(AsyncWebsocketConsumer):
             await self.close(code=4001)
             return
 
-        # Join personal channel group for receiving messages
-        self.personal_group_name = f'team_chat_{self.tenant_schema}_{self.user.id}'
+        try:
+            # Join personal channel group for receiving messages
+            self.personal_group_name = f'team_chat_{self.tenant_schema}_{self.user.id}'
 
-        # Join tenant-wide group for online status updates
-        self.tenant_group_name = f'team_chat_presence_{self.tenant_schema}'
+            # Join tenant-wide group for online status updates
+            self.tenant_group_name = f'team_chat_presence_{self.tenant_schema}'
 
-        await self.channel_layer.group_add(
-            self.personal_group_name,
-            self.channel_name
-        )
+            await self.channel_layer.group_add(
+                self.personal_group_name,
+                self.channel_name
+            )
 
-        await self.channel_layer.group_add(
-            self.tenant_group_name,
-            self.channel_name
-        )
+            await self.channel_layer.group_add(
+                self.tenant_group_name,
+                self.channel_name
+            )
 
-        await self.accept()
+            await self.accept()
 
-        # Update online status
-        await self.set_online_status(True)
+            # Update online status (wrapped in try/catch to not fail connection)
+            try:
+                await self.set_online_status(True)
+            except Exception as e:
+                print(f"[TeamChatWS] Error setting online status: {e}")
 
-        # Notify other users that this user is online
-        await self.channel_layer.group_send(
-            self.tenant_group_name,
-            {
-                'type': 'user_status_changed',
+            # Notify other users that this user is online
+            try:
+                await self.channel_layer.group_send(
+                    self.tenant_group_name,
+                    {
+                        'type': 'user_status_changed',
+                        'user_id': self.user.id,
+                        'is_online': True,
+                        'user_name': self.user.get_full_name() or self.user.email,
+                        'exclude_channel': self.channel_name
+                    }
+                )
+            except Exception as e:
+                print(f"[TeamChatWS] Error broadcasting online status: {e}")
+
+            # Get online users list
+            online_users = []
+            try:
+                online_users = await self.get_online_users()
+            except Exception as e:
+                print(f"[TeamChatWS] Error getting online users: {e}")
+
+            # Send connection confirmation
+            await self.send(text_data=json.dumps({
+                'type': 'connection',
+                'status': 'connected',
+                'tenant': self.tenant_schema,
                 'user_id': self.user.id,
-                'is_online': True,
-                'user_name': self.user.get_full_name() or self.user.email,
-                'exclude_channel': self.channel_name
-            }
-        )
+                'online_users': online_users
+            }))
 
-        # Get online users list
-        online_users = await self.get_online_users()
-
-        # Send connection confirmation
-        await self.send(text_data=json.dumps({
-            'type': 'connection',
-            'status': 'connected',
-            'tenant': self.tenant_schema,
-            'user_id': self.user.id,
-            'online_users': online_users
-        }))
-
-        print(f"[TeamChatWS] Connected successfully for user {self.user.email} in tenant {self.tenant_schema}")
+            print(f"[TeamChatWS] Connected successfully for user {self.user.email} in tenant {self.tenant_schema}")
+        except Exception as e:
+            print(f"[TeamChatWS] Connection error: {e}")
+            import traceback
+            traceback.print_exc()
+            await self.close(code=4000)
 
     async def disconnect(self, close_code):
         if hasattr(self, 'personal_group_name'):
