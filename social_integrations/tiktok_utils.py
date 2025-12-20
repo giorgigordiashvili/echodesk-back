@@ -212,12 +212,16 @@ def get_user_info(access_token: str) -> Dict[str, Any]:
         access_token: Valid access token
 
     Returns:
-        Dict containing user info (open_id, union_id, avatar_url, display_name, etc.)
+        Dict containing user info (open_id, avatar_url, display_name, etc.)
     """
     url = f"{TIKTOK_API_BASE}/user/info/"
 
-    # Fields to request
-    fields = "open_id,union_id,avatar_url,display_name,username"
+    # Fields available with user.info.basic scope only
+    # Additional fields require additional scopes:
+    # - username: requires user.info.username
+    # - union_id: requires user.info.basic (but may not always be returned)
+    # - bio_description, profile_deep_link: requires user.info.profile
+    fields = "open_id,avatar_url,display_name"
 
     headers = {
         'Authorization': f'Bearer {access_token}',
