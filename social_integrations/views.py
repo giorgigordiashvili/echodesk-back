@@ -3084,7 +3084,7 @@ def rating_statistics(request):
     ).select_related('rated_user')
 
     # Aggregate stats per user
-    from django.db.models import Avg, Count, Sum
+    from django.db.models import Avg, Count, Sum, Q
     from django.db.models.functions import Coalesce
 
     user_stats = ratings.values(
@@ -3095,11 +3095,11 @@ def rating_statistics(request):
     ).annotate(
         total_ratings=Count('id'),
         average_rating=Avg('rating'),
-        rating_1=Count('id', filter=models.Q(rating=1)),
-        rating_2=Count('id', filter=models.Q(rating=2)),
-        rating_3=Count('id', filter=models.Q(rating=3)),
-        rating_4=Count('id', filter=models.Q(rating=4)),
-        rating_5=Count('id', filter=models.Q(rating=5)),
+        rating_1=Count('id', filter=Q(rating=1)),
+        rating_2=Count('id', filter=Q(rating=2)),
+        rating_3=Count('id', filter=Q(rating=3)),
+        rating_4=Count('id', filter=Q(rating=4)),
+        rating_5=Count('id', filter=Q(rating=5)),
     ).order_by('-average_rating', '-total_ratings')
 
     # Format response
