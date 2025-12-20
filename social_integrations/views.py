@@ -5822,26 +5822,29 @@ def tiktok_oauth_callback(request):
     error = request.GET.get('error')
     error_description = request.GET.get('error_description', '')
 
-    # Get frontend URL for redirects
-    frontend_url = settings.FRONTEND_URL.rstrip('/')
-
-    # Handle OAuth errors
-    if error:
-        logger.error(f"TikTok OAuth error: {error} - {error_description}")
-        return redirect(f'{frontend_url}/social/connections?tiktok=error&message={quote_plus(error_description)}')
-
-    if not code:
-        return redirect(f'{frontend_url}/social/connections?tiktok=error&message=No+authorization+code+received')
-
-    # Parse tenant from state
+    # Parse tenant from state first (needed for frontend URL)
     tenant_schema = None
     for param in state.split('&'):
         if param.startswith('tenant='):
             tenant_schema = param.split('=', 1)[1]
             break
 
+    # Build frontend URL from tenant schema
+    if tenant_schema:
+        frontend_url = f"https://{tenant_schema}.echodesk.ge"
+    else:
+        frontend_url = "https://echodesk.ge"
+
+    # Handle OAuth errors
+    if error:
+        logger.error(f"TikTok OAuth error: {error} - {error_description}")
+        return redirect(f'{frontend_url}/social/connections?tiktok_status=error&message={quote_plus(error_description)}')
+
+    if not code:
+        return redirect(f'{frontend_url}/social/connections?tiktok_status=error&message=No+authorization+code+received')
+
     if not tenant_schema:
-        return redirect(f'{frontend_url}/social/connections?tiktok=error&message=Invalid+state+parameter')
+        return redirect(f'{frontend_url}/social/connections?tiktok_status=error&message=Invalid+state+parameter')
 
     try:
         # Exchange code for tokens
@@ -5873,11 +5876,11 @@ def tiktok_oauth_callback(request):
 
             logger.info(f"TikTok account {'created' if created else 'updated'}: @{account.username}")
 
-        return redirect(f'{frontend_url}/social/connections?tiktok=success')
+        return redirect(f'{frontend_url}/social/connections?tiktok_status=connected')
 
     except Exception as e:
         logger.error(f"TikTok OAuth callback error: {e}")
-        return redirect(f'{frontend_url}/social/connections?tiktok=error&message={quote_plus(str(e))}')
+        return redirect(f'{frontend_url}/social/connections?tiktok_status=error&message={quote_plus(str(e))}')
 
 
 @csrf_exempt
