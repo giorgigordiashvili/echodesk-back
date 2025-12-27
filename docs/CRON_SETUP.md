@@ -1,17 +1,21 @@
-# Cron Job Setup for EchoDesk Recurring Payments
+# Cron Job Setup for EchoDesk
 
 ## Overview
 
-EchoDesk uses two cron jobs to handle recurring payments and subscription management:
+EchoDesk uses cron jobs to handle various automated tasks:
 
 1. **process_recurring_payments** - Charges saved cards for subscription renewals
 2. **check_subscription_status** - Monitors subscriptions and sends notifications
+3. **sync_emails** - Syncs emails from IMAP servers for all tenants
 
 ## Cron Schedule
 
 Add these to your server's crontab (`crontab -e`):
 
 ```bash
+# EchoDesk Email Sync (runs every 5 minutes)
+*/5 * * * * cd /path/to/echodesk-back && /path/to/python manage.py sync_emails >> /var/log/echodesk/email_sync.log 2>&1
+
 # EchoDesk Recurring Payments (runs daily at 2 AM)
 0 2 * * * cd /path/to/echodesk-back && /path/to/python manage.py process_recurring_payments >> /var/log/echodesk/recurring_payments.log 2>&1
 
@@ -21,7 +25,38 @@ Add these to your server's crontab (`crontab -e`):
 
 ## Commands Explained
 
-### 1. process_recurring_payments
+### 1. sync_emails
+
+Syncs emails from IMAP servers for all tenants with active email connections.
+
+**Options:**
+- `--tenant SCHEMA` - Sync only for a specific tenant (by schema name)
+- `--max-messages N` - Maximum messages to sync per connection (default: 500)
+- `--dry-run` - Show what would be synced without actually syncing
+
+**Examples:**
+```bash
+# Dry run to see what would be synced
+python manage.py sync_emails --dry-run
+
+# Sync for all tenants
+python manage.py sync_emails
+
+# Sync for a specific tenant
+python manage.py sync_emails --tenant mycompany
+
+# Sync with custom message limit
+python manage.py sync_emails --max-messages 1000
+```
+
+**What it does:**
+1. Iterates through all active tenants
+2. For each tenant, finds active email connections
+3. Connects to IMAP server and fetches new messages
+4. Stores new messages in the database
+5. Updates last_sync_at timestamp
+
+### 2. process_recurring_payments
 
 Charges saved cards for subscriptions expiring soon.
 
