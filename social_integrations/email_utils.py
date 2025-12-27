@@ -236,6 +236,139 @@ def extract_attachments(email_message, connection) -> List[Dict[str, Any]]:
     return attachments
 
 
+def wrap_html_email(body_html: str, signature_html: str = None) -> str:
+    """
+    Wrap HTML content in a proper email template with inline styles.
+
+    This ensures consistent rendering across email clients like Outlook, Gmail, etc.
+
+    Args:
+        body_html: The main email body HTML
+        signature_html: Optional signature HTML to append
+
+    Returns:
+        Complete HTML email with inline styles
+    """
+    import re
+
+    def process_images(html):
+        """Add explicit width/height styles to images based on their attributes."""
+        if not html:
+            return html
+
+        def fix_img(match):
+            tag = match.group(0)
+            attrs = match.group(1)
+
+            # Extract width and height attributes
+            width_match = re.search(r'width=["\']?(\d+)["\']?', attrs, re.IGNORECASE)
+            height_match = re.search(r'height=["\']?(\d+)["\']?', attrs, re.IGNORECASE)
+
+            if not width_match and not height_match:
+                return tag
+
+            width = width_match.group(1) if width_match else None
+            height = height_match.group(1) if height_match else None
+
+            # Build style string
+            styles = []
+            if width:
+                styles.append(f'width: {width}px')
+            if height:
+                styles.append(f'height: {height}px')
+            styles.append('max-width: none')  # Override any max-width: 100%
+
+            style_str = '; '.join(styles)
+
+            # Remove existing max-width from style if present
+            tag = re.sub(r'max-width:\s*[^;]+;?\s*', '', tag, flags=re.IGNORECASE)
+
+            # Add or update style attribute
+            if 'style=' in tag.lower():
+                # Append to existing style
+                tag = re.sub(
+                    r'style=(["\'])([^"\']*)\1',
+                    lambda m: f'style="{m.group(2)}; {style_str}"',
+                    tag,
+                    count=1,
+                    flags=re.IGNORECASE
+                )
+            else:
+                # Add new style attribute
+                tag = tag.replace('<img ', f'<img style="{style_str}" ', 1)
+
+            return tag
+
+        return re.sub(r'<img\s+([^>]*)>', fix_img, html, flags=re.IGNORECASE)
+
+    # Add default link styling to signature HTML if links don't have inline styles
+    styled_signature = signature_html
+    if styled_signature:
+        # Process images first
+        styled_signature = process_images(styled_signature)
+
+        # Find <a> tags without style attribute and add blue color
+        def add_link_style(match):
+            tag = match.group(0)
+            if 'style=' in tag.lower():
+                # Already has style, ensure color is set
+                if 'color:' not in tag.lower() and 'color :' not in tag.lower():
+                    # Add color to existing style
+                    tag = re.sub(r'style="', 'style="color: #0066cc; ', tag, flags=re.IGNORECASE)
+                    tag = re.sub(r"style='", "style='color: #0066cc; ", tag, flags=re.IGNORECASE)
+                return tag
+            else:
+                # No style attribute, add one
+                return tag.replace('<a ', '<a style="color: #0066cc; text-decoration: underline;" ', 1)
+        styled_signature = re.sub(r'<a\s[^>]*>', add_link_style, styled_signature, flags=re.IGNORECASE)
+
+    # Build the signature section with proper separator
+    signature_section = ""
+    if styled_signature:
+        signature_section = f'''
+        <tr>
+            <td style="padding-top: 20px; border-top: 1px solid #e5e5e5; margin-top: 20px;">
+                <div style="color: #666666; font-size: 14px; line-height: 1.5;">
+                    {styled_signature}
+                </div>
+            </td>
+        </tr>
+        '''
+
+    # Wrap in email-safe HTML template
+    html_template = f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <title>Email</title>
+    <!--[if mso]>
+    <style type="text/css">
+        body, table, td {{font-family: Arial, Helvetica, sans-serif !important;}}
+    </style>
+    <![endif]-->
+    <style type="text/css">
+        a {{color: #0066cc; text-decoration: underline;}}
+    </style>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; font-size: 14px; line-height: 1.6; color: #333333; background-color: #ffffff;">
+    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="max-width: 600px;">
+        <tr>
+            <td style="padding: 0;">
+                <div style="font-size: 14px; line-height: 1.6; color: #333333;">
+                    {body_html}
+                </div>
+            </td>
+        </tr>
+        {signature_section}
+    </table>
+</body>
+</html>'''
+
+    return html_template
+
+
 def compute_thread_id(message_id: str, in_reply_to: str, references: str) -> str:
     """
     Compute a thread ID for grouping related emails.
@@ -291,42 +424,53 @@ def send_email_smtp(connection, to_emails: List[str], cc_emails: List[str] = Non
 
     # Check if we should append email signature
     is_reply = reply_to_message_id is not None
+    signature_html_content = None
+    signature_text_content = None
+
     try:
         signature = EmailSignature.objects.first()
         if signature and signature.is_enabled:
             # Check if signature should be included (always for new emails, conditional for replies)
             should_include = not is_reply or signature.include_on_reply
             if should_include:
-                # Append signature to HTML body
-                if body_html:
-                    if signature.signature_html:
-                        body_html = f"{body_html}<br><br>{signature.signature_html}"
-                    elif signature.signature_text:
-                        # Fallback to plain text signature in HTML
-                        sig_html = signature.signature_text.replace('\n', '<br>')
-                        body_html = f"{body_html}<br><br>{sig_html}"
-                # Append signature to plain text body
-                if body_text:
-                    if signature.signature_text:
-                        body_text = f"{body_text}\n\n{signature.signature_text}"
-                    elif signature.signature_html:
-                        # Simple HTML to text fallback - strip tags
-                        import re
-                        sig_text = re.sub(r'<[^>]+>', '', signature.signature_html)
-                        sig_text = sig_text.replace('&nbsp;', ' ').strip()
-                        body_text = f"{body_text}\n\n{sig_text}"
+                # Get signature content
+                if signature.signature_html:
+                    signature_html_content = signature.signature_html
+                elif signature.signature_text:
+                    # Convert plain text signature to HTML
+                    signature_html_content = signature.signature_text.replace('\n', '<br>')
+
+                # Get plain text signature
+                if signature.signature_text:
+                    signature_text_content = signature.signature_text
+                elif signature.signature_html:
+                    # Simple HTML to text fallback - strip tags
+                    import re
+                    sig_text = re.sub(r'<[^>]+>', '', signature.signature_html)
+                    sig_text = sig_text.replace('&nbsp;', ' ').replace('&lt;', '<').replace('&gt;', '>').replace('&amp;', '&').strip()
+                    signature_text_content = sig_text
     except Exception as e:
-        logger.warning(f"Failed to append email signature: {e}")
+        logger.warning(f"Failed to get email signature: {e}")
+
+    # Append signature to plain text body
+    final_body_text = body_text
+    if signature_text_content and body_text:
+        final_body_text = f"{body_text}\n\n--\n{signature_text_content}"
+
+    # Wrap HTML body in proper email template with signature
+    final_body_html = None
+    if body_html:
+        final_body_html = wrap_html_email(body_html, signature_html_content)
 
     # Create message
-    if body_html and body_text:
+    if final_body_html and final_body_text:
         msg = MIMEMultipart('alternative')
-        msg.attach(MIMEText(body_text, 'plain', 'utf-8'))
-        msg.attach(MIMEText(body_html, 'html', 'utf-8'))
-    elif body_html:
-        msg = MIMEText(body_html, 'html', 'utf-8')
+        msg.attach(MIMEText(final_body_text, 'plain', 'utf-8'))
+        msg.attach(MIMEText(final_body_html, 'html', 'utf-8'))
+    elif final_body_html:
+        msg = MIMEText(final_body_html, 'html', 'utf-8')
     else:
-        msg = MIMEText(body_text or '', 'plain', 'utf-8')
+        msg = MIMEText(final_body_text or '', 'plain', 'utf-8')
 
     # Set headers
     msg['Message-ID'] = make_msgid()
