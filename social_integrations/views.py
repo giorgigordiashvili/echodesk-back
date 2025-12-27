@@ -3277,36 +3277,123 @@ def user_chat_sessions(request, user_id):
 def unread_messages_count(request):
     """
     Get the total count of unread messages across all social platforms.
-    Returns counts for Facebook, Instagram, WhatsApp, and total.
+    Returns counts for Facebook, Instagram, WhatsApp, Email, and total.
     Unread = incoming messages from customers that staff hasn't read yet.
+
+    When chat_assignment_enabled is True:
+    - Only counts messages in chats assigned to the current user
+    - Also counts messages in chats not assigned to anyone
+    - Chats with status='completed' are treated as unassigned (notifications return to all)
     """
     logger = logging.getLogger(__name__)
 
     try:
-        # Count unread Facebook messages (incoming messages not read by staff)
-        facebook_unread = FacebookMessage.objects.filter(
-            is_from_page=False,  # Messages FROM customers TO the page
-            is_read_by_staff=False  # Staff hasn't read this message yet
-        ).count()
+        # Check if chat assignment filtering is enabled
+        settings_obj = SocialIntegrationSettings.objects.first()
+        assignment_enabled = settings_obj and settings_obj.chat_assignment_enabled
 
-        # Count unread Instagram messages (incoming messages not read by staff)
-        instagram_unread = InstagramMessage.objects.filter(
-            is_from_business=False,  # Messages FROM customers TO the business
-            is_read_by_staff=False  # Staff hasn't read this message yet
-        ).count()
+        if assignment_enabled:
+            # Get active assignments (not 'completed' - those return to everyone)
+            active_assignments = ChatAssignment.objects.filter(
+                status__in=['active', 'in_session']
+            )
 
-        # Count unread WhatsApp messages (incoming messages not read by staff)
-        whatsapp_unread = WhatsAppMessage.objects.filter(
-            is_from_business=False,  # Messages FROM customers TO the business
-            is_read_by_staff=False  # Staff hasn't read this message yet
-        ).count()
+            # Get my active assignments by platform
+            my_fb_assignments = active_assignments.filter(
+                assigned_user=request.user,
+                platform='facebook'
+            ).values_list('conversation_id', flat=True)
 
-        # Count unread Email messages (incoming messages not read by staff)
-        email_unread = EmailMessage.objects.filter(
-            is_from_business=False,  # Messages FROM customers TO the business
-            is_read_by_staff=False,  # Staff hasn't read this message yet
-            is_deleted=False  # Not soft-deleted
-        ).count()
+            my_ig_assignments = active_assignments.filter(
+                assigned_user=request.user,
+                platform='instagram'
+            ).values_list('conversation_id', flat=True)
+
+            my_wa_assignments = active_assignments.filter(
+                assigned_user=request.user,
+                platform='whatsapp'
+            ).values_list('conversation_id', flat=True)
+
+            my_email_assignments = active_assignments.filter(
+                assigned_user=request.user,
+                platform='email'
+            ).values_list('conversation_id', flat=True)
+
+            # Get all active assignments by platform (to exclude others' chats)
+            all_fb_assignments = active_assignments.filter(
+                platform='facebook'
+            ).values_list('conversation_id', flat=True)
+
+            all_ig_assignments = active_assignments.filter(
+                platform='instagram'
+            ).values_list('conversation_id', flat=True)
+
+            all_wa_assignments = active_assignments.filter(
+                platform='whatsapp'
+            ).values_list('conversation_id', flat=True)
+
+            all_email_assignments = active_assignments.filter(
+                platform='email'
+            ).values_list('conversation_id', flat=True)
+
+            # Count unread Facebook messages - only mine or unassigned
+            facebook_unread = FacebookMessage.objects.filter(
+                is_from_page=False,
+                is_read_by_staff=False
+            ).filter(
+                Q(sender_id__in=my_fb_assignments) |  # Assigned to me
+                ~Q(sender_id__in=all_fb_assignments)   # Not assigned to anyone
+            ).count()
+
+            # Count unread Instagram messages - only mine or unassigned
+            instagram_unread = InstagramMessage.objects.filter(
+                is_from_business=False,
+                is_read_by_staff=False
+            ).filter(
+                Q(sender_id__in=my_ig_assignments) |  # Assigned to me
+                ~Q(sender_id__in=all_ig_assignments)  # Not assigned to anyone
+            ).count()
+
+            # Count unread WhatsApp messages - only mine or unassigned
+            whatsapp_unread = WhatsAppMessage.objects.filter(
+                is_from_business=False,
+                is_read_by_staff=False
+            ).filter(
+                Q(from_number__in=my_wa_assignments) |  # Assigned to me
+                ~Q(from_number__in=all_wa_assignments)  # Not assigned to anyone
+            ).count()
+
+            # Count unread Email messages - only mine or unassigned
+            email_unread = EmailMessage.objects.filter(
+                is_from_business=False,
+                is_read_by_staff=False,
+                is_deleted=False
+            ).filter(
+                Q(thread_id__in=my_email_assignments) |  # Assigned to me
+                ~Q(thread_id__in=all_email_assignments)  # Not assigned to anyone
+            ).count()
+        else:
+            # Assignment not enabled - count all unread messages (original behavior)
+            facebook_unread = FacebookMessage.objects.filter(
+                is_from_page=False,
+                is_read_by_staff=False
+            ).count()
+
+            instagram_unread = InstagramMessage.objects.filter(
+                is_from_business=False,
+                is_read_by_staff=False
+            ).count()
+
+            whatsapp_unread = WhatsAppMessage.objects.filter(
+                is_from_business=False,
+                is_read_by_staff=False
+            ).count()
+
+            email_unread = EmailMessage.objects.filter(
+                is_from_business=False,
+                is_read_by_staff=False,
+                is_deleted=False
+            ).count()
 
         total_unread = facebook_unread + instagram_unread + whatsapp_unread + email_unread
 
