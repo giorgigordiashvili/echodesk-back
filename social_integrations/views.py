@@ -5786,7 +5786,7 @@ class EmailMessageViewSet(viewsets.ReadOnlyModelViewSet):
         ).values('thread_id').annotate(
             latest_timestamp=Max('timestamp'),
             message_count=Count('id'),
-            unread_count=Count('id', filter=Q(is_read=False))
+            unread_count=Count('id', filter=Q(is_read_by_staff=False, is_from_business=False))
         ).order_by('-latest_timestamp')
 
         # Get the actual latest message for each thread
