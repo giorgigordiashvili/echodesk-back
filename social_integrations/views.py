@@ -5779,11 +5779,39 @@ class EmailMessageViewSet(viewsets.ReadOnlyModelViewSet):
         """
         Get email threads (grouped conversations).
         Returns the latest message from each unique thread with customer info.
+
+        When chat_assignment_enabled is True:
+        - Only shows threads assigned to the current user or unassigned threads
+        - Threads with status='completed' are treated as unassigned
         """
+        # Check if chat assignment filtering is enabled
+        settings_obj = SocialIntegrationSettings.objects.first()
+        assignment_enabled = settings_obj and settings_obj.chat_assignment_enabled
+
+        # Build base queryset
+        base_queryset = EmailMessage.objects.filter(is_deleted=False)
+
+        if assignment_enabled:
+            # Get active assignments (not 'completed' - those return to everyone)
+            active_assignments = ChatAssignment.objects.filter(
+                platform='email',
+                status__in=['active', 'in_session']
+            )
+
+            my_assignments = active_assignments.filter(
+                assigned_user=request.user
+            ).values_list('conversation_id', flat=True)
+
+            all_assignments = active_assignments.values_list('conversation_id', flat=True)
+
+            # Filter threads: only mine or unassigned
+            base_queryset = base_queryset.filter(
+                Q(thread_id__in=my_assignments) |  # Assigned to me
+                ~Q(thread_id__in=all_assignments)  # Not assigned to anyone
+            )
+
         # Get distinct thread_ids with their latest message
-        threads = EmailMessage.objects.filter(
-            is_deleted=False
-        ).values('thread_id').annotate(
+        threads = base_queryset.values('thread_id').annotate(
             latest_timestamp=Max('timestamp'),
             message_count=Count('id'),
             unread_count=Count('id', filter=Q(is_read_by_staff=False, is_from_business=False))
