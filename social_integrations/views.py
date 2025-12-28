@@ -5865,6 +5865,48 @@ class EmailMessageViewSet(viewsets.ReadOnlyModelViewSet):
 
         return Response(result)
 
+    @action(detail=False, methods=['get'])
+    def folders(self, request):
+        """
+        Get list of available IMAP folders.
+        """
+        from .email_utils import get_available_folders
+
+        connection = EmailConnection.objects.filter(is_active=True).first()
+        if not connection:
+            return Response({'error': 'No active email connection'}, status=400)
+
+        folders = get_available_folders(connection)
+        return Response(folders)
+
+    @action(detail=False, methods=['post'])
+    def move(self, request):
+        """
+        Move an email to a different folder.
+        Expects: message_id, source_folder, target_folder
+        """
+        from .email_utils import move_email_to_folder
+
+        message_id = request.data.get('message_id')
+        source_folder = request.data.get('source_folder')
+        target_folder = request.data.get('target_folder')
+
+        if not all([message_id, source_folder, target_folder]):
+            return Response({'error': 'message_id, source_folder, and target_folder are required'}, status=400)
+
+        connection = EmailConnection.objects.filter(is_active=True).first()
+        if not connection:
+            return Response({'error': 'No active email connection'}, status=400)
+
+        success = move_email_to_folder(connection, message_id, source_folder, target_folder)
+
+        if success:
+            # Update the folder in our database
+            EmailMessage.objects.filter(message_id=message_id).update(folder=target_folder)
+            return Response({'success': True, 'message': f'Email moved to {target_folder}'})
+        else:
+            return Response({'error': 'Failed to move email'}, status=500)
+
 
 class EmailDraftViewSet(viewsets.ModelViewSet):
     """ViewSet for managing email drafts"""

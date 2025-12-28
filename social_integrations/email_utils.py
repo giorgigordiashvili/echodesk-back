@@ -855,3 +855,117 @@ def delete_emails_from_imap(connection, message_ids: List[str]) -> int:
     except Exception as e:
         logger.error(f"IMAP delete error for {connection.email_address}: {e}")
         raise
+
+
+def move_email_to_folder(connection, message_id: str, source_folder: str, target_folder: str) -> bool:
+    """
+    Move an email from one IMAP folder to another.
+
+    Args:
+        connection: EmailConnection model instance
+        message_id: Message-ID header of the email to move
+        source_folder: Current folder of the email
+        target_folder: Destination folder
+
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        # Connect to IMAP
+        if connection.imap_use_ssl:
+            imap = imaplib.IMAP4_SSL(connection.imap_server, connection.imap_port, timeout=30)
+        else:
+            imap = imaplib.IMAP4(connection.imap_server, connection.imap_port)
+            imap.starttls()
+
+        imap.login(connection.username, connection.get_password())
+
+        # Select source folder
+        result, data = imap.select(source_folder, readonly=False)
+        if result != 'OK':
+            raise Exception(f"Failed to select source folder {source_folder}")
+
+        # Search for message by Message-ID
+        search_id = message_id if message_id.startswith('<') else f'<{message_id}>'
+        result, data = imap.search(None, f'HEADER Message-ID "{search_id}"')
+
+        if result != 'OK' or not data[0]:
+            # Try without angle brackets
+            clean_id = message_id.strip('<>')
+            result, data = imap.search(None, f'HEADER Message-ID "{clean_id}"')
+
+        if result != 'OK' or not data[0]:
+            logger.warning(f"Message {message_id} not found in {source_folder}")
+            imap.logout()
+            return False
+
+        msg_nums = data[0].split()
+        if not msg_nums:
+            imap.logout()
+            return False
+
+        msg_num = msg_nums[0]
+
+        # Copy to target folder
+        result, data = imap.copy(msg_num, target_folder)
+        if result != 'OK':
+            raise Exception(f"Failed to copy message to {target_folder}")
+
+        # Mark original as deleted
+        imap.store(msg_num, '+FLAGS', '\\Deleted')
+
+        # Expunge to remove the original
+        imap.expunge()
+
+        imap.close()
+        imap.logout()
+
+        logger.info(f"Moved email {message_id} from {source_folder} to {target_folder}")
+        return True
+
+    except Exception as e:
+        logger.error(f"IMAP move error: {e}")
+        return False
+
+
+def get_available_folders(connection) -> List[Dict[str, Any]]:
+    """
+    Get list of available IMAP folders for a connection.
+
+    Returns:
+        List of folder info dicts with name and flags
+    """
+    try:
+        if connection.imap_use_ssl:
+            imap = imaplib.IMAP4_SSL(connection.imap_server, connection.imap_port, timeout=30)
+        else:
+            imap = imaplib.IMAP4(connection.imap_server, connection.imap_port)
+            imap.starttls()
+
+        imap.login(connection.username, connection.get_password())
+
+        result, folders_data = imap.list()
+        folders = []
+
+        if result == 'OK':
+            for folder_data in folders_data:
+                if isinstance(folder_data, bytes):
+                    decoded = folder_data.decode('utf-8', errors='replace')
+                    if '"' in decoded:
+                        parts = decoded.split('"')
+                        if len(parts) >= 2:
+                            folder_name = parts[-2]
+                            # Skip Drafts and All Mail
+                            skip_folders = ['Drafts', '[Gmail]/Drafts', '[Gmail]/All Mail']
+                            if not any(skip.lower() == folder_name.lower() for skip in skip_folders):
+                                folders.append({
+                                    'name': folder_name,
+                                    'display_name': folder_name.replace('[Gmail]/', '').replace('INBOX/', '')
+                                })
+
+        imap.logout()
+        return folders
+
+    except Exception as e:
+        logger.error(f"Error getting folders: {e}")
+        return []
