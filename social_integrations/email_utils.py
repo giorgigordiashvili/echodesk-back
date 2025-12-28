@@ -690,3 +690,71 @@ def sync_imap_messages(connection, max_messages: int = 500) -> int:
         connection.last_sync_error = str(e)
         connection.save()
         raise
+
+
+def delete_emails_from_imap(connection, message_ids: List[str]) -> int:
+    """
+    Delete emails from IMAP server by moving them to Trash.
+
+    Args:
+        connection: EmailConnection model instance
+        message_ids: List of Message-ID headers to delete
+
+    Returns:
+        Number of emails deleted
+    """
+    if not message_ids:
+        return 0
+
+    try:
+        # Connect to IMAP
+        if connection.imap_use_ssl:
+            imap = imaplib.IMAP4_SSL(connection.imap_server, connection.imap_port, timeout=30)
+        else:
+            imap = imaplib.IMAP4(connection.imap_server, connection.imap_port)
+            imap.starttls()
+
+        imap.login(connection.username, connection.get_password())
+
+        # Select folder (not readonly - we need to modify)
+        result, data = imap.select(connection.sync_folder, readonly=False)
+        if result != 'OK':
+            raise Exception(f"Failed to select folder {connection.sync_folder}")
+
+        deleted_count = 0
+
+        for message_id in message_ids:
+            try:
+                # Search for message by Message-ID header
+                # Note: Message-ID includes angle brackets, search needs them
+                search_id = message_id if message_id.startswith('<') else f'<{message_id}>'
+                result, data = imap.search(None, f'HEADER Message-ID "{search_id}"')
+
+                if result != 'OK' or not data[0]:
+                    # Try without angle brackets
+                    clean_id = message_id.strip('<>')
+                    result, data = imap.search(None, f'HEADER Message-ID "{clean_id}"')
+
+                if result == 'OK' and data[0]:
+                    msg_nums = data[0].split()
+                    for msg_num in msg_nums:
+                        # Mark as deleted
+                        imap.store(msg_num, '+FLAGS', '\\Deleted')
+                        deleted_count += 1
+
+            except Exception as e:
+                logger.warning(f"Failed to delete email {message_id}: {e}")
+                continue
+
+        # Expunge to permanently remove deleted messages
+        imap.expunge()
+
+        imap.close()
+        imap.logout()
+
+        logger.info(f"Deleted {deleted_count} emails from IMAP for {connection.email_address}")
+        return deleted_count
+
+    except Exception as e:
+        logger.error(f"IMAP delete error for {connection.email_address}: {e}")
+        raise

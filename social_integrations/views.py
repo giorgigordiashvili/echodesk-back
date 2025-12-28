@@ -3572,11 +3572,27 @@ def delete_conversation(request):
             deleted_count = deleted_from + deleted_to
 
         elif platform == 'email':
-            # Soft delete all messages in this thread
-            deleted_count = EmailMessage.objects.filter(
+            # Get messages to delete (need message_ids for IMAP deletion)
+            messages_to_delete = EmailMessage.objects.filter(
                 thread_id=conversation_id,
                 is_deleted=False
-            ).update(
+            )
+            message_ids = list(messages_to_delete.values_list('message_id', flat=True))
+
+            # Try to delete from IMAP server first
+            if message_ids:
+                try:
+                    # Get the connection for these emails
+                    first_message = messages_to_delete.first()
+                    if first_message and first_message.connection:
+                        from .email_utils import delete_emails_from_imap
+                        delete_emails_from_imap(first_message.connection, message_ids)
+                except Exception as e:
+                    logger.warning(f"Failed to delete emails from IMAP server: {e}")
+                    # Continue with soft delete even if IMAP delete fails
+
+            # Soft delete all messages in this thread
+            deleted_count = messages_to_delete.update(
                 is_deleted=True,
                 deleted_at=now,
                 deleted_by=request.user
