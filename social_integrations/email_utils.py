@@ -539,19 +539,199 @@ def send_email_smtp(connection, to_emails: List[str], cc_emails: List[str] = Non
     return msg['Message-ID'], sent_message
 
 
+def _find_sent_folder(imap) -> Optional[str]:
+    """
+    Find the Sent folder name for this IMAP server.
+    Different providers use different names.
+    """
+    # Common sent folder names across providers
+    sent_folder_names = [
+        'Sent',
+        'INBOX.Sent',
+        'Sent Items',
+        'Sent Messages',
+        '[Gmail]/Sent Mail',
+        'INBOX/Sent',
+    ]
+
+    try:
+        result, folders = imap.list()
+        if result != 'OK':
+            return None
+
+        available_folders = []
+        for folder_data in folders:
+            if isinstance(folder_data, bytes):
+                # Parse folder name from response like: (\HasNoChildren) "/" "Sent"
+                decoded = folder_data.decode('utf-8', errors='replace')
+                # Extract folder name (last quoted string or last part)
+                if '"' in decoded:
+                    parts = decoded.split('"')
+                    if len(parts) >= 2:
+                        folder_name = parts[-2]
+                        available_folders.append(folder_name)
+
+        # Try to find a matching sent folder
+        for sent_name in sent_folder_names:
+            if sent_name in available_folders:
+                return sent_name
+            # Case-insensitive match
+            for folder in available_folders:
+                if folder.lower() == sent_name.lower():
+                    return folder
+
+        # Try partial match for 'sent' keyword
+        for folder in available_folders:
+            if 'sent' in folder.lower():
+                return folder
+
+    except Exception as e:
+        logger.warning(f"Error finding sent folder: {e}")
+
+    return None
+
+
+def _sync_folder(imap, connection, folder_name: str, max_messages: int) -> int:
+    """
+    Sync messages from a specific IMAP folder.
+
+    Returns:
+        Number of new messages synced from this folder
+    """
+    from .models import EmailMessage
+
+    try:
+        result, data = imap.select(folder_name, readonly=True)
+        if result != 'OK':
+            logger.warning(f"Failed to select folder {folder_name}")
+            return 0
+    except Exception as e:
+        logger.warning(f"Error selecting folder {folder_name}: {e}")
+        return 0
+
+    # Search for messages from last N days
+    since_date = (timezone.now() - timedelta(days=connection.sync_days_back)).strftime('%d-%b-%Y')
+    result, data = imap.search(None, f'(SINCE {since_date})')
+
+    if result != 'OK':
+        logger.warning(f"Failed to search emails in {folder_name}")
+        return 0
+
+    message_ids = data[0].split()
+
+    # Limit to most recent messages
+    if len(message_ids) > max_messages:
+        message_ids = message_ids[-max_messages:]
+
+    new_count = 0
+
+    for msg_num in message_ids:
+        try:
+            # Fetch message
+            result, msg_data = imap.fetch(msg_num, '(RFC822 FLAGS UID)')
+            if result != 'OK':
+                continue
+
+            raw_email = msg_data[0][1]
+            email_message = email.message_from_bytes(raw_email)
+
+            # Parse Message-ID
+            message_id_header = email_message.get('Message-ID', '')
+            if not message_id_header:
+                message_id_header = make_msgid()
+
+            # Skip if already exists
+            if EmailMessage.objects.filter(message_id=message_id_header).exists():
+                continue
+
+            # Parse sender
+            from_header = email_message.get('From', '')
+            from_name, from_email_addr = parseaddr(from_header)
+
+            # Parse recipients
+            to_emails = parse_address_list(email_message.get('To', ''))
+            cc_emails = parse_address_list(email_message.get('Cc', ''))
+
+            # Parse date
+            date_str = email_message.get('Date')
+            try:
+                timestamp = parsedate_to_datetime(date_str)
+                if timestamp.tzinfo is None:
+                    timestamp = timezone.make_aware(timestamp)
+            except Exception:
+                timestamp = timezone.now()
+
+            # Get body
+            body_text, body_html = extract_body(email_message)
+
+            # Get attachments
+            message_attachments = extract_attachments(email_message, connection)
+
+            # Thread ID
+            references = email_message.get('References', '')
+            in_reply_to = email_message.get('In-Reply-To', '')
+            thread_id = compute_thread_id(message_id_header, in_reply_to, references)
+
+            # Determine if from business
+            is_from_business = from_email_addr.lower() == connection.email_address.lower()
+
+            # Parse IMAP flags
+            flags_data = msg_data[0][0] if len(msg_data[0]) > 0 else b''
+            flags = imaplib.ParseFlags(flags_data) if flags_data else ()
+
+            # Get UID
+            uid = ''
+            uid_match = msg_data[0][0].decode() if isinstance(msg_data[0][0], bytes) else str(msg_data[0][0])
+            if 'UID' in uid_match:
+                import re
+                uid_search = re.search(r'UID (\d+)', uid_match)
+                if uid_search:
+                    uid = uid_search.group(1)
+
+            # Create message
+            EmailMessage.objects.create(
+                connection=connection,
+                message_id=message_id_header,
+                thread_id=thread_id,
+                in_reply_to=in_reply_to,
+                references=references,
+                from_email=from_email_addr,
+                from_name=from_name,
+                to_emails=to_emails,
+                cc_emails=cc_emails,
+                subject=email_message.get('Subject', ''),
+                body_text=body_text,
+                body_html=body_html,
+                attachments=message_attachments,
+                timestamp=timestamp,
+                folder=folder_name,
+                uid=uid,
+                is_from_business=is_from_business,
+                is_read=b'\\Seen' in flags,
+                is_starred=b'\\Flagged' in flags,
+                is_answered=b'\\Answered' in flags,
+            )
+            new_count += 1
+
+        except Exception as e:
+            logger.warning(f"Failed to process email {msg_num} in {folder_name}: {e}")
+            continue
+
+    return new_count
+
+
 def sync_imap_messages(connection, max_messages: int = 500) -> int:
     """
     Sync messages from IMAP server for a given connection.
+    Syncs both the configured folder (usually INBOX) and the Sent folder.
 
     Args:
         connection: EmailConnection model instance
-        max_messages: Maximum number of messages to fetch per sync
+        max_messages: Maximum number of messages to fetch per sync per folder
 
     Returns:
         Number of new messages synced
     """
-    from .models import EmailMessage
-
     try:
         # Connect to IMAP
         if connection.imap_use_ssl:
@@ -562,119 +742,36 @@ def sync_imap_messages(connection, max_messages: int = 500) -> int:
 
         imap.login(connection.username, connection.get_password())
 
-        # Select folder
-        result, data = imap.select(connection.sync_folder, readonly=True)
-        if result != 'OK':
-            raise Exception(f"Failed to select folder {connection.sync_folder}")
+        total_new_count = 0
 
-        # Search for messages from last N days
-        since_date = (timezone.now() - timedelta(days=connection.sync_days_back)).strftime('%d-%b-%Y')
-        result, data = imap.search(None, f'(SINCE {since_date})')
+        # Get all available folders
+        result, folders_data = imap.list()
+        if result == 'OK':
+            folders_to_sync = []
+            for folder_data in folders_data:
+                if isinstance(folder_data, bytes):
+                    decoded = folder_data.decode('utf-8', errors='replace')
+                    # Extract folder name from response like: (\HasNoChildren) "/" "INBOX"
+                    if '"' in decoded:
+                        parts = decoded.split('"')
+                        if len(parts) >= 2:
+                            folder_name = parts[-2]
+                            # Only skip Drafts (incomplete emails) and All Mail (duplicates)
+                            skip_folders = ['Drafts', '[Gmail]/Drafts', '[Gmail]/All Mail']
+                            if not any(skip.lower() == folder_name.lower() for skip in skip_folders):
+                                folders_to_sync.append(folder_name)
 
-        if result != 'OK':
-            raise Exception("Failed to search emails")
-
-        message_ids = data[0].split()
-
-        # Limit to most recent messages
-        if len(message_ids) > max_messages:
-            message_ids = message_ids[-max_messages:]
-
-        new_count = 0
-
-        for msg_num in message_ids:
-            try:
-                # Fetch message
-                result, msg_data = imap.fetch(msg_num, '(RFC822 FLAGS UID)')
-                if result != 'OK':
-                    continue
-
-                raw_email = msg_data[0][1]
-                email_message = email.message_from_bytes(raw_email)
-
-                # Parse Message-ID
-                message_id_header = email_message.get('Message-ID', '')
-                if not message_id_header:
-                    message_id_header = make_msgid()
-
-                # Skip if already exists
-                if EmailMessage.objects.filter(message_id=message_id_header).exists():
-                    continue
-
-                # Parse sender
-                from_header = email_message.get('From', '')
-                from_name, from_email_addr = parseaddr(from_header)
-
-                # Parse recipients
-                to_emails = parse_address_list(email_message.get('To', ''))
-                cc_emails = parse_address_list(email_message.get('Cc', ''))
-
-                # Parse date
-                date_str = email_message.get('Date')
+            # Sync each folder
+            for folder_name in folders_to_sync:
                 try:
-                    timestamp = parsedate_to_datetime(date_str)
-                    if timestamp.tzinfo is None:
-                        timestamp = timezone.make_aware(timestamp)
-                except Exception:
-                    timestamp = timezone.now()
+                    folder_count = _sync_folder(imap, connection, folder_name, max_messages)
+                    total_new_count += folder_count
+                    if folder_count > 0:
+                        logger.info(f"Synced {folder_count} emails from {folder_name}")
+                except Exception as e:
+                    logger.warning(f"Failed to sync folder {folder_name}: {e}")
+                    continue
 
-                # Get body
-                body_text, body_html = extract_body(email_message)
-
-                # Get attachments
-                message_attachments = extract_attachments(email_message, connection)
-
-                # Thread ID
-                references = email_message.get('References', '')
-                in_reply_to = email_message.get('In-Reply-To', '')
-                thread_id = compute_thread_id(message_id_header, in_reply_to, references)
-
-                # Determine if from business
-                is_from_business = from_email_addr.lower() == connection.email_address.lower()
-
-                # Parse IMAP flags
-                flags_data = msg_data[0][0] if len(msg_data[0]) > 0 else b''
-                flags = imaplib.ParseFlags(flags_data) if flags_data else ()
-
-                # Get UID
-                uid = ''
-                uid_match = msg_data[0][0].decode() if isinstance(msg_data[0][0], bytes) else str(msg_data[0][0])
-                if 'UID' in uid_match:
-                    import re
-                    uid_search = re.search(r'UID (\d+)', uid_match)
-                    if uid_search:
-                        uid = uid_search.group(1)
-
-                # Create message
-                EmailMessage.objects.create(
-                    connection=connection,
-                    message_id=message_id_header,
-                    thread_id=thread_id,
-                    in_reply_to=in_reply_to,
-                    references=references,
-                    from_email=from_email_addr,
-                    from_name=from_name,
-                    to_emails=to_emails,
-                    cc_emails=cc_emails,
-                    subject=email_message.get('Subject', ''),
-                    body_text=body_text,
-                    body_html=body_html,
-                    attachments=message_attachments,
-                    timestamp=timestamp,
-                    folder=connection.sync_folder,
-                    uid=uid,
-                    is_from_business=is_from_business,
-                    is_read=b'\\Seen' in flags,
-                    is_starred=b'\\Flagged' in flags,
-                    is_answered=b'\\Answered' in flags,
-                )
-                new_count += 1
-
-            except Exception as e:
-                logger.warning(f"Failed to process email {msg_num}: {e}")
-                continue
-
-        imap.close()
         imap.logout()
 
         # Update connection status
@@ -682,8 +779,8 @@ def sync_imap_messages(connection, max_messages: int = 500) -> int:
         connection.last_sync_error = ''
         connection.save()
 
-        logger.info(f"Synced {new_count} new emails for {connection.email_address}")
-        return new_count
+        logger.info(f"Synced {total_new_count} total new emails for {connection.email_address}")
+        return total_new_count
 
     except Exception as e:
         logger.error(f"Email sync error for {connection.email_address}: {e}")
