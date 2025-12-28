@@ -258,7 +258,7 @@ class ChatAssignmentSerializer(serializers.ModelSerializer):
 
 class ChatAssignmentCreateSerializer(serializers.Serializer):
     """Serializer for assigning a chat"""
-    platform = serializers.ChoiceField(choices=['facebook', 'instagram', 'whatsapp'])
+    platform = serializers.ChoiceField(choices=['facebook', 'instagram', 'whatsapp', 'email'])
     conversation_id = serializers.CharField(max_length=255)
     account_id = serializers.CharField(max_length=255)
 
