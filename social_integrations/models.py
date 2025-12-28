@@ -784,7 +784,7 @@ class EmailConnection(models.Model):
 
     # Sync settings
     sync_folder = models.CharField(max_length=100, default='INBOX', help_text="IMAP folder to sync")
-    sync_days_back = models.IntegerField(default=30, help_text="Number of days of history to sync")
+    sync_days_back = models.IntegerField(default=365, help_text="Number of days of history to sync")
 
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
