@@ -640,8 +640,13 @@ def _sync_folder(imap, connection, folder_name: str, max_messages: int) -> int:
             if not message_id_header:
                 message_id_header = make_msgid()
 
-            # Skip if already exists
-            if EmailMessage.objects.filter(message_id=message_id_header).exists():
+            # Check if already exists
+            existing_message = EmailMessage.objects.filter(message_id=message_id_header).first()
+            if existing_message:
+                # Update folder if it changed (email was moved on server)
+                if existing_message.folder != folder_name:
+                    existing_message.folder = folder_name
+                    existing_message.save(update_fields=['folder'])
                 continue
 
             # Parse sender
