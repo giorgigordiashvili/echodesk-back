@@ -660,6 +660,9 @@ class ChatAssignment(models.Model):
     @property
     def full_conversation_id(self):
         """Returns the full conversation ID as used in frontend"""
+        if self.platform == 'email':
+            # Email format is email_{thread_id}
+            return f"email_{self.conversation_id}"
         prefix = {'facebook': 'fb', 'instagram': 'ig', 'whatsapp': 'wa'}[self.platform]
         return f"{prefix}_{self.account_id}_{self.conversation_id}"
 

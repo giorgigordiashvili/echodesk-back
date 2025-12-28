@@ -763,8 +763,8 @@ def sync_imap_messages(connection, max_messages: int = 500) -> int:
                         parts = decoded.split('"')
                         if len(parts) >= 2:
                             folder_name = parts[-2]
-                            # Skip Drafts, All Mail (duplicates), and Trash
-                            skip_folders = ['Drafts', '[Gmail]/Drafts', '[Gmail]/All Mail', 'Trash', '[Gmail]/Trash', 'Deleted', 'Deleted Items', 'Deleted Messages']
+                            # Skip Drafts, All Mail, Trash, and Sent
+                            skip_folders = ['Drafts', '[Gmail]/Drafts', '[Gmail]/All Mail', 'Trash', '[Gmail]/Trash', 'Deleted', 'Deleted Items', 'Deleted Messages', 'Sent', '[Gmail]/Sent Mail', 'Sent Items', 'Sent Messages']
                             if not any(skip.lower() == folder_name.lower() for skip in skip_folders):
                                 folders_to_sync.append(folder_name)
 
@@ -962,8 +962,8 @@ def get_available_folders(connection) -> List[Dict[str, Any]]:
                         parts = decoded.split('"')
                         if len(parts) >= 2:
                             folder_name = parts[-2]
-                            # Skip Drafts, All Mail, and Trash
-                            skip_folders = ['Drafts', '[Gmail]/Drafts', '[Gmail]/All Mail', 'Trash', '[Gmail]/Trash', 'Deleted', 'Deleted Items', 'Deleted Messages']
+                            # Skip Drafts, All Mail, Trash, and Sent
+                            skip_folders = ['Drafts', '[Gmail]/Drafts', '[Gmail]/All Mail', 'Trash', '[Gmail]/Trash', 'Deleted', 'Deleted Items', 'Deleted Messages', 'Sent', '[Gmail]/Sent Mail', 'Sent Items', 'Sent Messages']
                             if not any(skip.lower() == folder_name.lower() for skip in skip_folders):
                                 folders.append({
                                     'name': folder_name,
