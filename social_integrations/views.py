@@ -5791,6 +5791,11 @@ class EmailMessageViewSet(viewsets.ReadOnlyModelViewSet):
         # Build base queryset
         base_queryset = EmailMessage.objects.filter(is_deleted=False)
 
+        # Filter by folder if specified
+        folder = request.query_params.get('folder')
+        if folder and folder != 'All':
+            base_queryset = base_queryset.filter(folder=folder)
+
         if assignment_enabled:
             # Get active assignments (not 'completed' - those return to everyone)
             active_assignments = ChatAssignment.objects.filter(
