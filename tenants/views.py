@@ -220,23 +220,41 @@ def tenant_profile(request):
     """
     Get current user profile information including groups and permissions
     """
+    from django.db.models import Prefetch
+    from django.db import connection
+
     if not hasattr(request, 'tenant') or request.tenant.schema_name == get_public_schema_name():
         return Response(
-            {'error': 'This endpoint is only available from tenant subdomains'}, 
+            {'error': 'This endpoint is only available from tenant subdomains'},
             status=status.HTTP_403_FORBIDDEN
         )
-    
+
     user = request.user
 
-    # Get user's tenant groups with feature keys
+    # Prefetch tenant_groups with features to avoid N+1 queries
     groups_data = []
+    group_feature_keys = set()
     try:
-        for group in user.tenant_groups.filter(is_active=True):
+        # Single query with prefetched features
+        tenant_groups = user.tenant_groups.filter(
+            is_active=True
+        ).prefetch_related(
+            Prefetch(
+                'features',
+                queryset=Feature.objects.filter(is_active=True),
+                to_attr='prefetched_features'
+            )
+        )
+
+        for group in tenant_groups:
+            # Use prefetched features instead of calling get_feature_keys()
+            feature_keys_list = [f.key for f in group.prefetched_features]
             groups_data.append({
                 'id': group.id,
                 'name': group.name,
-                'feature_keys': group.get_feature_keys()
+                'feature_keys': feature_keys_list
             })
+            group_feature_keys.update(feature_keys_list)
     except Exception:
         # In case of any tenant_groups query issues
         pass
@@ -244,8 +262,25 @@ def tenant_profile(request):
     # Get all user permissions (both from groups and direct permissions)
     all_permissions = user.get_all_permissions()
 
-    # Get feature keys from tenant groups
-    feature_keys = user.get_feature_keys()
+    # Calculate feature_keys efficiently (avoid redundant queries)
+    feature_keys = []
+    try:
+        tenant = Tenant.objects.get(schema_name=connection.schema_name)
+        subscription = tenant.current_subscription
+        if subscription and subscription.is_active:
+            subscription_feature_keys = set(
+                subscription.selected_features.filter(
+                    is_active=True
+                ).values_list('key', flat=True)
+            )
+
+            if user.is_superuser:
+                feature_keys = list(subscription_feature_keys)
+            elif group_feature_keys:
+                # Intersection of subscription features and group features
+                feature_keys = list(group_feature_keys & subscription_feature_keys)
+    except Exception:
+        pass
 
     return Response({
         'id': user.id,
