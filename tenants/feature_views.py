@@ -8,6 +8,8 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.utils.decorators import method_decorator
+from django.views.decorators.cache import cache_page
 from datetime import timedelta
 from decimal import Decimal
 
@@ -35,17 +37,32 @@ class FeatureViewSet(viewsets.ReadOnlyModelViewSet):
     list: Get all active features
     retrieve: Get a specific feature with its permissions
     """
-    queryset = Feature.objects.filter(is_active=True).prefetch_related('permissions__permission')
+    queryset = Feature.objects.filter(is_active=True)
     serializer_class = FeatureSerializer
     permission_classes = [AllowAny]  # Public endpoint for pricing calculator and registration
 
     def get_queryset(self):
         """Filter features by category if provided"""
-        queryset = super().get_queryset()
+        from django.db.models import Prefetch
+        from .feature_models import FeaturePermission
+
+        # Prefetch permissions with their content_type to avoid N+1 queries
+        queryset = super().get_queryset().prefetch_related(
+            Prefetch(
+                'permissions',
+                queryset=FeaturePermission.objects.select_related(
+                    'permission__content_type'
+                )
+            )
+        )
         category = self.request.query_params.get('category', None)
         if category:
             queryset = queryset.filter(category=category)
         return queryset
+
+    @method_decorator(cache_page(60 * 10))  # Cache for 10 minutes
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
 
 
 class PermissionViewSet(viewsets.ReadOnlyModelViewSet):
