@@ -8,6 +8,15 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from django.http import JsonResponse
 from ecommerce_crm.schema import EcommerceClientSchemaGenerator
 
+def sentry_test_error(request):
+    """
+    Test endpoint to verify Sentry is working.
+    This will trigger an error that should appear in Sentry dashboard.
+    """
+    division_by_zero = 1 / 0
+    return JsonResponse({'status': 'error not triggered'})
+
+
 def websocket_diagnostic(request):
     """
     Diagnostic endpoint to check WebSocket configuration
@@ -79,6 +88,9 @@ urlpatterns = [
 
     # WebSocket diagnostic endpoint
     path('websocket-diagnostic/', websocket_diagnostic, name='websocket_diagnostic'),
+
+    # Sentry test endpoint - triggers a test error
+    path('sentry-test/', sentry_test_error, name='sentry_test'),
     
     # Authentication and tenant management
     path('', include('tenants.urls')),

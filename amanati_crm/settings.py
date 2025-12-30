@@ -5,6 +5,22 @@ Django settings for amanati_crm project.
 import os
 from pathlib import Path
 from decouple import config
+import sentry_sdk
+
+# Initialize Sentry for error tracking and performance monitoring
+sentry_sdk.init(
+    dsn="https://8332ec36828620b76c2fc782e8c44d66@o4510624823443456.ingest.de.sentry.io/4510624824754256",
+    # Add data like request headers and IP for users
+    send_default_pii=True,
+    # Set traces_sample_rate to 1.0 to capture 100% of transactions for tracing
+    traces_sample_rate=1.0,
+    # Set profile_session_sample_rate to 1.0 to profile 100% of profile sessions
+    profile_session_sample_rate=1.0,
+    # Set profile_lifecycle to "trace" to automatically run the profiler on when there is an active transaction
+    profile_lifecycle="trace",
+    # Environment tag
+    environment=config('SENTRY_ENVIRONMENT', default='production'),
+)
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
