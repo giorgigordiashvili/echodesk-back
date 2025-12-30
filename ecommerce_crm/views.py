@@ -5,6 +5,9 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiParameter, inline_serializer
 from django_filters.rest_framework import DjangoFilterBackend, FilterSet, CharFilter, NumberFilter, BooleanFilter
 from django.db.models import Q, F
+from django.utils.decorators import method_decorator
+from django.views.decorators.cache import cache_page
+from django.core.cache import cache
 from tenants.models import Tenant
 from .models import (
     Language,
@@ -32,6 +35,7 @@ from .serializers import (
     ProductImageSerializer,
     ProductVariantSerializer,
     EcommerceClientSerializer,
+    EcommerceClientListSerializer,
     ClientRegistrationSerializer,
     ClientLoginSerializer,
     PasswordResetRequestSerializer,
@@ -40,9 +44,11 @@ from .serializers import (
     FavoriteProductSerializer,
     FavoriteProductCreateSerializer,
     CartSerializer,
+    CartListSerializer,
     CartItemSerializer,
     CartItemCreateSerializer,
     OrderSerializer,
+    OrderListSerializer,
     OrderCreateSerializer,
     EcommerceSettingsSerializer,
     HomepageSectionSerializer,
@@ -122,6 +128,7 @@ class AttributeDefinitionViewSet(viewsets.ModelViewSet):
         tags=['Ecommerce Admin - Attributes'],
         summary='List all product attributes'
     )
+    @method_decorator(cache_page(60 * 10))  # Cache for 10 minutes
     def list(self, request, *args, **kwargs):
         return super().list(request, *args, **kwargs)
 
@@ -286,6 +293,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         - Search: ?search=keyword
         '''
     )
+    @method_decorator(cache_page(60 * 5))  # Cache for 5 minutes
     def list(self, request, *args, **kwargs):
         return super().list(request, *args, **kwargs)
 
@@ -334,6 +342,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         description='Retrieve all products marked as featured'
     )
     @action(detail=False, methods=['get'])
+    @method_decorator(cache_page(60 * 5))  # Cache for 5 minutes
     def featured(self, request):
         """Get featured products"""
         products = self.get_queryset().filter(is_featured=True, status='active')
@@ -475,6 +484,23 @@ class EcommerceClientViewSet(viewsets.ModelViewSet):
     filterset_fields = ['is_active', 'is_verified']
     ordering_fields = ['created_at', 'last_login', 'first_name', 'last_name']
     ordering = ['-created_at']
+
+    def get_queryset(self):
+        """Optimize queryset with prefetch_related for related data"""
+        queryset = super().get_queryset()
+        # Only prefetch related data for detail views
+        if self.action != 'list':
+            queryset = queryset.prefetch_related(
+                'addresses',
+                'favorites__product'
+            )
+        return queryset
+
+    def get_serializer_class(self):
+        """Return lightweight serializer for list, full serializer for detail"""
+        if self.action == 'list':
+            return EcommerceClientListSerializer
+        return EcommerceClientSerializer
 
     @extend_schema(
         tags=['Ecommerce Admin - Clients'],
@@ -1191,6 +1217,15 @@ class FavoriteProductViewSet(viewsets.ModelViewSet):
     ordering_fields = ['created_at']
     ordering = ['-created_at']
 
+    def get_queryset(self):
+        """Optimize queryset with select_related and prefetch_related"""
+        return super().get_queryset().select_related(
+            'client',
+            'product'
+        ).prefetch_related(
+            'product__images'
+        )
+
     def get_serializer_class(self):
         """Return appropriate serializer based on action"""
         if self.action in ['create']:
@@ -1321,6 +1356,26 @@ class CartViewSet(viewsets.ModelViewSet):
     ordering_fields = ['created_at', 'updated_at']
     ordering = ['-updated_at']
 
+    def get_queryset(self):
+        """Optimize queryset with select_related and prefetch_related"""
+        queryset = super().get_queryset().select_related(
+            'client',
+            'delivery_address'
+        )
+        # Only prefetch items for detail views
+        if self.action != 'list':
+            queryset = queryset.prefetch_related(
+                'items__product__images',
+                'items__variant'
+            )
+        return queryset
+
+    def get_serializer_class(self):
+        """Return lightweight serializer for list, full serializer for detail"""
+        if self.action == 'list':
+            return CartListSerializer
+        return CartSerializer
+
     @extend_schema(
         tags=['Ecommerce Admin - Cart'],
         summary='List all carts',
@@ -1403,6 +1458,14 @@ class CartItemViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['cart', 'product']
 
+    def get_queryset(self):
+        """Optimize queryset with select_related"""
+        return super().get_queryset().select_related(
+            'cart',
+            'product',
+            'variant'
+        )
+
     def get_serializer_class(self):
         if self.action in ['create', 'update', 'partial_update']:
             return CartItemCreateSerializer
@@ -1449,7 +1512,23 @@ class OrderViewSet(viewsets.ModelViewSet):
     ordering_fields = ['created_at', 'total_amount', 'status']
     ordering = ['-created_at']
 
+    def get_queryset(self):
+        """Optimize queryset with select_related and prefetch_related"""
+        queryset = super().get_queryset().select_related(
+            'client',
+            'delivery_address'
+        )
+        # Only prefetch items for detail views
+        if self.action != 'list':
+            queryset = queryset.prefetch_related(
+                'items__product',
+                'items__variant'
+            )
+        return queryset
+
     def get_serializer_class(self):
+        if self.action == 'list':
+            return OrderListSerializer
         if self.action == 'create':
             return OrderCreateSerializer
         return OrderSerializer
@@ -1930,6 +2009,7 @@ class EcommerceSettingsViewSet(viewsets.ModelViewSet):
         summary='Get ecommerce settings',
         description='Retrieve ecommerce settings for current tenant including BOG configuration'
     )
+    @method_decorator(cache_page(60 * 10))  # Cache for 10 minutes
     def list(self, request, *args, **kwargs):
         return super().list(request, *args, **kwargs)
 
@@ -1938,6 +2018,7 @@ class EcommerceSettingsViewSet(viewsets.ModelViewSet):
         summary='Get settings detail',
         description='Retrieve detailed ecommerce settings'
     )
+    @method_decorator(cache_page(60 * 10))  # Cache for 10 minutes
     def retrieve(self, request, *args, **kwargs):
         return super().retrieve(request, *args, **kwargs)
 
@@ -2456,11 +2537,16 @@ class HomepageSectionViewSet(viewsets.ModelViewSet):
     ordering_fields = ['position', 'created_at']
     ordering = ['position']
 
+    def get_queryset(self):
+        """Optimize queryset with select_related for item_list"""
+        return super().get_queryset().select_related('item_list')
+
     @extend_schema(
         tags=['Ecommerce Admin - Homepage Builder'],
         summary='List homepage sections',
         description='Get all homepage sections for this tenant, ordered by position'
     )
+    @method_decorator(cache_page(60 * 10))  # Cache for 10 minutes
     def list(self, request, *args, **kwargs):
         return super().list(request, *args, **kwargs)
 

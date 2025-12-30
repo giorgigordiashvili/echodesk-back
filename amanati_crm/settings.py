@@ -477,6 +477,24 @@ else:
         },
     }
 
+# Cache configuration using Redis (DB 1 to avoid collision with Channels on DB 0)
+if redis_password:
+    cache_redis_url = f'rediss://:{redis_password}@{redis_host}:{redis_port}/1'
+else:
+    cache_redis_url = f'redis://{redis_host}:{redis_port}/1'
+
+CACHES = {
+    'default': {
+        'BACKEND': 'django_redis.cache.RedisCache',
+        'LOCATION': cache_redis_url,
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+        },
+        'KEY_PREFIX': 'ecommerce',
+        'TIMEOUT': 300,  # 5 minutes default
+    }
+}
+
 # Bank of Georgia (BOG) Payment Gateway Configuration
 # Documentation: https://api.bog.ge/docs/en/payments/introduction
 # Get credentials from BOG merchant portal

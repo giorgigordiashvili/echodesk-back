@@ -356,6 +356,24 @@ class FavoriteProductCreateSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at']
 
 
+class EcommerceClientListSerializer(serializers.ModelSerializer):
+    """Lightweight serializer for client lists - excludes nested addresses and favorites"""
+    full_name = serializers.CharField(read_only=True)
+
+    class Meta:
+        model = None  # Will be set dynamically
+        fields = [
+            'id', 'email', 'first_name', 'last_name', 'full_name',
+            'phone_number', 'is_active', 'is_verified', 'created_at'
+        ]
+        read_only_fields = ['id', 'is_verified', 'created_at']
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        from .models import EcommerceClient
+        self.Meta.model = EcommerceClient
+
+
 class EcommerceClientSerializer(serializers.ModelSerializer):
     """Serializer for listing and viewing ecommerce clients"""
     full_name = serializers.CharField(read_only=True)
@@ -483,6 +501,20 @@ class CartItemSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'price_at_add', 'created_at', 'updated_at']
 
 
+class CartListSerializer(serializers.ModelSerializer):
+    """Lightweight serializer for cart lists - excludes nested items for faster list views"""
+    client_name = serializers.CharField(source='client.full_name', read_only=True)
+    items_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Cart
+        fields = ['id', 'client', 'client_name', 'status', 'items_count', 'updated_at']
+        read_only_fields = ['id', 'updated_at']
+
+    def get_items_count(self, obj):
+        return obj.items.count()
+
+
 class CartSerializer(serializers.ModelSerializer):
     """Serializer for shopping cart with nested items"""
     items = CartItemSerializer(many=True, read_only=True)
@@ -513,6 +545,19 @@ class OrderItemSerializer(serializers.ModelSerializer):
         model = OrderItem
         fields = ['id', 'order', 'product', 'variant', 'product_name', 'quantity', 'price', 'subtotal', 'created_at']
         read_only_fields = ['id', 'created_at']
+
+
+class OrderListSerializer(serializers.ModelSerializer):
+    """Lightweight serializer for order lists - excludes nested items for faster list views"""
+    client_name = serializers.CharField(source='client.full_name', read_only=True)
+
+    class Meta:
+        model = Order
+        fields = [
+            'id', 'order_number', 'client', 'client_name', 'status',
+            'payment_status', 'total_amount', 'created_at'
+        ]
+        read_only_fields = ['id', 'order_number', 'created_at']
 
 
 class OrderSerializer(serializers.ModelSerializer):

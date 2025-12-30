@@ -246,6 +246,7 @@ class Product(models.Model):
             models.Index(fields=['slug']),
             models.Index(fields=['status', '-created_at']),
             models.Index(fields=['is_featured', 'status']),
+            models.Index(fields=['quantity'], name='ecommerce_c_quantit_idx'),
         ]
 
     def __str__(self):
@@ -338,6 +339,10 @@ class ProductAttributeValue(models.Model):
         verbose_name_plural = 'Product Attribute Values'
         indexes = [
             models.Index(fields=['product', 'attribute']),
+            models.Index(fields=['attribute', 'value_text'], name='ecommerce_c_attr_txt_idx'),
+            models.Index(fields=['attribute', 'value_boolean'], name='ecommerce_c_attr_bool_idx'),
+            models.Index(fields=['attribute', 'value_number'], name='ecommerce_c_attr_num_idx'),
+            models.Index(fields=['value_text'], name='ecommerce_c_val_txt_idx'),
         ]
 
     def __str__(self):
