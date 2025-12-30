@@ -834,9 +834,15 @@ class ListItemSerializer(serializers.ModelSerializer):
 
     def get_children(self, obj):
         """Recursively serialize child items"""
-        if obj.children.exists():
-            return ListItemSerializer(obj.children.filter(is_active=True), many=True).data
-        return []
+        # Use prefetched children if available (avoids N+1 query)
+        if hasattr(obj, '_prefetched_objects_cache') and 'children' in obj._prefetched_objects_cache:
+            children = [c for c in obj.children.all() if c.is_active]
+        else:
+            # Fallback for non-prefetched queries
+            if not obj.children.exists():
+                return []
+            children = obj.children.filter(is_active=True)
+        return ListItemSerializer(children, many=True).data if children else []
 
 
 class ItemListMinimalSerializer(serializers.ModelSerializer):
@@ -950,8 +956,12 @@ class HomepageSectionPublicSerializer(serializers.ModelSerializer):
     def get_data(self, obj):
         """Resolve data from ItemList if available"""
         if obj.item_list:
-            # Get root-level items from the linked ItemList
-            root_items = obj.item_list.items.filter(parent__isnull=True, is_active=True).order_by('position')
+            # Use prefetched items if available (avoids N+1 query)
+            if hasattr(obj.item_list, 'prefetched_root_items'):
+                root_items = obj.item_list.prefetched_root_items
+            else:
+                # Fallback for non-prefetched queries
+                root_items = obj.item_list.items.filter(parent__isnull=True, is_active=True).order_by('position')
             return ListItemSerializer(root_items, many=True).data
         return []
 

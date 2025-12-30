@@ -12,6 +12,7 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiParameter, OpenApiExample, extend_schema_view
 from drf_spectacular.openapi import AutoSchema
 from django_filters.rest_framework import DjangoFilterBackend
+from django.views.decorators.cache import cache_page
 from .authentication import EcommerceClientJWTAuthentication
 from .models import (
     EcommerceClient,
@@ -1393,6 +1394,7 @@ class ClientLanguageViewSet(viewsets.ReadOnlyModelViewSet):
 )
 @api_view(['GET'])
 @permission_classes([AllowAny])
+@cache_page(60 * 10)  # Cache for 10 minutes
 def get_homepage_config(request):
     """
     Get the homepage configuration for the storefront.
@@ -1400,9 +1402,21 @@ def get_homepage_config(request):
 
     GET /api/ecommerce/client/homepage/
     """
+    from django.db.models import Prefetch
+    from tickets.models import ListItem
+
     sections = HomepageSection.objects.filter(
         is_active=True
-    ).select_related('item_list').order_by('position')
+    ).select_related('item_list').prefetch_related(
+        Prefetch(
+            'item_list__items',
+            queryset=ListItem.objects.filter(
+                is_active=True,
+                parent__isnull=True
+            ).prefetch_related('children').order_by('position'),
+            to_attr='prefetched_root_items'
+        )
+    ).order_by('position')
 
     serializer = HomepageSectionPublicSerializer(sections, many=True)
 
