@@ -125,6 +125,21 @@ def send_websocket_notification(tenant_schema, message_data, conversation_id):
         logger.error(f"Failed to send WebSocket notification: {e}")
 
 
+def is_facebook_page_unknown(page_id):
+    """Check if this Facebook page is in the unknown pages cache"""
+    from django.core.cache import cache
+    cache_key = f"unknown_facebook_page:{page_id}"
+    return cache.get(cache_key) is not None
+
+
+def mark_facebook_page_unknown(page_id):
+    """Mark a Facebook page as unknown (not connected to any tenant)"""
+    from django.core.cache import cache
+    cache_key = f"unknown_facebook_page:{page_id}"
+    # Cache for 24 hours - after that, we'll check again in case it was reconnected
+    cache.set(cache_key, True, timeout=60 * 60 * 24)
+
+
 def find_tenant_by_page_id(page_id):
     """Find which tenant schema contains the given Facebook page ID"""
     from django.db import connection
@@ -1001,83 +1016,19 @@ def facebook_webhook(request):
                 logger.error("No page_id found in webhook data")
                 return JsonResponse({'error': 'No page_id found'}, status=400)
 
+            # Check if this is a known unknown page (skip DB lookup)
+            if is_facebook_page_unknown(page_id):
+                logger.debug(f"Ignoring webhook for unknown Facebook page: {page_id}")
+                return JsonResponse({'status': 'received'})
+
             # Find which tenant this page belongs to
             tenant_schema = find_tenant_by_page_id(page_id)
 
             if not tenant_schema:
-                logger.warning(f"No tenant found for page_id: {page_id} - Saving as orphaned message")
-
-                # Extract message details from webhook data
-                try:
-                    # Extract messages from webhook data
-                    messages_to_save = []
-
-                    # Handle test format
-                    if 'field' in data and 'value' in data and data['field'] == 'messages':
-                        test_value = data['value']
-                        sender_id = test_value.get('sender', {}).get('id', 'unknown')
-                        message_data = test_value.get('message', {})
-                        timestamp = test_value.get('timestamp', 0)
-
-                        messages_to_save.append({
-                            'sender_id': sender_id,
-                            'sender_name': test_value.get('sender', {}).get('name', ''),
-                            'message_id': message_data.get('mid', ''),
-                            'message_text': message_data.get('text', '[No text content]'),
-                            'timestamp': convert_facebook_timestamp(int(timestamp) if timestamp else 0)
-                        })
-
-                    # Handle standard webhook format
-                    elif 'entry' in data:
-                        for entry in data['entry']:
-                            if 'messaging' in entry:
-                                for message_event in entry['messaging']:
-                                    if 'message' in message_event:
-                                        message_data = message_event['message']
-                                        # Skip echo messages
-                                        if not message_data.get('is_echo'):
-                                            sender_id = message_event.get('sender', {}).get('id', 'unknown')
-                                            timestamp = message_event.get('timestamp', 0)
-
-                                            messages_to_save.append({
-                                                'sender_id': sender_id,
-                                                'sender_name': '',  # Not available in standard webhook
-                                                'message_id': message_data.get('mid', ''),
-                                                'message_text': message_data.get('text', '[No text content]'),
-                                                'timestamp': convert_facebook_timestamp(int(timestamp) if timestamp else 0)
-                                            })
-
-                    # Save orphaned messages to public schema
-                    saved_count = 0
-                    for msg in messages_to_save:
-                        OrphanedFacebookMessage.objects.create(
-                            page_id=page_id,
-                            sender_id=msg['sender_id'],
-                            sender_name=msg['sender_name'],
-                            message_id=msg['message_id'],
-                            message_text=msg['message_text'],
-                            timestamp=msg['timestamp'],
-                            raw_webhook_data=data,
-                            error_reason='page_not_found'
-                        )
-                        saved_count += 1
-                        logger.info(f"✅ Saved orphaned message from {msg['sender_id']}: {msg['message_text'][:50]}")
-
-                    logger.info(f"✅ Saved {saved_count} orphaned message(s) for page_id: {page_id}")
-
-                    # Return success so Facebook doesn't keep retrying
-                    return JsonResponse({
-                        'status': 'received',
-                        'message': f'Saved {saved_count} orphaned message(s) for review'
-                    })
-
-                except Exception as e:
-                    logger.error(f"Failed to save orphaned message: {e}")
-                    # Still return success to avoid Facebook retries
-                    return JsonResponse({
-                        'status': 'received',
-                        'message': 'Page not found, webhook acknowledged'
-                    })
+                # Mark as unknown to avoid repeated lookups - silently ignore
+                mark_facebook_page_unknown(page_id)
+                logger.debug(f"Ignoring webhook for unlinked Facebook page: {page_id}")
+                return JsonResponse({'status': 'received'})
 
             logger.info(f"Processing webhook for page_id {page_id} in tenant: {tenant_schema}")
             
@@ -2129,6 +2080,21 @@ def instagram_send_message(request):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+def is_instagram_account_unknown(instagram_account_id):
+    """Check if this Instagram account is in the unknown accounts cache"""
+    from django.core.cache import cache
+    cache_key = f"unknown_instagram_account:{instagram_account_id}"
+    return cache.get(cache_key) is not None
+
+
+def mark_instagram_account_unknown(instagram_account_id):
+    """Mark an Instagram account as unknown (not connected to any tenant)"""
+    from django.core.cache import cache
+    cache_key = f"unknown_instagram_account:{instagram_account_id}"
+    # Cache for 24 hours - after that, we'll check again in case it was reconnected
+    cache.set(cache_key, True, timeout=60 * 60 * 24)
+
+
 def find_tenant_by_instagram_account_id(instagram_account_id):
     """Find which tenant schema contains the given Instagram account ID"""
     from django.db import connection
@@ -2197,11 +2163,18 @@ def instagram_webhook(request):
                     logger.warning("No Instagram account ID in entry")
                     continue
 
+                # Check if this is a known unknown account (skip DB lookup)
+                if is_instagram_account_unknown(instagram_account_id):
+                    logger.debug(f"Ignoring webhook for unknown Instagram account: {instagram_account_id}")
+                    continue
+
                 # Find which tenant this Instagram account belongs to
                 tenant_schema = find_tenant_by_instagram_account_id(instagram_account_id)
 
                 if not tenant_schema:
-                    logger.error(f"No tenant found for Instagram account: {instagram_account_id}")
+                    # Mark as unknown to avoid repeated lookups - silently ignore
+                    mark_instagram_account_unknown(instagram_account_id)
+                    logger.debug(f"Ignoring webhook for unlinked Instagram account: {instagram_account_id}")
                     continue
 
                 logger.info(f"Processing Instagram webhook for account {instagram_account_id} in tenant: {tenant_schema}")
