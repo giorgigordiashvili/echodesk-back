@@ -120,6 +120,51 @@ class EchoDeskTenantMiddleware(TenantMiddleware):
                 print(f"[DEBUG] Using tenant URLs: {request.urlconf}")
 
 
+class BotBlockerMiddleware:
+    """
+    Middleware to block suspicious bot requests early before URL routing.
+    Returns 404 for:
+    - Requests to unknown file types (.php, .asp, .jsp, etc.)
+    - Requests to common attack paths
+    - Requests to /api without trailing slash (prevents APPEND_SLASH errors)
+    """
+
+    BLOCKED_EXTENSIONS = {'.php', '.asp', '.aspx', '.jsp', '.cgi', '.pl', '.sh', '.exe', '.dll'}
+    BLOCKED_PATHS = {
+        '/wp-admin', '/wp-content', '/wp-includes', '/wordpress',
+        '/admin.php', '/xmlrpc.php', '/wp-login.php',
+        '/.env', '/.git', '/.svn', '/.htaccess',
+        '/phpmyadmin', '/pma', '/mysql', '/myadmin',
+        '/shell', '/cmd', '/command', '/eval',
+    }
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        path = request.path.lower()
+
+        # Block /api without trailing slash (causes APPEND_SLASH errors on POST)
+        if path == '/api':
+            from django.http import JsonResponse
+            return JsonResponse(
+                {'error': 'Not found. API endpoints are under /api/'},
+                status=404
+            )
+
+        # Block requests to suspicious file extensions
+        for ext in self.BLOCKED_EXTENSIONS:
+            if path.endswith(ext):
+                raise Http404("Not found")
+
+        # Block requests to common attack paths
+        for blocked in self.BLOCKED_PATHS:
+            if path.startswith(blocked):
+                raise Http404("Not found")
+
+        return self.get_response(request)
+
+
 class RequestLoggingMiddleware:
     """
     Middleware to log every HTTP request when DEBUG=True

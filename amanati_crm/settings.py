@@ -110,6 +110,7 @@ INSTALLED_APPS = list(SHARED_APPS) + [app for app in TENANT_APPS if app not in S
 TENANT_MODEL = "tenants.Tenant"
 
 MIDDLEWARE = [
+    'amanati_crm.middleware.BotBlockerMiddleware',  # Block bots/scanners early (before CommonMiddleware)
     'amanati_crm.middleware.EchoDeskTenantMiddleware',  # Custom tenant middleware (must be first)
     'tenants.subscription_middleware.SubscriptionMiddleware',  # Subscription feature middleware
     'amanati_crm.debug_middleware.TransactionDebugMiddleware',  # Debug transaction errors
