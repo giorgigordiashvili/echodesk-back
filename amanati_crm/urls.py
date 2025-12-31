@@ -17,6 +17,17 @@ def sentry_test_error(request):
     return JsonResponse({'status': 'error not triggered'})
 
 
+def api_root_catchall(request):
+    """
+    Catch-all for /api without trailing slash to prevent APPEND_SLASH errors.
+    Returns proper 404 instead of triggering RuntimeError for POST/PUT/PATCH.
+    """
+    return JsonResponse(
+        {'error': 'Not found. API endpoints are under /api/'},
+        status=404
+    )
+
+
 def websocket_diagnostic(request):
     """
     Diagnostic endpoint to check WebSocket configuration
@@ -71,6 +82,9 @@ def websocket_diagnostic(request):
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+
+    # Catch-all for /api without trailing slash (prevents APPEND_SLASH errors from bots)
+    path('api', api_root_catchall, name='api_root_catchall'),
 
     # API Documentation - Main API
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
