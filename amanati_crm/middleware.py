@@ -49,7 +49,9 @@ class EchoDeskTenantMiddleware(TenantMiddleware):
                 tenant = model.objects.get(schema_name=subdomain)
                 return tenant
             except model.DoesNotExist:
-                raise Exception(f"No tenant found for subdomain: {subdomain}")
+                # Silently return 404 for unknown subdomains (likely bots)
+                logger.debug(f"Unknown subdomain: {subdomain}")
+                raise Http404(f"Not found")
 
         # For main domain subdomains, look up by domain_url
         try:
@@ -57,8 +59,9 @@ class EchoDeskTenantMiddleware(TenantMiddleware):
             tenant = model.objects.get(domain_url=hostname)
             return tenant
         except model.DoesNotExist:
-            # If tenant not found, raise exception to trigger fallback
-            raise Exception(f"No tenant found for domain: {hostname}")
+            # Silently return 404 for unknown domains (likely bots probing)
+            logger.debug(f"Unknown domain: {hostname}")
+            raise Http404(f"Not found")
     
     def process_request(self, request):
         """
