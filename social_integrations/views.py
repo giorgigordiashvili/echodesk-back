@@ -3314,7 +3314,8 @@ def unread_messages_count(request):
             # Count unread Facebook messages - only mine or unassigned
             facebook_unread = FacebookMessage.objects.filter(
                 is_from_page=False,
-                is_read_by_staff=False
+                is_read_by_staff=False,
+                is_deleted=False
             ).filter(
                 Q(sender_id__in=my_fb_assignments) |  # Assigned to me
                 ~Q(sender_id__in=all_fb_assignments)   # Not assigned to anyone
@@ -3323,7 +3324,8 @@ def unread_messages_count(request):
             # Count unread Instagram messages - only mine or unassigned
             instagram_unread = InstagramMessage.objects.filter(
                 is_from_business=False,
-                is_read_by_staff=False
+                is_read_by_staff=False,
+                is_deleted=False
             ).filter(
                 Q(sender_id__in=my_ig_assignments) |  # Assigned to me
                 ~Q(sender_id__in=all_ig_assignments)  # Not assigned to anyone
@@ -3332,7 +3334,8 @@ def unread_messages_count(request):
             # Count unread WhatsApp messages - only mine or unassigned
             whatsapp_unread = WhatsAppMessage.objects.filter(
                 is_from_business=False,
-                is_read_by_staff=False
+                is_read_by_staff=False,
+                is_deleted=False
             ).filter(
                 Q(from_number__in=my_wa_assignments) |  # Assigned to me
                 ~Q(from_number__in=all_wa_assignments)  # Not assigned to anyone
@@ -3352,17 +3355,20 @@ def unread_messages_count(request):
             # Assignment not enabled - count all unread messages (original behavior)
             facebook_unread = FacebookMessage.objects.filter(
                 is_from_page=False,
-                is_read_by_staff=False
+                is_read_by_staff=False,
+                is_deleted=False
             ).count()
 
             instagram_unread = InstagramMessage.objects.filter(
                 is_from_business=False,
-                is_read_by_staff=False
+                is_read_by_staff=False,
+                is_deleted=False
             ).count()
 
             whatsapp_unread = WhatsAppMessage.objects.filter(
                 is_from_business=False,
-                is_read_by_staff=False
+                is_read_by_staff=False,
+                is_deleted=False
             ).count()
 
             email_unread = EmailMessage.objects.filter(
