@@ -1140,6 +1140,13 @@ class TikTokMessage(models.Model):
 class EmailSignature(models.Model):
     """Stores email signature configuration for a tenant - singleton per tenant"""
 
+    # Sender name for the signature
+    sender_name = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Name to display in the signature (e.g., 'John Doe' or 'Support Team')"
+    )
+
     # Signature content
     signature_html = models.TextField(
         blank=True,

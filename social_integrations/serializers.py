@@ -561,7 +561,7 @@ class EmailSignatureSerializer(serializers.ModelSerializer):
     class Meta:
         model = EmailSignature
         fields = [
-            'id', 'signature_html', 'signature_text',
+            'id', 'sender_name', 'signature_html', 'signature_text',
             'is_enabled', 'include_on_reply',
             'created_by', 'created_by_name',
             'created_at', 'updated_at'
