@@ -207,7 +207,7 @@ class FacebookMessageViewSet(viewsets.ReadOnlyModelViewSet):
         base_queryset = FacebookMessage.objects.filter(
             page_connection__in=tenant_pages,
             is_deleted=False
-        )
+        ).select_related('page_connection')
 
         # Check if hiding assigned chats is enabled
         settings_obj = SocialIntegrationSettings.objects.first()
@@ -1794,7 +1794,7 @@ class InstagramMessageViewSet(viewsets.ReadOnlyModelViewSet):
         base_queryset = InstagramMessage.objects.filter(
             account_connection__in=tenant_accounts,
             is_deleted=False
-        )
+        ).select_related('account_connection')
 
         # Check if hiding assigned chats is enabled
         settings_obj = SocialIntegrationSettings.objects.first()
@@ -3845,7 +3845,7 @@ class WhatsAppMessageViewSet(viewsets.ReadOnlyModelViewSet):
         base_queryset = WhatsAppMessage.objects.filter(
             business_account__in=tenant_accounts,
             is_deleted=False
-        )
+        ).select_related('business_account', 'template')
 
         # Check if hiding assigned chats is enabled
         settings_obj = SocialIntegrationSettings.objects.first()
