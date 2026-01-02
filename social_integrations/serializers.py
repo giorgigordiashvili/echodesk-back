@@ -19,6 +19,7 @@ class FacebookPageConnectionSerializer(serializers.ModelSerializer):
 
 
 class FacebookMessageSerializer(serializers.ModelSerializer):
+    page_id = serializers.CharField(source='page_connection.page_id', read_only=True)
     page_name = serializers.CharField(source='page_connection.page_name', read_only=True)
 
     class Meta:
@@ -26,7 +27,7 @@ class FacebookMessageSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'message_id', 'sender_id', 'sender_name', 'profile_pic_url', 'message_text',
             'attachment_type', 'attachment_url', 'attachments',
-            'timestamp', 'is_from_page', 'is_delivered', 'delivered_at', 'is_read', 'read_at', 'page_name', 'created_at'
+            'timestamp', 'is_from_page', 'is_delivered', 'delivered_at', 'is_read', 'read_at', 'page_id', 'page_name', 'created_at'
         ]
         read_only_fields = ['id', 'is_delivered', 'delivered_at', 'is_read', 'read_at', 'created_at']
 
