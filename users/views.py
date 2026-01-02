@@ -632,6 +632,26 @@ class TeamChatConversationViewSet(viewsets.ModelViewSet):
 
         return Response({'marked_read': updated})
 
+    @action(detail=True, methods=['delete', 'post'])
+    def clear_history(self, request, pk=None):
+        """Clear all messages in a conversation"""
+        conversation = self.get_object()
+
+        # Authorization check - only participants can clear history
+        if not conversation.participants.filter(id=request.user.id).exists():
+            return Response(
+                {'error': 'Not authorized to clear this conversation'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Delete all messages in the conversation
+        deleted_count, _ = conversation.messages.all().delete()
+
+        return Response({
+            'message': f'Cleared {deleted_count} messages',
+            'deleted_count': deleted_count
+        })
+
 
 class TeamChatMessageViewSet(viewsets.ModelViewSet):
     """ViewSet for team chat messages"""
