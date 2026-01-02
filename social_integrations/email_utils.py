@@ -729,6 +729,7 @@ def _sync_folder(imap, connection, imap_folder_name: str, db_folder_name: str, m
         Number of new messages synced from this folder
     """
     from .models import EmailMessage
+    import re as re_module
 
     try:
         # Quote folder name for IMAP (handles spaces and special chars)
@@ -759,20 +760,24 @@ def _sync_folder(imap, connection, imap_folder_name: str, db_folder_name: str, m
         logger.warning(f"[EMAIL_SYNC] Failed to search emails in '{db_folder_name}': {result}")
         return 0
 
-    message_ids = data[0].split()
-    total_found = len(message_ids)
+    message_nums = data[0].split()
+    total_found = len(message_nums)
     logger.info(f"[EMAIL_SYNC] Found {total_found} messages in '{db_folder_name}' matching search criteria")
 
     # Limit to most recent messages
-    if len(message_ids) > max_messages:
-        message_ids = message_ids[-max_messages:]
-        logger.info(f"[EMAIL_SYNC] Limited to {len(message_ids)} most recent messages (max_messages={max_messages})")
+    if len(message_nums) > max_messages:
+        message_nums = message_nums[-max_messages:]
+        logger.info(f"[EMAIL_SYNC] Limited to {len(message_nums)} most recent messages (max_messages={max_messages})")
 
-    new_count = 0
+    if not message_nums:
+        return 0
 
-    for msg_num in message_ids:
+    # Phase 1: Fetch all messages and extract their data
+    fetched_messages = []
+    message_id_headers = []
+
+    for msg_num in message_nums:
         try:
-            # Fetch message
             result, msg_data = imap.fetch(msg_num, '(RFC822 FLAGS UID)')
             if result != 'OK':
                 continue
@@ -785,14 +790,48 @@ def _sync_folder(imap, connection, imap_folder_name: str, db_folder_name: str, m
             if not message_id_header:
                 message_id_header = make_msgid()
 
-            # Check if already exists
-            existing_message = EmailMessage.objects.filter(message_id=message_id_header).first()
-            if existing_message:
+            message_id_headers.append(message_id_header)
+            fetched_messages.append({
+                'msg_num': msg_num,
+                'msg_data': msg_data,
+                'email_message': email_message,
+                'message_id_header': message_id_header,
+            })
+        except Exception as e:
+            logger.warning(f"[EMAIL_SYNC] Failed to fetch email {msg_num} in folder '{db_folder_name}': {e}")
+            continue
+
+    if not fetched_messages:
+        return 0
+
+    # Phase 2: Batch query for existing messages (single query instead of N queries)
+    existing_messages = EmailMessage.objects.filter(
+        message_id__in=message_id_headers
+    ).values('message_id', 'folder', 'id')
+
+    # Create lookup dict for O(1) access
+    existing_lookup = {msg['message_id']: msg for msg in existing_messages}
+
+    # Track messages that need folder updates (batch update later)
+    messages_to_update_folder = []
+
+    # Phase 3: Process messages and create new ones
+    new_count = 0
+    messages_to_create = []
+
+    for msg_info in fetched_messages:
+        try:
+            message_id_header = msg_info['message_id_header']
+            email_message = msg_info['email_message']
+            msg_data = msg_info['msg_data']
+
+            # Check if already exists using lookup dict (O(1) instead of DB query)
+            existing = existing_lookup.get(message_id_header)
+            if existing:
                 # Update folder if it changed (email was moved on server)
-                if existing_message.folder != db_folder_name:
-                    logger.info(f"[EMAIL_SYNC] Updating folder '{existing_message.folder}' -> '{db_folder_name}' for message_id={message_id_header[:50]}")
-                    existing_message.folder = db_folder_name
-                    existing_message.save(update_fields=['folder'])
+                if existing['folder'] != db_folder_name:
+                    logger.info(f"[EMAIL_SYNC] Updating folder '{existing['folder']}' -> '{db_folder_name}' for message_id={message_id_header[:50]}")
+                    messages_to_update_folder.append(existing['id'])
                 else:
                     logger.debug(f"[EMAIL_SYNC] Message already synced in correct folder: {message_id_header[:50]}")
                 continue
@@ -836,13 +875,12 @@ def _sync_folder(imap, connection, imap_folder_name: str, db_folder_name: str, m
             uid = ''
             uid_match = msg_data[0][0].decode() if isinstance(msg_data[0][0], bytes) else str(msg_data[0][0])
             if 'UID' in uid_match:
-                import re
-                uid_search = re.search(r'UID (\d+)', uid_match)
+                uid_search = re_module.search(r'UID (\d+)', uid_match)
                 if uid_search:
                     uid = uid_search.group(1)
 
-            # Create message
-            EmailMessage.objects.create(
+            # Create message object (will be bulk created)
+            messages_to_create.append(EmailMessage(
                 connection=connection,
                 message_id=message_id_header,
                 thread_id=thread_id,
@@ -863,13 +901,23 @@ def _sync_folder(imap, connection, imap_folder_name: str, db_folder_name: str, m
                 is_read=b'\\Seen' in flags,
                 is_starred=b'\\Flagged' in flags,
                 is_answered=b'\\Answered' in flags,
-            )
+            ))
             new_count += 1
-            logger.info(f"[EMAIL_SYNC] Created new message in folder '{db_folder_name}': {email_message.get('Subject', '')[:50]}")
+            logger.info(f"[EMAIL_SYNC] Prepared new message in folder '{db_folder_name}': {email_message.get('Subject', '')[:50]}")
 
         except Exception as e:
-            logger.warning(f"[EMAIL_SYNC] Failed to process email {msg_num} in folder '{db_folder_name}': {e}")
+            logger.warning(f"[EMAIL_SYNC] Failed to process email {msg_info['msg_num']} in folder '{db_folder_name}': {e}")
             continue
+
+    # Batch create new messages (single INSERT instead of N INSERTs)
+    if messages_to_create:
+        EmailMessage.objects.bulk_create(messages_to_create, ignore_conflicts=True)
+        logger.info(f"[EMAIL_SYNC] Bulk created {len(messages_to_create)} messages")
+
+    # Batch update folder for moved messages (single UPDATE instead of N UPDATEs)
+    if messages_to_update_folder:
+        EmailMessage.objects.filter(id__in=messages_to_update_folder).update(folder=db_folder_name)
+        logger.info(f"[EMAIL_SYNC] Batch updated folder for {len(messages_to_update_folder)} messages")
 
     logger.info(f"[EMAIL_SYNC] Folder '{db_folder_name}' sync complete: {new_count} new messages created")
     return new_count
