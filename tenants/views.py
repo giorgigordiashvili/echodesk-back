@@ -234,6 +234,7 @@ def tenant_profile(request):
     # Prefetch tenant_groups with features to avoid N+1 queries
     groups_data = []
     group_feature_keys = set()
+    prefetched_groups = []
     try:
         # Single query with prefetched features
         tenant_groups = user.tenant_groups.filter(
@@ -247,6 +248,7 @@ def tenant_profile(request):
         )
 
         for group in tenant_groups:
+            prefetched_groups.append(group)
             # Use prefetched features instead of calling get_feature_keys()
             feature_keys_list = [f.key for f in group.prefetched_features]
             groups_data.append({
@@ -259,8 +261,9 @@ def tenant_profile(request):
         # In case of any tenant_groups query issues
         pass
 
-    # Get all user permissions (both from groups and direct permissions)
-    all_permissions = user.get_all_permissions()
+    # Calculate permissions efficiently without N+1 queries
+    # Use the already-fetched groups instead of querying again
+    all_permissions = _compute_permissions_efficiently(user, prefetched_groups)
 
     # Calculate feature_keys efficiently (avoid redundant queries)
     feature_keys = []
@@ -296,6 +299,108 @@ def tenant_profile(request):
         'all_permissions': list(all_permissions),
         'feature_keys': feature_keys
     }, status=status.HTTP_200_OK)
+
+
+def _compute_permissions_efficiently(user, prefetched_groups):
+    """
+    Compute user permissions without N+1 queries.
+    Uses already-fetched groups instead of querying for each permission check.
+    """
+    if user.is_superuser:
+        # Superuser has all permissions
+        return [
+            'view_all_tickets', 'manage_users', 'make_calls', 'manage_groups',
+            'manage_settings', 'create_tickets', 'edit_own_tickets',
+            'edit_all_tickets', 'delete_tickets', 'assign_tickets',
+            'view_reports', 'export_data', 'manage_tags', 'manage_columns',
+            'view_boards', 'create_boards', 'edit_boards', 'delete_boards',
+            'access_orders', 'manage_social_connections', 'view_social_messages',
+            'send_social_messages', 'manage_social_settings'
+        ]
+
+    permissions = set()
+
+    # Permission fields to check
+    permission_fields = [
+        'view_all_tickets', 'manage_users', 'make_calls', 'manage_groups',
+        'manage_settings', 'create_tickets', 'edit_own_tickets',
+        'edit_all_tickets', 'delete_tickets', 'assign_tickets',
+        'view_reports', 'export_data', 'manage_tags', 'manage_columns',
+        'view_boards', 'create_boards', 'edit_boards', 'delete_boards',
+        'access_orders', 'manage_social_connections', 'view_social_messages',
+        'send_social_messages', 'manage_social_settings'
+    ]
+
+    # Individual user permissions (direct attributes)
+    individual_permissions = {
+        'view_all_tickets': getattr(user, 'can_view_all_tickets', False),
+        'manage_users': getattr(user, 'can_manage_users', False),
+        'make_calls': getattr(user, 'can_make_calls', False),
+        'manage_groups': getattr(user, 'can_manage_groups', False),
+        'manage_settings': getattr(user, 'can_manage_settings', False),
+        'create_tickets': getattr(user, 'can_create_tickets', False),
+        'edit_own_tickets': getattr(user, 'can_edit_own_tickets', False),
+        'edit_all_tickets': getattr(user, 'can_edit_all_tickets', False),
+        'delete_tickets': getattr(user, 'can_delete_tickets', False),
+        'assign_tickets': getattr(user, 'can_assign_tickets', False),
+        'view_reports': getattr(user, 'can_view_reports', False),
+        'export_data': getattr(user, 'can_export_data', False),
+        'manage_tags': getattr(user, 'can_manage_tags', False),
+        'manage_columns': getattr(user, 'can_manage_columns', False),
+        'view_boards': getattr(user, 'can_view_boards', False),
+        'create_boards': getattr(user, 'can_create_boards', False),
+        'edit_boards': getattr(user, 'can_edit_boards', False),
+        'delete_boards': getattr(user, 'can_delete_boards', False),
+        'access_orders': getattr(user, 'can_access_orders', False),
+        'manage_social_connections': getattr(user, 'can_manage_social_connections', False),
+        'view_social_messages': getattr(user, 'can_view_social_messages', False),
+        'send_social_messages': getattr(user, 'can_send_social_messages', False),
+        'manage_social_settings': getattr(user, 'can_manage_social_settings', False),
+    }
+
+    # Role-based permissions
+    role_permissions = {
+        'view_all_tickets': getattr(user, 'is_manager', False),
+        'manage_users': getattr(user, 'is_admin', False),
+        'make_calls': getattr(user, 'is_manager', False),
+        'manage_groups': getattr(user, 'is_admin', False),
+        'manage_settings': getattr(user, 'is_admin', False),
+        'edit_all_tickets': getattr(user, 'is_manager', False),
+        'delete_tickets': getattr(user, 'is_manager', False),
+        'assign_tickets': getattr(user, 'is_manager', False),
+        'view_reports': getattr(user, 'is_manager', False),
+        'export_data': getattr(user, 'is_manager', False),
+        'manage_tags': getattr(user, 'is_manager', False),
+        'manage_columns': getattr(user, 'is_manager', False),
+        'view_boards': getattr(user, 'is_manager', False),
+        'create_boards': getattr(user, 'is_manager', False),
+        'edit_boards': getattr(user, 'is_manager', False),
+        'delete_boards': getattr(user, 'is_admin', False),
+        'manage_social_connections': getattr(user, 'is_admin', False),
+        'view_social_messages': getattr(user, 'is_manager', False),
+        'send_social_messages': getattr(user, 'is_manager', False),
+        'manage_social_settings': getattr(user, 'is_admin', False),
+    }
+
+    for perm in permission_fields:
+        # Check individual permission
+        if individual_permissions.get(perm, False):
+            permissions.add(perm)
+            continue
+
+        # Check role-based permission
+        if role_permissions.get(perm, False):
+            permissions.add(perm)
+            continue
+
+        # Check group permissions (using already-fetched groups, no new queries)
+        group_perm_field = f'can_{perm}'
+        for group in prefetched_groups:
+            if getattr(group, group_perm_field, False):
+                permissions.add(perm)
+                break
+
+    return list(permissions)
 
 
 @extend_schema(
