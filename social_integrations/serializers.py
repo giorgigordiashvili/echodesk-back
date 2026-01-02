@@ -51,6 +51,7 @@ class InstagramAccountConnectionSerializer(serializers.ModelSerializer):
 
 
 class InstagramMessageSerializer(serializers.ModelSerializer):
+    account_id = serializers.CharField(source='account_connection.instagram_account_id', read_only=True)
     account_username = serializers.CharField(source='account_connection.username', read_only=True)
 
     class Meta:
@@ -58,7 +59,7 @@ class InstagramMessageSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'message_id', 'sender_id', 'sender_name', 'sender_username', 'sender_profile_pic',
             'message_text', 'attachment_type', 'attachment_url', 'attachments',
-            'timestamp', 'is_from_business', 'is_delivered', 'delivered_at', 'is_read', 'read_at', 'account_username', 'created_at'
+            'timestamp', 'is_from_business', 'is_delivered', 'delivered_at', 'is_read', 'read_at', 'account_id', 'account_username', 'created_at'
         ]
         read_only_fields = ['id', 'is_delivered', 'delivered_at', 'is_read', 'read_at', 'created_at']
 
