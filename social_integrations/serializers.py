@@ -27,7 +27,9 @@ class FacebookMessageSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'message_id', 'sender_id', 'sender_name', 'profile_pic_url', 'message_text',
             'attachment_type', 'attachment_url', 'attachments',
-            'timestamp', 'is_from_page', 'is_delivered', 'delivered_at', 'is_read', 'read_at', 'page_id', 'page_name', 'created_at'
+            'timestamp', 'is_from_page', 'is_delivered', 'delivered_at', 'is_read', 'read_at',
+            'is_read_by_staff', 'read_by_staff_at',
+            'page_id', 'page_name', 'created_at'
         ]
         read_only_fields = ['id', 'is_delivered', 'delivered_at', 'is_read', 'read_at', 'created_at']
 
@@ -59,7 +61,9 @@ class InstagramMessageSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'message_id', 'sender_id', 'sender_name', 'sender_username', 'sender_profile_pic',
             'message_text', 'attachment_type', 'attachment_url', 'attachments',
-            'timestamp', 'is_from_business', 'is_delivered', 'delivered_at', 'is_read', 'read_at', 'account_id', 'account_username', 'created_at'
+            'timestamp', 'is_from_business', 'is_delivered', 'delivered_at', 'is_read', 'read_at',
+            'is_read_by_staff', 'read_by_staff_at',
+            'account_id', 'account_username', 'created_at'
         ]
         read_only_fields = ['id', 'is_delivered', 'delivered_at', 'is_read', 'read_at', 'created_at']
 
@@ -100,6 +104,7 @@ class WhatsAppMessageSerializer(serializers.ModelSerializer):
             'id', 'message_id', 'from_number', 'to_number', 'contact_name', 'profile_pic_url',
             'message_text', 'message_type', 'media_url', 'media_mime_type', 'attachments', 'timestamp',
             'is_from_business', 'status', 'is_delivered', 'delivered_at', 'is_read', 'read_at',
+            'is_read_by_staff', 'read_by_staff_at',
             'error_message', 'business_name', 'business_phone', 'waba_id', 'template', 'template_name',
             'template_parameters',
             # Coexistence fields
