@@ -534,8 +534,8 @@ def send_email_smtp(connection, to_emails: List[str], cc_emails: List[str] = Non
     signature_text_content = None
 
     try:
-        # First, check if the connection has its own signature
-        if connection.signature_enabled and (connection.signature_html or connection.signature_text):
+        # First, check if the connection has its own signature (auto-enabled if content exists)
+        if connection.signature_html or connection.signature_text:
             # Use connection-specific signature
             if connection.signature_html:
                 signature_html_content = connection.signature_html
