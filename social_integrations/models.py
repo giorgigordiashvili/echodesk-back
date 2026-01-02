@@ -563,6 +563,38 @@ class SocialIntegrationSettings(models.Model):
         help_text="When enabled, customers will be asked to rate the session after it ends."
     )
 
+    # Notification sound settings (per platform)
+    notification_sound_facebook = models.CharField(
+        max_length=255,
+        default='mixkit-bubble-pop-up-alert-notification-2357.wav',
+        help_text="Sound file for Facebook notifications"
+    )
+    notification_sound_instagram = models.CharField(
+        max_length=255,
+        default='mixkit-magic-notification-ring-2344.wav',
+        help_text="Sound file for Instagram notifications"
+    )
+    notification_sound_whatsapp = models.CharField(
+        max_length=255,
+        default='mixkit-positive-notification-951.wav',
+        help_text="Sound file for WhatsApp notifications"
+    )
+    notification_sound_email = models.CharField(
+        max_length=255,
+        default='mixkit-bell-notification-933.wav',
+        help_text="Sound file for Email notifications"
+    )
+    notification_sound_team_chat = models.CharField(
+        max_length=255,
+        default='mixkit-happy-bells-notification-937.wav',
+        help_text="Sound file for Team Chat notifications"
+    )
+    notification_sound_system = models.CharField(
+        max_length=255,
+        default='mixkit-confirmation-tone-2867.wav',
+        help_text="Sound file for System notifications"
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

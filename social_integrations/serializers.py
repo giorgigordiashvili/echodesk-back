@@ -223,6 +223,9 @@ class SocialIntegrationSettingsSerializer(serializers.ModelSerializer):
             'id', 'refresh_interval',
             'chat_assignment_enabled', 'session_management_enabled',
             'hide_assigned_chats', 'collect_customer_rating',
+            'notification_sound_facebook', 'notification_sound_instagram',
+            'notification_sound_whatsapp', 'notification_sound_email',
+            'notification_sound_team_chat', 'notification_sound_system',
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
