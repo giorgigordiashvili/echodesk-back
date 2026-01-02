@@ -756,10 +756,10 @@ class ChatRating(models.Model):
 
 
 class EmailConnection(models.Model):
-    """Stores Email (IMAP/SMTP) connection details for a tenant - one per tenant"""
+    """Stores Email (IMAP/SMTP) connection details for a tenant - supports multiple connections per tenant"""
 
     # Identity
-    email_address = models.EmailField(unique=True, help_text="Email address for this connection")
+    email_address = models.EmailField(help_text="Email address for this connection")
     display_name = models.CharField(max_length=200, blank=True, help_text="Display name for sent emails")
 
     # IMAP Settings (incoming)

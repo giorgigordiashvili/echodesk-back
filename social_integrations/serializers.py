@@ -336,6 +336,7 @@ class EmailConnectionCreateSerializer(serializers.Serializer):
 
 class EmailMessageSerializer(serializers.ModelSerializer):
     """Serializer for email messages"""
+    connection_id = serializers.IntegerField(source='connection.id', read_only=True)
     connection_email = serializers.EmailField(source='connection.email_address', read_only=True)
     connection_display_name = serializers.CharField(source='connection.display_name', read_only=True)
 
@@ -349,14 +350,14 @@ class EmailMessageSerializer(serializers.ModelSerializer):
             'is_from_business', 'is_read', 'is_starred', 'is_answered', 'is_draft', 'labels',
             'is_read_by_staff', 'read_by_staff_at',
             'is_deleted', 'deleted_at',
-            'connection_email', 'connection_display_name',
+            'connection_id', 'connection_email', 'connection_display_name',
             'created_at', 'updated_at'
         ]
         read_only_fields = [
             'id', 'message_id', 'thread_id', 'in_reply_to', 'references',
             'timestamp', 'folder', 'uid',
             'is_from_business', 'is_answered',
-            'connection_email', 'connection_display_name',
+            'connection_id', 'connection_email', 'connection_display_name',
             'created_at', 'updated_at'
         ]
 

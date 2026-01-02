@@ -5336,31 +5336,29 @@ def whatsapp_send_template_message(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def email_connection_status(request):
-    """Check Email connection status for current tenant"""
+    """Check Email connection status for current tenant - returns all connections"""
     try:
-        connection = EmailConnection.objects.filter(is_active=True).first()
+        connections = EmailConnection.objects.all()
 
-        if connection:
-            return Response({
-                'connected': True,
-                'connection': {
-                    'id': connection.id,
-                    'email_address': connection.email_address,
-                    'display_name': connection.display_name,
-                    'imap_server': connection.imap_server,
-                    'smtp_server': connection.smtp_server,
-                    'is_active': connection.is_active,
-                    'last_sync_at': connection.last_sync_at.isoformat() if connection.last_sync_at else None,
-                    'last_sync_error': connection.last_sync_error,
-                    'sync_folder': connection.sync_folder,
-                    'connected_at': connection.created_at.isoformat()
-                }
-            })
-        else:
-            return Response({
-                'connected': False,
-                'connection': None
-            })
+        connections_data = [{
+            'id': conn.id,
+            'email_address': conn.email_address,
+            'display_name': conn.display_name,
+            'imap_server': conn.imap_server,
+            'smtp_server': conn.smtp_server,
+            'is_active': conn.is_active,
+            'last_sync_at': conn.last_sync_at.isoformat() if conn.last_sync_at else None,
+            'last_sync_error': conn.last_sync_error,
+            'sync_folder': conn.sync_folder,
+            'connected_at': conn.created_at.isoformat()
+        } for conn in connections]
+
+        return Response({
+            'connected': connections.exists(),
+            'connections': connections_data,
+            # Keep backwards compatibility - return first connection as 'connection'
+            'connection': connections_data[0] if connections_data else None
+        })
     except Exception as e:
         logger.error(f"Failed to get Email connection status: {e}")
         return Response({
@@ -5437,10 +5435,7 @@ def email_connect(request):
             connection = existing
             created = False
         else:
-            # Delete any existing connection (only one per tenant)
-            EmailConnection.objects.all().delete()
-
-            # Create new connection
+            # Create new connection (multiple connections per tenant supported)
             connection = EmailConnection.objects.create(
                 email_address=data['email_address'],
                 display_name=data.get('display_name', ''),
@@ -5479,13 +5474,19 @@ def email_connect(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated, CanManageSocialConnections])
 def email_disconnect(request):
-    """Disconnect email and delete all related data"""
+    """Disconnect a specific email connection and delete all related data"""
     try:
-        connection = EmailConnection.objects.first()
+        connection_id = request.data.get('connection_id')
+        if not connection_id:
+            return Response({
+                'error': 'connection_id is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        connection = EmailConnection.objects.filter(id=connection_id).first()
 
         if not connection:
             return Response({
-                'error': 'No email connection found'
+                'error': 'Email connection not found'
             }, status=status.HTTP_404_NOT_FOUND)
 
         email_address = connection.email_address
@@ -5529,7 +5530,12 @@ def email_send(request):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     try:
-        connection = EmailConnection.objects.filter(is_active=True).first()
+        # Support sending from a specific connection
+        connection_id = request.data.get('connection_id')
+        if connection_id:
+            connection = EmailConnection.objects.filter(id=connection_id, is_active=True).first()
+        else:
+            connection = EmailConnection.objects.filter(is_active=True).first()
         if not connection:
             return Response({
                 'error': 'No active email connection found'
@@ -5677,22 +5683,38 @@ def email_folders(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated, CanManageSocialConnections])
 def email_sync(request):
-    """Trigger manual email sync"""
+    """Trigger manual email sync - supports syncing specific or all connections"""
     from .email_utils import sync_imap_messages
 
     try:
-        connection = EmailConnection.objects.filter(is_active=True).first()
-        if not connection:
+        # Support syncing a specific connection or all connections
+        connection_id = request.data.get('connection_id')
+        if connection_id:
+            connections = EmailConnection.objects.filter(id=connection_id, is_active=True)
+        else:
+            connections = EmailConnection.objects.filter(is_active=True)
+
+        if not connections.exists():
             return Response({
                 'error': 'No active email connection found'
             }, status=status.HTTP_404_NOT_FOUND)
 
-        # Perform sync - returns number of new messages synced
-        new_messages = sync_imap_messages(connection)
+        # Perform sync for each connection
+        total_new_messages = 0
+        sync_results = []
+        for connection in connections:
+            new_messages = sync_imap_messages(connection)
+            total_new_messages += new_messages
+            sync_results.append({
+                'connection_id': connection.id,
+                'email_address': connection.email_address,
+                'new_messages': new_messages
+            })
 
         return Response({
             'status': 'success',
-            'new_messages': new_messages
+            'new_messages': total_new_messages,
+            'sync_results': sync_results
         })
 
     except Exception as e:
@@ -5784,6 +5806,11 @@ class EmailMessageViewSet(viewsets.ReadOnlyModelViewSet):
             is_deleted=False
         ).select_related('connection').order_by('-timestamp')
 
+        # Filter by connection_id (specific email account)
+        connection_id = self.request.query_params.get('connection_id')
+        if connection_id:
+            queryset = queryset.filter(connection_id=connection_id)
+
         # Filter by thread_id for conversation view
         thread_id = self.request.query_params.get('thread_id')
         if thread_id:
@@ -5837,6 +5864,11 @@ class EmailMessageViewSet(viewsets.ReadOnlyModelViewSet):
 
         # Build base queryset
         base_queryset = EmailMessage.objects.filter(is_deleted=False)
+
+        # Filter by connection_id (specific email account)
+        connection_id = request.query_params.get('connection_id')
+        if connection_id:
+            base_queryset = base_queryset.filter(connection_id=connection_id)
 
         # Filter by folder if specified
         folder = request.query_params.get('folder')
