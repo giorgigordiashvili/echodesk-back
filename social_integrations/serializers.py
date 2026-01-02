@@ -322,7 +322,7 @@ class EmailConnectionCreateSerializer(serializers.Serializer):
 
     # Sync settings
     sync_folder = serializers.CharField(max_length=100, default='INBOX', help_text="IMAP folder to sync")
-    sync_days_back = serializers.IntegerField(default=30, min_value=1, max_value=365, help_text="Number of days of history to sync")
+    sync_days_back = serializers.IntegerField(default=30, min_value=0, max_value=3650, help_text="Number of days of history to sync (0 = all history)")
 
     def validate(self, data):
         """Validate that SMTP and IMAP settings are consistent"""

@@ -605,25 +605,38 @@ def _sync_folder(imap, connection, folder_name: str, max_messages: int) -> int:
         quoted_folder = f'"{folder_name}"'
         result, data = imap.select(quoted_folder, readonly=True)
         if result != 'OK':
-            logger.warning(f"Failed to select folder {folder_name}")
+            logger.warning(f"[EMAIL_SYNC] Failed to select folder '{folder_name}': {result}")
             return 0
+
+        # Log folder selection and message count
+        msg_count = int(data[0]) if data and data[0] else 0
+        logger.info(f"[EMAIL_SYNC] Selected folder '{folder_name}' - {msg_count} total messages on server")
     except Exception as e:
-        logger.warning(f"Error selecting folder {folder_name}: {e}")
+        logger.warning(f"[EMAIL_SYNC] Error selecting folder '{folder_name}': {e}")
         return 0
 
-    # Search for messages from last N days
-    since_date = (timezone.now() - timedelta(days=connection.sync_days_back)).strftime('%d-%b-%Y')
-    result, data = imap.search(None, f'(SINCE {since_date})')
+    # Search for messages - use date filter only if sync_days_back > 0
+    if connection.sync_days_back > 0:
+        since_date = (timezone.now() - timedelta(days=connection.sync_days_back)).strftime('%d-%b-%Y')
+        logger.info(f"[EMAIL_SYNC] Searching '{folder_name}' for messages since {since_date} ({connection.sync_days_back} days)")
+        result, data = imap.search(None, f'(SINCE {since_date})')
+    else:
+        # sync_days_back = 0 means sync ALL history
+        logger.info(f"[EMAIL_SYNC] Searching '{folder_name}' for ALL messages (sync_days_back=0)")
+        result, data = imap.search(None, 'ALL')
 
     if result != 'OK':
-        logger.warning(f"Failed to search emails in {folder_name}")
+        logger.warning(f"[EMAIL_SYNC] Failed to search emails in '{folder_name}': {result}")
         return 0
 
     message_ids = data[0].split()
+    total_found = len(message_ids)
+    logger.info(f"[EMAIL_SYNC] Found {total_found} messages in '{folder_name}' matching search criteria")
 
     # Limit to most recent messages
     if len(message_ids) > max_messages:
         message_ids = message_ids[-max_messages:]
+        logger.info(f"[EMAIL_SYNC] Limited to {len(message_ids)} most recent messages (max_messages={max_messages})")
 
     new_count = 0
 
@@ -754,7 +767,10 @@ def sync_imap_messages(connection, max_messages: int = 500) -> int:
         # Get all available folders
         result, folders_data = imap.list()
         if result == 'OK':
+            all_folders = []
             folders_to_sync = []
+            skipped_folders = []
+
             for folder_data in folders_data:
                 if isinstance(folder_data, bytes):
                     decoded = folder_data.decode('utf-8', errors='replace')
@@ -763,10 +779,21 @@ def sync_imap_messages(connection, max_messages: int = 500) -> int:
                         parts = decoded.split('"')
                         if len(parts) >= 2:
                             folder_name = parts[-2]
+                            all_folders.append(folder_name)
                             # Skip Drafts, All Mail, Trash, Sent, and Spam
                             skip_folders = ['Drafts', '[Gmail]/Drafts', '[Gmail]/All Mail', 'Trash', '[Gmail]/Trash', 'Deleted', 'Deleted Items', 'Deleted Messages', 'Sent', '[Gmail]/Sent Mail', 'Sent Items', 'Sent Messages', 'Spam', '[Gmail]/Spam', 'Junk', 'Junk E-mail']
-                            if not any(skip.lower() == folder_name.lower() for skip in skip_folders):
+                            if any(skip.lower() == folder_name.lower() for skip in skip_folders):
+                                skipped_folders.append(folder_name)
+                            else:
                                 folders_to_sync.append(folder_name)
+
+            # Log folder discovery details
+            logger.info(f"[EMAIL_SYNC] ===== FOLDER DISCOVERY for {connection.email_address} =====")
+            logger.info(f"[EMAIL_SYNC] All folders on server ({len(all_folders)}): {all_folders}")
+            logger.info(f"[EMAIL_SYNC] Folders to sync ({len(folders_to_sync)}): {folders_to_sync}")
+            logger.info(f"[EMAIL_SYNC] Skipped folders ({len(skipped_folders)}): {skipped_folders}")
+            logger.info(f"[EMAIL_SYNC] sync_days_back setting: {connection.sync_days_back} (0=all history)")
+            logger.info(f"[EMAIL_SYNC] ================================================")
 
             # Sync each folder
             for folder_name in folders_to_sync:
@@ -976,3 +1003,122 @@ def get_available_folders(connection) -> List[Dict[str, Any]]:
     except Exception as e:
         logger.error(f"Error getting folders: {e}")
         return []
+
+
+def debug_email_sync(connection) -> Dict[str, Any]:
+    """
+    Debug email sync - returns detailed folder info without actually syncing.
+
+    Args:
+        connection: EmailConnection model instance
+
+    Returns:
+        Dict with debug info about folders, message counts, and settings
+    """
+    from .models import EmailMessage
+
+    debug_info = {
+        'connection': {
+            'email': connection.email_address,
+            'imap_server': connection.imap_server,
+            'sync_days_back': connection.sync_days_back,
+            'sync_days_back_meaning': 'all history' if connection.sync_days_back == 0 else f'{connection.sync_days_back} days',
+            'last_sync_at': str(connection.last_sync_at) if connection.last_sync_at else None,
+            'last_sync_error': connection.last_sync_error or None,
+        },
+        'folders': [],
+        'skipped_folders': [],
+        'summary': {},
+        'errors': []
+    }
+
+    try:
+        # Connect to IMAP
+        if connection.imap_use_ssl:
+            imap = imaplib.IMAP4_SSL(connection.imap_server, connection.imap_port, timeout=30)
+        else:
+            imap = imaplib.IMAP4(connection.imap_server, connection.imap_port)
+            imap.starttls()
+
+        imap.login(connection.username, connection.get_password())
+
+        # Get all folders
+        result, folders_data = imap.list()
+        if result != 'OK':
+            debug_info['errors'].append(f"Failed to list folders: {result}")
+            return debug_info
+
+        skip_folders = ['Drafts', '[Gmail]/Drafts', '[Gmail]/All Mail', 'Trash', '[Gmail]/Trash',
+                       'Deleted', 'Deleted Items', 'Deleted Messages', 'Sent', '[Gmail]/Sent Mail',
+                       'Sent Items', 'Sent Messages', 'Spam', '[Gmail]/Spam', 'Junk', 'Junk E-mail']
+
+        for folder_data in folders_data:
+            if isinstance(folder_data, bytes):
+                decoded = folder_data.decode('utf-8', errors='replace')
+                if '"' in decoded:
+                    parts = decoded.split('"')
+                    if len(parts) >= 2:
+                        folder_name = parts[-2]
+
+                        # Check if skipped
+                        is_skipped = any(skip.lower() == folder_name.lower() for skip in skip_folders)
+
+                        folder_info = {
+                            'name': folder_name,
+                            'is_synced': not is_skipped,
+                            'skip_reason': 'In skip list' if is_skipped else None,
+                        }
+
+                        if not is_skipped:
+                            # Get message count and search info for this folder
+                            try:
+                                quoted_folder = f'"{folder_name}"'
+                                result, data = imap.select(quoted_folder, readonly=True)
+                                if result == 'OK':
+                                    total_messages = int(data[0]) if data and data[0] else 0
+                                    folder_info['total_messages_on_server'] = total_messages
+
+                                    # Search with date filter
+                                    if connection.sync_days_back > 0:
+                                        since_date = (timezone.now() - timedelta(days=connection.sync_days_back)).strftime('%d-%b-%Y')
+                                        result, data = imap.search(None, f'(SINCE {since_date})')
+                                        folder_info['search_filter'] = f'SINCE {since_date}'
+                                    else:
+                                        result, data = imap.search(None, 'ALL')
+                                        folder_info['search_filter'] = 'ALL'
+
+                                    if result == 'OK':
+                                        message_ids = data[0].split() if data[0] else []
+                                        folder_info['messages_matching_filter'] = len(message_ids)
+                                    else:
+                                        folder_info['search_error'] = str(result)
+
+                                    # Count already synced messages in DB for this folder
+                                    synced_count = EmailMessage.objects.filter(
+                                        connection=connection,
+                                        folder=folder_name
+                                    ).count()
+                                    folder_info['messages_already_synced'] = synced_count
+                                else:
+                                    folder_info['select_error'] = str(result)
+                            except Exception as e:
+                                folder_info['error'] = str(e)
+
+                            debug_info['folders'].append(folder_info)
+                        else:
+                            debug_info['skipped_folders'].append(folder_info)
+
+        imap.logout()
+
+        # Summary
+        debug_info['summary'] = {
+            'total_folders_on_server': len(debug_info['folders']) + len(debug_info['skipped_folders']),
+            'folders_being_synced': len(debug_info['folders']),
+            'folders_skipped': len(debug_info['skipped_folders']),
+            'total_messages_in_db': EmailMessage.objects.filter(connection=connection).count(),
+        }
+
+    except Exception as e:
+        debug_info['errors'].append(str(e))
+
+    return debug_info

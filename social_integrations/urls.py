@@ -65,6 +65,8 @@ urlpatterns = [
     path('email/action/', views.email_action, name='email_action'),
     path('email/folders/', views.email_folders, name='email_folders'),
     path('email/sync/', views.email_sync, name='email_sync'),
+    path('email/sync/debug/', views.email_sync_debug, name='email_sync_debug'),
+    path('email/sync/settings/', views.email_update_sync_days, name='email_update_sync_days'),
     path('email/signature/', views.email_signature_view, name='email_signature'),
 
     # TikTok endpoints

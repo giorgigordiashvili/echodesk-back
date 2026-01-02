@@ -5700,6 +5700,78 @@ def email_sync(request):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, CanManageSocialConnections])
+def email_sync_debug(request):
+    """
+    Debug email sync - returns detailed folder info without syncing.
+    Shows all folders, message counts, and why some folders might be empty.
+    """
+    from .email_utils import debug_email_sync
+
+    try:
+        connection = EmailConnection.objects.filter(is_active=True).first()
+        if not connection:
+            return Response({
+                'error': 'No active email connection found'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        debug_info = debug_email_sync(connection)
+        return Response(debug_info)
+
+    except Exception as e:
+        logger.error(f"Failed to debug email sync: {e}")
+        return Response({
+            'error': f'Failed to debug email sync: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, CanManageSocialConnections])
+def email_update_sync_days(request):
+    """
+    Update sync_days_back setting for email connection.
+    Use 0 to sync ALL history.
+    """
+    try:
+        connection = EmailConnection.objects.filter(is_active=True).first()
+        if not connection:
+            return Response({
+                'error': 'No active email connection found'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        sync_days_back = request.data.get('sync_days_back')
+        if sync_days_back is None:
+            return Response({
+                'error': 'sync_days_back is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        sync_days_back = int(sync_days_back)
+        if sync_days_back < 0:
+            return Response({
+                'error': 'sync_days_back must be 0 or positive'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        connection.sync_days_back = sync_days_back
+        connection.save(update_fields=['sync_days_back'])
+
+        return Response({
+            'status': 'success',
+            'sync_days_back': sync_days_back,
+            'meaning': 'all history' if sync_days_back == 0 else f'{sync_days_back} days'
+        })
+
+    except ValueError:
+        return Response({
+            'error': 'sync_days_back must be an integer'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    except Exception as e:
+        logger.error(f"Failed to update sync_days_back: {e}")
+        return Response({
+            'error': f'Failed to update: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 class EmailMessageViewSet(viewsets.ReadOnlyModelViewSet):
     """ViewSet for viewing email messages"""
     serializer_class = EmailMessageSerializer
