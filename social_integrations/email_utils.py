@@ -6,6 +6,7 @@ import smtplib
 import email
 import hashlib
 import logging
+import base64
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
@@ -20,6 +21,53 @@ from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 
 logger = logging.getLogger(__name__)
+
+
+def decode_imap_utf7(s: str) -> str:
+    """
+    Decode IMAP Modified UTF-7 encoded folder names.
+
+    IMAP uses a modified version of UTF-7 for folder names containing non-ASCII characters.
+    Example: "&ENAQ4A- &EOwQ0BDoENAQ2hDdENc-" decodes to "არ წაშალოთ" (Georgian)
+
+    Args:
+        s: The IMAP Modified UTF-7 encoded string
+
+    Returns:
+        The decoded Unicode string
+    """
+    if not s or '&' not in s:
+        return s
+
+    result = []
+    i = 0
+    while i < len(s):
+        if s[i] == '&':
+            end = s.find('-', i)
+            if end == -1:
+                result.append(s[i:])
+                break
+            if end == i + 1:
+                # "&-" represents a literal "&"
+                result.append('&')
+            else:
+                encoded = s[i+1:end]
+                # Replace , with / for standard base64
+                encoded = encoded.replace(',', '/')
+                # Add padding if needed
+                padding = (4 - len(encoded) % 4) % 4
+                encoded += '=' * padding
+                try:
+                    decoded = base64.b64decode(encoded).decode('utf-16-be')
+                    result.append(decoded)
+                except Exception:
+                    # If decoding fails, keep original
+                    result.append(s[i:end+1])
+            i = end + 1
+        else:
+            result.append(s[i])
+            i += 1
+    return ''.join(result)
 
 
 def test_imap_connection(server: str, port: int, username: str, password: str, use_ssl: bool = True) -> Tuple[bool, Optional[str]]:
@@ -568,7 +616,7 @@ def _find_sent_folder(imap) -> Optional[str]:
                 if '"' in decoded:
                     parts = decoded.split('"')
                     if len(parts) >= 2:
-                        folder_name = parts[-2]
+                        folder_name = decode_imap_utf7(parts[-2])
                         available_folders.append(folder_name)
 
         # Try to find a matching sent folder
@@ -783,7 +831,7 @@ def sync_imap_messages(connection, max_messages: int = 500) -> int:
                     if '"' in decoded:
                         parts = decoded.split('"')
                         if len(parts) >= 2:
-                            folder_name = parts[-2]
+                            folder_name = decode_imap_utf7(parts[-2])
                             all_folders.append(folder_name)
                             # Skip Drafts, All Mail, Trash, Sent, and Spam
                             skip_folders = ['Drafts', '[Gmail]/Drafts', '[Gmail]/All Mail', 'Trash', '[Gmail]/Trash', 'Deleted', 'Deleted Items', 'Deleted Messages', 'Sent', '[Gmail]/Sent Mail', 'Sent Items', 'Sent Messages', 'Spam', '[Gmail]/Spam', 'Junk', 'Junk E-mail']
@@ -993,7 +1041,7 @@ def get_available_folders(connection) -> List[Dict[str, Any]]:
                     if '"' in decoded:
                         parts = decoded.split('"')
                         if len(parts) >= 2:
-                            folder_name = parts[-2]
+                            folder_name = decode_imap_utf7(parts[-2])
                             # Skip Drafts, All Mail, Trash, Sent, and Spam
                             skip_folders = ['Drafts', '[Gmail]/Drafts', '[Gmail]/All Mail', 'Trash', '[Gmail]/Trash', 'Deleted', 'Deleted Items', 'Deleted Messages', 'Sent', '[Gmail]/Sent Mail', 'Sent Items', 'Sent Messages', 'Spam', '[Gmail]/Spam', 'Junk', 'Junk E-mail']
                             if not any(skip.lower() == folder_name.lower() for skip in skip_folders):
@@ -1063,7 +1111,7 @@ def debug_email_sync(connection) -> Dict[str, Any]:
                 if '"' in decoded:
                     parts = decoded.split('"')
                     if len(parts) >= 2:
-                        folder_name = parts[-2]
+                        folder_name = decode_imap_utf7(parts[-2])
 
                         # Check if skipped
                         is_skipped = any(skip.lower() == folder_name.lower() for skip in skip_folders)

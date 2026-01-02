@@ -3336,11 +3336,12 @@ def unread_messages_count(request):
                 ~Q(from_number__in=all_wa_assignments)  # Not assigned to anyone
             ).count()
 
-            # Count unread Email messages - only mine or unassigned
+            # Count unread Email messages - only mine or unassigned, only INBOX
             email_unread = EmailMessage.objects.filter(
                 is_from_business=False,
                 is_read_by_staff=False,
-                is_deleted=False
+                is_deleted=False,
+                folder='INBOX'  # Only count INBOX messages for notifications
             ).filter(
                 Q(thread_id__in=my_email_assignments) |  # Assigned to me
                 ~Q(thread_id__in=all_email_assignments)  # Not assigned to anyone
@@ -3365,7 +3366,8 @@ def unread_messages_count(request):
             email_unread = EmailMessage.objects.filter(
                 is_from_business=False,
                 is_read_by_staff=False,
-                is_deleted=False
+                is_deleted=False,
+                folder='INBOX'  # Only count INBOX messages for notifications
             ).count()
 
         total_unread = facebook_unread + instagram_unread + whatsapp_unread + email_unread
