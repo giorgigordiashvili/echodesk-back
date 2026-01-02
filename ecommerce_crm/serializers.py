@@ -364,7 +364,7 @@ class EcommerceClientListSerializer(serializers.ModelSerializer):
         model = None  # Will be set dynamically
         fields = [
             'id', 'email', 'first_name', 'last_name', 'full_name',
-            'phone_number', 'is_active', 'is_verified', 'created_at'
+            'phone_number', 'date_of_birth', 'is_active', 'is_verified', 'last_login', 'created_at'
         ]
         read_only_fields = ['id', 'is_verified', 'created_at']
 

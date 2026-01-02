@@ -660,8 +660,11 @@ def _sync_folder(imap, connection, folder_name: str, max_messages: int) -> int:
             if existing_message:
                 # Update folder if it changed (email was moved on server)
                 if existing_message.folder != folder_name:
+                    logger.info(f"[EMAIL_SYNC] Updating folder '{existing_message.folder}' -> '{folder_name}' for message_id={message_id_header[:50]}")
                     existing_message.folder = folder_name
                     existing_message.save(update_fields=['folder'])
+                else:
+                    logger.debug(f"[EMAIL_SYNC] Message already synced in correct folder: {message_id_header[:50]}")
                 continue
 
             # Parse sender
@@ -732,11 +735,13 @@ def _sync_folder(imap, connection, folder_name: str, max_messages: int) -> int:
                 is_answered=b'\\Answered' in flags,
             )
             new_count += 1
+            logger.info(f"[EMAIL_SYNC] Created new message in folder '{folder_name}': {email_message.get('Subject', '')[:50]}")
 
         except Exception as e:
-            logger.warning(f"Failed to process email {msg_num} in {folder_name}: {e}")
+            logger.warning(f"[EMAIL_SYNC] Failed to process email {msg_num} in folder '{folder_name}': {e}")
             continue
 
+    logger.info(f"[EMAIL_SYNC] Folder '{folder_name}' sync complete: {new_count} new messages created")
     return new_count
 
 
@@ -1065,6 +1070,7 @@ def debug_email_sync(connection) -> Dict[str, Any]:
 
                         folder_info = {
                             'name': folder_name,
+                            'name_bytes': folder_name.encode('utf-8').hex(),  # For debugging encoding issues
                             'is_synced': not is_skipped,
                             'skip_reason': 'In skip list' if is_skipped else None,
                         }
