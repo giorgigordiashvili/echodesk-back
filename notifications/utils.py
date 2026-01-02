@@ -14,17 +14,37 @@ def get_vapid_keys():
     public_key = getattr(settings, 'VAPID_PUBLIC_KEY', None)
 
     if not private_key or not public_key:
-        # Generate new keys if not in settings
-        from py_vapid import Vapid01
-        vapid = Vapid01()
-        vapid.generate_keys()
-        private_key = vapid.private_key.decode('utf-8') if isinstance(vapid.private_key, bytes) else vapid.private_key
-        public_key = vapid.public_key.decode('utf-8') if isinstance(vapid.public_key, bytes) else vapid.public_key
+        # Generate new keys using cryptography directly (py_vapid has compatibility issues)
+        import base64
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from cryptography.hazmat.backends import default_backend
+        from cryptography.hazmat.primitives import serialization
+
+        # Generate ECDSA key pair using P-256 curve
+        private_key_obj = ec.generate_private_key(ec.SECP256R1(), default_backend())
+
+        # Get private key in PEM format
+        private_pem = private_key_obj.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption()
+        ).decode('utf-8')
+
+        # Get public key in uncompressed format for VAPID
+        public_numbers = private_key_obj.public_key().public_numbers()
+        x_bytes = public_numbers.x.to_bytes(32, byteorder='big')
+        y_bytes = public_numbers.y.to_bytes(32, byteorder='big')
+        # Uncompressed point format: 0x04 + x + y, then base64url encode
+        public_key_bytes = b'\x04' + x_bytes + y_bytes
+        public_key_b64 = base64.urlsafe_b64encode(public_key_bytes).rstrip(b'=').decode('utf-8')
+
+        private_key = private_pem
+        public_key = public_key_b64
 
         logger.warning(
             "VAPID keys not found in settings. Generated new keys. "
             "Add these to your settings.py:\n"
-            f"VAPID_PRIVATE_KEY = '{private_key}'\n"
+            f"VAPID_PRIVATE_KEY = '''{private_key}'''\n"
             f"VAPID_PUBLIC_KEY = '{public_key}'\n"
             f"VAPID_ADMIN_EMAIL = 'mailto:admin@echodesk.ge'"
         )
