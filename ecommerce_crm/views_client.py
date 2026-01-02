@@ -381,7 +381,14 @@ class ClientProductViewSet(viewsets.ReadOnlyModelViewSet):
     Client-facing product browsing (read-only, public access)
     Anyone can view active products without authentication
     """
-    queryset = Product.objects.filter(status='active')
+    queryset = Product.objects.filter(status='active').select_related(
+        'created_by',
+        'updated_by'
+    ).prefetch_related(
+        'images',
+        'attribute_values__attribute',
+        'variants__attribute_values__attribute'
+    )
     authentication_classes = []
     permission_classes = [AllowAny]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
