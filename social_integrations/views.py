@@ -3888,7 +3888,7 @@ class WhatsAppContactViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         tenant_accounts = WhatsAppBusinessAccount.objects.all()
-        queryset = WhatsAppContact.objects.filter(account__in=tenant_accounts)
+        queryset = WhatsAppContact.objects.filter(account__in=tenant_accounts).select_related('account')
 
         # Filter by account if provided
         account_id = self.request.query_params.get('account')

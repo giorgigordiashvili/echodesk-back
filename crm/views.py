@@ -121,12 +121,13 @@ class CallLogViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         # Return calls for users in current tenant - use request.tenant instead of user.tenant
+        # Use select_related to avoid N+1 queries when serializer accesses client and sip_configuration
         if hasattr(self.request, 'tenant'):
             # Filter by tenant through the handled_by user's association with tenant tables
-            return CallLog.objects.all()  # In tenant schema, all records are for the current tenant
+            return CallLog.objects.select_related('client', 'sip_configuration').all()
         else:
             # Fallback for public schema or when tenant is not available
-            return CallLog.objects.all()
+            return CallLog.objects.select_related('client', 'sip_configuration').all()
     
     def get_serializer_class(self):
         if self.action == 'create':

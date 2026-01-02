@@ -587,10 +587,11 @@ class ClientViewSet(viewsets.ReadOnlyModelViewSet):
 
         if settings.client_itemlist:
             # Return items from the selected ItemList
+            # Use select_related to avoid N+1 queries
             queryset = ListItem.objects.filter(
                 item_list=settings.client_itemlist,
                 is_active=True
-            )
+            ).select_related('item_list')
             logger.info(f"[ClientViewSet] Returning ListItem queryset, count={queryset.count()}")
             return queryset
         else:
@@ -604,7 +605,7 @@ class InvoiceMaterialViewSet(viewsets.ReadOnlyModelViewSet):
     """
     API endpoint for materials (from ItemList) selection
     """
-    queryset = ListItem.objects.filter(is_active=True)
+    queryset = ListItem.objects.filter(is_active=True).select_related('item_list')
     serializer_class = ListItemMaterialSerializer
     permission_classes = [IsAuthenticated, CanManageInvoices]
     filter_backends = [filters.SearchFilter]
