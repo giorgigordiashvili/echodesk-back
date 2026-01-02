@@ -13,6 +13,7 @@ from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiParamet
 from drf_spectacular.openapi import AutoSchema
 from django_filters.rest_framework import DjangoFilterBackend
 from django.views.decorators.cache import cache_page
+from django.utils.decorators import method_decorator
 from .authentication import EcommerceClientJWTAuthentication
 from .models import (
     EcommerceClient,
@@ -606,6 +607,7 @@ class ClientProductViewSet(viewsets.ReadOnlyModelViewSet):
             # Dynamic attribute parameters are added via ClientProductAutoSchema
         ]
     )
+    @method_decorator(cache_page(60 * 5))  # Cache for 5 minutes
     def list(self, request, *args, **kwargs):
         return super().list(request, *args, **kwargs)
 
@@ -614,6 +616,7 @@ class ClientProductViewSet(viewsets.ReadOnlyModelViewSet):
         summary='Get product details',
         description='View detailed product information'
     )
+    @method_decorator(cache_page(60 * 5))  # Cache for 5 minutes
     def retrieve(self, request, *args, **kwargs):
         return super().retrieve(request, *args, **kwargs)
 
