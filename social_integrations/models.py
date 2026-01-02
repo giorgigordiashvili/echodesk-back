@@ -786,6 +786,11 @@ class EmailConnection(models.Model):
     sync_folder = models.CharField(max_length=100, default='INBOX', help_text="IMAP folder to sync")
     sync_days_back = models.IntegerField(default=365, help_text="Number of days of history to sync")
 
+    # Email signature settings (per connection)
+    signature_enabled = models.BooleanField(default=False, help_text="Whether to append signature to outgoing emails")
+    signature_html = models.TextField(blank=True, help_text="HTML signature for outgoing emails")
+    signature_text = models.TextField(blank=True, help_text="Plain text signature for outgoing emails")
+
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

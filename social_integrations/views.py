@@ -2795,9 +2795,11 @@ def end_session(request):
             status=status.HTTP_404_NOT_FOUND
         )
 
-    # Mark assignment as completed (needed for rating tracking)
+    # Mark assignment as completed and unassign user
+    # Setting status to 'completed' makes the chat available to everyone again
     assignment.status = 'completed'
     assignment.session_ended_at = timezone.now()
+    assignment.assigned_user = None  # Explicitly unassign the user
     assignment.save()
 
     # Check if customer rating collection is enabled
@@ -5350,7 +5352,10 @@ def email_connection_status(request):
             'last_sync_at': conn.last_sync_at.isoformat() if conn.last_sync_at else None,
             'last_sync_error': conn.last_sync_error,
             'sync_folder': conn.sync_folder,
-            'connected_at': conn.created_at.isoformat()
+            'connected_at': conn.created_at.isoformat(),
+            'signature_enabled': conn.signature_enabled,
+            'signature_html': conn.signature_html,
+            'signature_text': conn.signature_text,
         } for conn in connections]
 
         return Response({
@@ -5468,6 +5473,56 @@ def email_connect(request):
         logger.error(f"Failed to connect email: {e}")
         return Response({
             'error': f'Failed to connect email: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, CanManageSocialConnections])
+def email_update_connection(request):
+    """Update an email connection's settings (display name, signature, etc.)"""
+    try:
+        connection_id = request.data.get('connection_id')
+        if not connection_id:
+            return Response({
+                'error': 'connection_id is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        connection = EmailConnection.objects.filter(id=connection_id).first()
+
+        if not connection:
+            return Response({
+                'error': 'Email connection not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        # Update allowed fields
+        if 'display_name' in request.data:
+            connection.display_name = request.data['display_name']
+        if 'signature_enabled' in request.data:
+            connection.signature_enabled = request.data['signature_enabled']
+        if 'signature_html' in request.data:
+            connection.signature_html = request.data['signature_html']
+        if 'signature_text' in request.data:
+            connection.signature_text = request.data['signature_text']
+
+        connection.save()
+
+        logger.info(f"Email connection updated: {connection.email_address}")
+        return Response({
+            'message': 'Connection updated successfully',
+            'connection': {
+                'id': connection.id,
+                'email_address': connection.email_address,
+                'display_name': connection.display_name,
+                'signature_enabled': connection.signature_enabled,
+                'signature_html': connection.signature_html,
+                'signature_text': connection.signature_text,
+            }
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to update email connection: {e}")
+        return Response({
+            'error': f'Failed to update connection: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 

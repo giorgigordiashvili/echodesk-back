@@ -61,6 +61,7 @@ urlpatterns = [
     path('email/status/', views.email_connection_status, name='email_status'),
     path('email/connect/', views.email_connect, name='email_connect'),
     path('email/disconnect/', views.email_disconnect, name='email_disconnect'),
+    path('email/update/', views.email_update_connection, name='email_update_connection'),
     path('email/send/', views.email_send, name='email_send'),
     path('email/action/', views.email_action, name='email_action'),
     path('email/folders/', views.email_folders, name='email_folders'),

@@ -528,32 +528,50 @@ def send_email_smtp(connection, to_emails: List[str], cc_emails: List[str] = Non
     attachments = attachments or []
 
     # Check if we should append email signature
+    # Priority: 1. Connection-specific signature, 2. Global EmailSignature
     is_reply = reply_to_message_id is not None
     signature_html_content = None
     signature_text_content = None
 
     try:
-        signature = EmailSignature.objects.first()
-        if signature and signature.is_enabled:
-            # Check if signature should be included (always for new emails, conditional for replies)
-            should_include = not is_reply or signature.include_on_reply
-            if should_include:
-                # Get signature content
-                if signature.signature_html:
-                    signature_html_content = signature.signature_html
-                elif signature.signature_text:
-                    # Convert plain text signature to HTML
-                    signature_html_content = signature.signature_text.replace('\n', '<br>')
+        # First, check if the connection has its own signature
+        if connection.signature_enabled and (connection.signature_html or connection.signature_text):
+            # Use connection-specific signature
+            if connection.signature_html:
+                signature_html_content = connection.signature_html
+            elif connection.signature_text:
+                signature_html_content = connection.signature_text.replace('\n', '<br>')
 
-                # Get plain text signature
-                if signature.signature_text:
-                    signature_text_content = signature.signature_text
-                elif signature.signature_html:
-                    # Simple HTML to text fallback - strip tags
-                    import re
-                    sig_text = re.sub(r'<[^>]+>', '', signature.signature_html)
-                    sig_text = sig_text.replace('&nbsp;', ' ').replace('&lt;', '<').replace('&gt;', '>').replace('&amp;', '&').strip()
-                    signature_text_content = sig_text
+            if connection.signature_text:
+                signature_text_content = connection.signature_text
+            elif connection.signature_html:
+                import re
+                sig_text = re.sub(r'<[^>]+>', '', connection.signature_html)
+                sig_text = sig_text.replace('&nbsp;', ' ').replace('&lt;', '<').replace('&gt;', '>').replace('&amp;', '&').strip()
+                signature_text_content = sig_text
+        else:
+            # Fall back to global EmailSignature
+            signature = EmailSignature.objects.first()
+            if signature and signature.is_enabled:
+                # Check if signature should be included (always for new emails, conditional for replies)
+                should_include = not is_reply or signature.include_on_reply
+                if should_include:
+                    # Get signature content
+                    if signature.signature_html:
+                        signature_html_content = signature.signature_html
+                    elif signature.signature_text:
+                        # Convert plain text signature to HTML
+                        signature_html_content = signature.signature_text.replace('\n', '<br>')
+
+                    # Get plain text signature
+                    if signature.signature_text:
+                        signature_text_content = signature.signature_text
+                    elif signature.signature_html:
+                        # Simple HTML to text fallback - strip tags
+                        import re
+                        sig_text = re.sub(r'<[^>]+>', '', signature.signature_html)
+                        sig_text = sig_text.replace('&nbsp;', ' ').replace('&lt;', '<').replace('&gt;', '>').replace('&amp;', '&').strip()
+                        signature_text_content = sig_text
     except Exception as e:
         logger.warning(f"Failed to get email signature: {e}")
 
