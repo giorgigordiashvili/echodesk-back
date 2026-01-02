@@ -421,8 +421,13 @@ class EmailMessageActionSerializer(serializers.Serializer):
     """Serializer for email message actions (star, read, label, move, delete)"""
     message_ids = serializers.ListField(
         child=serializers.IntegerField(),
-        min_length=1,
+        required=False,
         help_text="List of message IDs to perform action on"
+    )
+    thread_id = serializers.CharField(
+        max_length=500,
+        required=False,
+        help_text="Thread ID to perform action on all messages in thread"
     )
     action = serializers.ChoiceField(
         choices=['mark_read', 'mark_unread', 'star', 'unstar', 'label', 'unlabel', 'move', 'delete', 'restore'],
@@ -434,6 +439,9 @@ class EmailMessageActionSerializer(serializers.Serializer):
 
     def validate(self, data):
         action = data.get('action')
+        # Either message_ids or thread_id must be provided
+        if not data.get('message_ids') and not data.get('thread_id'):
+            raise serializers.ValidationError("Either message_ids or thread_id must be provided")
         if action in ['label', 'unlabel'] and not data.get('label'):
             raise serializers.ValidationError({'label': f"Label is required for {action} action"})
         if action == 'move' and not data.get('folder'):

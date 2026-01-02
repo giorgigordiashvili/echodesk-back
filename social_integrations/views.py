@@ -5643,10 +5643,14 @@ def email_action(request):
 
     try:
         data = serializer.validated_data
-        message_ids = data['message_ids']
         action = data['action']
 
-        messages = EmailMessage.objects.filter(id__in=message_ids)
+        # Get messages either by message_ids or thread_id
+        if data.get('thread_id'):
+            messages = EmailMessage.objects.filter(thread_id=data['thread_id'])
+        else:
+            messages = EmailMessage.objects.filter(id__in=data['message_ids'])
+
         affected_count = messages.count()
 
         if affected_count == 0:
