@@ -199,7 +199,7 @@ class ClientServiceCategoryViewSet(viewsets.ReadOnlyModelViewSet):
 )
 class ClientServiceViewSet(viewsets.ReadOnlyModelViewSet):
     """View services (public read-only)"""
-    queryset = Service.objects.filter(status='active')
+    queryset = Service.objects.filter(status='active').select_related('category')
     serializer_class = ServiceListSerializer
     permission_classes = [permissions.AllowAny]
     filterset_fields = ['category', 'booking_type']
@@ -252,7 +252,7 @@ class ClientServiceViewSet(viewsets.ReadOnlyModelViewSet):
 )
 class ClientBookingStaffViewSet(viewsets.ReadOnlyModelViewSet):
     """View staff members (public read-only)"""
-    queryset = BookingStaff.objects.filter(is_active_for_bookings=True)
+    queryset = BookingStaff.objects.filter(is_active_for_bookings=True).select_related('user').prefetch_related('services')
     serializer_class = BookingStaffSerializer
     permission_classes = [permissions.AllowAny]
     feature_required = 'booking_management'
@@ -275,7 +275,7 @@ class ClientBookingViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         """Get only client's own bookings"""
-        return Booking.objects.filter(client=self.request.user).order_by('-date', '-start_time')
+        return Booking.objects.filter(client=self.request.user).select_related('client', 'service', 'staff').order_by('-date', '-start_time')
 
     def get_serializer_class(self):
         if self.action == 'retrieve':
@@ -376,7 +376,7 @@ class ClientRecurringBookingViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         """Get only client's own recurring bookings"""
-        return RecurringBooking.objects.filter(client=self.request.user)
+        return RecurringBooking.objects.filter(client=self.request.user).select_related('client', 'service', 'staff')
 
     def get_serializer_class(self):
         if self.action == 'create':

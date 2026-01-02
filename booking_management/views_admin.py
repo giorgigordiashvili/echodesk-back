@@ -229,7 +229,7 @@ class AdminServiceViewSet(viewsets.ModelViewSet):
 )
 class AdminBookingStaffViewSet(viewsets.ModelViewSet):
     """Admin staff management"""
-    queryset = BookingStaff.objects.all()
+    queryset = BookingStaff.objects.select_related('user').prefetch_related('services').all()
     serializer_class = BookingStaffSerializer
     permission_classes = [permissions.IsAuthenticated, HasBookingManagementFeature]
     feature_required = 'booking_management'

@@ -738,7 +738,7 @@ class TicketAssignmentViewSet(viewsets.ModelViewSet):
         """Return assignments for a specific ticket."""
         ticket_pk = self.kwargs.get('ticket_pk')
         if ticket_pk:
-            return TicketAssignment.objects.filter(ticket_id=ticket_pk)
+            return TicketAssignment.objects.filter(ticket_id=ticket_pk).select_related('ticket', 'user', 'assigned_by')
         return TicketAssignment.objects.none()
     
     def perform_create(self, serializer):
@@ -912,7 +912,7 @@ class BoardViewSet(viewsets.ModelViewSet):
 
         # Superusers and staff can see all boards
         if user.is_superuser or user.is_staff:
-            return Board.objects.all()
+            return Board.objects.select_related('created_by').prefetch_related('board_users', 'board_groups', 'columns').all()
 
         # Get user's groups
         user_groups = user.tenant_groups.filter(is_active=True)
@@ -938,7 +938,7 @@ class BoardViewSet(viewsets.ModelViewSet):
         return boards_with_counts.filter(
             Q(order_user_attached | board_user_attached | group_attached) |  # User has explicit access
             Q(user_count=0, group_count=0)  # OR board is unrestricted
-        ).distinct()
+        ).select_related('created_by').prefetch_related('board_users', 'board_groups', 'columns').distinct()
     
     def perform_create(self, serializer):
         """Set the created_by field when creating a board."""
@@ -1120,7 +1120,7 @@ class TicketPaymentViewSet(viewsets.ModelViewSet):
 
 class ItemListViewSet(viewsets.ModelViewSet):
     """ViewSet for managing item lists."""
-    queryset = ItemList.objects.all()
+    queryset = ItemList.objects.prefetch_related('items', 'items__children').all()
     serializer_class = ItemListSerializer
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
@@ -1178,7 +1178,7 @@ class ItemListViewSet(viewsets.ModelViewSet):
 
 class ListItemViewSet(viewsets.ModelViewSet):
     """ViewSet for managing list items."""
-    queryset = ListItem.objects.all()
+    queryset = ListItem.objects.select_related('item_list', 'parent').prefetch_related('children').all()
     serializer_class = ListItemSerializer
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -1348,7 +1348,7 @@ class TicketFormViewSet(viewsets.ModelViewSet):
 
 class TicketFormSubmissionViewSet(viewsets.ModelViewSet):
     """ViewSet for managing ticket form submissions."""
-    queryset = TicketFormSubmission.objects.all()
+    queryset = TicketFormSubmission.objects.select_related('form', 'ticket', 'submitted_by').all()
     serializer_class = TicketFormSubmissionSerializer
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
@@ -1404,7 +1404,7 @@ class TicketFormSubmissionViewSet(viewsets.ModelViewSet):
 
 class TicketAttachmentViewSet(viewsets.ModelViewSet):
     """ViewSet for managing ticket file attachments."""
-    queryset = TicketAttachment.objects.all()
+    queryset = TicketAttachment.objects.select_related('ticket', 'uploaded_by').all()
     serializer_class = TicketAttachmentSerializer
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [DjangoFilterBackend]
@@ -1414,7 +1414,7 @@ class TicketAttachmentViewSet(viewsets.ModelViewSet):
         """Filter attachments based on user permissions."""
         user = self.request.user
         if user.is_staff:
-            return TicketAttachment.objects.all()
+            return TicketAttachment.objects.select_related('ticket', 'uploaded_by').all()
 
         # Users can see attachments for tickets they have access to
         user_groups = user.tenant_groups.all()
@@ -1426,7 +1426,7 @@ class TicketAttachmentViewSet(viewsets.ModelViewSet):
             Q(ticket__column__board__order_users=user) |
             Q(ticket__column__board__board_users=user) |
             Q(ticket__column__board__board_groups__in=user_groups)
-        ).distinct()
+        ).select_related('ticket', 'uploaded_by').distinct()
 
     def perform_create(self, serializer):
         """Save attachment with uploaded_by set to current user."""

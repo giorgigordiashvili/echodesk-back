@@ -712,7 +712,7 @@ class ClientFavoriteViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         """Return only favorites belonging to the authenticated client"""
-        return FavoriteProduct.objects.filter(client=self.request.user)
+        return FavoriteProduct.objects.filter(client=self.request.user).select_related('product', 'client')
 
     def get_serializer_class(self):
         if self.action == 'create':
@@ -767,7 +767,7 @@ class ClientCartViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         """Return only carts belonging to the authenticated client"""
-        return Cart.objects.filter(client=self.request.user)
+        return Cart.objects.filter(client=self.request.user).select_related('client').prefetch_related('items', 'items__product')
 
     @extend_schema(
         tags=['Ecommerce Client - Cart'],
@@ -803,7 +803,7 @@ class ClientCartItemViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         """Return only cart items belonging to the authenticated client's carts"""
-        return CartItem.objects.filter(cart__client=self.request.user)
+        return CartItem.objects.filter(cart__client=self.request.user).select_related('cart', 'product', 'cart__client')
 
     def get_serializer_class(self):
         if self.action in ['create', 'update', 'partial_update']:
@@ -854,7 +854,7 @@ class ClientOrderViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         """Return only orders belonging to the authenticated client"""
-        return Order.objects.filter(client=self.request.user)
+        return Order.objects.filter(client=self.request.user).select_related('client').prefetch_related('items', 'items__product')
 
     def get_serializer_class(self):
         if self.action == 'create':
@@ -1307,7 +1307,7 @@ class ClientItemListViewSet(viewsets.ReadOnlyModelViewSet):
         return ItemList.objects.filter(
             is_public=True,
             is_active=True
-        ).prefetch_related('items')
+        ).prefetch_related('items', 'items__children')
 
     def get_serializer_class(self):
         """Use detailed serializer for retrieve, minimal for list"""

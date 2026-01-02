@@ -140,7 +140,7 @@ class GroupViewSet(viewsets.ModelViewSet):
 
 class UserViewSet(viewsets.ModelViewSet):
     """ViewSet for managing users"""
-    queryset = User.objects.all()
+    queryset = User.objects.prefetch_related('groups', 'tenant_groups', 'tenant_groups__features').all()
     serializer_class = UserSerializer
     permission_classes = [permissions.IsAuthenticated]
     
@@ -152,23 +152,23 @@ class UserViewSet(viewsets.ModelViewSet):
         return UserSerializer
     
     def get_queryset(self):
-        queryset = User.objects.all()
-        
+        queryset = User.objects.prefetch_related('groups', 'tenant_groups', 'tenant_groups__features').all()
+
         # Filter by role if specified
         role = self.request.query_params.get('role', None)
         if role is not None:
             queryset = queryset.filter(role=role)
-        
+
         # Filter by status if specified
         status_filter = self.request.query_params.get('status', None)
         if status_filter is not None:
             queryset = queryset.filter(status=status_filter)
-        
+
         # Filter by group if specified
         group_id = self.request.query_params.get('group', None)
         if group_id is not None:
             queryset = queryset.filter(groups__id=group_id)
-        
+
         return queryset.distinct()
     
     def perform_create(self, serializer):
@@ -320,7 +320,7 @@ class UserViewSet(viewsets.ModelViewSet):
 
 class TenantGroupViewSet(viewsets.ModelViewSet):
     """ViewSet for managing TenantGroups with custom permissions"""
-    queryset = TenantGroup.objects.all()
+    queryset = TenantGroup.objects.prefetch_related('members', 'features').all()
     serializer_class = TenantGroupSerializer
     permission_classes = [permissions.IsAuthenticated]
 
@@ -577,6 +577,8 @@ class TeamChatConversationViewSet(viewsets.ModelViewSet):
         """Only show conversations the user is part of"""
         return TeamChatConversation.objects.filter(
             participants=self.request.user
+        ).prefetch_related(
+            'participants', 'messages', 'messages__sender'
         ).annotate(
             latest_message_time=Max('messages__created_at')
         ).order_by('-latest_message_time', '-updated_at')
