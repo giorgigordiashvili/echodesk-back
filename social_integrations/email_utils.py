@@ -70,6 +70,63 @@ def decode_imap_utf7(s: str) -> str:
     return ''.join(result)
 
 
+def encode_imap_utf7(s: str) -> str:
+    """
+    Encode a Unicode string to IMAP Modified UTF-7.
+
+    This is the reverse of decode_imap_utf7(). Used when we need to
+    communicate folder names back to IMAP server.
+
+    Example: "არ წაშალოთ" encodes to "&ENAQ4A- &EOwQ0BDoENAQ2hDdENc-"
+
+    Args:
+        s: The Unicode string to encode
+
+    Returns:
+        The IMAP Modified UTF-7 encoded string
+    """
+    if not s:
+        return s
+
+    # Check if string is pure ASCII (no encoding needed)
+    try:
+        s.encode('ascii')
+        # String is pure ASCII, just escape & as &-
+        return s.replace('&', '&-')
+    except UnicodeEncodeError:
+        pass
+
+    result = []
+    i = 0
+    while i < len(s):
+        c = s[i]
+        # Check if character is ASCII printable (except &)
+        if c == '&':
+            result.append('&-')
+            i += 1
+        elif ord(c) >= 0x20 and ord(c) <= 0x7e:
+            result.append(c)
+            i += 1
+        else:
+            # Start of non-ASCII sequence - collect all non-ASCII chars
+            non_ascii_start = i
+            while i < len(s):
+                c = s[i]
+                if c == '&' or (ord(c) >= 0x20 and ord(c) <= 0x7e):
+                    break
+                i += 1
+
+            # Encode the non-ASCII sequence
+            non_ascii_str = s[non_ascii_start:i]
+            utf16_bytes = non_ascii_str.encode('utf-16-be')
+            b64_encoded = base64.b64encode(utf16_bytes).decode('ascii')
+            # Remove padding and replace / with ,
+            b64_encoded = b64_encoded.rstrip('=').replace('/', ',')
+            result.append('&' + b64_encoded + '-')
+
+    return ''.join(result)
+
+
 def test_imap_connection(server: str, port: int, username: str, password: str, use_ssl: bool = True) -> Tuple[bool, Optional[str]]:
     """
     Test IMAP connection credentials.
@@ -639,9 +696,16 @@ def _find_sent_folder(imap) -> Optional[str]:
     return None
 
 
-def _sync_folder(imap, connection, folder_name: str, max_messages: int) -> int:
+def _sync_folder(imap, connection, imap_folder_name: str, db_folder_name: str, max_messages: int) -> int:
     """
     Sync messages from a specific IMAP folder.
+
+    Args:
+        imap: IMAP connection object
+        connection: EmailConnection model instance
+        imap_folder_name: Raw folder name for IMAP operations (may be UTF-7 encoded)
+        db_folder_name: Decoded folder name for storing in database
+        max_messages: Maximum messages to sync per folder
 
     Returns:
         Number of new messages synced from this folder
@@ -650,36 +714,36 @@ def _sync_folder(imap, connection, folder_name: str, max_messages: int) -> int:
 
     try:
         # Quote folder name for IMAP (handles spaces and special chars)
-        quoted_folder = f'"{folder_name}"'
+        quoted_folder = f'"{imap_folder_name}"'
         result, data = imap.select(quoted_folder, readonly=True)
         if result != 'OK':
-            logger.warning(f"[EMAIL_SYNC] Failed to select folder '{folder_name}': {result}")
+            logger.warning(f"[EMAIL_SYNC] Failed to select folder '{db_folder_name}': {result}")
             return 0
 
         # Log folder selection and message count
         msg_count = int(data[0]) if data and data[0] else 0
-        logger.info(f"[EMAIL_SYNC] Selected folder '{folder_name}' - {msg_count} total messages on server")
+        logger.info(f"[EMAIL_SYNC] Selected folder '{db_folder_name}' - {msg_count} total messages on server")
     except Exception as e:
-        logger.warning(f"[EMAIL_SYNC] Error selecting folder '{folder_name}': {e}")
+        logger.warning(f"[EMAIL_SYNC] Error selecting folder '{db_folder_name}': {e}")
         return 0
 
     # Search for messages - use date filter only if sync_days_back > 0
     if connection.sync_days_back > 0:
         since_date = (timezone.now() - timedelta(days=connection.sync_days_back)).strftime('%d-%b-%Y')
-        logger.info(f"[EMAIL_SYNC] Searching '{folder_name}' for messages since {since_date} ({connection.sync_days_back} days)")
+        logger.info(f"[EMAIL_SYNC] Searching '{db_folder_name}' for messages since {since_date} ({connection.sync_days_back} days)")
         result, data = imap.search(None, f'(SINCE {since_date})')
     else:
         # sync_days_back = 0 means sync ALL history
-        logger.info(f"[EMAIL_SYNC] Searching '{folder_name}' for ALL messages (sync_days_back=0)")
+        logger.info(f"[EMAIL_SYNC] Searching '{db_folder_name}' for ALL messages (sync_days_back=0)")
         result, data = imap.search(None, 'ALL')
 
     if result != 'OK':
-        logger.warning(f"[EMAIL_SYNC] Failed to search emails in '{folder_name}': {result}")
+        logger.warning(f"[EMAIL_SYNC] Failed to search emails in '{db_folder_name}': {result}")
         return 0
 
     message_ids = data[0].split()
     total_found = len(message_ids)
-    logger.info(f"[EMAIL_SYNC] Found {total_found} messages in '{folder_name}' matching search criteria")
+    logger.info(f"[EMAIL_SYNC] Found {total_found} messages in '{db_folder_name}' matching search criteria")
 
     # Limit to most recent messages
     if len(message_ids) > max_messages:
@@ -707,9 +771,9 @@ def _sync_folder(imap, connection, folder_name: str, max_messages: int) -> int:
             existing_message = EmailMessage.objects.filter(message_id=message_id_header).first()
             if existing_message:
                 # Update folder if it changed (email was moved on server)
-                if existing_message.folder != folder_name:
-                    logger.info(f"[EMAIL_SYNC] Updating folder '{existing_message.folder}' -> '{folder_name}' for message_id={message_id_header[:50]}")
-                    existing_message.folder = folder_name
+                if existing_message.folder != db_folder_name:
+                    logger.info(f"[EMAIL_SYNC] Updating folder '{existing_message.folder}' -> '{db_folder_name}' for message_id={message_id_header[:50]}")
+                    existing_message.folder = db_folder_name
                     existing_message.save(update_fields=['folder'])
                 else:
                     logger.debug(f"[EMAIL_SYNC] Message already synced in correct folder: {message_id_header[:50]}")
@@ -775,7 +839,7 @@ def _sync_folder(imap, connection, folder_name: str, max_messages: int) -> int:
                 body_html=body_html,
                 attachments=message_attachments,
                 timestamp=timestamp,
-                folder=folder_name,
+                folder=db_folder_name,
                 uid=uid,
                 is_from_business=is_from_business,
                 is_read=b'\\Seen' in flags,
@@ -783,13 +847,13 @@ def _sync_folder(imap, connection, folder_name: str, max_messages: int) -> int:
                 is_answered=b'\\Answered' in flags,
             )
             new_count += 1
-            logger.info(f"[EMAIL_SYNC] Created new message in folder '{folder_name}': {email_message.get('Subject', '')[:50]}")
+            logger.info(f"[EMAIL_SYNC] Created new message in folder '{db_folder_name}': {email_message.get('Subject', '')[:50]}")
 
         except Exception as e:
-            logger.warning(f"[EMAIL_SYNC] Failed to process email {msg_num} in folder '{folder_name}': {e}")
+            logger.warning(f"[EMAIL_SYNC] Failed to process email {msg_num} in folder '{db_folder_name}': {e}")
             continue
 
-    logger.info(f"[EMAIL_SYNC] Folder '{folder_name}' sync complete: {new_count} new messages created")
+    logger.info(f"[EMAIL_SYNC] Folder '{db_folder_name}' sync complete: {new_count} new messages created")
     return new_count
 
 
@@ -831,32 +895,34 @@ def sync_imap_messages(connection, max_messages: int = 500) -> int:
                     if '"' in decoded:
                         parts = decoded.split('"')
                         if len(parts) >= 2:
-                            folder_name = decode_imap_utf7(parts[-2])
-                            all_folders.append(folder_name)
+                            raw_folder_name = parts[-2]  # Keep raw for IMAP operations
+                            display_folder_name = decode_imap_utf7(raw_folder_name)  # Decode for display/DB
+                            all_folders.append(display_folder_name)
                             # Skip Drafts, All Mail, Trash, Sent, and Spam
                             skip_folders = ['Drafts', '[Gmail]/Drafts', '[Gmail]/All Mail', 'Trash', '[Gmail]/Trash', 'Deleted', 'Deleted Items', 'Deleted Messages', 'Sent', '[Gmail]/Sent Mail', 'Sent Items', 'Sent Messages', 'Spam', '[Gmail]/Spam', 'Junk', 'Junk E-mail']
-                            if any(skip.lower() == folder_name.lower() for skip in skip_folders):
-                                skipped_folders.append(folder_name)
+                            if any(skip.lower() == display_folder_name.lower() for skip in skip_folders):
+                                skipped_folders.append(display_folder_name)
                             else:
-                                folders_to_sync.append(folder_name)
+                                # Store tuple of (raw_name, display_name)
+                                folders_to_sync.append((raw_folder_name, display_folder_name))
 
             # Log folder discovery details
             logger.info(f"[EMAIL_SYNC] ===== FOLDER DISCOVERY for {connection.email_address} =====")
             logger.info(f"[EMAIL_SYNC] All folders on server ({len(all_folders)}): {all_folders}")
-            logger.info(f"[EMAIL_SYNC] Folders to sync ({len(folders_to_sync)}): {folders_to_sync}")
+            logger.info(f"[EMAIL_SYNC] Folders to sync ({len(folders_to_sync)}): {[f[1] for f in folders_to_sync]}")
             logger.info(f"[EMAIL_SYNC] Skipped folders ({len(skipped_folders)}): {skipped_folders}")
             logger.info(f"[EMAIL_SYNC] sync_days_back setting: {connection.sync_days_back} (0=all history)")
             logger.info(f"[EMAIL_SYNC] ================================================")
 
             # Sync each folder
-            for folder_name in folders_to_sync:
+            for raw_folder_name, display_folder_name in folders_to_sync:
                 try:
-                    folder_count = _sync_folder(imap, connection, folder_name, max_messages)
+                    folder_count = _sync_folder(imap, connection, raw_folder_name, display_folder_name, max_messages)
                     total_new_count += folder_count
                     if folder_count > 0:
-                        logger.info(f"Synced {folder_count} emails from {folder_name}")
+                        logger.info(f"Synced {folder_count} emails from {display_folder_name}")
                 except Exception as e:
-                    logger.warning(f"Failed to sync folder {folder_name}: {e}")
+                    logger.warning(f"Failed to sync folder {display_folder_name}: {e}")
                     continue
 
         imap.logout()
@@ -1111,14 +1177,15 @@ def debug_email_sync(connection) -> Dict[str, Any]:
                 if '"' in decoded:
                     parts = decoded.split('"')
                     if len(parts) >= 2:
-                        folder_name = decode_imap_utf7(parts[-2])
+                        raw_folder_name = parts[-2]  # Keep raw for IMAP
+                        display_folder_name = decode_imap_utf7(raw_folder_name)  # Decode for display
 
                         # Check if skipped
-                        is_skipped = any(skip.lower() == folder_name.lower() for skip in skip_folders)
+                        is_skipped = any(skip.lower() == display_folder_name.lower() for skip in skip_folders)
 
                         folder_info = {
-                            'name': folder_name,
-                            'name_bytes': folder_name.encode('utf-8').hex(),  # For debugging encoding issues
+                            'name': display_folder_name,
+                            'name_bytes': display_folder_name.encode('utf-8').hex(),  # For debugging encoding issues
                             'is_synced': not is_skipped,
                             'skip_reason': 'In skip list' if is_skipped else None,
                         }
@@ -1126,7 +1193,8 @@ def debug_email_sync(connection) -> Dict[str, Any]:
                         if not is_skipped:
                             # Get message count and search info for this folder
                             try:
-                                quoted_folder = f'"{folder_name}"'
+                                # Use raw folder name for IMAP operations
+                                quoted_folder = f'"{raw_folder_name}"'
                                 result, data = imap.select(quoted_folder, readonly=True)
                                 if result == 'OK':
                                     total_messages = int(data[0]) if data and data[0] else 0
@@ -1147,10 +1215,10 @@ def debug_email_sync(connection) -> Dict[str, Any]:
                                     else:
                                         folder_info['search_error'] = str(result)
 
-                                    # Count already synced messages in DB for this folder
+                                    # Count already synced messages in DB for this folder (using display name)
                                     synced_count = EmailMessage.objects.filter(
                                         connection=connection,
-                                        folder=folder_name
+                                        folder=display_folder_name
                                     ).count()
                                     folder_info['messages_already_synced'] = synced_count
                                 else:
