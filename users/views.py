@@ -557,9 +557,12 @@ class TeamChatUserListView(APIView):
 
     def get(self, request):
         # Get all active users except the current user
+        # Use select_related to avoid N+1 query on online_status
         users = User.objects.filter(
             is_active=True,
             status='active'
+        ).select_related(
+            'online_status'
         ).exclude(id=request.user.id).order_by('first_name', 'last_name', 'email')
 
         serializer = TeamChatUserSerializer(users, many=True)
