@@ -72,6 +72,7 @@ class LanguageViewSet(viewsets.ModelViewSet):
         tags=['Ecommerce Admin - Languages'],
         summary='List all languages'
     )
+    @method_decorator(cache_page(60 * 60))  # Cache for 1 hour - languages rarely change
     def list(self, request, *args, **kwargs):
         return super().list(request, *args, **kwargs)
 
@@ -79,6 +80,7 @@ class LanguageViewSet(viewsets.ModelViewSet):
         tags=['Ecommerce Admin - Languages'],
         summary='Get language details'
     )
+    @method_decorator(cache_page(60 * 60))  # Cache for 1 hour
     def retrieve(self, request, *args, **kwargs):
         return super().retrieve(request, *args, **kwargs)
 
@@ -302,6 +304,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         summary='Get product details',
         description='Retrieve detailed information about a specific product including variants and attributes'
     )
+    @method_decorator(cache_page(60 * 5))  # Cache for 5 minutes
     def retrieve(self, request, *args, **kwargs):
         return super().retrieve(request, *args, **kwargs)
 

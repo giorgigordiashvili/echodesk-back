@@ -144,7 +144,7 @@ class Ticket(models.Model):
         help_text='Format of the rich_description field'
     )
     # Removed hardcoded status - now using dynamic columns
-    priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default='medium')
+    priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default='medium', db_index=True)
     
     # Add column field for Kanban board organization
     column = models.ForeignKey(
@@ -204,6 +204,7 @@ class Ticket(models.Model):
     # Field to distinguish orders from regular tickets
     is_order = models.BooleanField(
         default=False,
+        db_index=True,
         help_text='Whether this is an order (created by order users) or a regular ticket'
     )
     
@@ -222,6 +223,7 @@ class Ticket(models.Model):
     )
     is_paid = models.BooleanField(
         default=False,
+        db_index=True,
         help_text='Whether this ticket has been fully paid'
     )
     amount_paid = models.DecimalField(

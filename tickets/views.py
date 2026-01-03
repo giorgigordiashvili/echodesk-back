@@ -87,12 +87,17 @@ class TicketColumnViewSet(viewsets.ModelViewSet):
     """
     ViewSet for managing ticket columns (Kanban board columns).
     """
-    queryset = TicketColumn.objects.all()
     serializer_class = TicketColumnSerializer
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ['board']
     ordering = ['position', 'created_at']
+
+    def get_queryset(self):
+        """Annotate queryset with tickets_count to avoid N+1 queries."""
+        return TicketColumn.objects.annotate(
+            tickets_count=Count('tickets')
+        )
 
     def get_serializer_class(self):
         """Use different serializers for different actions."""
@@ -279,9 +284,6 @@ class TicketViewSet(viewsets.ModelViewSet):
     """
     ViewSet for managing tickets with filtering and permissions.
     """
-    queryset = Ticket.objects.all().select_related(
-        'created_by', 'assigned_to'
-    ).prefetch_related('tags', 'comments', 'assigned_groups')
     serializer_class = TicketSerializer
     permission_classes = [TicketPermission]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -299,8 +301,13 @@ class TicketViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         """
         Filter queryset based on user permissions and query parameters.
+        Annotate with comments_count to avoid N+1 queries.
         """
-        queryset = super().get_queryset()
+        queryset = Ticket.objects.annotate(
+            comments_count=Count('comments')
+        ).select_related(
+            'created_by', 'assigned_to', 'column'
+        ).prefetch_related('tags', 'assigned_groups', 'assigned_users', 'ticketassignment_set')
 
         # Non-staff users can only see their tickets or tickets on boards they have access to
         if not self.request.user.is_staff:
@@ -912,7 +919,9 @@ class BoardViewSet(viewsets.ModelViewSet):
 
         # Superusers and staff can see all boards
         if user.is_superuser or user.is_staff:
-            return Board.objects.select_related('created_by').prefetch_related('board_users', 'board_groups', 'columns').all()
+            return Board.objects.annotate(
+                columns_count=Count('columns', distinct=True)
+            ).select_related('created_by').prefetch_related('board_users', 'board_groups', 'columns')
 
         # Get user's groups
         user_groups = user.tenant_groups.filter(is_active=True)
@@ -927,11 +936,12 @@ class BoardViewSet(viewsets.ModelViewSet):
         # 3. User's group is attached via board_groups
         group_attached = Q(board_groups__in=user_groups) if user_groups.exists() else Q(pk__in=[])
 
-        # Annotate boards with counts of restrictions
+        # Annotate boards with counts of restrictions and columns
         from django.db.models import Count
         boards_with_counts = Board.objects.annotate(
             user_count=Count('board_users', distinct=True),
-            group_count=Count('board_groups', distinct=True)
+            group_count=Count('board_groups', distinct=True),
+            columns_count=Count('columns', distinct=True)
         )
 
         # Filter: user has access OR board has no restrictions (both counts are 0)

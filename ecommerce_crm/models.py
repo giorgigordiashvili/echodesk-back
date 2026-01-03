@@ -192,8 +192,8 @@ class Product(models.Model):
     )
 
     # Status and metadata
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft')
-    is_featured = models.BooleanField(default=False)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft', db_index=True)
+    is_featured = models.BooleanField(default=False, db_index=True)
     weight = models.DecimalField(
         max_digits=10,
         decimal_places=2,

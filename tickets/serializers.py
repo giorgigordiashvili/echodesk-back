@@ -40,7 +40,7 @@ class DepartmentMinimalSerializer(serializers.ModelSerializer):
 class BoardSerializer(serializers.ModelSerializer):
     """Serializer for Board model."""
     created_by = serializers.StringRelatedField(read_only=True)
-    columns_count = serializers.SerializerMethodField()
+    columns_count = serializers.IntegerField(read_only=True)  # From annotation
     order_users = UserMinimalSerializer(many=True, read_only=True)
     order_user_ids = serializers.ListField(
         child=serializers.IntegerField(),
@@ -76,9 +76,6 @@ class BoardSerializer(serializers.ModelSerializer):
             'board_users', 'board_user_ids', 'payment_summary'
         ]
         read_only_fields = ['created_at', 'updated_at', 'created_by']
-    
-    def get_columns_count(self, obj):
-        return obj.columns.count()
     
     def get_payment_summary(self, obj):
         """Get payment summary for this board."""
@@ -123,7 +120,7 @@ class BoardSerializer(serializers.ModelSerializer):
 class TicketColumnSerializer(serializers.ModelSerializer):
     """Serializer for TicketColumn model."""
     created_by = serializers.StringRelatedField(read_only=True)
-    tickets_count = serializers.SerializerMethodField()
+    tickets_count = serializers.IntegerField(read_only=True)  # From annotation
     
     class Meta:
         model = TicketColumn
@@ -133,10 +130,6 @@ class TicketColumnSerializer(serializers.ModelSerializer):
             'created_by', 'tickets_count'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'created_by']
-
-    def get_tickets_count(self, obj):
-        """Get the number of tickets in this column."""
-        return obj.tickets.count()
 
     def create(self, validated_data):
         # Set created_by from request context
@@ -515,7 +508,7 @@ class TicketListSerializer(serializers.ModelSerializer):
     assignments = TicketAssignmentSerializer(source='ticketassignment_set', many=True, read_only=True)
     column = TicketColumnSerializer(read_only=True)
     tags = TagSerializer(many=True, read_only=True)
-    comments_count = serializers.SerializerMethodField()
+    comments_count = serializers.IntegerField(read_only=True)  # From annotation
     status = serializers.ReadOnlyField()  # Dynamic status from column
     is_closed = serializers.ReadOnlyField()  # Dynamic closed status from column
 
@@ -527,10 +520,6 @@ class TicketListSerializer(serializers.ModelSerializer):
             'assigned_groups', 'assignments', 'tags', 'comments_count'
         ]
         read_only_fields = fields
-
-    def get_comments_count(self, obj):
-        """Get the number of comments for this ticket."""
-        return obj.comments.count()
 
 
 class KanbanBoardSerializer(serializers.Serializer):
