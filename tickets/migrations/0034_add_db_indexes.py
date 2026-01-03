@@ -10,10 +10,6 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RemoveConstraint(
-            model_name='checklistitem',
-            name='checklist_item_belongs_to_ticket_or_sub_ticket',
-        ),
         migrations.AlterField(
             model_name='ticket',
             name='is_order',
