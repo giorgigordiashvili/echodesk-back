@@ -140,7 +140,7 @@ class GroupViewSet(viewsets.ModelViewSet):
 
 class UserViewSet(viewsets.ModelViewSet):
     """ViewSet for managing users"""
-    queryset = User.objects.prefetch_related('groups', 'tenant_groups', 'tenant_groups__features').all()
+    queryset = User.objects.prefetch_related('tenant_groups', 'tenant_groups__features').all()
     serializer_class = UserSerializer
     permission_classes = [permissions.IsAuthenticated]
     
@@ -152,7 +152,7 @@ class UserViewSet(viewsets.ModelViewSet):
         return UserSerializer
     
     def get_queryset(self):
-        queryset = User.objects.prefetch_related('groups', 'tenant_groups', 'tenant_groups__features').all()
+        queryset = User.objects.prefetch_related('tenant_groups', 'tenant_groups__features').all()
 
         # Filter by role if specified
         role = self.request.query_params.get('role', None)
