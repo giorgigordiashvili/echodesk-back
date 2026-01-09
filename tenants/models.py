@@ -927,3 +927,75 @@ class TenantDomain(models.Model):
             ).exclude(id=self.id).update(is_primary=False)
 
         super().save(*args, **kwargs)
+
+
+class DashboardAppearanceSettings(models.Model):
+    """
+    Dashboard appearance settings for tenant customization.
+    Stores theme colors, border radius, and sidebar ordering that superadmins can configure.
+    All users in the tenant see the same customizations.
+    """
+    tenant = models.OneToOneField(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name='dashboard_appearance',
+        help_text="Tenant these appearance settings belong to"
+    )
+
+    # Colors (HSL format without hsl() wrapper, e.g., "240 5.9% 10%")
+    primary_color = models.CharField(
+        max_length=50,
+        default="240 5.9% 10%",
+        help_text="Primary color in HSL format for light mode"
+    )
+    primary_color_dark = models.CharField(
+        max_length=50,
+        default="0 0% 98%",
+        help_text="Primary color in HSL format for dark mode"
+    )
+    secondary_color = models.CharField(
+        max_length=50,
+        default="239 49% 32%",
+        help_text="Secondary color in HSL format"
+    )
+    accent_color = models.CharField(
+        max_length=50,
+        default="240 4.8% 95.9%",
+        help_text="Accent color in HSL format"
+    )
+    sidebar_background = models.CharField(
+        max_length=50,
+        default="0 0% 100%",
+        help_text="Sidebar background color in HSL format"
+    )
+    sidebar_primary = models.CharField(
+        max_length=50,
+        default="240 5.9% 10%",
+        help_text="Sidebar primary/active color in HSL format"
+    )
+
+    # Border radius
+    border_radius = models.CharField(
+        max_length=20,
+        default="0.5rem",
+        help_text="Border radius value (e.g., '0', '0.3rem', '0.5rem', '0.75rem', '1rem')"
+    )
+
+    # Sidebar ordering (JSON array of menu item IDs)
+    sidebar_order = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Order of sidebar menu items as JSON array of item IDs"
+    )
+
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'tenants_dashboard_appearance_settings'
+        verbose_name = 'Dashboard Appearance Settings'
+        verbose_name_plural = 'Dashboard Appearance Settings'
+
+    def __str__(self):
+        return f"Dashboard Appearance for {self.tenant.name}"

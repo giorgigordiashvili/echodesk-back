@@ -6,7 +6,8 @@ from .views import (
     get_all_tenants, check_deployment_status, tenant_login, tenant_logout,
     tenant_dashboard, tenant_profile, update_tenant_profile, change_tenant_password,
     tenant_settings, upload_logo, remove_logo, forced_password_change, upload_image,
-    get_subscription_me, resolve_ecommerce_domain
+    get_subscription_me, resolve_ecommerce_domain,
+    get_dashboard_appearance, update_dashboard_appearance, reset_dashboard_appearance
 )
 from .payment_views import (
     create_subscription_payment, check_payment_status, bog_webhook, cancel_subscription,
@@ -93,6 +94,11 @@ urlpatterns = [
     path('api/tenant-settings/', tenant_settings, name='tenant_settings'),
     path('api/tenant-settings/upload-logo/', upload_logo, name='upload_logo'),
     path('api/tenant-settings/remove-logo/', remove_logo, name='remove_logo'),
+
+    # Dashboard appearance settings endpoints
+    path('api/dashboard-appearance/', get_dashboard_appearance, name='get_dashboard_appearance'),
+    path('api/dashboard-appearance/update/', update_dashboard_appearance, name='update_dashboard_appearance'),
+    path('api/dashboard-appearance/reset/', reset_dashboard_appearance, name='reset_dashboard_appearance'),
 
     # Upload endpoints
     path('api/upload/image/', upload_image, name='upload_image'),

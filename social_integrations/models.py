@@ -650,7 +650,9 @@ class ChatAssignment(models.Model):
         'users.User',
         on_delete=models.CASCADE,
         related_name='chat_assignments',
-        help_text="User this chat is assigned to"
+        null=True,
+        blank=True,
+        help_text="User this chat is assigned to (null when session completed)"
     )
     status = models.CharField(
         max_length=20,

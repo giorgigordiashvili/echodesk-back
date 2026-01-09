@@ -1,7 +1,8 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model, authenticate
 from rest_framework.authtoken.models import Token
-from .models import Tenant, SavedCard, TenantSubscription
+from .models import Tenant, SavedCard, TenantSubscription, DashboardAppearanceSettings
+import re
 
 User = get_user_model()
 
@@ -382,3 +383,45 @@ class TenantSubscriptionSerializer(serializers.ModelSerializer):
             'id', 'tenant', 'starts_at', 'current_users', 'whatsapp_messages_used',
             'storage_used_gb', 'created_at', 'updated_at'
         )
+
+
+class DashboardAppearanceSettingsSerializer(serializers.ModelSerializer):
+    """Serializer for dashboard appearance settings"""
+
+    class Meta:
+        model = DashboardAppearanceSettings
+        fields = (
+            'primary_color', 'primary_color_dark', 'secondary_color',
+            'accent_color', 'sidebar_background', 'sidebar_primary',
+            'border_radius', 'sidebar_order', 'updated_at'
+        )
+        read_only_fields = ('updated_at',)
+
+    def validate_border_radius(self, value):
+        """Validate border radius format"""
+        valid_values = ['0', '0.3rem', '0.5rem', '0.75rem', '1rem']
+        if value not in valid_values:
+            raise serializers.ValidationError(
+                f"Border radius must be one of: {', '.join(valid_values)}"
+            )
+        return value
+
+    def validate(self, attrs):
+        """Validate HSL color format for all color fields"""
+        hsl_pattern = r'^\d{1,3}(\.\d+)?\s+\d{1,3}(\.\d+)?%\s+\d{1,3}(\.\d+)?%$'
+
+        color_fields = [
+            'primary_color', 'primary_color_dark', 'secondary_color',
+            'accent_color', 'sidebar_background', 'sidebar_primary'
+        ]
+
+        for field in color_fields:
+            if field in attrs:
+                value = attrs[field].strip()
+                if not re.match(hsl_pattern, value):
+                    raise serializers.ValidationError({
+                        field: f"Invalid HSL format. Expected format: 'H S% L%' (e.g., '240 5.9% 10%')"
+                    })
+                attrs[field] = value
+
+        return attrs

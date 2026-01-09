@@ -11,11 +11,11 @@ from tenant_schemas.utils import get_public_schema_name, schema_context
 from django.contrib.auth import get_user_model
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse
 from drf_spectacular.openapi import OpenApiTypes
-from .models import Tenant, PendingRegistration, PaymentOrder, TenantDomain
+from .models import Tenant, PendingRegistration, PaymentOrder, TenantDomain, DashboardAppearanceSettings
 from .feature_models import Feature
 from .serializers import (
     TenantSerializer, TenantCreateSerializer, TenantRegistrationSerializer,
-    TenantLoginSerializer, TenantDashboardDataSerializer
+    TenantLoginSerializer, TenantDashboardDataSerializer, DashboardAppearanceSettingsSerializer
 )
 from .services import SingleFrontendDeploymentService, TenantConfigAPI
 from .bog_payment import bog_service
@@ -1741,3 +1741,117 @@ def resolve_ecommerce_domain(request):
             {'error': 'Failed to build tenant configuration'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+
+# ============================================================
+# Dashboard Appearance Settings
+# ============================================================
+
+@extend_schema(
+    operation_id='get_dashboard_appearance',
+    summary='Get Dashboard Appearance Settings',
+    description='Get the current tenant dashboard appearance customization settings. Available to all authenticated users.',
+    responses={
+        200: DashboardAppearanceSettingsSerializer,
+        403: OpenApiResponse(description='Not available from main domain')
+    },
+    tags=['Dashboard Appearance']
+)
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def get_dashboard_appearance(request):
+    """Get tenant dashboard appearance settings"""
+    if not hasattr(request, 'tenant') or request.tenant.schema_name == get_public_schema_name():
+        return Response(
+            {'error': 'This endpoint is only available from tenant subdomains'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    # Get or create appearance settings for this tenant
+    appearance, created = DashboardAppearanceSettings.objects.get_or_create(
+        tenant=request.tenant
+    )
+
+    serializer = DashboardAppearanceSettingsSerializer(appearance)
+    return Response(serializer.data)
+
+
+@extend_schema(
+    operation_id='update_dashboard_appearance',
+    summary='Update Dashboard Appearance Settings',
+    description='Update the tenant dashboard appearance customization settings. Only superadmins can update.',
+    request=DashboardAppearanceSettingsSerializer,
+    responses={
+        200: DashboardAppearanceSettingsSerializer,
+        400: OpenApiResponse(description='Validation error'),
+        403: OpenApiResponse(description='Permission denied or not from tenant domain')
+    },
+    tags=['Dashboard Appearance']
+)
+@api_view(['PATCH', 'PUT'])
+@permission_classes([permissions.IsAuthenticated])
+def update_dashboard_appearance(request):
+    """Update tenant dashboard appearance settings - superadmin only"""
+    if not hasattr(request, 'tenant') or request.tenant.schema_name == get_public_schema_name():
+        return Response(
+            {'error': 'This endpoint is only available from tenant subdomains'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    # Only superadmins can update appearance settings
+    if not request.user.is_superuser:
+        return Response(
+            {'error': 'Only superadmins can update dashboard appearance settings'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    # Get or create appearance settings
+    appearance, created = DashboardAppearanceSettings.objects.get_or_create(
+        tenant=request.tenant
+    )
+
+    serializer = DashboardAppearanceSettingsSerializer(
+        appearance,
+        data=request.data,
+        partial=True
+    )
+
+    if serializer.is_valid():
+        serializer.save()
+        return Response(serializer.data)
+
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@extend_schema(
+    operation_id='reset_dashboard_appearance',
+    summary='Reset Dashboard Appearance Settings',
+    description='Reset the tenant dashboard appearance to default values. Only superadmins can reset.',
+    responses={
+        200: DashboardAppearanceSettingsSerializer,
+        403: OpenApiResponse(description='Permission denied or not from tenant domain')
+    },
+    tags=['Dashboard Appearance']
+)
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def reset_dashboard_appearance(request):
+    """Reset tenant dashboard appearance to defaults - superadmin only"""
+    if not hasattr(request, 'tenant') or request.tenant.schema_name == get_public_schema_name():
+        return Response(
+            {'error': 'This endpoint is only available from tenant subdomains'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    if not request.user.is_superuser:
+        return Response(
+            {'error': 'Only superadmins can reset dashboard appearance settings'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    # Delete existing and create fresh with defaults
+    DashboardAppearanceSettings.objects.filter(tenant=request.tenant).delete()
+    appearance = DashboardAppearanceSettings.objects.create(tenant=request.tenant)
+
+    serializer = DashboardAppearanceSettingsSerializer(appearance)
+    return Response(serializer.data)
