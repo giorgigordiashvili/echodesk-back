@@ -249,7 +249,7 @@ class SocialIntegrationSettingsSerializer(serializers.ModelSerializer):
 class ChatAssignmentSerializer(serializers.ModelSerializer):
     """Serializer for chat assignments"""
     assigned_user_name = serializers.SerializerMethodField()
-    assigned_user_email = serializers.EmailField(source='assigned_user.email', read_only=True)
+    assigned_user_email = serializers.SerializerMethodField()
     full_conversation_id = serializers.CharField(read_only=True)
 
     class Meta:
@@ -266,6 +266,11 @@ class ChatAssignmentSerializer(serializers.ModelSerializer):
         if obj.assigned_user is None:
             return None
         return obj.assigned_user.get_full_name() or obj.assigned_user.email
+
+    def get_assigned_user_email(self, obj):
+        if obj.assigned_user is None:
+            return None
+        return obj.assigned_user.email
 
 
 class ChatAssignmentCreateSerializer(serializers.Serializer):
