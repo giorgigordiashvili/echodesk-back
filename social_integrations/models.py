@@ -1278,3 +1278,191 @@ class QuickReply(models.Model):
             {'name': 'current_date', 'description': 'Current date (YYYY-MM-DD)'},
             {'name': 'current_time', 'description': 'Current time (HH:MM)'},
         ]
+
+
+class SocialClient(models.Model):
+    """
+    Central client entity for social/chat contacts.
+    One client can have multiple social accounts across different platforms.
+    """
+    name = models.CharField(max_length=255, help_text="Client's display name")
+    email = models.EmailField(blank=True, null=True, help_text="Optional email address")
+    phone = models.CharField(max_length=50, blank=True, help_text="Optional phone number")
+    notes = models.TextField(blank=True, help_text="Internal notes about this client")
+    profile_picture = models.URLField(
+        max_length=500,
+        blank=True,
+        null=True,
+        help_text="URL to profile picture (auto-populated from linked accounts)"
+    )
+
+    # Metadata
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_social_clients'
+    )
+
+    class Meta:
+        ordering = ['-updated_at']
+        verbose_name = "Social Client"
+        verbose_name_plural = "Social Clients"
+        indexes = [
+            models.Index(fields=['name']),
+            models.Index(fields=['email']),
+            models.Index(fields=['phone']),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
+class SocialClientCustomField(models.Model):
+    """
+    Tenant-configurable custom field definitions for social clients.
+    Defines the schema for custom fields that can be added to clients.
+    """
+    FIELD_TYPE_CHOICES = [
+        ('string', 'Single Line Text'),
+        ('text', 'Multi-line Text'),
+        ('number', 'Number'),
+        ('date', 'Date'),
+        ('boolean', 'Yes/No'),
+        ('select', 'Dropdown Select'),
+        ('multiselect', 'Multi-select'),
+    ]
+
+    name = models.CharField(max_length=100, help_text="Internal field name (snake_case)")
+    label = models.CharField(max_length=255, help_text="Display label for the field")
+    field_type = models.CharField(max_length=20, choices=FIELD_TYPE_CHOICES, default='string')
+    is_required = models.BooleanField(default=False)
+    position = models.PositiveIntegerField(default=0, help_text="Display order")
+
+    # For select/multiselect types - JSON array of options
+    options = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Options for select/multiselect fields (e.g., ['Option 1', 'Option 2'])"
+    )
+
+    # Default value
+    default_value = models.CharField(max_length=500, blank=True, help_text="Default value for new clients")
+
+    # Metadata
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_social_client_fields'
+    )
+
+    class Meta:
+        ordering = ['position', 'created_at']
+        verbose_name = "Social Client Custom Field"
+        verbose_name_plural = "Social Client Custom Fields"
+        constraints = [
+            models.UniqueConstraint(fields=['name'], name='unique_social_client_field_name')
+        ]
+
+    def __str__(self):
+        return f"{self.label} ({self.field_type})"
+
+
+class SocialClientCustomFieldValue(models.Model):
+    """
+    Stores the actual custom field values for each client.
+    Each client can have multiple field values.
+    """
+    client = models.ForeignKey(
+        SocialClient,
+        on_delete=models.CASCADE,
+        related_name='custom_field_values'
+    )
+    field = models.ForeignKey(
+        SocialClientCustomField,
+        on_delete=models.CASCADE,
+        related_name='values'
+    )
+    value = models.TextField(blank=True, help_text="Value stored as string (JSON for complex types)")
+
+    class Meta:
+        unique_together = [['client', 'field']]
+        verbose_name = "Social Client Custom Field Value"
+        verbose_name_plural = "Social Client Custom Field Values"
+
+    def __str__(self):
+        return f"{self.client.name} - {self.field.label}: {self.value[:50] if self.value else ''}"
+
+
+class SocialAccount(models.Model):
+    """
+    Links a SocialClient to a specific social platform account.
+    One client can have multiple accounts across different platforms.
+    """
+    PLATFORM_CHOICES = [
+        ('facebook', 'Facebook'),
+        ('instagram', 'Instagram'),
+        ('whatsapp', 'WhatsApp'),
+        ('email', 'Email'),
+        ('tiktok', 'TikTok'),
+    ]
+
+    client = models.ForeignKey(
+        SocialClient,
+        on_delete=models.CASCADE,
+        related_name='social_accounts'
+    )
+
+    # Platform identification
+    platform = models.CharField(max_length=20, choices=PLATFORM_CHOICES)
+    platform_id = models.CharField(
+        max_length=255,
+        help_text="Platform-specific ID (sender_id, wa_id, email address, etc.)"
+    )
+
+    # Connection reference - links to the tenant's platform connection
+    account_connection_id = models.CharField(
+        max_length=255,
+        help_text="ID of the tenant's account connection (page_id for FB, account_id for IG, waba_id for WhatsApp)"
+    )
+
+    # Display info (cached from messages)
+    display_name = models.CharField(max_length=255, blank=True)
+    username = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Username if available (e.g., @instagram_handle)"
+    )
+    profile_pic_url = models.URLField(max_length=500, blank=True, null=True)
+
+    # Metadata
+    first_seen_at = models.DateTimeField(auto_now_add=True)
+    last_seen_at = models.DateTimeField(auto_now=True)
+    last_message_at = models.DateTimeField(null=True, blank=True)
+
+    # Auto-created vs manually linked
+    is_auto_created = models.BooleanField(
+        default=True,
+        help_text="True if auto-created from incoming message, False if manually linked"
+    )
+
+    class Meta:
+        ordering = ['-last_message_at']
+        verbose_name = "Social Account"
+        verbose_name_plural = "Social Accounts"
+        unique_together = [['platform', 'platform_id', 'account_connection_id']]
+        indexes = [
+            models.Index(fields=['platform', 'platform_id']),
+            models.Index(fields=['client', 'platform']),
+        ]
+
+    def __str__(self):
+        return f"{self.client.name} - {self.platform}: {self.display_name or self.platform_id}"

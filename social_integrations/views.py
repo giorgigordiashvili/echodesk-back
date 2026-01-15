@@ -28,7 +28,8 @@ from .models import (
     ChatAssignment, ChatRating,
     EmailConnection, EmailMessage, EmailDraft,
     TikTokCreatorAccount, TikTokMessage,
-    EmailSignature, QuickReply
+    EmailSignature, QuickReply,
+    SocialClient, SocialClientCustomField, SocialClientCustomFieldValue, SocialAccount
 )
 from .serializers import (
     FacebookPageConnectionSerializer, FacebookMessageSerializer, FacebookSendMessageSerializer,
@@ -40,7 +41,9 @@ from .serializers import (
     EmailConnectionSerializer, EmailConnectionCreateSerializer, EmailMessageSerializer,
     EmailSendSerializer, EmailDraftSerializer, EmailMessageActionSerializer, EmailFolderSerializer,
     TikTokCreatorAccountSerializer, TikTokMessageSerializer, TikTokSendMessageSerializer,
-    EmailSignatureSerializer, QuickReplySerializer, QuickReplyUseSerializer, QuickReplyVariablesSerializer
+    EmailSignatureSerializer, QuickReplySerializer, QuickReplyUseSerializer, QuickReplyVariablesSerializer,
+    SocialClientSerializer, SocialClientListSerializer, SocialClientCreateSerializer,
+    SocialClientCustomFieldSerializer, SocialAccountSerializer, SocialAccountLinkSerializer
 )
 from .permissions import (
     CanManageSocialConnections, CanViewSocialMessages,
@@ -6722,5 +6725,191 @@ class QuickReplyViewSet(viewsets.ModelViewSet):
             position = item.get('position')
             if quick_reply_id is not None and position is not None:
                 QuickReply.objects.filter(id=quick_reply_id).update(position=position)
+
+        return Response({'status': 'reordered'})
+
+
+# =============================================================================
+# Social Client ViewSets
+# =============================================================================
+
+class SocialClientViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing social clients"""
+    permission_classes = [IsAuthenticated]
+
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return SocialClientListSerializer
+        elif self.action in ['create', 'update', 'partial_update']:
+            return SocialClientCreateSerializer
+        return SocialClientSerializer
+
+    def get_queryset(self):
+        queryset = SocialClient.objects.prefetch_related(
+            'social_accounts',
+            'custom_field_values',
+            'custom_field_values__field'
+        ).all()
+
+        # Search filter
+        search = self.request.query_params.get('search')
+        if search:
+            queryset = queryset.filter(
+                Q(name__icontains=search) |
+                Q(email__icontains=search) |
+                Q(phone__icontains=search)
+            )
+
+        # Platform filter
+        platform = self.request.query_params.get('platform')
+        if platform:
+            queryset = queryset.filter(social_accounts__platform=platform).distinct()
+
+        return queryset
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
+
+    @action(detail=False, methods=['get'])
+    def by_account(self, request):
+        """
+        Get client by social account details.
+        Query params: platform, platform_id, account_connection_id
+        """
+        platform = request.query_params.get('platform')
+        platform_id = request.query_params.get('platform_id')
+        account_connection_id = request.query_params.get('account_connection_id')
+
+        if not all([platform, platform_id, account_connection_id]):
+            return Response(
+                {'error': 'platform, platform_id, and account_connection_id are required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            social_account = SocialAccount.objects.select_related('client').get(
+                platform=platform,
+                platform_id=platform_id,
+                account_connection_id=account_connection_id
+            )
+            return Response({
+                'found': True,
+                'client': SocialClientSerializer(social_account.client).data,
+                'social_account': SocialAccountSerializer(social_account).data
+            })
+        except SocialAccount.DoesNotExist:
+            return Response({
+                'found': False,
+                'client': None,
+                'social_account': None
+            })
+
+    @action(detail=True, methods=['post'])
+    def link_account(self, request, pk=None):
+        """Link a social account to this client"""
+        client = self.get_object()
+        serializer = SocialAccountLinkSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        data = serializer.validated_data
+
+        # Check if this account is already linked to another client
+        existing = SocialAccount.objects.filter(
+            platform=data['platform'],
+            platform_id=data['platform_id'],
+            account_connection_id=data['account_connection_id']
+        ).exclude(client=client).first()
+
+        if existing:
+            return Response(
+                {'error': f'This account is already linked to client: {existing.client.name}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Create or update the social account
+        social_account, created = SocialAccount.objects.update_or_create(
+            platform=data['platform'],
+            platform_id=data['platform_id'],
+            account_connection_id=data['account_connection_id'],
+            defaults={
+                'client': client,
+                'display_name': data.get('display_name', ''),
+                'username': data.get('username', ''),
+                'profile_pic_url': data.get('profile_pic_url'),
+                'is_auto_created': False,
+            }
+        )
+
+        # Update client's profile picture if not set
+        if not client.profile_picture and social_account.profile_pic_url:
+            client.profile_picture = social_account.profile_pic_url
+            client.save(update_fields=['profile_picture'])
+
+        return Response({
+            'status': 'linked' if created else 'updated',
+            'social_account': SocialAccountSerializer(social_account).data
+        })
+
+    @action(detail=True, methods=['post'])
+    def unlink_account(self, request, pk=None):
+        """Unlink a social account from this client"""
+        client = self.get_object()
+        serializer = SocialAccountLinkSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        data = serializer.validated_data
+
+        try:
+            social_account = SocialAccount.objects.get(
+                client=client,
+                platform=data['platform'],
+                platform_id=data['platform_id'],
+                account_connection_id=data['account_connection_id']
+            )
+            social_account.delete()
+            return Response({'status': 'unlinked'})
+        except SocialAccount.DoesNotExist:
+            return Response(
+                {'error': 'Social account not found or not linked to this client'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+
+class SocialClientCustomFieldViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing custom field definitions"""
+    serializer_class = SocialClientCustomFieldSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = SocialClientCustomField.objects.all()
+
+        # Filter by active status
+        is_active = self.request.query_params.get('is_active')
+        if is_active is not None:
+            queryset = queryset.filter(is_active=is_active.lower() == 'true')
+
+        return queryset
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
+
+    @action(detail=False, methods=['post'])
+    def reorder(self, request):
+        """
+        Reorder custom fields by updating their position values.
+        Expects a list of {id: position} pairs.
+        """
+        items = request.data.get('items', [])
+        if not items:
+            return Response(
+                {'error': 'No items provided'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        for item in items:
+            field_id = item.get('id')
+            position = item.get('position')
+            if field_id is not None and position is not None:
+                SocialClientCustomField.objects.filter(id=field_id).update(position=position)
 
         return Response({'status': 'reordered'})

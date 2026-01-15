@@ -15,6 +15,8 @@ router.register(r'email-messages', views.EmailMessageViewSet, basename='email_me
 router.register(r'email-drafts', views.EmailDraftViewSet, basename='email_drafts')
 router.register(r'tiktok-messages', views.TikTokMessageViewSet, basename='tiktok_messages')
 router.register(r'quick-replies', views.QuickReplyViewSet, basename='quick_replies')
+router.register(r'clients', views.SocialClientViewSet, basename='social_clients')
+router.register(r'clients/custom-fields', views.SocialClientCustomFieldViewSet, basename='social_client_custom_fields')
 
 # URL patterns for the social integrations app
 urlpatterns = [

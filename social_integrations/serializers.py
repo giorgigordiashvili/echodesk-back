@@ -7,7 +7,8 @@ from .models import (
     ChatAssignment, ChatRating,
     EmailConnection, EmailMessage, EmailDraft,
     TikTokCreatorAccount, TikTokMessage,
-    EmailSignature, QuickReply
+    EmailSignature, QuickReply,
+    SocialClient, SocialClientCustomField, SocialClientCustomFieldValue, SocialAccount
 )
 
 
@@ -636,3 +637,175 @@ class QuickReplyVariablesSerializer(serializers.Serializer):
     """Serializer for available quick reply variables"""
     name = serializers.CharField()
     description = serializers.CharField()
+
+
+# =============================================================================
+# Social Client Serializers
+# =============================================================================
+
+class SocialAccountSerializer(serializers.ModelSerializer):
+    """Serializer for social accounts linked to a client"""
+
+    class Meta:
+        model = SocialAccount
+        fields = [
+            'id', 'platform', 'platform_id', 'account_connection_id',
+            'display_name', 'username', 'profile_pic_url',
+            'first_seen_at', 'last_seen_at', 'last_message_at',
+            'is_auto_created'
+        ]
+        read_only_fields = ['id', 'first_seen_at', 'last_seen_at']
+
+
+class SocialClientCustomFieldSerializer(serializers.ModelSerializer):
+    """Serializer for custom field definitions"""
+    created_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SocialClientCustomField
+        fields = [
+            'id', 'name', 'label', 'field_type', 'is_required',
+            'position', 'options', 'default_value', 'is_active',
+            'created_by', 'created_by_name',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_by', 'created_by_name', 'created_at', 'updated_at']
+
+    def get_created_by_name(self, obj):
+        if obj.created_by:
+            return obj.created_by.get_full_name() or obj.created_by.email
+        return None
+
+    def validate_name(self, value):
+        """Validate field name is snake_case"""
+        import re
+        if not re.match(r'^[a-z][a-z0-9_]*$', value):
+            raise serializers.ValidationError(
+                "Field name must be snake_case (lowercase letters, numbers, and underscores, starting with a letter)"
+            )
+        return value
+
+
+class SocialClientCustomFieldValueSerializer(serializers.ModelSerializer):
+    """Serializer for custom field values"""
+    field_name = serializers.CharField(source='field.name', read_only=True)
+    field_label = serializers.CharField(source='field.label', read_only=True)
+    field_type = serializers.CharField(source='field.field_type', read_only=True)
+
+    class Meta:
+        model = SocialClientCustomFieldValue
+        fields = ['id', 'field', 'field_name', 'field_label', 'field_type', 'value']
+        read_only_fields = ['id', 'field_name', 'field_label', 'field_type']
+
+
+class SocialClientSerializer(serializers.ModelSerializer):
+    """Serializer for social clients with nested social accounts and custom fields"""
+    social_accounts = SocialAccountSerializer(many=True, read_only=True)
+    custom_fields = serializers.SerializerMethodField()
+    created_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SocialClient
+        fields = [
+            'id', 'name', 'email', 'phone', 'notes', 'profile_picture',
+            'social_accounts', 'custom_fields',
+            'created_by', 'created_by_name',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_by', 'created_by_name', 'created_at', 'updated_at', 'social_accounts']
+
+    def get_created_by_name(self, obj):
+        if obj.created_by:
+            return obj.created_by.get_full_name() or obj.created_by.email
+        return None
+
+    def get_custom_fields(self, obj):
+        """Return custom fields as a dict {field_name: value}"""
+        values = obj.custom_field_values.select_related('field').all()
+        return {v.field.name: v.value for v in values}
+
+
+class SocialClientListSerializer(serializers.ModelSerializer):
+    """Lightweight serializer for client list (without all nested details)"""
+    social_accounts_count = serializers.IntegerField(source='social_accounts.count', read_only=True)
+    platforms = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SocialClient
+        fields = [
+            'id', 'name', 'email', 'phone', 'profile_picture',
+            'social_accounts_count', 'platforms',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = fields
+
+    def get_platforms(self, obj):
+        """Return list of unique platforms linked to this client"""
+        return list(obj.social_accounts.values_list('platform', flat=True).distinct())
+
+
+class SocialClientCreateSerializer(serializers.ModelSerializer):
+    """Serializer for creating/updating social clients with custom fields"""
+    custom_fields = serializers.DictField(
+        child=serializers.CharField(allow_blank=True),
+        required=False,
+        help_text="Custom field values as {field_name: value}"
+    )
+
+    class Meta:
+        model = SocialClient
+        fields = ['name', 'email', 'phone', 'notes', 'profile_picture', 'custom_fields']
+
+    def create(self, validated_data):
+        custom_fields_data = validated_data.pop('custom_fields', {})
+        client = SocialClient.objects.create(**validated_data)
+
+        # Create custom field values
+        if custom_fields_data:
+            self._save_custom_fields(client, custom_fields_data)
+
+        return client
+
+    def update(self, instance, validated_data):
+        custom_fields_data = validated_data.pop('custom_fields', None)
+
+        # Update basic fields
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        # Update custom fields if provided
+        if custom_fields_data is not None:
+            self._save_custom_fields(instance, custom_fields_data)
+
+        return instance
+
+    def _save_custom_fields(self, client, custom_fields_data):
+        """Save custom field values for a client"""
+        for field_name, value in custom_fields_data.items():
+            try:
+                field = SocialClientCustomField.objects.get(name=field_name, is_active=True)
+                SocialClientCustomFieldValue.objects.update_or_create(
+                    client=client,
+                    field=field,
+                    defaults={'value': value}
+                )
+            except SocialClientCustomField.DoesNotExist:
+                pass  # Ignore unknown fields
+
+
+class SocialAccountLinkSerializer(serializers.Serializer):
+    """Serializer for linking/unlinking a social account to a client"""
+    platform = serializers.ChoiceField(choices=['facebook', 'instagram', 'whatsapp', 'email', 'tiktok'])
+    platform_id = serializers.CharField(max_length=255, help_text="Platform-specific ID (sender_id, wa_id, etc.)")
+    account_connection_id = serializers.CharField(max_length=255, help_text="Account connection ID (page_id, waba_id, etc.)")
+    display_name = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    username = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    profile_pic_url = serializers.URLField(max_length=500, required=False, allow_null=True, allow_blank=True)
+
+
+class SocialClientByAccountSerializer(serializers.Serializer):
+    """Serializer for get client by account response"""
+    client = SocialClientSerializer(allow_null=True)
+    social_account = SocialAccountSerializer(allow_null=True)
+    found = serializers.BooleanField()

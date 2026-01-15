@@ -10,7 +10,8 @@ from .models import (
     FacebookPageConnection, FacebookMessage,
     InstagramAccountConnection, InstagramMessage,
     WhatsAppBusinessAccount, WhatsAppMessage,
-    SocialIntegrationSettings, OrphanedFacebookMessage
+    SocialIntegrationSettings, OrphanedFacebookMessage,
+    SocialClient, SocialClientCustomField, SocialClientCustomFieldValue, SocialAccount
 )
 
 
@@ -361,3 +362,111 @@ class SocialIntegrationSettingsAdmin(TenantAwareAdminMixin, admin.ModelAdmin):
     def has_delete_permission(self, request, obj=None):
         """Prevent deletion of settings"""
         return False
+
+
+class SocialAccountInline(admin.TabularInline):
+    """Inline for viewing social accounts linked to a client"""
+    model = SocialAccount
+    extra = 0
+    fields = ['platform', 'platform_id', 'display_name', 'username', 'last_message_at']
+    readonly_fields = ['platform', 'platform_id', 'display_name', 'username', 'last_message_at']
+    can_delete = True
+    show_change_link = True
+
+
+class SocialClientCustomFieldValueInline(admin.TabularInline):
+    """Inline for viewing custom field values for a client"""
+    model = SocialClientCustomFieldValue
+    extra = 0
+    fields = ['field', 'value']
+    readonly_fields = ['field']
+    can_delete = True
+
+
+@admin.register(SocialClient)
+class SocialClientAdmin(TenantAwareAdminMixin, admin.ModelAdmin):
+    list_display = ['name', 'email', 'phone', 'social_accounts_count', 'created_at', 'updated_at']
+    list_filter = ['created_at', 'updated_at']
+    search_fields = ['name', 'email', 'phone', 'notes']
+    readonly_fields = ['created_at', 'updated_at', 'created_by']
+    inlines = [SocialAccountInline, SocialClientCustomFieldValueInline]
+
+    fieldsets = (
+        ('Basic Information', {
+            'fields': ('name', 'email', 'phone', 'profile_picture')
+        }),
+        ('Notes', {
+            'fields': ('notes',)
+        }),
+        ('Metadata', {
+            'fields': ('created_by', 'created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+
+    def social_accounts_count(self, obj):
+        """Display count of linked social accounts"""
+        return obj.social_accounts.count()
+    social_accounts_count.short_description = 'Linked Accounts'
+
+    def save_model(self, request, obj, form, change):
+        if not change:  # Creating new object
+            obj.created_by = request.user
+        super().save_model(request, obj, form, change)
+
+
+@admin.register(SocialClientCustomField)
+class SocialClientCustomFieldAdmin(TenantAwareAdminMixin, admin.ModelAdmin):
+    list_display = ['label', 'name', 'field_type', 'is_required', 'position', 'is_active']
+    list_filter = ['field_type', 'is_required', 'is_active']
+    search_fields = ['name', 'label']
+    list_editable = ['position', 'is_active']
+    ordering = ['position']
+
+    fieldsets = (
+        ('Field Information', {
+            'fields': ('name', 'label', 'field_type')
+        }),
+        ('Configuration', {
+            'fields': ('is_required', 'position', 'default_value', 'is_active')
+        }),
+        ('Options', {
+            'fields': ('options',),
+            'classes': ('collapse',),
+            'description': 'Only for select/multiselect field types'
+        }),
+    )
+
+    def save_model(self, request, obj, form, change):
+        if not change:  # Creating new object
+            obj.created_by = request.user
+        super().save_model(request, obj, form, change)
+
+
+@admin.register(SocialAccount)
+class SocialAccountAdmin(TenantAwareAdminMixin, admin.ModelAdmin):
+    list_display = ['display_name_or_id', 'platform', 'client', 'last_message_at', 'is_auto_created']
+    list_filter = ['platform', 'is_auto_created', 'first_seen_at']
+    search_fields = ['display_name', 'username', 'platform_id', 'client__name']
+    readonly_fields = ['first_seen_at', 'last_seen_at']
+
+    fieldsets = (
+        ('Client', {
+            'fields': ('client',)
+        }),
+        ('Platform Details', {
+            'fields': ('platform', 'platform_id', 'account_connection_id')
+        }),
+        ('Display Information', {
+            'fields': ('display_name', 'username', 'profile_pic_url')
+        }),
+        ('Metadata', {
+            'fields': ('is_auto_created', 'first_seen_at', 'last_seen_at', 'last_message_at'),
+            'classes': ('collapse',)
+        }),
+    )
+
+    def display_name_or_id(self, obj):
+        """Display name or platform ID"""
+        return obj.display_name or obj.platform_id
+    display_name_or_id.short_description = 'Name/ID'
