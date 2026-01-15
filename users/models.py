@@ -684,3 +684,35 @@ class TeamChatMessage(models.Model):
             self.is_read = True
             self.read_at = timezone.now()
             self.save(update_fields=['is_read', 'read_at'])
+
+
+class HiddenTeamChatConversation(models.Model):
+    """
+    Tracks conversations hidden by individual users.
+    When a user "deletes" a conversation, it only hides it from their view.
+    The other participant can still see the conversation.
+    """
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='hidden_team_conversations',
+        help_text="The user who hid this conversation"
+    )
+    conversation = models.ForeignKey(
+        TeamChatConversation,
+        on_delete=models.CASCADE,
+        related_name='hidden_by_users'
+    )
+    hidden_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-hidden_at']
+        verbose_name = "Hidden Team Chat Conversation"
+        verbose_name_plural = "Hidden Team Chat Conversations"
+        unique_together = [['user', 'conversation']]
+        indexes = [
+            models.Index(fields=['user', 'conversation']),
+        ]
+
+    def __str__(self):
+        return f"{self.user.email} hid conversation {self.conversation.id}"

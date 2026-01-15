@@ -11,7 +11,7 @@ import secrets
 import string
 import logging
 from tenants.email_service import email_service
-from .models import Department, TenantGroup, Notification, UserOnlineStatus, TeamChatConversation, TeamChatMessage
+from .models import Department, TenantGroup, Notification, UserOnlineStatus, TeamChatConversation, TeamChatMessage, HiddenTeamChatConversation
 from .serializers import (
     UserSerializer, UserCreateSerializer, UserUpdateSerializer,
     GroupSerializer, GroupCreateSerializer, PermissionSerializer,
@@ -574,9 +574,16 @@ class TeamChatConversationViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        """Only show conversations the user is part of"""
+        """Only show conversations the user is part of, excluding hidden ones"""
+        # Get IDs of conversations hidden by this user
+        hidden_conversation_ids = HiddenTeamChatConversation.objects.filter(
+            user=self.request.user
+        ).values_list('conversation_id', flat=True)
+
         return TeamChatConversation.objects.filter(
             participants=self.request.user
+        ).exclude(
+            id__in=hidden_conversation_ids
         ).prefetch_related(
             'participants', 'messages', 'messages__sender'
         ).annotate(
@@ -610,6 +617,13 @@ class TeamChatConversationViewSet(viewsets.ModelViewSet):
             # Create new conversation
             conversation = TeamChatConversation.objects.create()
             conversation.participants.add(request.user, other_user)
+        else:
+            # If conversation exists but was hidden by this user, unhide it
+            # since user is explicitly choosing to start a chat again
+            HiddenTeamChatConversation.objects.filter(
+                user=request.user,
+                conversation=conversation
+            ).delete()
 
         serializer = TeamChatConversationDetailSerializer(
             conversation,
@@ -636,7 +650,7 @@ class TeamChatConversationViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['delete', 'post'])
     def clear_history(self, request, pk=None):
-        """Clear all messages in a conversation"""
+        """Clear all messages in a conversation (affects all users)"""
         conversation = self.get_object()
 
         # Authorization check - only participants can clear history
@@ -652,6 +666,52 @@ class TeamChatConversationViewSet(viewsets.ModelViewSet):
         return Response({
             'message': f'Cleared {deleted_count} messages',
             'deleted_count': deleted_count
+        })
+
+    @action(detail=True, methods=['post'])
+    def hide_for_me(self, request, pk=None):
+        """
+        Hide a conversation from the current user's view only.
+        This does NOT delete messages - the other user can still see the conversation.
+        """
+        conversation = self.get_object()
+
+        # Authorization check - only participants can hide
+        if not conversation.participants.filter(id=request.user.id).exists():
+            return Response(
+                {'error': 'Not authorized to hide this conversation'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Create or get the hidden record
+        hidden, created = HiddenTeamChatConversation.objects.get_or_create(
+            user=request.user,
+            conversation=conversation
+        )
+
+        return Response({
+            'success': True,
+            'message': 'Conversation hidden from your view',
+            'created': created
+        })
+
+    @action(detail=True, methods=['post'])
+    def unhide(self, request, pk=None):
+        """
+        Unhide a previously hidden conversation.
+        """
+        conversation = self.get_object()
+
+        # Delete the hidden record
+        deleted_count, _ = HiddenTeamChatConversation.objects.filter(
+            user=request.user,
+            conversation=conversation
+        ).delete()
+
+        return Response({
+            'success': True,
+            'message': 'Conversation restored to your view',
+            'was_hidden': deleted_count > 0
         })
 
 
