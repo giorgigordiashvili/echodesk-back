@@ -263,6 +263,8 @@ class ChatAssignmentSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'assigned_at', 'updated_at', 'full_conversation_id']
 
     def get_assigned_user_name(self, obj):
+        if obj.assigned_user is None:
+            return None
         return obj.assigned_user.get_full_name() or obj.assigned_user.email
 
 
