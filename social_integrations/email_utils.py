@@ -12,6 +12,7 @@ from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
 from email.utils import make_msgid, formataddr, parseaddr, getaddresses, parsedate_to_datetime
+from email.header import decode_header as email_decode_header
 from datetime import datetime, timedelta
 from typing import Tuple, Optional, List, Dict, Any
 
@@ -68,6 +69,45 @@ def decode_imap_utf7(s: str) -> str:
             result.append(s[i])
             i += 1
     return ''.join(result)
+
+
+def decode_mime_header(header_value: str) -> str:
+    """
+    Decode MIME-encoded email headers (RFC 2047).
+
+    Handles encoded headers like:
+    - =?UTF-8?B?6IyX6KGM?= (Base64 encoded UTF-8)
+    - =?UTF-8?Q?Hello_World?= (Quoted-Printable encoded)
+
+    Args:
+        header_value: The potentially encoded header value
+
+    Returns:
+        The decoded string
+    """
+    if not header_value:
+        return ''
+
+    try:
+        decoded_parts = email_decode_header(header_value)
+        result_parts = []
+
+        for part, charset in decoded_parts:
+            if isinstance(part, bytes):
+                # Decode bytes using specified charset or default to utf-8
+                encoding = charset or 'utf-8'
+                try:
+                    result_parts.append(part.decode(encoding, errors='replace'))
+                except (LookupError, UnicodeDecodeError):
+                    # If charset is unknown, try utf-8
+                    result_parts.append(part.decode('utf-8', errors='replace'))
+            else:
+                result_parts.append(part)
+
+        return ''.join(result_parts)
+    except Exception as e:
+        logger.warning(f"Failed to decode MIME header: {e}")
+        return header_value
 
 
 def encode_imap_utf7(s: str) -> str:
@@ -231,7 +271,7 @@ def parse_address_list(address_string: str) -> List[Dict[str, str]]:
         List of dicts with 'email' and 'name' keys
     """
     addresses = getaddresses([address_string])
-    return [{'email': addr[1], 'name': addr[0]} for addr in addresses if addr[1]]
+    return [{'email': addr[1], 'name': decode_mime_header(addr[0])} for addr in addresses if addr[1]]
 
 
 def extract_body(email_message) -> Tuple[str, str]:
@@ -839,6 +879,7 @@ def _sync_folder(imap, connection, imap_folder_name: str, db_folder_name: str, m
             # Parse sender
             from_header = email_message.get('From', '')
             from_name, from_email_addr = parseaddr(from_header)
+            from_name = decode_mime_header(from_name)  # Decode MIME-encoded sender names
 
             # Parse recipients
             to_emails = parse_address_list(email_message.get('To', ''))
@@ -890,7 +931,7 @@ def _sync_folder(imap, connection, imap_folder_name: str, db_folder_name: str, m
                 from_name=from_name,
                 to_emails=to_emails,
                 cc_emails=cc_emails,
-                subject=email_message.get('Subject', ''),
+                subject=decode_mime_header(email_message.get('Subject', '')),
                 body_text=body_text,
                 body_html=body_html,
                 attachments=message_attachments,
