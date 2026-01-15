@@ -125,6 +125,9 @@ urlpatterns = [
     # Ecommerce endpoints (public access for client registration/login)
     path('api/ecommerce/', include('ecommerce_crm.urls')),
 
+    # Help center and documentation
+    path('api/help/', include('help_center.urls')),
+
     # Public/tenant management endpoints
     path('', include('tenants.urls')),
 ]

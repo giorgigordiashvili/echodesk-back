@@ -76,6 +76,7 @@ SHARED_APPS = [
     'tenants',  # This must be in SHARED_APPS
     'users',    # Add users to shared apps so public schema gets the table
     'crm',      # Move CRM to shared apps so it's available in public schema too
+    'help_center',  # Help center and documentation - global content
 ]
 
 # Tenant-specific applications
