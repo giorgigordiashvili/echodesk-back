@@ -180,11 +180,12 @@ class UserViewSet(viewsets.ModelViewSet):
         alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
         temporary_password = ''.join(secrets.choice(alphabet) for _ in range(12))
 
-        # Save user with temporary password
+        # Save user with temporary password and require password change on first login
         user = serializer.save(
             invited_by=self.request.user,
             invitation_sent_at=timezone.now(),
-            temporary_password=temporary_password
+            temporary_password=temporary_password,
+            password_change_required=True
         )
 
         # Set the password (hashed)
@@ -193,10 +194,11 @@ class UserViewSet(viewsets.ModelViewSet):
 
         # Send invitation email
         try:
-            # Get tenant info
+            # Get tenant info and language
             tenant = self.request.tenant if hasattr(self.request, 'tenant') else None
             tenant_name = tenant.name if tenant else "EchoDesk"
             frontend_url = tenant.frontend_url if tenant else settings.MAIN_DOMAIN
+            language = tenant.preferred_language if tenant else 'en'
 
             email_sent = email_service.send_user_invitation_email(
                 user_email=user.email,
@@ -204,7 +206,8 @@ class UserViewSet(viewsets.ModelViewSet):
                 tenant_name=tenant_name,
                 temporary_password=temporary_password,
                 frontend_url=frontend_url,
-                invited_by=self.request.user.get_full_name()
+                invited_by=self.request.user.get_full_name(),
+                language=language
             )
 
             if email_sent:
@@ -299,23 +302,77 @@ class UserViewSet(viewsets.ModelViewSet):
     def change_password(self, request, pk=None):
         """Change user password"""
         user = self.get_object()
-        
+
         # Users can only change their own password unless they have manage_users permission
-        if (user != request.user and 
-            not request.user.has_permission('can_manage_users') and 
+        if (user != request.user and
+            not request.user.has_permission('can_manage_users') and
             not request.user.is_staff):
             return Response(
                 {'error': 'You can only change your own password'},
                 status=status.HTTP_403_FORBIDDEN
             )
-        
+
         serializer = PasswordChangeSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             user.set_password(serializer.validated_data['new_password'])
             user.save()
             return Response({'message': 'Password changed successfully'})
-        
+
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'])
+    def send_new_password(self, request, pk=None):
+        """Generate new password and email it to user"""
+        # Check permission
+        if not request.user.has_permission('can_manage_users') and not request.user.is_staff:
+            return Response(
+                {'error': 'You do not have permission to manage users'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        user = self.get_object()
+
+        # Generate new temporary password (12 characters)
+        alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
+        new_password = ''.join(secrets.choice(alphabet) for _ in range(12))
+
+        # Update user
+        user.set_password(new_password)
+        user.temporary_password = new_password
+        user.password_change_required = True
+        user.save()
+
+        # Get tenant info and language
+        tenant = request.tenant if hasattr(request, 'tenant') else None
+        tenant_name = tenant.name if tenant else "EchoDesk"
+        frontend_url = tenant.frontend_url if tenant else settings.MAIN_DOMAIN
+        language = tenant.preferred_language if tenant else 'en'
+
+        try:
+            email_sent = email_service.send_new_password_email(
+                user_email=user.email,
+                user_name=user.get_full_name(),
+                tenant_name=tenant_name,
+                new_password=new_password,
+                frontend_url=frontend_url,
+                language=language
+            )
+
+            if email_sent:
+                logger.info(f'New password email sent to {user.email}')
+                return Response({'message': 'New password sent successfully'})
+            else:
+                logger.warning(f'Failed to send new password email to {user.email}')
+                return Response(
+                    {'error': 'Failed to send email'},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+        except Exception as e:
+            logger.error(f'Error sending new password email to {user.email}: {str(e)}')
+            return Response(
+                {'error': 'Failed to send email'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 class TenantGroupViewSet(viewsets.ModelViewSet):
