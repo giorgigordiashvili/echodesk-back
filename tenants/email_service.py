@@ -265,7 +265,7 @@ class EmailService:
                     <p>You can now access your dashboard and start managing your customer support operations:</p>
 
                     <div style="text-align: center;">
-                        <a href="{frontend_url}" class="button">Access Your Dashboard</a>
+                        <a href="{frontend_url}" style="display: inline-block; background-color: #4F46E5; color: #ffffff !important; padding: 12px 30px; text-decoration: none; border-radius: 6px; margin: 20px 0; font-weight: bold;">Access Your Dashboard</a>
                     </div>
 
                     <p><strong>Getting Started:</strong></p>
@@ -398,7 +398,7 @@ class EmailService:
                     </ol>
 
                     <div style="text-align: center;">
-                        <a href="{frontend_url}" class="button">{t['button']}</a>
+                        <a href="{frontend_url}" style="display: inline-block; background-color: #4F46E5; color: #ffffff !important; padding: 12px 30px; text-decoration: none; border-radius: 6px; margin: 20px 0; font-weight: bold;">{t['button']}</a>
                     </div>
 
                     <p>{t['ignore_notice']}</p>
@@ -510,7 +510,7 @@ class EmailService:
                     </div>
 
                     <div style="text-align: center;">
-                        <a href="{frontend_url}" class="button">{t['button']}</a>
+                        <a href="{frontend_url}" style="display: inline-block; background-color: #4F46E5; color: #ffffff !important; padding: 12px 30px; text-decoration: none; border-radius: 6px; margin: 20px 0; font-weight: bold;">{t['button']}</a>
                     </div>
 
                     <p>{t['ignore_notice']}</p>
