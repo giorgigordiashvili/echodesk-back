@@ -87,6 +87,23 @@ class FacebookMessage(models.Model):
         help_text='Staff member who deleted this message'
     )
 
+    # Reaction fields (from message_reactions webhook)
+    reaction = models.CharField(max_length=20, blank=True, null=True, help_text='Reaction type: love, smile, angry, sad, wow, like')
+    reaction_emoji = models.CharField(max_length=10, blank=True, null=True, help_text='Emoji representation of the reaction')
+    reacted_by = models.CharField(max_length=100, blank=True, null=True, help_text='ID of the user who reacted')
+    reacted_at = models.DateTimeField(null=True, blank=True, help_text='When the reaction was added')
+
+    # Reply fields (for message replies)
+    reply_to_message_id = models.CharField(max_length=100, blank=True, null=True, help_text='Message ID this is a reply to')
+    reply_to = models.ForeignKey(
+        'self',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='replies',
+        help_text='Reference to the message this is replying to'
+    )
+
     class Meta:
         ordering = ['-timestamp']
 

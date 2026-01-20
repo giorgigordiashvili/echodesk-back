@@ -525,7 +525,7 @@ def facebook_oauth_callback(request):
                     try:
                         subscribe_url = f"https://graph.facebook.com/v23.0/{page_id}/subscribed_apps"
                         subscribe_params = {
-                            'subscribed_fields': 'messages,messaging_postbacks,message_reads,message_deliveries',
+                            'subscribed_fields': 'messages,messaging_postbacks,message_reads,message_deliveries,message_reactions',
                             'access_token': page_access_token
                         }
                         logger.info(f"📡 Subscribing page {page_name} ({page_id}) to webhooks...")
@@ -1267,6 +1267,19 @@ def facebook_webhook(request):
 
                                         logger.info(f"📎 Found {len(attachments)} attachment(s): {[a['type'] for a in attachments]}")
 
+                                    # Extract reply_to information (for message replies)
+                                    reply_to_message_id = None
+                                    reply_to_obj = None
+                                    if 'reply_to' in message_data:
+                                        reply_to_data = message_data.get('reply_to', {})
+                                        reply_to_message_id = reply_to_data.get('mid')
+                                        if reply_to_message_id:
+                                            # Try to find the original message
+                                            reply_to_obj = FacebookMessage.objects.filter(
+                                                message_id=reply_to_message_id
+                                            ).first()
+                                            logger.info(f"↩️ Message is a reply to: {reply_to_message_id}")
+
                                     if message_id and not FacebookMessage.objects.filter(message_id=message_id).exists():
                                         try:
                                             message_obj = FacebookMessage.objects.create(
@@ -1280,7 +1293,9 @@ def facebook_webhook(request):
                                                 attachments=attachments,
                                                 timestamp=convert_facebook_timestamp(message_event.get('timestamp', 0)),
                                                 is_from_page=(sender_id == page_id),
-                                                profile_pic_url=profile_pic_url
+                                                profile_pic_url=profile_pic_url,
+                                                reply_to_message_id=reply_to_message_id,
+                                                reply_to=reply_to_obj
                                             )
                                             logger.info(f"✅ Saved message from {sender_name}: {message_text[:50] if message_text else f'[{attachment_type}]'}")
 
@@ -1309,6 +1324,8 @@ def facebook_webhook(request):
                                                     'attachments': message_obj.attachments,
                                                     'timestamp': message_obj.timestamp.isoformat() if message_obj.timestamp else None,
                                                     'is_from_page': message_obj.is_from_page,
+                                                    'reply_to_message_id': message_obj.reply_to_message_id,
+                                                    'reply_to_id': message_obj.reply_to_id if message_obj.reply_to else None,
                                                 }
                                                 # Conversation ID is the sender_id (the customer)
                                                 ws_conversation_id = sender_id
@@ -1435,8 +1452,69 @@ def facebook_webhook(request):
                                     except Exception as e:
                                         logger.error(f"❌ Failed to process delivery receipt: {e}")
 
+                                # Handle message reactions
+                                elif 'reaction' in message_event:
+                                    reaction_data = message_event['reaction']
+                                    sender_id = message_event['sender']['id']
+                                    message_id = reaction_data.get('mid')
+                                    action = reaction_data.get('action')  # 'react' or 'unreact'
+                                    reaction = reaction_data.get('reaction')  # 'love', 'smile', 'angry', 'sad', 'wow', 'like'
+                                    emoji = reaction_data.get('emoji')
+
+                                    logger.info(f"😀 Reaction from {sender_id}: {action} - {reaction} ({emoji}) on message {message_id}")
+
+                                    try:
+                                        from django.utils import timezone
+
+                                        # Find the message that was reacted to
+                                        fb_message = FacebookMessage.objects.filter(
+                                            page_connection=page_connection,
+                                            message_id=message_id
+                                        ).first()
+
+                                        if fb_message:
+                                            if action == 'react':
+                                                # Add or update reaction
+                                                fb_message.reaction = reaction
+                                                fb_message.reaction_emoji = emoji
+                                                fb_message.reacted_by = sender_id
+                                                fb_message.reacted_at = timezone.now()
+                                                fb_message.save()
+                                                logger.info(f"✅ Added reaction {reaction} to message {message_id}")
+                                            elif action == 'unreact':
+                                                # Remove reaction
+                                                fb_message.reaction = None
+                                                fb_message.reaction_emoji = None
+                                                fb_message.reacted_by = None
+                                                fb_message.reacted_at = None
+                                                fb_message.save()
+                                                logger.info(f"✅ Removed reaction from message {message_id}")
+
+                                            # Send WebSocket notification for reaction
+                                            from django.db import connection
+                                            current_schema = getattr(connection, 'schema_name', None)
+                                            if current_schema:
+                                                reaction_notification_data = {
+                                                    'type': 'message_reaction',
+                                                    'message_id': fb_message.id,
+                                                    'facebook_message_id': message_id,
+                                                    'action': action,
+                                                    'reaction': reaction,
+                                                    'emoji': emoji,
+                                                    'reacted_by': sender_id,
+                                                    'timestamp': timezone.now().isoformat()
+                                                }
+                                                # Get conversation ID from the message
+                                                ws_conversation_id = fb_message.sender_id if fb_message.sender_id != page_id else fb_message.recipient_id
+                                                send_websocket_notification(current_schema, reaction_notification_data, ws_conversation_id)
+                                        else:
+                                            logger.warning(f"⚠️ Message not found for reaction: {message_id}")
+
+                                    except Exception as e:
+                                        logger.error(f"❌ Failed to process reaction: {e}")
+
                                 else:
-                                    logger.info(f"ℹ️ Message event has no 'message', 'read', or 'delivery' field: {message_event}")
+                                    logger.info(f"ℹ️ Message event has no 'message', 'read', 'delivery', or 'reaction' field: {message_event}")
                         else:
                             logger.info(f"ℹ️ Entry has no 'messaging' field: {entry}")
                 else:

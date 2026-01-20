@@ -22,6 +22,7 @@ class FacebookPageConnectionSerializer(serializers.ModelSerializer):
 class FacebookMessageSerializer(serializers.ModelSerializer):
     page_id = serializers.CharField(source='page_connection.page_id', read_only=True)
     page_name = serializers.CharField(source='page_connection.page_name', read_only=True)
+    reply_to_id = serializers.PrimaryKeyRelatedField(source='reply_to', read_only=True)
 
     class Meta:
         model = FacebookMessage
@@ -30,9 +31,15 @@ class FacebookMessageSerializer(serializers.ModelSerializer):
             'attachment_type', 'attachment_url', 'attachments',
             'timestamp', 'is_from_page', 'is_delivered', 'delivered_at', 'is_read', 'read_at',
             'is_read_by_staff', 'read_by_staff_at',
-            'page_id', 'page_name', 'created_at'
+            'page_id', 'page_name', 'created_at',
+            # Reaction fields
+            'reaction', 'reaction_emoji', 'reacted_by', 'reacted_at',
+            # Reply fields
+            'reply_to_message_id', 'reply_to_id'
         ]
-        read_only_fields = ['id', 'is_delivered', 'delivered_at', 'is_read', 'read_at', 'created_at']
+        read_only_fields = ['id', 'is_delivered', 'delivered_at', 'is_read', 'read_at', 'created_at',
+                           'reaction', 'reaction_emoji', 'reacted_by', 'reacted_at',
+                           'reply_to_message_id', 'reply_to_id']
 
 
 class FacebookSendMessageSerializer(serializers.Serializer):
