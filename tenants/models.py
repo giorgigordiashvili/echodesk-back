@@ -71,6 +71,16 @@ class Tenant(TenantMixin):
         help_text="If True, only superadmins can delete tickets. If False, both ticket owners and superadmins can delete tickets."
     )
 
+    # IP Whitelist settings
+    ip_whitelist_enabled = models.BooleanField(
+        default=False,
+        help_text="If True, only whitelisted IPs can access this tenant"
+    )
+    superadmin_bypass_whitelist = models.BooleanField(
+        default=True,
+        help_text="If True, superadmins can bypass IP whitelist restrictions"
+    )
+
     # Frontend deployment fields
     frontend_url = models.URLField(blank=True, null=True, help_text="URL of the deployed frontend")
     vercel_project_id = models.CharField(max_length=100, blank=True, null=True, help_text="Vercel project ID for frontend deployment")
@@ -999,3 +1009,131 @@ class DashboardAppearanceSettings(models.Model):
 
     def __str__(self):
         return f"Dashboard Appearance for {self.tenant.name}"
+
+
+class SecurityLog(models.Model):
+    """
+    Logs security events like login, logout, and token expiry.
+    This model is stored in each tenant's schema.
+    """
+    EVENT_TYPES = [
+        ('login_success', 'Successful Login'),
+        ('login_failed', 'Failed Login'),
+        ('logout', 'Logout'),
+        ('token_expired', 'Token Expired'),
+    ]
+
+    DEVICE_TYPES = [
+        ('desktop', 'Desktop'),
+        ('mobile', 'Mobile'),
+        ('tablet', 'Tablet'),
+        ('unknown', 'Unknown'),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='security_logs',
+        help_text='User associated with this event (null for failed logins with unknown user)'
+    )
+    attempted_email = models.EmailField(
+        blank=True,
+        help_text='Email attempted during login (useful for failed logins)'
+    )
+    event_type = models.CharField(
+        max_length=30,
+        choices=EVENT_TYPES,
+        db_index=True
+    )
+
+    # Request metadata
+    ip_address = models.GenericIPAddressField(db_index=True)
+    user_agent = models.TextField(blank=True)
+    device_type = models.CharField(
+        max_length=20,
+        choices=DEVICE_TYPES,
+        default='unknown'
+    )
+    browser = models.CharField(max_length=100, blank=True)
+    operating_system = models.CharField(max_length=100, blank=True)
+
+    # Geolocation
+    city = models.CharField(max_length=100, blank=True)
+    country = models.CharField(max_length=100, blank=True)
+    country_code = models.CharField(max_length=10, blank=True)
+
+    # Failure details
+    failure_reason = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text='Reason for failed login (wrong password, user not found, IP blocked, etc.)'
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = 'tenants_security_log'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', '-created_at']),
+            models.Index(fields=['event_type', '-created_at']),
+            models.Index(fields=['ip_address', '-created_at']),
+        ]
+
+    def __str__(self):
+        user_display = self.user.email if self.user else self.attempted_email or 'Unknown'
+        return f"{self.get_event_type_display()} - {user_display} - {self.ip_address}"
+
+
+class TenantIPWhitelist(models.Model):
+    """
+    Stores whitelisted IP addresses for a tenant.
+    This model is stored in the public schema since it references Tenant.
+    """
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name='ip_whitelists',
+        help_text='Tenant this IP whitelist entry belongs to'
+    )
+    ip_address = models.GenericIPAddressField(
+        help_text='Single IP address to whitelist'
+    )
+    cidr_notation = models.CharField(
+        max_length=20,
+        blank=True,
+        help_text='CIDR notation for IP range (e.g., 192.168.1.0/24). If provided, ip_address is the network address.'
+    )
+    description = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text='Description of this IP entry (e.g., Office, VPN, etc.)'
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text='Whether this whitelist entry is active'
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_ip_whitelists',
+        help_text='User who created this whitelist entry'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'tenants_ip_whitelist'
+        verbose_name = 'Tenant IP Whitelist'
+        verbose_name_plural = 'Tenant IP Whitelists'
+        ordering = ['-created_at']
+        unique_together = [['tenant', 'ip_address', 'cidr_notation']]
+
+    def __str__(self):
+        ip_display = f"{self.ip_address}/{self.cidr_notation}" if self.cidr_notation else self.ip_address
+        status = "Active" if self.is_active else "Inactive"
+        return f"{self.tenant.name} - {ip_display} ({status})"

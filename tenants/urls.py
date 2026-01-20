@@ -30,6 +30,11 @@ from .deployment_views import (
     deploy_frontend, get_deployment_status as get_frontend_deployment_status,
     redeploy_frontend, delete_deployment, update_deployment_env
 )
+from .security_views import (
+    list_security_logs, security_logs_stats, my_security_logs,
+    list_ip_whitelist, create_ip_whitelist, manage_ip_whitelist,
+    toggle_ip_whitelist, get_current_ip
+)
 
 router = DefaultRouter()
 router.register(r'tenants', TenantViewSet)
@@ -99,6 +104,16 @@ urlpatterns = [
     path('api/dashboard-appearance/', get_dashboard_appearance, name='get_dashboard_appearance'),
     path('api/dashboard-appearance/update/', update_dashboard_appearance, name='update_dashboard_appearance'),
     path('api/dashboard-appearance/reset/', reset_dashboard_appearance, name='reset_dashboard_appearance'),
+
+    # Security endpoints
+    path('api/security/logs/', list_security_logs, name='list_security_logs'),
+    path('api/security/logs/stats/', security_logs_stats, name='security_logs_stats'),
+    path('api/security/logs/me/', my_security_logs, name='my_security_logs'),
+    path('api/security/ip-whitelist/', list_ip_whitelist, name='list_ip_whitelist'),
+    path('api/security/ip-whitelist/create/', create_ip_whitelist, name='create_ip_whitelist'),
+    path('api/security/ip-whitelist/<int:pk>/', manage_ip_whitelist, name='manage_ip_whitelist'),
+    path('api/security/ip-whitelist/toggle/', toggle_ip_whitelist, name='toggle_ip_whitelist'),
+    path('api/security/current-ip/', get_current_ip, name='get_current_ip'),
 
     # Upload endpoints
     path('api/upload/image/', upload_image, name='upload_image'),

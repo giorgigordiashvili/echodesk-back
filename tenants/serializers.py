@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model, authenticate
 from rest_framework.authtoken.models import Token
-from .models import Tenant, SavedCard, TenantSubscription, DashboardAppearanceSettings
+from .models import Tenant, SavedCard, TenantSubscription, DashboardAppearanceSettings, SecurityLog, TenantIPWhitelist
 import re
 
 User = get_user_model()
@@ -423,5 +423,95 @@ class DashboardAppearanceSettingsSerializer(serializers.ModelSerializer):
                         field: f"Invalid HSL format. Expected format: 'H S% L%' (e.g., '240 5.9% 10%')"
                     })
                 attrs[field] = value
+
+        return attrs
+
+
+# ============================================================
+# Security Serializers
+# ============================================================
+
+class SecurityLogSerializer(serializers.ModelSerializer):
+    """Serializer for SecurityLog model - read-only for viewing logs"""
+    user_email = serializers.SerializerMethodField()
+    event_type_display = serializers.CharField(source='get_event_type_display', read_only=True)
+    device_type_display = serializers.CharField(source='get_device_type_display', read_only=True)
+
+    class Meta:
+        model = SecurityLog
+        fields = (
+            'id', 'user', 'user_email', 'attempted_email', 'event_type', 'event_type_display',
+            'ip_address', 'user_agent', 'device_type', 'device_type_display',
+            'browser', 'operating_system', 'city', 'country', 'country_code',
+            'failure_reason', 'created_at'
+        )
+        read_only_fields = fields
+
+    def get_user_email(self, obj):
+        """Get user email if user exists"""
+        if obj.user:
+            return obj.user.email
+        return obj.attempted_email or None
+
+
+class TenantIPWhitelistSerializer(serializers.ModelSerializer):
+    """Serializer for TenantIPWhitelist model"""
+    created_by_email = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TenantIPWhitelist
+        fields = (
+            'id', 'ip_address', 'cidr_notation', 'description',
+            'is_active', 'created_by', 'created_by_email', 'created_at', 'updated_at'
+        )
+        read_only_fields = ('id', 'created_by', 'created_by_email', 'created_at', 'updated_at')
+
+    def get_created_by_email(self, obj):
+        """Get creator email if exists"""
+        if obj.created_by:
+            return obj.created_by.email
+        return None
+
+    def validate_ip_address(self, value):
+        """Validate IP address format"""
+        import ipaddress
+        try:
+            ipaddress.ip_address(value)
+        except ValueError:
+            raise serializers.ValidationError("Invalid IP address format")
+        return value
+
+    def validate_cidr_notation(self, value):
+        """Validate CIDR notation if provided"""
+        if not value:
+            return value
+
+        # CIDR should be just the prefix length (e.g., "24" not "/24")
+        value = value.strip().lstrip('/')
+
+        try:
+            prefix_length = int(value)
+            if prefix_length < 0 or prefix_length > 128:
+                raise serializers.ValidationError("CIDR prefix must be between 0 and 128")
+        except ValueError:
+            raise serializers.ValidationError("CIDR notation must be a number (e.g., '24' for /24)")
+
+        return value
+
+    def validate(self, attrs):
+        """Validate IP address and CIDR combination"""
+        import ipaddress
+
+        ip_address = attrs.get('ip_address')
+        cidr_notation = attrs.get('cidr_notation', '')
+
+        if ip_address and cidr_notation:
+            try:
+                # Validate the network address
+                ipaddress.ip_network(f"{ip_address}/{cidr_notation}", strict=False)
+            except ValueError as e:
+                raise serializers.ValidationError({
+                    'cidr_notation': f"Invalid IP/CIDR combination: {str(e)}"
+                })
 
         return attrs

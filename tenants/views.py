@@ -20,6 +20,7 @@ from .serializers import (
 from .services import SingleFrontendDeploymentService, TenantConfigAPI
 from .bog_payment import bog_service
 from .permissions import get_subscription_info
+from .security_service import SecurityService
 from django.contrib.auth.hashers import make_password
 import logging
 import uuid
@@ -56,12 +57,41 @@ def tenant_login(request):
     """
     Tenant-specific login endpoint for dashboard access
     """
+    from django.utils import timezone
+
     if not hasattr(request, 'tenant') or request.tenant.schema_name == get_public_schema_name():
         return Response(
-            {'error': 'This endpoint is only available from tenant subdomains'}, 
+            {'error': 'This endpoint is only available from tenant subdomains'},
             status=status.HTTP_403_FORBIDDEN
         )
-    
+
+    # Get the attempted email for logging
+    attempted_email = request.data.get('email', '')
+    client_ip = SecurityService.get_client_ip(request)
+
+    # Try to find the user first to check if they're superuser (for IP bypass check)
+    potential_user = None
+    try:
+        potential_user = User.objects.get(email=attempted_email)
+    except User.DoesNotExist:
+        pass
+
+    # Check IP whitelist BEFORE authentication
+    is_superuser = potential_user.is_superuser if potential_user else False
+    if not SecurityService.is_ip_whitelisted(request.tenant, client_ip, is_superuser):
+        # Log failed login due to IP block
+        SecurityService.log_security_event(
+            event_type='login_failed',
+            request=request,
+            user=potential_user,
+            attempted_email=attempted_email,
+            failure_reason=f'IP address {client_ip} is not whitelisted'
+        )
+        return Response(
+            {'error': 'Access denied. Your IP address is not allowed.'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
     serializer = TenantLoginSerializer(data=request.data, context={'request': request})
     if serializer.is_valid():
         user = serializer.validated_data['user']
@@ -78,6 +108,17 @@ def tenant_login(request):
         # Get or create token for the user
         token, created = Token.objects.get_or_create(user=user)
 
+        # Update last_login
+        user.last_login = timezone.now()
+        user.save(update_fields=['last_login'])
+
+        # Log successful login
+        SecurityService.log_security_event(
+            event_type='login_success',
+            request=request,
+            user=user
+        )
+
         # Get dashboard data
         dashboard_serializer = TenantDashboardDataSerializer(user, context={'request': request})
 
@@ -86,6 +127,15 @@ def tenant_login(request):
             'token': token.key,
             'dashboard_data': dashboard_serializer.data
         }, status=status.HTTP_200_OK)
+
+    # Log failed login (invalid credentials)
+    SecurityService.log_security_event(
+        event_type='login_failed',
+        request=request,
+        user=potential_user,
+        attempted_email=attempted_email,
+        failure_reason='Invalid email or password'
+    )
 
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -117,19 +167,27 @@ def tenant_logout(request):
     """
     if not hasattr(request, 'tenant') or request.tenant.schema_name == get_public_schema_name():
         return Response(
-            {'error': 'This endpoint is only available from tenant subdomains'}, 
+            {'error': 'This endpoint is only available from tenant subdomains'},
             status=status.HTTP_403_FORBIDDEN
         )
-    
+
     try:
+        # Log logout event before deleting token
+        SecurityService.log_security_event(
+            event_type='logout',
+            request=request,
+            user=request.user
+        )
+
         # Delete the user's token
         request.user.auth_token.delete()
         return Response({
             'message': 'Successfully logged out'
         }, status=status.HTTP_200_OK)
-    except:
+    except Exception as e:
+        logger.error(f"Error during logout: {str(e)}")
         return Response(
-            {'error': 'Error during logout'}, 
+            {'error': 'Error during logout'},
             status=status.HTTP_400_BAD_REQUEST
         )
 
