@@ -839,7 +839,8 @@ def facebook_send_message(request):
         recipient_id = validated_data['recipient_id']
         message_text = validated_data['message']
         page_id = validated_data['page_id']
-        
+        reply_to_message_id = validated_data.get('reply_to_message_id', '').strip()
+
         # Get the page connection for this tenant
         try:
             page_connection = FacebookPageConnection.objects.get(
@@ -850,15 +851,20 @@ def facebook_send_message(request):
             return Response({
                 'error': 'Page not found or not connected to this tenant'
             }, status=status.HTTP_404_NOT_FOUND)
-        
+
         # Send message using Facebook Graph API
         send_url = f"https://graph.facebook.com/v23.0/me/messages"
-        
+
         message_data = {
             'recipient': {'id': recipient_id},
             'message': {'text': message_text},
             'messaging_type': 'RESPONSE'  # Responding to user message
         }
+
+        # Add reply_to if replying to a specific message
+        if reply_to_message_id:
+            message_data['reply_to'] = {'mid': reply_to_message_id}
+            logger.info(f"Replying to message: {reply_to_message_id}")
         
         headers = {
             'Content-Type': 'application/json',

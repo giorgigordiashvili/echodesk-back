@@ -46,6 +46,7 @@ class FacebookSendMessageSerializer(serializers.Serializer):
     recipient_id = serializers.CharField(max_length=255, help_text="Facebook user ID to send message to")
     message = serializers.CharField(help_text="Message text to send")
     page_id = serializers.CharField(max_length=255, help_text="Facebook page ID to send from")
+    reply_to_message_id = serializers.CharField(max_length=255, required=False, allow_blank=True, help_text="Message ID to reply to (optional)")
 
 
 class InstagramAccountConnectionSerializer(serializers.ModelSerializer):
