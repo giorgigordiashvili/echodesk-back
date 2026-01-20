@@ -440,7 +440,7 @@ class SecurityLogSerializer(serializers.ModelSerializer):
     class Meta:
         model = SecurityLog
         fields = (
-            'id', 'user', 'user_email', 'attempted_email', 'event_type', 'event_type_display',
+            'id', 'user_id', 'user_email', 'attempted_email', 'event_type', 'event_type_display',
             'ip_address', 'user_agent', 'device_type', 'device_type_display',
             'browser', 'operating_system', 'city', 'country', 'country_code',
             'failure_reason', 'created_at'
@@ -448,9 +448,8 @@ class SecurityLogSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
     def get_user_email(self, obj):
-        """Get user email if user exists"""
-        if obj.user:
-            return obj.user.email
+        """Get user email - primarily from attempted_email since we store it on login"""
+        # attempted_email is always populated on login, so use that
         return obj.attempted_email or None
 
 

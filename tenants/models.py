@@ -1030,13 +1030,13 @@ class SecurityLog(models.Model):
         ('unknown', 'Unknown'),
     ]
 
-    user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
+    # Note: Using IntegerField instead of ForeignKey to avoid cross-schema FK issues
+    # in multi-tenant setup. The user may exist in a different schema context.
+    user_id = models.IntegerField(
         null=True,
         blank=True,
-        related_name='security_logs',
-        help_text='User associated with this event (null for failed logins with unknown user)'
+        db_index=True,
+        help_text='User ID associated with this event (null for failed logins with unknown user)'
     )
     attempted_email = models.EmailField(
         blank=True,
@@ -1077,14 +1077,13 @@ class SecurityLog(models.Model):
         db_table = 'tenants_security_log'
         ordering = ['-created_at']
         indexes = [
-            models.Index(fields=['user', '-created_at']),
+            models.Index(fields=['user_id', '-created_at']),
             models.Index(fields=['event_type', '-created_at']),
             models.Index(fields=['ip_address', '-created_at']),
         ]
 
     def __str__(self):
-        user_display = self.user.email if self.user else self.attempted_email or 'Unknown'
-        return f"{self.get_event_type_display()} - {user_display} - {self.ip_address}"
+        return f"{self.get_event_type_display()} - {self.attempted_email or 'Unknown'} - {self.ip_address}"
 
 
 class TenantIPWhitelist(models.Model):

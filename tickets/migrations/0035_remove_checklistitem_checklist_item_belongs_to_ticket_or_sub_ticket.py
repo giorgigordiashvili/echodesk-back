@@ -3,6 +3,29 @@
 from django.db import migrations
 
 
+def remove_constraint_if_exists(apps, schema_editor):
+    """Remove constraint only if it exists."""
+    table_name = 'tickets_checklistitem'
+    constraint_name = 'checklist_item_belongs_to_ticket_or_sub_ticket'
+
+    # Check if constraint exists
+    with schema_editor.connection.cursor() as cursor:
+        cursor.execute("""
+            SELECT 1 FROM pg_constraint
+            WHERE conname = %s
+            AND conrelid = %s::regclass
+        """, [constraint_name, table_name])
+
+        if cursor.fetchone():
+            # Constraint exists, remove it
+            cursor.execute(f'ALTER TABLE {table_name} DROP CONSTRAINT {constraint_name}')
+
+
+def noop(apps, schema_editor):
+    """No-op for reverse migration."""
+    pass
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -10,8 +33,5 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RemoveConstraint(
-            model_name='checklistitem',
-            name='checklist_item_belongs_to_ticket_or_sub_ticket',
-        ),
+        migrations.RunPython(remove_constraint_if_exists, noop),
     ]

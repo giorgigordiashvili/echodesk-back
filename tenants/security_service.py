@@ -150,7 +150,7 @@ class SecurityService:
 
         try:
             log = SecurityLog.objects.create(
-                user=user,
+                user_id=user.id if user else None,
                 attempted_email=attempted_email or (user.email if user else ''),
                 event_type=event_type,
                 ip_address=ip_address,
@@ -163,7 +163,7 @@ class SecurityService:
                 country_code=location['country_code'],
                 failure_reason=failure_reason
             )
-            logger.info(f"Security event logged: {event_type} for {user or attempted_email} from {ip_address}")
+            logger.info(f"Security event logged: {event_type} for {user.email if user else attempted_email} from {ip_address}")
             return log
         except Exception as e:
             logger.error(f"Failed to log security event: {e}")
