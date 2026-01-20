@@ -889,6 +889,13 @@ def facebook_send_message(request):
             
             # Optionally save the sent message to our database
             try:
+                # Look up the original message if this is a reply
+                reply_to_obj = None
+                if reply_to_message_id:
+                    reply_to_obj = FacebookMessage.objects.filter(
+                        message_id=reply_to_message_id
+                    ).first()
+
                 FacebookMessage.objects.create(
                     page_connection=page_connection,
                     message_id=message_id or f"sent_{datetime.now().timestamp()}",
@@ -896,7 +903,9 @@ def facebook_send_message(request):
                     sender_name=page_connection.page_name,
                     message_text=message_text,
                     timestamp=datetime.now(),
-                    is_from_page=True
+                    is_from_page=True,
+                    reply_to_message_id=reply_to_message_id if reply_to_message_id else None,
+                    reply_to=reply_to_obj
                 )
             except Exception as e:
                 logger.warning(f"Failed to save sent message: {e}")
