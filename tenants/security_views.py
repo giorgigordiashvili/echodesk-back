@@ -157,7 +157,7 @@ def security_logs_stats(request):
     total_logins = logs.filter(event_type='login_success').count()
     failed_logins = logs.filter(event_type='login_failed').count()
     unique_ips = logs.values('ip_address').distinct().count()
-    unique_users = logs.filter(user__isnull=False).values('user').distinct().count()
+    unique_users = logs.filter(user_id__isnull=False).values('user_id').distinct().count()
 
     # Count by event type
     by_event_type = dict(logs.values('event_type').annotate(count=Count('id')).values_list('event_type', 'count'))
@@ -227,7 +227,7 @@ def my_security_logs(request):
             status=status.HTTP_403_FORBIDDEN
         )
 
-    queryset = SecurityLog.objects.filter(user=request.user).order_by('-created_at')
+    queryset = SecurityLog.objects.filter(user_id=request.user.id).order_by('-created_at')
 
     paginator = SecurityLogPagination()
     paginator.page_size = 20
