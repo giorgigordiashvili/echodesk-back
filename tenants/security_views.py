@@ -68,7 +68,7 @@ def list_security_logs(request):
             status=status.HTTP_403_FORBIDDEN
         )
 
-    queryset = SecurityLog.objects.all().select_related('user')
+    queryset = SecurityLog.objects.all()
 
     # Apply filters
     event_type = request.GET.get('event_type')
