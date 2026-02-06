@@ -68,11 +68,16 @@ class LanguageViewSet(viewsets.ModelViewSet):
     ordering_fields = ['sort_order', 'code']
     ordering = ['sort_order', 'code']
 
+    def _clear_language_cache(self):
+        """Clear all language-related caches"""
+        # Clear all cache - simple approach for language management
+        # Languages are rarely modified so this is acceptable
+        cache.clear()
+
     @extend_schema(
         tags=['Ecommerce Admin - Languages'],
         summary='List all languages'
     )
-    @method_decorator(cache_page(60 * 60))  # Cache for 1 hour - languages rarely change
     def list(self, request, *args, **kwargs):
         return super().list(request, *args, **kwargs)
 
@@ -80,7 +85,6 @@ class LanguageViewSet(viewsets.ModelViewSet):
         tags=['Ecommerce Admin - Languages'],
         summary='Get language details'
     )
-    @method_decorator(cache_page(60 * 60))  # Cache for 1 hour
     def retrieve(self, request, *args, **kwargs):
         return super().retrieve(request, *args, **kwargs)
 
@@ -89,28 +93,36 @@ class LanguageViewSet(viewsets.ModelViewSet):
         summary='Create new language'
     )
     def create(self, request, *args, **kwargs):
-        return super().create(request, *args, **kwargs)
+        response = super().create(request, *args, **kwargs)
+        self._clear_language_cache()
+        return response
 
     @extend_schema(
         tags=['Ecommerce Admin - Languages'],
         summary='Update language'
     )
     def update(self, request, *args, **kwargs):
-        return super().update(request, *args, **kwargs)
+        response = super().update(request, *args, **kwargs)
+        self._clear_language_cache()
+        return response
 
     @extend_schema(
         tags=['Ecommerce Admin - Languages'],
         summary='Partially update language'
     )
     def partial_update(self, request, *args, **kwargs):
-        return super().partial_update(request, *args, **kwargs)
+        response = super().partial_update(request, *args, **kwargs)
+        self._clear_language_cache()
+        return response
 
     @extend_schema(
         tags=['Ecommerce Admin - Languages'],
         summary='Delete language'
     )
     def destroy(self, request, *args, **kwargs):
-        return super().destroy(request, *args, **kwargs)
+        response = super().destroy(request, *args, **kwargs)
+        self._clear_language_cache()
+        return response
 
 
 class AttributeDefinitionViewSet(viewsets.ModelViewSet):
