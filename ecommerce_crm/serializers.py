@@ -161,6 +161,7 @@ class ProductDetailSerializer(serializers.ModelSerializer):
 
 class ProductCreateUpdateSerializer(serializers.ModelSerializer):
     """Serializer for creating/updating products with attributes"""
+    slug = serializers.CharField(required=False, allow_blank=True, help_text="Auto-generated from SKU if not provided")
     image = serializers.CharField(required=False, allow_null=True, allow_blank=True, help_text="Image URL string")
     attributes = serializers.ListField(
         child=serializers.DictField(),
@@ -195,8 +196,8 @@ class ProductCreateUpdateSerializer(serializers.ModelSerializer):
         return value
 
     def validate_slug(self, value):
-        """Validate slug length"""
-        if len(value) > 200:
+        """Validate slug length - allow blank for auto-generation"""
+        if value and len(value) > 200:
             raise serializers.ValidationError(
                 f"Slug must be 200 characters or less. Current length: {len(value)}"
             )
@@ -221,6 +222,22 @@ class ProductCreateUpdateSerializer(serializers.ModelSerializer):
         if request and hasattr(request, 'user'):
             validated_data['created_by'] = request.user
             validated_data['updated_by'] = request.user
+
+        # Auto-generate slug if not provided
+        if not validated_data.get('slug'):
+            from django.utils.text import slugify
+            import uuid
+            # Try to generate from SKU first
+            base_slug = slugify(validated_data.get('sku', ''))
+            if not base_slug:
+                # Fallback to uuid
+                base_slug = f"product-{uuid.uuid4().hex[:8]}"
+            slug = base_slug
+            counter = 1
+            while Product.objects.filter(slug=slug).exists():
+                slug = f"{base_slug}-{counter}"
+                counter += 1
+            validated_data['slug'] = slug
 
         # Create product
         product = super().create(validated_data)
