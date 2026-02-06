@@ -280,6 +280,26 @@ class Product(models.Model):
             return round(((self.compare_at_price - self.price) / self.compare_at_price) * 100, 2)
         return 0
 
+    def save(self, *args, **kwargs):
+        """Auto-generate slug from SKU if not provided"""
+        if not self.slug:
+            from django.utils.text import slugify
+            import uuid
+            # Generate slug from SKU (always ASCII-safe)
+            base_slug = slugify(self.sku)
+            if not base_slug:
+                # Fallback to uuid-based slug
+                base_slug = f"product-{uuid.uuid4().hex[:8]}"
+
+            # Ensure uniqueness
+            slug = base_slug
+            counter = 1
+            while Product.objects.filter(slug=slug).exclude(pk=self.pk).exists():
+                slug = f"{base_slug}-{counter}"
+                counter += 1
+            self.slug = slug
+        super().save(*args, **kwargs)
+
 
 class ProductImage(models.Model):
     """Additional product images"""
