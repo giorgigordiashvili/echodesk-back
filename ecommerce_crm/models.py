@@ -60,7 +60,6 @@ class AttributeDefinition(models.Model):
     (e.g., Color, Size, Material, etc.)
     """
     ATTRIBUTE_TYPES = [
-        ('select', 'Single Select'),
         ('multiselect', 'Multi Select'),
         ('number', 'Number'),
     ]
@@ -73,7 +72,7 @@ class AttributeDefinition(models.Model):
         unique=True,
         help_text="Unique key for code reference (e.g., 'color', 'size')"
     )
-    attribute_type = models.CharField(max_length=20, choices=ATTRIBUTE_TYPES, default='select')
+    attribute_type = models.CharField(max_length=20, choices=ATTRIBUTE_TYPES, default='multiselect')
     options = models.JSONField(
         blank=True,
         default=list,
