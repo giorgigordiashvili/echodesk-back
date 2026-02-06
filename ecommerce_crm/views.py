@@ -6,7 +6,17 @@ from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiParamet
 from django_filters.rest_framework import DjangoFilterBackend, FilterSet, CharFilter, NumberFilter, BooleanFilter
 from django.db.models import Q, F
 from django.core.cache import cache
+from django.utils.decorators import method_decorator
+from django.views.decorators.cache import never_cache
 from tenants.models import Tenant
+
+
+class NoCacheMixin:
+    """Mixin to prevent browser caching for admin viewsets"""
+
+    @method_decorator(never_cache)
+    def dispatch(self, request, *args, **kwargs):
+        return super().dispatch(request, *args, **kwargs)
 from .models import (
     Language,
     AttributeDefinition,
@@ -55,7 +65,7 @@ from .serializers import (
 )
 
 
-class LanguageViewSet(viewsets.ModelViewSet):
+class LanguageViewSet(NoCacheMixin, viewsets.ModelViewSet):
     """
     ViewSet for managing available languages
     """
@@ -123,7 +133,7 @@ class LanguageViewSet(viewsets.ModelViewSet):
         return response
 
 
-class AttributeDefinitionViewSet(viewsets.ModelViewSet):
+class AttributeDefinitionViewSet(NoCacheMixin, viewsets.ModelViewSet):
     """
     ViewSet for attribute definitions (Public access for frontend)
     """
@@ -250,7 +260,7 @@ class ProductFilter(FilterSet):
         return queryset.distinct()
 
 
-class ProductViewSet(viewsets.ModelViewSet):
+class ProductViewSet(NoCacheMixin, viewsets.ModelViewSet):
     """
     ViewSet for products with advanced filtering and sorting (Public access for frontend)
     """
@@ -455,7 +465,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
 
-class ProductImageViewSet(viewsets.ModelViewSet):
+class ProductImageViewSet(NoCacheMixin, viewsets.ModelViewSet):
     """ViewSet for product images (Admin only)"""
     queryset = ProductImage.objects.all()
     serializer_class = ProductImageSerializer
@@ -466,7 +476,7 @@ class ProductImageViewSet(viewsets.ModelViewSet):
     ordering = ['sort_order', 'id']
 
 
-class ProductVariantViewSet(viewsets.ModelViewSet):
+class ProductVariantViewSet(NoCacheMixin, viewsets.ModelViewSet):
     """ViewSet for product variants (Admin only)"""
     queryset = ProductVariant.objects.filter(is_active=True)
     serializer_class = ProductVariantSerializer
@@ -483,7 +493,7 @@ class ProductVariantViewSet(viewsets.ModelViewSet):
         )
 
 
-class EcommerceClientViewSet(viewsets.ModelViewSet):
+class EcommerceClientViewSet(NoCacheMixin, viewsets.ModelViewSet):
     """ViewSet for managing ecommerce clients (Public access for frontend)"""
     queryset = EcommerceClient.objects.all()
     serializer_class = EcommerceClientSerializer
@@ -1144,7 +1154,7 @@ def get_current_client(request):
         )
 
 
-class ClientAddressViewSet(viewsets.ModelViewSet):
+class ClientAddressViewSet(NoCacheMixin, viewsets.ModelViewSet):
     """ViewSet for managing client addresses (Admin only)"""
     queryset = ClientAddress.objects.all()
     serializer_class = ClientAddressSerializer
@@ -1217,7 +1227,7 @@ class ClientAddressViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
 
-class FavoriteProductViewSet(viewsets.ModelViewSet):
+class FavoriteProductViewSet(NoCacheMixin, viewsets.ModelViewSet):
     """ViewSet for managing client favorite products/wishlist (Admin only)"""
     queryset = FavoriteProduct.objects.all()
     permission_classes = [IsAuthenticated]
@@ -1355,7 +1365,7 @@ class FavoriteProductViewSet(viewsets.ModelViewSet):
             }, status=status.HTTP_201_CREATED)
 
 
-class CartViewSet(viewsets.ModelViewSet):
+class CartViewSet(NoCacheMixin, viewsets.ModelViewSet):
     """ViewSet for managing shopping carts (Admin only)"""
     queryset = Cart.objects.all()
     serializer_class = CartSerializer
@@ -1460,7 +1470,7 @@ class CartViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
 
-class CartItemViewSet(viewsets.ModelViewSet):
+class CartItemViewSet(NoCacheMixin, viewsets.ModelViewSet):
     """ViewSet for managing cart items (Admin only)"""
     queryset = CartItem.objects.all()
     permission_classes = [IsAuthenticated]
@@ -1511,7 +1521,7 @@ class CartItemViewSet(viewsets.ModelViewSet):
         return super().destroy(request, *args, **kwargs)
 
 
-class OrderViewSet(viewsets.ModelViewSet):
+class OrderViewSet(NoCacheMixin, viewsets.ModelViewSet):
     """ViewSet for managing orders (Admin only)"""
     queryset = Order.objects.all()
     permission_classes = [IsAuthenticated]
@@ -2000,7 +2010,7 @@ def ecommerce_payment_webhook(request):
     return Response({'status': 'received'})
 
 
-class EcommerceSettingsViewSet(viewsets.ModelViewSet):
+class EcommerceSettingsViewSet(NoCacheMixin, viewsets.ModelViewSet):
     """ViewSet for managing ecommerce settings including BOG payment configuration"""
     serializer_class = EcommerceSettingsSerializer
     permission_classes = [IsAuthenticated]
@@ -2531,7 +2541,7 @@ class EcommerceSettingsViewSet(viewsets.ModelViewSet):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-class HomepageSectionViewSet(viewsets.ModelViewSet):
+class HomepageSectionViewSet(NoCacheMixin, viewsets.ModelViewSet):
     """
     ViewSet for managing homepage sections (tenant admin).
     Allows CRUD operations and reordering of homepage sections.
