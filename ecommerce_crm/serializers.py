@@ -36,7 +36,7 @@ class AttributeDefinitionSerializer(serializers.ModelSerializer):
         model = AttributeDefinition
         fields = [
             'id', 'name', 'key', 'attribute_type', 'options', 'unit',
-            'is_required', 'is_variant_attribute', 'is_filterable',
+            'is_required', 'is_filterable',
             'sort_order', 'is_active', 'created_at', 'updated_at'
         ]
         read_only_fields = ['created_at', 'updated_at']

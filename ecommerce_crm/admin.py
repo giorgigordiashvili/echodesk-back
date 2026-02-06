@@ -44,8 +44,8 @@ class LanguageAdmin(admin.ModelAdmin):
 
 @admin.register(AttributeDefinition)
 class AttributeDefinitionAdmin(admin.ModelAdmin):
-    list_display = ['__str__', 'key', 'attribute_type', 'is_required', 'is_variant_attribute', 'is_filterable', 'is_active']
-    list_filter = ['attribute_type', 'is_required', 'is_variant_attribute', 'is_filterable', 'is_active']
+    list_display = ['__str__', 'key', 'attribute_type', 'is_required', 'is_filterable', 'is_active']
+    list_filter = ['attribute_type', 'is_required', 'is_filterable', 'is_active']
     search_fields = ['key']
     ordering = ['sort_order', 'id']
 

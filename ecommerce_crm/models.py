@@ -60,13 +60,9 @@ class AttributeDefinition(models.Model):
     (e.g., Color, Size, Material, etc.)
     """
     ATTRIBUTE_TYPES = [
-        ('text', 'Text'),
-        ('number', 'Number'),
-        ('boolean', 'Boolean'),
         ('select', 'Single Select'),
         ('multiselect', 'Multi Select'),
-        ('color', 'Color'),
-        ('date', 'Date'),
+        ('number', 'Number'),
     ]
 
     name = models.JSONField(
@@ -77,7 +73,7 @@ class AttributeDefinition(models.Model):
         unique=True,
         help_text="Unique key for code reference (e.g., 'color', 'size')"
     )
-    attribute_type = models.CharField(max_length=20, choices=ATTRIBUTE_TYPES, default='text')
+    attribute_type = models.CharField(max_length=20, choices=ATTRIBUTE_TYPES, default='select')
     options = models.JSONField(
         blank=True,
         default=list,
@@ -89,10 +85,6 @@ class AttributeDefinition(models.Model):
         help_text="Unit of measurement (e.g., 'cm', 'kg', 'ml')"
     )
     is_required = models.BooleanField(default=False)
-    is_variant_attribute = models.BooleanField(
-        default=False,
-        help_text="If True, this attribute can be used to create product variants (e.g., Size, Color)"
-    )
     is_filterable = models.BooleanField(
         default=True,
         help_text="Whether this attribute can be used for filtering products"
@@ -352,15 +344,9 @@ class ProductAttributeValue(models.Model):
         """Get the appropriate value based on attribute type"""
         attribute_type = self.attribute.attribute_type
 
-        if attribute_type == 'text':
-            return self.value_text
-        elif attribute_type == 'number':
+        if attribute_type == 'number':
             return self.value_number
-        elif attribute_type == 'boolean':
-            return self.value_boolean
-        elif attribute_type == 'date':
-            return self.value_date
-        elif attribute_type in ['select', 'multiselect', 'color']:
+        elif attribute_type in ['select', 'multiselect']:
             return self.value_json
 
         return None
@@ -369,15 +355,9 @@ class ProductAttributeValue(models.Model):
         """Set the appropriate value field based on attribute type"""
         attribute_type = self.attribute.attribute_type
 
-        if attribute_type == 'text':
-            self.value_text = str(value)
-        elif attribute_type == 'number':
+        if attribute_type == 'number':
             self.value_number = Decimal(str(value))
-        elif attribute_type == 'boolean':
-            self.value_boolean = bool(value)
-        elif attribute_type == 'date':
-            self.value_date = value
-        elif attribute_type in ['select', 'multiselect', 'color']:
+        elif attribute_type in ['select', 'multiselect']:
             self.value_json = value
 
 

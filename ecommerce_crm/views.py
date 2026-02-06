@@ -122,7 +122,7 @@ class AttributeDefinitionViewSet(viewsets.ModelViewSet):
     permission_classes = [AllowAny]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter, DjangoFilterBackend]
     search_fields = ['key']
-    filterset_fields = ['attribute_type', 'is_variant_attribute', 'is_filterable']
+    filterset_fields = ['attribute_type', 'is_filterable']
     ordering_fields = ['sort_order', 'created_at']
     ordering = ['sort_order', 'id']
 

@@ -122,7 +122,7 @@ class ClientAttributeViewSet(viewsets.ReadOnlyModelViewSet):
     authentication_classes = []
     permission_classes = [AllowAny]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
-    filterset_fields = ['attribute_type', 'is_variant_attribute']
+    filterset_fields = ['attribute_type']
     ordering_fields = ['sort_order', 'key']
     ordering = ['sort_order', 'id']
 
@@ -189,11 +189,6 @@ class ClientAttributeViewSet(viewsets.ReadOnlyModelViewSet):
                             attribute_values__attribute=attribute,
                             attribute_values__value_json__contains=value
                         )
-                    elif attribute.attribute_type == 'boolean':
-                        q_filter |= Q(
-                            attribute_values__attribute=attribute,
-                            attribute_values__value_boolean=(value.lower() == 'true')
-                        )
                     elif attribute.attribute_type == 'number':
                         # Support range: min-max format
                         if '-' in value:
@@ -255,24 +250,6 @@ class ClientAttributeViewSet(viewsets.ReadOnlyModelViewSet):
                         'max': float(value_range['max_value']),
                         'unit': attribute.unit
                     }
-
-            elif attribute.attribute_type == 'boolean':
-                # For boolean types, count true/false
-                true_count = products_qs.filter(
-                    attribute_values__attribute=attribute,
-                    attribute_values__value_boolean=True
-                ).distinct().count()
-
-                false_count = products_qs.filter(
-                    attribute_values__attribute=attribute,
-                    attribute_values__value_boolean=False
-                ).distinct().count()
-
-                if true_count > 0 or false_count > 0:
-                    facet['options'] = [
-                        {'value': 'true', 'label': 'Yes', 'count': true_count},
-                        {'value': 'false', 'label': 'No', 'count': false_count}
-                    ]
 
             # Only include facets that have data
             if facet.get('options') or facet.get('range'):
@@ -446,11 +423,6 @@ class ClientProductViewSet(viewsets.ReadOnlyModelViewSet):
                                 attribute_values__attribute=attribute,
                                 attribute_values__value_json__contains=val
                             )
-                        elif attribute.attribute_type == 'boolean':
-                            q_filter |= Q(
-                                attribute_values__attribute=attribute,
-                                attribute_values__value_boolean=(val.lower() == 'true')
-                            )
                         elif attribute.attribute_type == 'number':
                             # Support range: min-max format
                             if '-' in val:
@@ -465,11 +437,6 @@ class ClientProductViewSet(viewsets.ReadOnlyModelViewSet):
                                     attribute_values__attribute=attribute,
                                     attribute_values__value_number=float(val)
                                 )
-                        elif attribute.attribute_type == 'text':
-                            q_filter |= Q(
-                                attribute_values__attribute=attribute,
-                                attribute_values__value_text__icontains=val
-                            )
 
                     if q_filter:
                         queryset = queryset.filter(q_filter).distinct()
