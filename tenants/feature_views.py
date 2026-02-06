@@ -8,8 +8,6 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from django.utils.decorators import method_decorator
-from django.views.decorators.cache import cache_page
 from datetime import timedelta
 from decimal import Decimal
 
@@ -60,7 +58,6 @@ class FeatureViewSet(viewsets.ReadOnlyModelViewSet):
             queryset = queryset.filter(category=category)
         return queryset
 
-    @method_decorator(cache_page(60 * 10))  # Cache for 10 minutes
     def list(self, request, *args, **kwargs):
         return super().list(request, *args, **kwargs)
 

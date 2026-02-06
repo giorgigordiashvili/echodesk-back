@@ -5,8 +5,6 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiParameter, inline_serializer
 from django_filters.rest_framework import DjangoFilterBackend, FilterSet, CharFilter, NumberFilter, BooleanFilter
 from django.db.models import Q, F
-from django.utils.decorators import method_decorator
-from django.views.decorators.cache import cache_page
 from django.core.cache import cache
 from tenants.models import Tenant
 from .models import (
@@ -142,7 +140,6 @@ class AttributeDefinitionViewSet(viewsets.ModelViewSet):
         tags=['Ecommerce Admin - Attributes'],
         summary='List all product attributes'
     )
-    @method_decorator(cache_page(60 * 10))  # Cache for 10 minutes
     def list(self, request, *args, **kwargs):
         return super().list(request, *args, **kwargs)
 
@@ -307,7 +304,6 @@ class ProductViewSet(viewsets.ModelViewSet):
         - Search: ?search=keyword
         '''
     )
-    @method_decorator(cache_page(60 * 5))  # Cache for 5 minutes
     def list(self, request, *args, **kwargs):
         return super().list(request, *args, **kwargs)
 
@@ -316,7 +312,6 @@ class ProductViewSet(viewsets.ModelViewSet):
         summary='Get product details',
         description='Retrieve detailed information about a specific product including variants and attributes'
     )
-    @method_decorator(cache_page(60 * 5))  # Cache for 5 minutes
     def retrieve(self, request, *args, **kwargs):
         return super().retrieve(request, *args, **kwargs)
 
@@ -357,7 +352,6 @@ class ProductViewSet(viewsets.ModelViewSet):
         description='Retrieve all products marked as featured'
     )
     @action(detail=False, methods=['get'])
-    @method_decorator(cache_page(60 * 5))  # Cache for 5 minutes
     def featured(self, request):
         """Get featured products"""
         products = self.get_queryset().filter(is_featured=True, status='active')
@@ -2024,7 +2018,6 @@ class EcommerceSettingsViewSet(viewsets.ModelViewSet):
         summary='Get ecommerce settings',
         description='Retrieve ecommerce settings for current tenant including BOG configuration'
     )
-    @method_decorator(cache_page(60 * 10))  # Cache for 10 minutes
     def list(self, request, *args, **kwargs):
         return super().list(request, *args, **kwargs)
 
@@ -2033,7 +2026,6 @@ class EcommerceSettingsViewSet(viewsets.ModelViewSet):
         summary='Get settings detail',
         description='Retrieve detailed ecommerce settings'
     )
-    @method_decorator(cache_page(60 * 10))  # Cache for 10 minutes
     def retrieve(self, request, *args, **kwargs):
         return super().retrieve(request, *args, **kwargs)
 
@@ -2561,7 +2553,6 @@ class HomepageSectionViewSet(viewsets.ModelViewSet):
         summary='List homepage sections',
         description='Get all homepage sections for this tenant, ordered by position'
     )
-    @method_decorator(cache_page(60 * 10))  # Cache for 10 minutes
     def list(self, request, *args, **kwargs):
         return super().list(request, *args, **kwargs)
 
