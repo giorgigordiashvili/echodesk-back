@@ -1,6 +1,9 @@
 from django.db import models
 from django.contrib.auth import get_user_model
+from django.contrib.auth.hashers import make_password, check_password
 from django.core.validators import MinValueValidator, MaxValueValidator
+from django.utils import timezone
+import secrets
 
 User = get_user_model()
 
@@ -1297,11 +1300,13 @@ class QuickReply(models.Model):
         ]
 
 
-class SocialClient(models.Model):
+class Client(models.Model):
     """
-    Central client entity for social/chat contacts.
-    One client can have multiple social accounts across different platforms.
+    Unified client entity for social/chat contacts and booking clients.
+    One client can have multiple social accounts across different platforms
+    and can also be enabled for booking services.
     """
+    # Basic info
     name = models.CharField(max_length=255, help_text="Client's display name")
     email = models.EmailField(blank=True, null=True, help_text="Optional email address")
     phone = models.CharField(max_length=50, blank=True, help_text="Optional phone number")
@@ -1313,6 +1318,24 @@ class SocialClient(models.Model):
         help_text="URL to profile picture (auto-populated from linked accounts)"
     )
 
+    # Booking authentication fields
+    first_name = models.CharField(max_length=100, blank=True, help_text="First name for booking")
+    last_name = models.CharField(max_length=100, blank=True, help_text="Last name for booking")
+    password_hash = models.CharField(max_length=255, blank=True, null=True, help_text="Hashed password for booking auth")
+    is_booking_enabled = models.BooleanField(default=False, help_text="Whether this client can use booking system")
+
+    # Email verification (for booking)
+    is_verified = models.BooleanField(default=False, help_text="Email verified for booking")
+    verification_token = models.CharField(max_length=100, blank=True, null=True)
+    verification_sent_at = models.DateTimeField(blank=True, null=True)
+
+    # Password reset (for booking)
+    reset_token = models.CharField(max_length=100, blank=True, null=True)
+    reset_token_expires = models.DateTimeField(blank=True, null=True)
+
+    # Login tracking
+    last_login = models.DateTimeField(blank=True, null=True)
+
     # Metadata
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -1321,21 +1344,65 @@ class SocialClient(models.Model):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name='created_social_clients'
+        related_name='created_clients'
     )
 
     class Meta:
         ordering = ['-updated_at']
-        verbose_name = "Social Client"
-        verbose_name_plural = "Social Clients"
+        verbose_name = "Client"
+        verbose_name_plural = "Clients"
         indexes = [
             models.Index(fields=['name']),
             models.Index(fields=['email']),
             models.Index(fields=['phone']),
+            models.Index(fields=['is_booking_enabled']),
         ]
 
     def __str__(self):
         return self.name
+
+    @property
+    def full_name(self):
+        """Return full name for booking, or display name if not set"""
+        if self.first_name or self.last_name:
+            return f"{self.first_name} {self.last_name}".strip()
+        return self.name
+
+    def set_password(self, raw_password):
+        """Hash and set password for booking authentication"""
+        self.password_hash = make_password(raw_password)
+
+    def check_password(self, raw_password):
+        """Check password against hash"""
+        if not self.password_hash:
+            return False
+        return check_password(raw_password, self.password_hash)
+
+    def generate_verification_token(self):
+        """Generate email verification token"""
+        self.verification_token = secrets.token_urlsafe(32)
+        self.verification_sent_at = timezone.now()
+        return self.verification_token
+
+    def generate_reset_token(self):
+        """Generate password reset token (valid for 1 hour)"""
+        self.reset_token = secrets.token_urlsafe(32)
+        self.reset_token_expires = timezone.now() + timezone.timedelta(hours=1)
+        return self.reset_token
+
+    def verify_reset_token(self, token):
+        """Check if reset token is valid"""
+        if not self.reset_token or not self.reset_token_expires:
+            return False
+        if self.reset_token != token:
+            return False
+        if timezone.now() > self.reset_token_expires:
+            return False
+        return True
+
+
+# Backwards compatibility alias
+SocialClient = Client
 
 
 class SocialClientCustomField(models.Model):
@@ -1399,7 +1466,7 @@ class SocialClientCustomFieldValue(models.Model):
     Each client can have multiple field values.
     """
     client = models.ForeignKey(
-        SocialClient,
+        Client,
         on_delete=models.CASCADE,
         related_name='custom_field_values'
     )
@@ -1421,7 +1488,7 @@ class SocialClientCustomFieldValue(models.Model):
 
 class SocialAccount(models.Model):
     """
-    Links a SocialClient to a specific social platform account.
+    Links a Client to a specific social platform account.
     One client can have multiple accounts across different platforms.
     """
     PLATFORM_CHOICES = [
@@ -1433,7 +1500,7 @@ class SocialAccount(models.Model):
     ]
 
     client = models.ForeignKey(
-        SocialClient,
+        Client,
         on_delete=models.CASCADE,
         related_name='social_accounts'
     )

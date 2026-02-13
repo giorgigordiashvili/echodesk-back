@@ -6850,13 +6850,28 @@ class SocialClientViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(
                 Q(name__icontains=search) |
                 Q(email__icontains=search) |
-                Q(phone__icontains=search)
+                Q(phone__icontains=search) |
+                Q(first_name__icontains=search) |
+                Q(last_name__icontains=search)
             )
 
         # Platform filter
         platform = self.request.query_params.get('platform')
         if platform:
             queryset = queryset.filter(social_accounts__platform=platform).distinct()
+
+        # Booking enabled filter
+        is_booking_enabled = self.request.query_params.get('is_booking_enabled')
+        if is_booking_enabled is not None:
+            is_enabled = is_booking_enabled.lower() in ('true', '1', 'yes')
+            queryset = queryset.filter(is_booking_enabled=is_enabled)
+
+        # Client type filter (convenience filter)
+        client_type = self.request.query_params.get('client_type')
+        if client_type == 'booking':
+            queryset = queryset.filter(is_booking_enabled=True)
+        elif client_type == 'social':
+            queryset = queryset.filter(is_booking_enabled=False)
 
         return queryset
 
@@ -6966,6 +6981,83 @@ class SocialClientViewSet(viewsets.ModelViewSet):
                 {'error': 'Social account not found or not linked to this client'},
                 status=status.HTTP_404_NOT_FOUND
             )
+
+    @action(detail=True, methods=['get'])
+    def booking_history(self, request, pk=None):
+        """Get booking history for a client (only for booking-enabled clients)"""
+        client = self.get_object()
+
+        if not client.is_booking_enabled:
+            return Response({
+                'error': 'This client does not have booking enabled',
+                'bookings': []
+            })
+
+        try:
+            # Import here to avoid circular imports
+            from booking_management.models import Booking
+            from booking_management.serializers import BookingListSerializer
+
+            bookings = Booking.objects.filter(client=client).order_by('-date', '-start_time')
+
+            # Pagination support
+            page_size = int(request.query_params.get('page_size', 10))
+            page = int(request.query_params.get('page', 1))
+            offset = (page - 1) * page_size
+
+            total = bookings.count()
+            bookings = bookings[offset:offset + page_size]
+
+            return Response({
+                'results': BookingListSerializer(bookings, many=True).data,
+                'count': total,
+                'page': page,
+                'page_size': page_size,
+            })
+        except Exception as e:
+            return Response({
+                'error': f'Could not fetch booking history: {str(e)}',
+                'bookings': []
+            })
+
+    @action(detail=True, methods=['get'])
+    def booking_stats(self, request, pk=None):
+        """Get booking statistics for a client"""
+        client = self.get_object()
+
+        if not client.is_booking_enabled:
+            return Response({
+                'error': 'This client does not have booking enabled',
+                'stats': None
+            })
+
+        try:
+            from booking_management.models import Booking
+            from django.db.models import Sum
+            from django.utils import timezone
+
+            today = timezone.now().date()
+
+            total = client.bookings.count()
+            completed = client.bookings.filter(status='completed').count()
+            upcoming = client.bookings.filter(date__gte=today, status__in=['pending', 'confirmed']).count()
+            cancelled = client.bookings.filter(status='cancelled').count()
+            total_spent = client.bookings.filter(
+                payment_status__in=['fully_paid', 'deposit_paid']
+            ).aggregate(total=Sum('paid_amount'))['total'] or 0
+
+            return Response({
+                'total': total,
+                'completed': completed,
+                'upcoming': upcoming,
+                'cancelled': cancelled,
+                'total_spent': float(total_spent),
+            })
+        except Exception as e:
+            return Response({
+                'error': f'Could not fetch booking stats: {str(e)}',
+                'stats': None
+            })
 
 
 class SocialClientCustomFieldViewSet(viewsets.ModelViewSet):

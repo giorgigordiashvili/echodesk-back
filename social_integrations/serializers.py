@@ -707,10 +707,12 @@ class SocialClientCustomFieldValueSerializer(serializers.ModelSerializer):
 
 
 class SocialClientSerializer(serializers.ModelSerializer):
-    """Serializer for social clients with nested social accounts and custom fields"""
+    """Serializer for clients with nested social accounts and custom fields"""
     social_accounts = SocialAccountSerializer(many=True, read_only=True)
     custom_fields = serializers.SerializerMethodField()
     created_by_name = serializers.SerializerMethodField()
+    booking_stats = serializers.SerializerMethodField()
+    full_name = serializers.ReadOnlyField()
 
     class Meta:
         model = SocialClient
@@ -718,9 +720,16 @@ class SocialClientSerializer(serializers.ModelSerializer):
             'id', 'name', 'email', 'phone', 'notes', 'profile_picture',
             'social_accounts', 'custom_fields',
             'created_by', 'created_by_name',
-            'created_at', 'updated_at'
+            'created_at', 'updated_at',
+            # Booking fields
+            'first_name', 'last_name', 'full_name',
+            'is_booking_enabled', 'is_verified', 'last_login',
+            'booking_stats',
         ]
-        read_only_fields = ['id', 'created_by', 'created_by_name', 'created_at', 'updated_at', 'social_accounts']
+        read_only_fields = [
+            'id', 'created_by', 'created_by_name', 'created_at', 'updated_at',
+            'social_accounts', 'booking_stats', 'full_name'
+        ]
 
     def get_created_by_name(self, obj):
         if obj.created_by:
@@ -732,18 +741,49 @@ class SocialClientSerializer(serializers.ModelSerializer):
         values = obj.custom_field_values.select_related('field').all()
         return {v.field.name: v.value for v in values}
 
+    def get_booking_stats(self, obj):
+        """Return booking statistics for booking-enabled clients"""
+        if not obj.is_booking_enabled:
+            return None
+
+        from django.utils import timezone
+        today = timezone.now().date()
+
+        # Import here to avoid circular import
+        try:
+            total = obj.bookings.count()
+            completed = obj.bookings.filter(status='completed').count()
+            upcoming = obj.bookings.filter(date__gte=today, status__in=['pending', 'confirmed']).count()
+            return {
+                'total': total,
+                'completed': completed,
+                'upcoming': upcoming
+            }
+        except Exception:
+            return None
+
+
+# Alias for backward compatibility
+ClientSerializer = SocialClientSerializer
+
 
 class SocialClientListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for client list (without all nested details)"""
     social_accounts_count = serializers.IntegerField(source='social_accounts.count', read_only=True)
     platforms = serializers.SerializerMethodField()
+    booking_count = serializers.SerializerMethodField()
+    full_name = serializers.ReadOnlyField()
 
     class Meta:
         model = SocialClient
         fields = [
             'id', 'name', 'email', 'phone', 'profile_picture',
             'social_accounts_count', 'platforms',
-            'created_at', 'updated_at'
+            'created_at', 'updated_at',
+            # Booking fields
+            'first_name', 'last_name', 'full_name',
+            'is_booking_enabled', 'is_verified',
+            'booking_count',
         ]
         read_only_fields = fields
 
@@ -751,22 +791,68 @@ class SocialClientListSerializer(serializers.ModelSerializer):
         """Return list of unique platforms linked to this client"""
         return list(obj.social_accounts.values_list('platform', flat=True).distinct())
 
+    def get_booking_count(self, obj):
+        """Return total booking count for booking-enabled clients"""
+        if not obj.is_booking_enabled:
+            return None
+        try:
+            return obj.bookings.count()
+        except Exception:
+            return None
+
+
+# Alias for backward compatibility
+ClientListSerializer = SocialClientListSerializer
+
 
 class SocialClientCreateSerializer(serializers.ModelSerializer):
-    """Serializer for creating/updating social clients with custom fields"""
+    """Serializer for creating/updating clients with custom fields and booking support"""
     custom_fields = serializers.DictField(
         child=serializers.CharField(allow_blank=True),
         required=False,
         help_text="Custom field values as {field_name: value}"
     )
+    password = serializers.CharField(
+        write_only=True,
+        required=False,
+        min_length=8,
+        help_text="Password for booking authentication (only if is_booking_enabled=True)"
+    )
 
     class Meta:
         model = SocialClient
-        fields = ['name', 'email', 'phone', 'notes', 'profile_picture', 'custom_fields']
+        fields = [
+            'name', 'email', 'phone', 'notes', 'profile_picture', 'custom_fields',
+            # Booking fields
+            'first_name', 'last_name', 'is_booking_enabled', 'password'
+        ]
+
+    def validate(self, attrs):
+        # If enabling booking, require email and password
+        is_booking_enabled = attrs.get('is_booking_enabled', False)
+        if is_booking_enabled:
+            if not attrs.get('email'):
+                raise serializers.ValidationError({
+                    'email': 'Email is required for booking-enabled clients'
+                })
+            # Password is only required on create when booking is enabled
+            if not self.instance and not attrs.get('password'):
+                raise serializers.ValidationError({
+                    'password': 'Password is required for booking-enabled clients'
+                })
+        return attrs
 
     def create(self, validated_data):
         custom_fields_data = validated_data.pop('custom_fields', {})
+        password = validated_data.pop('password', None)
+
         client = SocialClient.objects.create(**validated_data)
+
+        # Set password if provided
+        if password:
+            client.set_password(password)
+            client.generate_verification_token()
+            client.save()
 
         # Create custom field values
         if custom_fields_data:
@@ -776,10 +862,16 @@ class SocialClientCreateSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         custom_fields_data = validated_data.pop('custom_fields', None)
+        password = validated_data.pop('password', None)
 
         # Update basic fields
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
+
+        # Update password if provided
+        if password:
+            instance.set_password(password)
+
         instance.save()
 
         # Update custom fields if provided
@@ -800,6 +892,10 @@ class SocialClientCreateSerializer(serializers.ModelSerializer):
                 )
             except SocialClientCustomField.DoesNotExist:
                 pass  # Ignore unknown fields
+
+
+# Alias for backward compatibility
+ClientCreateSerializer = SocialClientCreateSerializer
 
 
 class SocialAccountLinkSerializer(serializers.Serializer):

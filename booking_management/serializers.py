@@ -2,35 +2,47 @@ from rest_framework import serializers
 from django.utils import timezone
 from rest_framework_simplejwt.tokens import RefreshToken
 from .models import (
-    BookingClient, ServiceCategory, Service, BookingStaff,
+    ServiceCategory, Service, BookingStaff,
     StaffAvailability, StaffException, Booking, RecurringBooking,
     BookingSettings
 )
+from social_integrations.models import Client
 from users.models import User
 
 
 # ============================================================================
-# BOOKING CLIENT SERIALIZERS
+# BOOKING CLIENT SERIALIZERS (using unified Client model)
 # ============================================================================
 
 class BookingClientSerializer(serializers.ModelSerializer):
-    """Serializer for BookingClient (read)"""
+    """Serializer for booking client (using unified Client model)"""
     full_name = serializers.ReadOnlyField()
+    phone_number = serializers.CharField(source='phone', read_only=True)
 
     class Meta:
-        model = BookingClient
-        fields = ['id', 'email', 'phone_number', 'first_name', 'last_name', 'full_name', 'is_verified', 'created_at']
-        read_only_fields = ['id', 'is_verified', 'created_at']
+        model = Client
+        fields = [
+            'id', 'email', 'phone_number', 'first_name', 'last_name',
+            'full_name', 'is_verified', 'is_booking_enabled', 'created_at'
+        ]
+        read_only_fields = ['id', 'is_verified', 'is_booking_enabled', 'created_at']
 
 
-class BookingClientRegistrationSerializer(serializers.ModelSerializer):
-    """Serializer for client registration"""
+class BookingClientRegistrationSerializer(serializers.Serializer):
+    """Serializer for booking client registration using unified Client model"""
+    email = serializers.EmailField()
+    phone_number = serializers.CharField(max_length=50)
+    first_name = serializers.CharField(max_length=100)
+    last_name = serializers.CharField(max_length=100)
     password = serializers.CharField(write_only=True, min_length=8)
     password_confirm = serializers.CharField(write_only=True)
 
-    class Meta:
-        model = BookingClient
-        fields = ['email', 'phone_number', 'first_name', 'last_name', 'password', 'password_confirm']
+    def validate_email(self, value):
+        # Check if a booking-enabled client with this email already exists
+        existing = Client.objects.filter(email=value, is_booking_enabled=True).first()
+        if existing:
+            raise serializers.ValidationError('A booking account with this email already exists')
+        return value
 
     def validate(self, attrs):
         if attrs['password'] != attrs['password_confirm']:
@@ -40,17 +52,40 @@ class BookingClientRegistrationSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         validated_data.pop('password_confirm')
         password = validated_data.pop('password')
+        phone_number = validated_data.pop('phone_number')
 
-        client = BookingClient.objects.create(**validated_data)
-        client.set_password(password)
-        client.generate_verification_token()
-        client.save()
+        # Check if a social client with this email already exists
+        existing_client = Client.objects.filter(email=validated_data['email']).first()
 
-        return client
+        if existing_client:
+            # Enable booking on existing client
+            existing_client.first_name = validated_data['first_name']
+            existing_client.last_name = validated_data['last_name']
+            existing_client.phone = phone_number
+            existing_client.is_booking_enabled = True
+            existing_client.set_password(password)
+            existing_client.generate_verification_token()
+            existing_client.save()
+            return existing_client
+        else:
+            # Create new client with booking enabled
+            full_name = f"{validated_data['first_name']} {validated_data['last_name']}".strip()
+            client = Client.objects.create(
+                name=full_name,
+                email=validated_data['email'],
+                phone=phone_number,
+                first_name=validated_data['first_name'],
+                last_name=validated_data['last_name'],
+                is_booking_enabled=True,
+            )
+            client.set_password(password)
+            client.generate_verification_token()
+            client.save()
+            return client
 
 
 class BookingClientLoginSerializer(serializers.Serializer):
-    """Serializer for client login"""
+    """Serializer for booking client login using unified Client model"""
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True)
 
@@ -59,8 +94,9 @@ class BookingClientLoginSerializer(serializers.Serializer):
         password = attrs.get('password')
 
         try:
-            client = BookingClient.objects.get(email=email)
-        except BookingClient.DoesNotExist:
+            # Find client with booking enabled
+            client = Client.objects.get(email=email, is_booking_enabled=True)
+        except Client.DoesNotExist:
             raise serializers.ValidationError('Invalid email or password')
 
         if not client.check_password(password):
@@ -73,9 +109,10 @@ class BookingClientLoginSerializer(serializers.Serializer):
         client.last_login = timezone.now()
         client.save(update_fields=['last_login'])
 
-        # Generate JWT token with booking_client_id claim
+        # Generate JWT token with client_id claim (unified model)
         refresh = RefreshToken()
-        refresh['booking_client_id'] = client.id
+        refresh['client_id'] = client.id
+        refresh['booking_client_id'] = client.id  # Keep for backwards compatibility
         refresh['email'] = client.email
 
         attrs['client'] = client

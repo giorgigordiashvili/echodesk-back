@@ -6,9 +6,10 @@ from django.utils import timezone
 from django.db.models import Q
 from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter
 from .models import (
-    BookingClient, Service, ServiceCategory, BookingStaff,
+    Service, ServiceCategory, BookingStaff,
     Booking, RecurringBooking
 )
+from social_integrations.models import Client
 from .serializers import (
     BookingClientSerializer, BookingClientRegistrationSerializer,
     BookingClientLoginSerializer, ServiceListSerializer,
@@ -75,7 +76,7 @@ def client_verify_email(request):
         return Response({'error': 'Token required'}, status=status.HTTP_400_BAD_REQUEST)
 
     try:
-        client = BookingClient.objects.get(verification_token=token)
+        client = Client.objects.get(verification_token=token, is_booking_enabled=True)
 
         if client.is_verified:
             return Response({'message': 'Email already verified'})
@@ -86,7 +87,7 @@ def client_verify_email(request):
 
         return Response({'message': 'Email verified successfully'})
 
-    except BookingClient.DoesNotExist:
+    except Client.DoesNotExist:
         return Response({'error': 'Invalid verification token'}, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -101,7 +102,7 @@ def client_password_reset_request(request):
         return Response({'error': 'Email required'}, status=status.HTTP_400_BAD_REQUEST)
 
     try:
-        client = BookingClient.objects.get(email=email)
+        client = Client.objects.get(email=email, is_booking_enabled=True)
         token = client.generate_reset_token()
         client.save(update_fields=['reset_token', 'reset_token_expires'])
 
@@ -110,7 +111,7 @@ def client_password_reset_request(request):
 
         return Response({'message': 'Password reset link sent to your email'})
 
-    except BookingClient.DoesNotExist:
+    except Client.DoesNotExist:
         # Don't reveal if email exists
         return Response({'message': 'If email exists, reset link will be sent'})
 
@@ -127,7 +128,7 @@ def client_password_reset_confirm(request):
         return Response({'error': 'Token and new password required'}, status=status.HTTP_400_BAD_REQUEST)
 
     try:
-        client = BookingClient.objects.get(reset_token=token)
+        client = Client.objects.get(reset_token=token, is_booking_enabled=True)
 
         if not client.verify_reset_token(token):
             return Response({'error': 'Invalid or expired token'}, status=status.HTTP_400_BAD_REQUEST)
@@ -139,7 +140,7 @@ def client_password_reset_confirm(request):
 
         return Response({'message': 'Password reset successful'})
 
-    except BookingClient.DoesNotExist:
+    except Client.DoesNotExist:
         return Response({'error': 'Invalid token'}, status=status.HTTP_400_BAD_REQUEST)
 
 

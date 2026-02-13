@@ -19,8 +19,10 @@ def generate_booking_number():
 
 class BookingClient(models.Model):
     """
-    Separate client model for booking management
-    Independent from EcommerceClient
+    DEPRECATED: This model is deprecated. Use social_integrations.Client instead.
+
+    Booking functionality has been merged into the unified Client model.
+    This model is kept for backwards compatibility during migration.
     """
     email = models.EmailField(unique=True, db_index=True)
     phone_number = models.CharField(max_length=20)
@@ -300,8 +302,13 @@ class Booking(models.Model):
     # Unique identifier
     booking_number = models.CharField(max_length=50, unique=True, default=generate_booking_number, db_index=True)
 
-    # Relationships
-    client = models.ForeignKey(BookingClient, on_delete=models.PROTECT, related_name='bookings')
+    # Relationships - client points to unified Client model in social_integrations
+    client = models.ForeignKey(
+        'social_integrations.Client',
+        on_delete=models.PROTECT,
+        related_name='bookings',
+        help_text="Client who made the booking"
+    )
     service = models.ForeignKey(Service, on_delete=models.PROTECT, related_name='bookings')
     staff = models.ForeignKey(BookingStaff, on_delete=models.SET_NULL, null=True, blank=True, related_name='bookings', help_text="Assigned staff member")
 
@@ -408,8 +415,13 @@ class RecurringBooking(models.Model):
         ('completed', 'Completed'),
     ]
 
-    # Relationships
-    client = models.ForeignKey(BookingClient, on_delete=models.CASCADE, related_name='recurring_bookings')
+    # Relationships - client points to unified Client model in social_integrations
+    client = models.ForeignKey(
+        'social_integrations.Client',
+        on_delete=models.CASCADE,
+        related_name='recurring_bookings',
+        help_text="Client with recurring booking"
+    )
     service = models.ForeignKey(Service, on_delete=models.PROTECT, related_name='recurring_bookings')
     staff = models.ForeignKey(BookingStaff, on_delete=models.SET_NULL, null=True, blank=True, related_name='recurring_bookings', help_text="Preferred staff (optional)")
 

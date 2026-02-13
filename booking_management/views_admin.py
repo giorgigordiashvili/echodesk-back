@@ -6,10 +6,11 @@ from django.db.models import Q, Count, Sum, Avg
 from datetime import datetime, timedelta, date
 from drf_spectacular.utils import extend_schema, extend_schema_view
 from .models import (
-    BookingClient, Service, ServiceCategory, BookingStaff,
+    Service, ServiceCategory, BookingStaff,
     Booking, RecurringBooking, StaffAvailability, StaffException,
     BookingSettings
 )
+from social_integrations.models import Client
 from .serializers import (
     BookingClientSerializer, ServiceListSerializer, ServiceDetailSerializer,
     ServiceCategorySerializer, BookingStaffSerializer, BookingStaffCreateSerializer,
@@ -600,12 +601,13 @@ class AdminRecurringBookingViewSet(viewsets.ModelViewSet):
     stats=extend_schema(tags=['Booking Admin - Clients'])
 )
 class AdminBookingClientViewSet(viewsets.ReadOnlyModelViewSet):
-    """Admin client viewing (read-only for now)"""
-    queryset = BookingClient.objects.all()
+    """Admin client viewing - shows clients with booking enabled from unified Client model"""
+    queryset = Client.objects.filter(is_booking_enabled=True)
     serializer_class = BookingClientSerializer
     permission_classes = [permissions.IsAuthenticated, HasBookingManagementFeature]
     feature_required = 'booking_management'
-    search_fields = ['email', 'first_name', 'last_name', 'phone_number']
+    search_fields = ['email', 'first_name', 'last_name', 'phone', 'name']
+    filterset_fields = ['is_verified']
 
     @action(detail=True, methods=['get'])
     def bookings(self, request, pk=None):
