@@ -165,23 +165,51 @@ class UserMinimalSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class ServiceMinimalSerializer(serializers.ModelSerializer):
+    """Minimal Service serializer for staff display"""
+    name_display = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Service
+        fields = ['id', 'name', 'name_display']
+        read_only_fields = fields
+
+    def get_name_display(self, obj):
+        """Get localized name"""
+        if isinstance(obj.name, dict):
+            language = self.context.get('language', 'en')
+            return obj.name.get(language, obj.name.get('en', str(obj.name)))
+        return obj.name
+
+
 class BookingStaffSerializer(serializers.ModelSerializer):
     """Serializer for BookingStaff (read)"""
     user = UserMinimalSerializer(read_only=True)
+    services = ServiceMinimalSerializer(many=True, read_only=True)
+    services_count = serializers.SerializerMethodField()
 
     class Meta:
         model = BookingStaff
-        fields = ['id', 'user', 'bio', 'profile_image', 'average_rating', 'total_ratings', 'is_active_for_bookings']
+        fields = ['id', 'user', 'bio', 'profile_image', 'average_rating', 'total_ratings', 'is_active_for_bookings', 'services', 'services_count']
         read_only_fields = ['id', 'average_rating', 'total_ratings']
+
+    def get_services_count(self, obj):
+        return obj.services.count()
 
 
 class BookingStaffCreateSerializer(serializers.ModelSerializer):
     """Serializer for creating/updating BookingStaff"""
-    user_id = serializers.IntegerField(write_only=True)
+    user_id = serializers.IntegerField(write_only=True, required=False)
+    service_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        write_only=True,
+        required=False,
+        help_text="List of service IDs this staff can provide"
+    )
 
     class Meta:
         model = BookingStaff
-        fields = ['user_id', 'bio', 'profile_image', 'is_active_for_bookings']
+        fields = ['user_id', 'bio', 'profile_image', 'is_active_for_bookings', 'service_ids']
 
     def validate_user_id(self, value):
         """Validate that user exists and is not already booking staff"""
@@ -190,16 +218,56 @@ class BookingStaffCreateSerializer(serializers.ModelSerializer):
         except User.DoesNotExist:
             raise serializers.ValidationError("User not found")
 
-        # Check if user is already a booking staff
-        if hasattr(user, 'booking_staff'):
+        # Check if user is already a booking staff (only on create)
+        if not self.instance and hasattr(user, 'booking_staff'):
             raise serializers.ValidationError("User is already assigned as booking staff")
 
         return value
 
+    def validate_service_ids(self, value):
+        """Validate that all services exist"""
+        if value:
+            existing_ids = set(Service.objects.filter(id__in=value).values_list('id', flat=True))
+            invalid_ids = set(value) - existing_ids
+            if invalid_ids:
+                raise serializers.ValidationError(f"Services not found: {invalid_ids}")
+        return value
+
     def create(self, validated_data):
         user_id = validated_data.pop('user_id')
+        service_ids = validated_data.pop('service_ids', [])
         user = User.objects.get(id=user_id)
-        return BookingStaff.objects.create(user=user, **validated_data)
+        staff = BookingStaff.objects.create(user=user, **validated_data)
+
+        # Assign services to staff
+        if service_ids:
+            services = Service.objects.filter(id__in=service_ids)
+            for service in services:
+                service.staff_members.add(staff)
+
+        return staff
+
+    def update(self, instance, validated_data):
+        # Remove user_id if present (can't change user on update)
+        validated_data.pop('user_id', None)
+        service_ids = validated_data.pop('service_ids', None)
+
+        # Update basic fields
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        # Update services if provided
+        if service_ids is not None:
+            # Remove from all services first
+            instance.services.clear()
+            # Add to new services
+            if service_ids:
+                services = Service.objects.filter(id__in=service_ids)
+                for service in services:
+                    service.staff_members.add(instance)
+
+        return instance
 
 
 class StaffAvailabilitySerializer(serializers.ModelSerializer):

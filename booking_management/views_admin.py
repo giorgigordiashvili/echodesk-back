@@ -226,7 +226,8 @@ class AdminServiceViewSet(viewsets.ModelViewSet):
     availability=extend_schema(tags=['Booking Admin - Staff']),
     exceptions=extend_schema(tags=['Booking Admin - Staff']),
     bookings=extend_schema(tags=['Booking Admin - Staff']),
-    toggle_active=extend_schema(tags=['Booking Admin - Staff'])
+    toggle_active=extend_schema(tags=['Booking Admin - Staff']),
+    available_users=extend_schema(tags=['Booking Admin - Staff'])
 )
 class AdminBookingStaffViewSet(viewsets.ModelViewSet):
     """Admin staff management"""
@@ -242,6 +243,44 @@ class AdminBookingStaffViewSet(viewsets.ModelViewSet):
         if self.action in ['create', 'update', 'partial_update']:
             return BookingStaffCreateSerializer
         return BookingStaffSerializer
+
+    @action(detail=False, methods=['get'])
+    def available_users(self, request):
+        """Get users who are not already booking staff"""
+        from users.models import User
+
+        # Get IDs of users who are already staff
+        staff_user_ids = BookingStaff.objects.values_list('user_id', flat=True)
+
+        # Get active users who are not staff
+        available_users = User.objects.filter(
+            is_active=True
+        ).exclude(
+            id__in=staff_user_ids
+        ).order_by('first_name', 'last_name')
+
+        # Search filter
+        search = request.query_params.get('search')
+        if search:
+            available_users = available_users.filter(
+                Q(first_name__icontains=search) |
+                Q(last_name__icontains=search) |
+                Q(email__icontains=search)
+            )
+
+        # Simple serialization
+        data = [
+            {
+                'id': user.id,
+                'email': user.email,
+                'first_name': user.first_name,
+                'last_name': user.last_name,
+                'full_name': user.get_full_name() or user.email,
+            }
+            for user in available_users[:50]  # Limit to 50 results
+        ]
+
+        return Response(data)
 
     @action(detail=True, methods=['get'])
     def availability(self, request, pk=None):
