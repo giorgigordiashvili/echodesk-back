@@ -601,7 +601,8 @@ class BookingSettingsSerializer(serializers.ModelSerializer):
     class Meta:
         model = BookingSettings
         fields = [
-            'id', 'require_deposit', 'allow_cash_payment', 'allow_card_payment',
+            'id', 'payment_method', 'bank_name', 'bank_iban', 'bank_account_holder',
+            'require_deposit', 'allow_cash_payment', 'allow_card_payment',
             'bog_client_id', 'bog_client_secret', 'bog_use_production',
             'cancellation_hours_before', 'refund_policy',
             'auto_confirm_on_deposit', 'auto_confirm_on_full_payment',

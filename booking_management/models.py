@@ -496,7 +496,20 @@ class BookingSettings(models.Model):
         ('no_refund', 'No Refund'),
     ]
 
+    PAYMENT_METHOD_CHOICES = [
+        ('manual_transfer', 'Manual Bank Transfer'),
+        ('bog_gateway', 'BOG Payment Gateway'),
+    ]
+
     tenant = models.OneToOneField('tenants.Tenant', on_delete=models.CASCADE, related_name='booking_settings')
+
+    # Payment method choice
+    payment_method = models.CharField(max_length=20, choices=PAYMENT_METHOD_CHOICES, default='manual_transfer')
+
+    # Bank transfer details (for manual method)
+    bank_name = models.CharField(max_length=100, blank=True)
+    bank_iban = models.CharField(max_length=50, blank=True)
+    bank_account_holder = models.CharField(max_length=255, blank=True)
 
     # Payment settings
     require_deposit = models.BooleanField(default=False, help_text="Require deposit for all bookings")
