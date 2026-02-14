@@ -510,7 +510,7 @@ def facebook_oauth_callback(request):
                     try:
                         subscribe_url = f"https://graph.facebook.com/v23.0/{page_id}/subscribed_apps"
                         subscribe_params = {
-                            'subscribed_fields': 'messages,messaging_postbacks,message_reads,message_deliveries,message_reactions',
+                            'subscribed_fields': 'messages,messaging_postbacks,message_reads,message_deliveries,message_reactions,message_echoes',
                             'access_token': page_access_token
                         }
                         logger.info(f"📡 Subscribing page {page_name} ({page_id}) to webhooks...")

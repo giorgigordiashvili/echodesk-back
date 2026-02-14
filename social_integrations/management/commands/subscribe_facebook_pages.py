@@ -71,7 +71,7 @@ class Command(BaseCommand):
         try:
             subscribe_url = f"https://graph.facebook.com/v23.0/{page.page_id}/subscribed_apps"
             subscribe_params = {
-                'subscribed_fields': 'messages,messaging_postbacks,message_reads,message_deliveries',
+                'subscribed_fields': 'messages,messaging_postbacks,message_reads,message_deliveries,message_reactions,message_echoes',
                 'access_token': page.page_access_token
             }
 
