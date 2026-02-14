@@ -37,6 +37,8 @@ def decode_imap_utf7(s: str) -> str:
     Returns:
         The decoded Unicode string
     """
+    if s is None:
+        return ''
     if not s or '&' not in s:
         return s
 
@@ -1209,12 +1211,16 @@ def get_available_folders(connection) -> List[Dict[str, Any]]:
 
         if result == 'OK':
             for folder_data in folders_data:
+                if folder_data is None:
+                    continue
                 if isinstance(folder_data, bytes):
                     decoded = folder_data.decode('utf-8', errors='replace')
                     if '"' in decoded:
                         parts = decoded.split('"')
                         if len(parts) >= 2:
                             folder_name = decode_imap_utf7(parts[-2])
+                            if not folder_name:
+                                continue
                             # Skip Drafts, All Mail, Trash, Sent, and Spam
                             skip_folders = ['Drafts', '[Gmail]/Drafts', '[Gmail]/All Mail', 'Trash', '[Gmail]/Trash', 'Deleted', 'Deleted Items', 'Deleted Messages', 'Sent', '[Gmail]/Sent Mail', 'Sent Items', 'Sent Messages', 'Spam', '[Gmail]/Spam', 'Junk', 'Junk E-mail']
                             if not any(skip.lower() == folder_name.lower() for skip in skip_folders):
