@@ -726,6 +726,8 @@ def _find_sent_folder(imap) -> Optional[str]:
 
         available_folders = []
         for folder_data in folders:
+            if folder_data is None:
+                continue
             if isinstance(folder_data, bytes):
                 # Parse folder name from response like: (\HasNoChildren) "/" "Sent"
                 decoded = folder_data.decode('utf-8', errors='replace')
@@ -734,7 +736,8 @@ def _find_sent_folder(imap) -> Optional[str]:
                     parts = decoded.split('"')
                     if len(parts) >= 2:
                         folder_name = decode_imap_utf7(parts[-2])
-                        available_folders.append(folder_name)
+                        if folder_name:
+                            available_folders.append(folder_name)
 
         # Try to find a matching sent folder
         for sent_name in sent_folder_names:
@@ -998,6 +1001,8 @@ def sync_imap_messages(connection, max_messages: int = 500) -> int:
             skipped_folders = []
 
             for folder_data in folders_data:
+                if folder_data is None:
+                    continue
                 if isinstance(folder_data, bytes):
                     decoded = folder_data.decode('utf-8', errors='replace')
                     # Extract folder name from response like: (\HasNoChildren) "/" "INBOX"
@@ -1005,7 +1010,7 @@ def sync_imap_messages(connection, max_messages: int = 500) -> int:
                         parts = decoded.split('"')
                         if len(parts) >= 2:
                             raw_folder_name = parts[-2]  # Keep raw for IMAP operations
-                            display_folder_name = decode_imap_utf7(raw_folder_name)  # Decode for display/DB
+                            display_folder_name = decode_imap_utf7(raw_folder_name) or raw_folder_name  # Decode for display/DB
                             all_folders.append(display_folder_name)
                             # Skip Drafts, All Mail, Trash, Sent, and Spam
                             skip_folders = ['Drafts', '[Gmail]/Drafts', '[Gmail]/All Mail', 'Trash', '[Gmail]/Trash', 'Deleted', 'Deleted Items', 'Deleted Messages', 'Sent', '[Gmail]/Sent Mail', 'Sent Items', 'Sent Messages', 'Spam', '[Gmail]/Spam', 'Junk', 'Junk E-mail']
@@ -1285,13 +1290,15 @@ def debug_email_sync(connection) -> Dict[str, Any]:
                        'Sent Items', 'Sent Messages', 'Spam', '[Gmail]/Spam', 'Junk', 'Junk E-mail']
 
         for folder_data in folders_data:
+            if folder_data is None:
+                continue
             if isinstance(folder_data, bytes):
                 decoded = folder_data.decode('utf-8', errors='replace')
                 if '"' in decoded:
                     parts = decoded.split('"')
                     if len(parts) >= 2:
                         raw_folder_name = parts[-2]  # Keep raw for IMAP
-                        display_folder_name = decode_imap_utf7(raw_folder_name)  # Decode for display
+                        display_folder_name = decode_imap_utf7(raw_folder_name) or raw_folder_name  # Decode for display
 
                         # Check if skipped
                         is_skipped = any(skip.lower() == display_folder_name.lower() for skip in skip_folders)
