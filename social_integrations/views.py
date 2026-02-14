@@ -1138,27 +1138,80 @@ def facebook_webhook(request):
                                     
                                     # Handle echo messages (messages sent by the page)
                                     if message_data.get('is_echo'):
-                                        logger.info("📤 Processing echo message to update timestamp")
+                                        logger.info("📤 Processing echo message (outgoing from page)")
                                         message_id = message_data.get('mid')
+                                        recipient_id = message_event.get('recipient', {}).get('id', '')
 
                                         if message_id:
                                             try:
-                                                # Update the timestamp of the message we saved when sending
                                                 fb_timestamp = message_event.get('timestamp')
-                                                if fb_timestamp:
-                                                    timestamp_dt = convert_facebook_timestamp(fb_timestamp)
+                                                timestamp_dt = convert_facebook_timestamp(fb_timestamp) if fb_timestamp else timezone.now()
 
-                                                    updated = FacebookMessage.objects.filter(
+                                                # Check if message already exists
+                                                existing = FacebookMessage.objects.filter(
+                                                    page_connection=page_connection,
+                                                    message_id=message_id
+                                                ).first()
+
+                                                if existing:
+                                                    # Update timestamp if message exists
+                                                    existing.timestamp = timestamp_dt
+                                                    existing.save(update_fields=['timestamp'])
+                                                    logger.info(f"✅ Updated echo message timestamp to {timestamp_dt}")
+                                                else:
+                                                    # Create new message for echo (sent from Facebook directly)
+                                                    message_text = message_data.get('text', '')
+
+                                                    # Handle attachments
+                                                    attachments = []
+                                                    attachment_type = ''
+                                                    attachment_url = None
+                                                    raw_attachments = message_data.get('attachments', [])
+
+                                                    for att in raw_attachments:
+                                                        att_type = att.get('type', 'file')
+                                                        att_url = att.get('payload', {}).get('url')
+                                                        attachments.append({
+                                                            'type': att_type,
+                                                            'url': att_url,
+                                                        })
+                                                        if not attachment_type:
+                                                            attachment_type = att_type
+                                                            attachment_url = att_url
+
+                                                    echo_message = FacebookMessage.objects.create(
                                                         page_connection=page_connection,
-                                                        message_id=message_id
-                                                    ).update(timestamp=timestamp_dt)
+                                                        message_id=message_id,
+                                                        sender_id=page_id,  # Sent by page
+                                                        sender_name=page_connection.page_name,
+                                                        message_text=message_text,
+                                                        attachment_type=attachment_type,
+                                                        attachment_url=attachment_url,
+                                                        attachments=attachments,
+                                                        timestamp=timestamp_dt,
+                                                        is_from_page=True,
+                                                        is_delivered=True,
+                                                    )
+                                                    logger.info(f"✅ Created echo message from Facebook: {message_id}")
 
-                                                    if updated > 0:
-                                                        logger.info(f"✅ Updated echo message timestamp to {timestamp_dt}")
-                                                    else:
-                                                        logger.info(f"⚠️ Echo message not found in database: {message_id}")
+                                                    # Send WebSocket notification
+                                                    ws_data = {
+                                                        'id': echo_message.id,
+                                                        'message_id': echo_message.message_id,
+                                                        'sender_id': echo_message.sender_id,
+                                                        'sender_name': echo_message.sender_name,
+                                                        'message_text': echo_message.message_text,
+                                                        'attachment_type': echo_message.attachment_type,
+                                                        'attachment_url': echo_message.attachment_url,
+                                                        'timestamp': echo_message.timestamp.isoformat(),
+                                                        'is_from_page': True,
+                                                        'page_id': page_id,
+                                                        'recipient_id': recipient_id,
+                                                    }
+                                                    send_websocket_notification(tenant_schema, ws_data, recipient_id)
+
                                             except Exception as e:
-                                                logger.error(f"❌ Failed to update echo message timestamp: {e}")
+                                                logger.error(f"❌ Failed to process echo message: {e}")
 
                                         continue
                                     
@@ -2254,27 +2307,82 @@ def instagram_webhook(request):
 
                                 # Handle echo messages (messages sent by the business)
                                 if message_data.get('is_echo'):
-                                    logger.info("📤 Processing Instagram echo message to update timestamp")
+                                    logger.info("📤 Processing Instagram echo message (outgoing from business)")
                                     message_id = message_data.get('mid')
+                                    recipient_id = message_event.get('recipient', {}).get('id', '')
 
                                     if message_id:
                                         try:
-                                            # Update the timestamp of the message we saved when sending
                                             ig_timestamp = message_event.get('timestamp')
-                                            if ig_timestamp:
-                                                timestamp_dt = convert_facebook_timestamp(ig_timestamp)
+                                            timestamp_dt = convert_facebook_timestamp(ig_timestamp) if ig_timestamp else timezone.now()
 
-                                                updated = InstagramMessage.objects.filter(
+                                            # Check if message already exists
+                                            existing = InstagramMessage.objects.filter(
+                                                account_connection=account_connection,
+                                                message_id=message_id
+                                            ).first()
+
+                                            if existing:
+                                                # Update timestamp if message exists
+                                                existing.timestamp = timestamp_dt
+                                                existing.save(update_fields=['timestamp'])
+                                                logger.info(f"✅ Updated Instagram echo message timestamp to {timestamp_dt}")
+                                            else:
+                                                # Create new message for echo (sent from Instagram directly)
+                                                message_text = message_data.get('text', '')
+
+                                                # Handle attachments
+                                                attachments = []
+                                                attachment_type = ''
+                                                attachment_url = None
+                                                raw_attachments = message_data.get('attachments', [])
+
+                                                for att in raw_attachments:
+                                                    att_type = att.get('type', 'file')
+                                                    att_url = att.get('payload', {}).get('url')
+                                                    attachments.append({
+                                                        'type': att_type,
+                                                        'url': att_url,
+                                                    })
+                                                    if not attachment_type:
+                                                        attachment_type = att_type
+                                                        attachment_url = att_url
+
+                                                echo_message = InstagramMessage.objects.create(
                                                     account_connection=account_connection,
-                                                    message_id=message_id
-                                                ).update(timestamp=timestamp_dt)
+                                                    message_id=message_id,
+                                                    sender_id=instagram_account_id,  # Sent by business
+                                                    sender_name=account_connection.username,
+                                                    sender_username=account_connection.username,
+                                                    message_text=message_text,
+                                                    attachment_type=attachment_type,
+                                                    attachment_url=attachment_url,
+                                                    attachments=attachments,
+                                                    timestamp=timestamp_dt,
+                                                    is_from_business=True,
+                                                    is_delivered=True,
+                                                )
+                                                logger.info(f"✅ Created Instagram echo message: {message_id}")
 
-                                                if updated > 0:
-                                                    logger.info(f"✅ Updated Instagram echo message timestamp to {timestamp_dt}")
-                                                else:
-                                                    logger.info(f"⚠️ Instagram echo message not found in database: {message_id}")
+                                                # Send WebSocket notification
+                                                ws_data = {
+                                                    'id': echo_message.id,
+                                                    'message_id': echo_message.message_id,
+                                                    'sender_id': echo_message.sender_id,
+                                                    'sender_name': echo_message.sender_name,
+                                                    'sender_username': echo_message.sender_username,
+                                                    'message_text': echo_message.message_text,
+                                                    'attachment_type': echo_message.attachment_type,
+                                                    'attachment_url': echo_message.attachment_url,
+                                                    'timestamp': echo_message.timestamp.isoformat(),
+                                                    'is_from_business': True,
+                                                    'account_id': instagram_account_id,
+                                                    'recipient_id': recipient_id,
+                                                }
+                                                send_websocket_notification(tenant_schema, ws_data, recipient_id)
+
                                         except Exception as e:
-                                            logger.error(f"❌ Failed to update Instagram echo message timestamp: {e}")
+                                            logger.error(f"❌ Failed to process Instagram echo message: {e}")
 
                                     continue
 
