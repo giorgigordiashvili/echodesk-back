@@ -128,21 +128,6 @@ def send_websocket_notification(tenant_schema, message_data, conversation_id):
         logger.error(f"Failed to send WebSocket notification: {e}")
 
 
-def is_facebook_page_unknown(page_id):
-    """Check if this Facebook page is in the unknown pages cache"""
-    from django.core.cache import cache
-    cache_key = f"unknown_facebook_page:{page_id}"
-    return cache.get(cache_key) is not None
-
-
-def mark_facebook_page_unknown(page_id):
-    """Mark a Facebook page as unknown (not connected to any tenant)"""
-    from django.core.cache import cache
-    cache_key = f"unknown_facebook_page:{page_id}"
-    # Cache for 24 hours - after that, we'll check again in case it was reconnected
-    cache.set(cache_key, True, timeout=60 * 60 * 24)
-
-
 def find_tenant_by_page_id(page_id):
     """Find which tenant schema contains the given Facebook page ID"""
     from django.db import connection
@@ -1034,17 +1019,10 @@ def facebook_webhook(request):
                 logger.error("No page_id found in webhook data")
                 return JsonResponse({'error': 'No page_id found'}, status=400)
 
-            # Check if this is a known unknown page (skip DB lookup)
-            if is_facebook_page_unknown(page_id):
-                logger.debug(f"Ignoring webhook for unknown Facebook page: {page_id}")
-                return JsonResponse({'status': 'received'})
-
             # Find which tenant this page belongs to
             tenant_schema = find_tenant_by_page_id(page_id)
 
             if not tenant_schema:
-                # Mark as unknown to avoid repeated lookups - silently ignore
-                mark_facebook_page_unknown(page_id)
                 logger.debug(f"Ignoring webhook for unlinked Facebook page: {page_id}")
                 return JsonResponse({'status': 'received'})
 
@@ -2176,21 +2154,6 @@ def instagram_send_message(request):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-def is_instagram_account_unknown(instagram_account_id):
-    """Check if this Instagram account is in the unknown accounts cache"""
-    from django.core.cache import cache
-    cache_key = f"unknown_instagram_account:{instagram_account_id}"
-    return cache.get(cache_key) is not None
-
-
-def mark_instagram_account_unknown(instagram_account_id):
-    """Mark an Instagram account as unknown (not connected to any tenant)"""
-    from django.core.cache import cache
-    cache_key = f"unknown_instagram_account:{instagram_account_id}"
-    # Cache for 24 hours - after that, we'll check again in case it was reconnected
-    cache.set(cache_key, True, timeout=60 * 60 * 24)
-
-
 def find_tenant_by_instagram_account_id(instagram_account_id):
     """Find which tenant schema contains the given Instagram account ID"""
     from django.db import connection
@@ -2259,17 +2222,10 @@ def instagram_webhook(request):
                     logger.warning("No Instagram account ID in entry")
                     continue
 
-                # Check if this is a known unknown account (skip DB lookup)
-                if is_instagram_account_unknown(instagram_account_id):
-                    logger.debug(f"Ignoring webhook for unknown Instagram account: {instagram_account_id}")
-                    continue
-
                 # Find which tenant this Instagram account belongs to
                 tenant_schema = find_tenant_by_instagram_account_id(instagram_account_id)
 
                 if not tenant_schema:
-                    # Mark as unknown to avoid repeated lookups - silently ignore
-                    mark_instagram_account_unknown(instagram_account_id)
                     logger.debug(f"Ignoring webhook for unlinked Instagram account: {instagram_account_id}")
                     continue
 
