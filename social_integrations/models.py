@@ -168,6 +168,7 @@ class OrphanedFacebookMessage(models.Model):
 
 class InstagramAccountConnection(models.Model):
     """Stores Instagram Business account connection details for a tenant"""
+
     instagram_account_id = models.CharField(max_length=100, unique=True)
     username = models.CharField(max_length=200)
     profile_picture_url = models.URLField(max_length=500, blank=True, null=True)
@@ -181,6 +182,7 @@ class InstagramAccountConnection(models.Model):
         blank=True
     )
     is_active = models.BooleanField(default=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -466,6 +468,25 @@ class WhatsAppMessage(models.Model):
         null=True,
         blank=True,
         help_text="When the message was revoked"
+    )
+
+    # Reaction fields
+    reaction_emoji = models.CharField(
+        max_length=10,
+        blank=True,
+        null=True,
+        help_text='Emoji reaction on this message'
+    )
+    reacted_by = models.CharField(
+        max_length=50,
+        blank=True,
+        null=True,
+        help_text='Phone number of user who reacted'
+    )
+    reacted_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text='When the reaction was added'
     )
 
     # Soft delete fields for admin investigation

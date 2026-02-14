@@ -128,21 +128,6 @@ def send_websocket_notification(tenant_schema, message_data, conversation_id):
         logger.error(f"Failed to send WebSocket notification: {e}")
 
 
-def is_facebook_page_unknown(page_id):
-    """Check if this Facebook page is in the unknown pages cache"""
-    from django.core.cache import cache
-    cache_key = f"unknown_facebook_page:{page_id}"
-    return cache.get(cache_key) is not None
-
-
-def mark_facebook_page_unknown(page_id):
-    """Mark a Facebook page as unknown (not connected to any tenant)"""
-    from django.core.cache import cache
-    cache_key = f"unknown_facebook_page:{page_id}"
-    # Cache for 24 hours - after that, we'll check again in case it was reconnected
-    cache.set(cache_key, True, timeout=60 * 60 * 24)
-
-
 def find_tenant_by_page_id(page_id):
     """Find which tenant schema contains the given Facebook page ID"""
     from django.db import connection
@@ -525,7 +510,7 @@ def facebook_oauth_callback(request):
                     try:
                         subscribe_url = f"https://graph.facebook.com/v23.0/{page_id}/subscribed_apps"
                         subscribe_params = {
-                            'subscribed_fields': 'messages,messaging_postbacks,message_reads,message_deliveries,message_reactions',
+                            'subscribed_fields': 'messages,messaging_postbacks,message_reads,message_deliveries,message_reactions,message_echoes',
                             'access_token': page_access_token
                         }
                         logger.info(f"📡 Subscribing page {page_name} ({page_id}) to webhooks...")
@@ -1034,17 +1019,10 @@ def facebook_webhook(request):
                 logger.error("No page_id found in webhook data")
                 return JsonResponse({'error': 'No page_id found'}, status=400)
 
-            # Check if this is a known unknown page (skip DB lookup)
-            if is_facebook_page_unknown(page_id):
-                logger.debug(f"Ignoring webhook for unknown Facebook page: {page_id}")
-                return JsonResponse({'status': 'received'})
-
             # Find which tenant this page belongs to
             tenant_schema = find_tenant_by_page_id(page_id)
 
             if not tenant_schema:
-                # Mark as unknown to avoid repeated lookups - silently ignore
-                mark_facebook_page_unknown(page_id)
                 logger.debug(f"Ignoring webhook for unlinked Facebook page: {page_id}")
                 return JsonResponse({'status': 'received'})
 
@@ -1160,27 +1138,80 @@ def facebook_webhook(request):
                                     
                                     # Handle echo messages (messages sent by the page)
                                     if message_data.get('is_echo'):
-                                        logger.info("📤 Processing echo message to update timestamp")
+                                        logger.info("📤 Processing echo message (outgoing from page)")
                                         message_id = message_data.get('mid')
+                                        recipient_id = message_event.get('recipient', {}).get('id', '')
 
                                         if message_id:
                                             try:
-                                                # Update the timestamp of the message we saved when sending
                                                 fb_timestamp = message_event.get('timestamp')
-                                                if fb_timestamp:
-                                                    timestamp_dt = convert_facebook_timestamp(fb_timestamp)
+                                                timestamp_dt = convert_facebook_timestamp(fb_timestamp) if fb_timestamp else timezone.now()
 
-                                                    updated = FacebookMessage.objects.filter(
+                                                # Check if message already exists
+                                                existing = FacebookMessage.objects.filter(
+                                                    page_connection=page_connection,
+                                                    message_id=message_id
+                                                ).first()
+
+                                                if existing:
+                                                    # Update timestamp if message exists
+                                                    existing.timestamp = timestamp_dt
+                                                    existing.save(update_fields=['timestamp'])
+                                                    logger.info(f"✅ Updated echo message timestamp to {timestamp_dt}")
+                                                else:
+                                                    # Create new message for echo (sent from Facebook directly)
+                                                    message_text = message_data.get('text', '')
+
+                                                    # Handle attachments
+                                                    attachments = []
+                                                    attachment_type = ''
+                                                    attachment_url = None
+                                                    raw_attachments = message_data.get('attachments', [])
+
+                                                    for att in raw_attachments:
+                                                        att_type = att.get('type', 'file')
+                                                        att_url = att.get('payload', {}).get('url')
+                                                        attachments.append({
+                                                            'type': att_type,
+                                                            'url': att_url,
+                                                        })
+                                                        if not attachment_type:
+                                                            attachment_type = att_type
+                                                            attachment_url = att_url
+
+                                                    echo_message = FacebookMessage.objects.create(
                                                         page_connection=page_connection,
-                                                        message_id=message_id
-                                                    ).update(timestamp=timestamp_dt)
+                                                        message_id=message_id,
+                                                        sender_id=page_id,  # Sent by page
+                                                        sender_name=page_connection.page_name,
+                                                        message_text=message_text,
+                                                        attachment_type=attachment_type,
+                                                        attachment_url=attachment_url,
+                                                        attachments=attachments,
+                                                        timestamp=timestamp_dt,
+                                                        is_from_page=True,
+                                                        is_delivered=True,
+                                                    )
+                                                    logger.info(f"✅ Created echo message from Facebook: {message_id}")
 
-                                                    if updated > 0:
-                                                        logger.info(f"✅ Updated echo message timestamp to {timestamp_dt}")
-                                                    else:
-                                                        logger.info(f"⚠️ Echo message not found in database: {message_id}")
+                                                    # Send WebSocket notification
+                                                    ws_data = {
+                                                        'id': echo_message.id,
+                                                        'message_id': echo_message.message_id,
+                                                        'sender_id': echo_message.sender_id,
+                                                        'sender_name': echo_message.sender_name,
+                                                        'message_text': echo_message.message_text,
+                                                        'attachment_type': echo_message.attachment_type,
+                                                        'attachment_url': echo_message.attachment_url,
+                                                        'timestamp': echo_message.timestamp.isoformat(),
+                                                        'is_from_page': True,
+                                                        'page_id': page_id,
+                                                        'recipient_id': recipient_id,
+                                                    }
+                                                    send_websocket_notification(tenant_schema, ws_data, recipient_id)
+
                                             except Exception as e:
-                                                logger.error(f"❌ Failed to update echo message timestamp: {e}")
+                                                logger.error(f"❌ Failed to process echo message: {e}")
 
                                         continue
                                     
@@ -2176,21 +2207,6 @@ def instagram_send_message(request):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-def is_instagram_account_unknown(instagram_account_id):
-    """Check if this Instagram account is in the unknown accounts cache"""
-    from django.core.cache import cache
-    cache_key = f"unknown_instagram_account:{instagram_account_id}"
-    return cache.get(cache_key) is not None
-
-
-def mark_instagram_account_unknown(instagram_account_id):
-    """Mark an Instagram account as unknown (not connected to any tenant)"""
-    from django.core.cache import cache
-    cache_key = f"unknown_instagram_account:{instagram_account_id}"
-    # Cache for 24 hours - after that, we'll check again in case it was reconnected
-    cache.set(cache_key, True, timeout=60 * 60 * 24)
-
-
 def find_tenant_by_instagram_account_id(instagram_account_id):
     """Find which tenant schema contains the given Instagram account ID"""
     from django.db import connection
@@ -2259,17 +2275,10 @@ def instagram_webhook(request):
                     logger.warning("No Instagram account ID in entry")
                     continue
 
-                # Check if this is a known unknown account (skip DB lookup)
-                if is_instagram_account_unknown(instagram_account_id):
-                    logger.debug(f"Ignoring webhook for unknown Instagram account: {instagram_account_id}")
-                    continue
-
                 # Find which tenant this Instagram account belongs to
                 tenant_schema = find_tenant_by_instagram_account_id(instagram_account_id)
 
                 if not tenant_schema:
-                    # Mark as unknown to avoid repeated lookups - silently ignore
-                    mark_instagram_account_unknown(instagram_account_id)
                     logger.debug(f"Ignoring webhook for unlinked Instagram account: {instagram_account_id}")
                     continue
 
@@ -2298,27 +2307,82 @@ def instagram_webhook(request):
 
                                 # Handle echo messages (messages sent by the business)
                                 if message_data.get('is_echo'):
-                                    logger.info("📤 Processing Instagram echo message to update timestamp")
+                                    logger.info("📤 Processing Instagram echo message (outgoing from business)")
                                     message_id = message_data.get('mid')
+                                    recipient_id = message_event.get('recipient', {}).get('id', '')
 
                                     if message_id:
                                         try:
-                                            # Update the timestamp of the message we saved when sending
                                             ig_timestamp = message_event.get('timestamp')
-                                            if ig_timestamp:
-                                                timestamp_dt = convert_facebook_timestamp(ig_timestamp)
+                                            timestamp_dt = convert_facebook_timestamp(ig_timestamp) if ig_timestamp else timezone.now()
 
-                                                updated = InstagramMessage.objects.filter(
+                                            # Check if message already exists
+                                            existing = InstagramMessage.objects.filter(
+                                                account_connection=account_connection,
+                                                message_id=message_id
+                                            ).first()
+
+                                            if existing:
+                                                # Update timestamp if message exists
+                                                existing.timestamp = timestamp_dt
+                                                existing.save(update_fields=['timestamp'])
+                                                logger.info(f"✅ Updated Instagram echo message timestamp to {timestamp_dt}")
+                                            else:
+                                                # Create new message for echo (sent from Instagram directly)
+                                                message_text = message_data.get('text', '')
+
+                                                # Handle attachments
+                                                attachments = []
+                                                attachment_type = ''
+                                                attachment_url = None
+                                                raw_attachments = message_data.get('attachments', [])
+
+                                                for att in raw_attachments:
+                                                    att_type = att.get('type', 'file')
+                                                    att_url = att.get('payload', {}).get('url')
+                                                    attachments.append({
+                                                        'type': att_type,
+                                                        'url': att_url,
+                                                    })
+                                                    if not attachment_type:
+                                                        attachment_type = att_type
+                                                        attachment_url = att_url
+
+                                                echo_message = InstagramMessage.objects.create(
                                                     account_connection=account_connection,
-                                                    message_id=message_id
-                                                ).update(timestamp=timestamp_dt)
+                                                    message_id=message_id,
+                                                    sender_id=instagram_account_id,  # Sent by business
+                                                    sender_name=account_connection.username,
+                                                    sender_username=account_connection.username,
+                                                    message_text=message_text,
+                                                    attachment_type=attachment_type,
+                                                    attachment_url=attachment_url,
+                                                    attachments=attachments,
+                                                    timestamp=timestamp_dt,
+                                                    is_from_business=True,
+                                                    is_delivered=True,
+                                                )
+                                                logger.info(f"✅ Created Instagram echo message: {message_id}")
 
-                                                if updated > 0:
-                                                    logger.info(f"✅ Updated Instagram echo message timestamp to {timestamp_dt}")
-                                                else:
-                                                    logger.info(f"⚠️ Instagram echo message not found in database: {message_id}")
+                                                # Send WebSocket notification
+                                                ws_data = {
+                                                    'id': echo_message.id,
+                                                    'message_id': echo_message.message_id,
+                                                    'sender_id': echo_message.sender_id,
+                                                    'sender_name': echo_message.sender_name,
+                                                    'sender_username': echo_message.sender_username,
+                                                    'message_text': echo_message.message_text,
+                                                    'attachment_type': echo_message.attachment_type,
+                                                    'attachment_url': echo_message.attachment_url,
+                                                    'timestamp': echo_message.timestamp.isoformat(),
+                                                    'is_from_business': True,
+                                                    'account_id': instagram_account_id,
+                                                    'recipient_id': recipient_id,
+                                                }
+                                                send_websocket_notification(tenant_schema, ws_data, recipient_id)
+
                                         except Exception as e:
-                                            logger.error(f"❌ Failed to update Instagram echo message timestamp: {e}")
+                                            logger.error(f"❌ Failed to process Instagram echo message: {e}")
 
                                     continue
 
@@ -4715,6 +4779,41 @@ def whatsapp_webhook(request):
                             logger.info(f"🗑️ Marked WhatsApp message as revoked: {revoked_msg_id}")
                         except WhatsAppMessage.DoesNotExist:
                             logger.warning(f"Cannot find message to revoke: {revoked_msg_id}")
+                        continue
+
+                    # Handle reaction message type
+                    if message_type == 'reaction':
+                        reaction_data = message.get('reaction', {})
+                        reacted_msg_id = reaction_data.get('message_id')
+                        emoji = reaction_data.get('emoji', '')
+
+                        try:
+                            existing_msg = WhatsAppMessage.objects.get(message_id=reacted_msg_id)
+                            if emoji:
+                                # Add reaction
+                                existing_msg.reaction_emoji = emoji
+                                existing_msg.reacted_by = from_number
+                                existing_msg.reacted_at = timezone.now()
+                                logger.info(f"😀 Added reaction {emoji} to WhatsApp message: {reacted_msg_id}")
+                            else:
+                                # Empty emoji means reaction removed
+                                existing_msg.reaction_emoji = None
+                                existing_msg.reacted_by = None
+                                existing_msg.reacted_at = None
+                                logger.info(f"🚫 Removed reaction from WhatsApp message: {reacted_msg_id}")
+                            existing_msg.save()
+
+                            # Send WebSocket notification for reaction update
+                            ws_reaction_data = {
+                                'type': 'reaction_update',
+                                'message_id': reacted_msg_id,
+                                'reaction_emoji': existing_msg.reaction_emoji,
+                                'reacted_by': existing_msg.reacted_by,
+                                'reacted_at': existing_msg.reacted_at.isoformat() if existing_msg.reacted_at else None,
+                            }
+                            send_websocket_notification(tenant_schema, ws_reaction_data, from_number)
+                        except WhatsAppMessage.DoesNotExist:
+                            logger.warning(f"Cannot find message for reaction: {reacted_msg_id}")
                         continue
 
                     # Skip if message already exists
