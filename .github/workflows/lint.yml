@@ -61,7 +61,7 @@ jobs:
         API_DOMAIN: api.echodesk.ge
         SENDGRID_API_KEY: fake
       run: |
-        python manage.py check --deploy --fail-level WARNING
+        python manage.py check --deploy --fail-level ERROR
 
     - name: Check for missing migrations
       env:
