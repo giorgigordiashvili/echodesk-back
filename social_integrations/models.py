@@ -19,13 +19,6 @@ class FacebookPageConnection(models.Model):
         ('api_error', 'API Error'),
     ]
 
-    SYNC_STATUS_CHOICES = [
-        ('pending', 'Pending'),
-        ('syncing', 'Syncing'),
-        ('completed', 'Completed'),
-        ('failed', 'Failed'),
-    ]
-
     page_id = models.CharField(max_length=100, unique=True)  # Make unique directly
     page_name = models.CharField(max_length=200)
     page_access_token = models.TextField()
@@ -45,35 +38,6 @@ class FacebookPageConnection(models.Model):
         null=True,
         blank=True,
         help_text='Facebook error code if deactivated due to error'
-    )
-
-    # Message sync tracking
-    sync_status = models.CharField(
-        max_length=20,
-        choices=SYNC_STATUS_CHOICES,
-        default='pending',
-        help_text='Status of historical message sync'
-    )
-    last_sync_at = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text='When messages were last synced'
-    )
-    last_sync_error = models.TextField(
-        blank=True,
-        help_text='Error message from last sync attempt if failed'
-    )
-    sync_days_back = models.IntegerField(
-        default=30,
-        help_text='Number of days of message history to sync'
-    )
-    conversations_synced = models.IntegerField(
-        default=0,
-        help_text='Number of conversations synced'
-    )
-    messages_synced = models.IntegerField(
-        default=0,
-        help_text='Number of messages synced'
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -205,13 +169,6 @@ class OrphanedFacebookMessage(models.Model):
 class InstagramAccountConnection(models.Model):
     """Stores Instagram Business account connection details for a tenant"""
 
-    SYNC_STATUS_CHOICES = [
-        ('pending', 'Pending'),
-        ('syncing', 'Syncing'),
-        ('completed', 'Completed'),
-        ('failed', 'Failed'),
-    ]
-
     instagram_account_id = models.CharField(max_length=100, unique=True)
     username = models.CharField(max_length=200)
     profile_picture_url = models.URLField(max_length=500, blank=True, null=True)
@@ -225,35 +182,6 @@ class InstagramAccountConnection(models.Model):
         blank=True
     )
     is_active = models.BooleanField(default=True)
-
-    # Message sync tracking
-    sync_status = models.CharField(
-        max_length=20,
-        choices=SYNC_STATUS_CHOICES,
-        default='pending',
-        help_text='Status of historical message sync'
-    )
-    last_sync_at = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text='When messages were last synced'
-    )
-    last_sync_error = models.TextField(
-        blank=True,
-        help_text='Error message from last sync attempt if failed'
-    )
-    sync_days_back = models.IntegerField(
-        default=30,
-        help_text='Number of days of message history to sync'
-    )
-    conversations_synced = models.IntegerField(
-        default=0,
-        help_text='Number of conversations synced'
-    )
-    messages_synced = models.IntegerField(
-        default=0,
-        help_text='Number of messages synced'
-    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
