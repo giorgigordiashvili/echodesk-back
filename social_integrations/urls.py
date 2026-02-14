@@ -110,6 +110,12 @@ urlpatterns = [
     # Delete conversation endpoint (superadmin only)
     path('delete-conversation/', views.delete_conversation, name='delete_conversation'),
 
+    # Social Sync endpoints (Facebook & Instagram message history sync)
+    path('sync/status/', views.social_sync_status, name='social_sync_status'),
+    path('sync/status/<str:platform>/', views.social_sync_status, name='social_sync_status_platform'),
+    path('sync/trigger/', views.social_sync_trigger, name='social_sync_trigger'),
+    path('sync/settings/', views.social_sync_settings, name='social_sync_settings'),
+
     # Admin OAuth endpoints
     path('admin/facebook/oauth/start/', admin_views.facebook_oauth_admin_start, name='admin_facebook_oauth_start'),
     path('admin/facebook/oauth/callback/', admin_views.facebook_oauth_admin_callback, name='admin_facebook_oauth_callback'),
