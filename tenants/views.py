@@ -885,7 +885,7 @@ def register_tenant_with_payment(request):
             payment_order = PaymentOrder.objects.create(
                 order_id=order_id,
                 tenant=None,  # No tenant yet
-                package=package,  # Will be None for feature-based
+                package=None,  # Feature-based pricing (no package)
                 amount=subscription_amount,  # Charge first month upfront
                 currency='GEL',
                 agent_count=agent_count,
@@ -897,15 +897,15 @@ def register_tenant_with_payment(request):
                     'company_name': validated_data['company_name'],
                     'admin_email': validated_data['admin_email'],
                     'subscription_amount': subscription_amount,
-                    'is_custom': is_custom,
-                    'feature_ids': list(selected_features.values_list('id', flat=True)) if is_custom else [],
+                    'is_custom': True,  # Feature-based pricing
+                    'feature_ids': list(selected_features.values_list('id', flat=True)) ,
                     'agent_count': agent_count
                 }
             )
 
             # Create subscription payment with card saving using BOG subscription endpoint
             payment_result = bog_service.create_subscription_payment_with_card_save(
-                package=package,  # Can be None for feature-based
+                package=None,  # Feature-based pricing (no package)
                 agent_count=agent_count,
                 customer_email=validated_data['admin_email'],
                 customer_name=f"{validated_data['admin_first_name']} {validated_data['admin_last_name']}",
@@ -926,7 +926,7 @@ def register_tenant_with_payment(request):
             payment_order.card_saved = card_saving_enabled
             payment_order.save()
 
-            logger.info(f"Registration payment initiated for {schema_name}: {order_id}, is_custom={is_custom}, features={len(selected_features) if is_custom else 0}, agents={agent_count}, amount={subscription_amount}")
+            logger.info(f"Registration payment initiated for {schema_name}: {order_id}, features={len(selected_features)}, agents={agent_count}, amount={subscription_amount}")
 
             return Response({
                 'payment_url': payment_result['payment_url'],
@@ -1063,15 +1063,15 @@ def register_tenant(request):
                         'frontend_url': tenant.frontend_url
                     },
                     'subscription': {
-                        'package_name': package.display_name,
-                        'pricing_model': package.pricing_model,
+                        'package_name': 'Feature-based',  # Package system removed
+                        'pricing_model': 'feature',
                         'monthly_cost': float(subscription.monthly_cost),
                         'agent_count': subscription.agent_count,
                         'trial_expires': subscription.expires_at,
                         'limits': {
-                            'max_users': package.max_users,
-                            'max_whatsapp_messages': package.max_whatsapp_messages,
-                            'max_storage_gb': package.max_storage_gb
+                            'max_users': None,
+                            'max_whatsapp_messages': None,
+                            'max_storage_gb': None
                         }
                     },
                     'domain_url': tenant.domain_url,

@@ -140,11 +140,12 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.SUCCESS(f'\n✓ Metrics calculated and saved for {calc_date}'))
 
-        # Display package breakdown
-        if package_dist:
-            self.stdout.write('\nPackage Distribution:')
-            for pkg_name, count in package_dist.items():
-                revenue = revenue_by_pkg.get(pkg_name, 0)
-                self.stdout.write(f'  {pkg_name}: {count} subscriptions ({revenue} GEL/month)')
+        # Display package breakdown (TODO: implement package_dist calculation)
+        # package_dist and revenue_by_pkg are not yet computed
+        # if package_dist:
+        #     self.stdout.write('\nPackage Distribution:')
+        #     for pkg_name, count in package_dist.items():
+        #         revenue = revenue_by_pkg.get(pkg_name, 0)
+        #         self.stdout.write(f'  {pkg_name}: {count} subscriptions ({revenue} GEL/month)')
 
         logger.info(f'Platform metrics calculated for {calc_date}: MRR={metrics.mrr}, Active={metrics.active_subscriptions}')
