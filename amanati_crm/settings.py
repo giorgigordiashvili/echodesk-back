@@ -35,6 +35,8 @@ DEBUG = config('DEBUG', default=True, cast=bool)
 MAIN_DOMAIN = config('MAIN_DOMAIN', default='echodesk.ge')
 API_DOMAIN = config('API_DOMAIN', default='api.echodesk.ge')
 
+SERVER_IP = config('SERVER_IP', default='')
+
 ALLOWED_HOSTS = [
     MAIN_DOMAIN,  # Main domain for public schema
     f'.{MAIN_DOMAIN}',  # Wildcard for tenant frontend subdomains
@@ -45,6 +47,10 @@ ALLOWED_HOSTS = [
     'localhost',
     '127.0.0.1',
 ]
+
+# Add server IP if configured (prevents DisallowedHost errors from direct IP access)
+if SERVER_IP:
+    ALLOWED_HOSTS.append(SERVER_IP)
 
 # CSRF trusted origins for cross-origin requests
 CSRF_TRUSTED_ORIGINS = [
@@ -374,7 +380,18 @@ LOGGING = {
             'formatter': 'simple',
         },
     },
+    'filters': {
+        'skip_disallowed_host': {
+            '()': 'django.utils.log.CallbackFilter',
+            'callback': lambda record: record.name != 'django.security.DisallowedHost',
+        },
+    },
     'loggers': {
+        'django.security.DisallowedHost': {
+            'handlers': ['file'],
+            'level': 'WARNING',
+            'propagate': False,  # Don't send to Sentry
+        },
         'django': {
             'handlers': ['file', 'console'] if DEBUG else ['file'],
             'level': 'INFO',
