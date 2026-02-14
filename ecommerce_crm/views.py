@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiParameter, inline_serializer
 from django_filters.rest_framework import DjangoFilterBackend, FilterSet, CharFilter, NumberFilter, BooleanFilter
+from .pagination import DynamicPageSizePagination
 from django.db.models import Q, F
 from django.core.cache import cache
 from django.utils.decorators import method_decorator
@@ -265,6 +266,7 @@ class ProductViewSet(NoCacheMixin, viewsets.ModelViewSet):
     ViewSet for products with advanced filtering and sorting (Public access for frontend)
     """
     permission_classes = [AllowAny]
+    pagination_class = DynamicPageSizePagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_class = ProductFilter
     search_fields = ['sku', 'slug']

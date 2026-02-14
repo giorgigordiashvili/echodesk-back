@@ -470,6 +470,25 @@ class WhatsAppMessage(models.Model):
         help_text="When the message was revoked"
     )
 
+    # Reaction fields
+    reaction_emoji = models.CharField(
+        max_length=10,
+        blank=True,
+        null=True,
+        help_text='Emoji reaction on this message'
+    )
+    reacted_by = models.CharField(
+        max_length=50,
+        blank=True,
+        null=True,
+        help_text='Phone number of user who reacted'
+    )
+    reacted_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text='When the reaction was added'
+    )
+
     # Soft delete fields for admin investigation
     is_deleted = models.BooleanField(default=False, help_text='Soft deleted by staff')
     deleted_at = models.DateTimeField(null=True, blank=True, help_text='When the message was deleted')

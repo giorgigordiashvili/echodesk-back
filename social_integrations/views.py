@@ -4781,6 +4781,41 @@ def whatsapp_webhook(request):
                             logger.warning(f"Cannot find message to revoke: {revoked_msg_id}")
                         continue
 
+                    # Handle reaction message type
+                    if message_type == 'reaction':
+                        reaction_data = message.get('reaction', {})
+                        reacted_msg_id = reaction_data.get('message_id')
+                        emoji = reaction_data.get('emoji', '')
+
+                        try:
+                            existing_msg = WhatsAppMessage.objects.get(message_id=reacted_msg_id)
+                            if emoji:
+                                # Add reaction
+                                existing_msg.reaction_emoji = emoji
+                                existing_msg.reacted_by = from_number
+                                existing_msg.reacted_at = timezone.now()
+                                logger.info(f"😀 Added reaction {emoji} to WhatsApp message: {reacted_msg_id}")
+                            else:
+                                # Empty emoji means reaction removed
+                                existing_msg.reaction_emoji = None
+                                existing_msg.reacted_by = None
+                                existing_msg.reacted_at = None
+                                logger.info(f"🚫 Removed reaction from WhatsApp message: {reacted_msg_id}")
+                            existing_msg.save()
+
+                            # Send WebSocket notification for reaction update
+                            ws_reaction_data = {
+                                'type': 'reaction_update',
+                                'message_id': reacted_msg_id,
+                                'reaction_emoji': existing_msg.reaction_emoji,
+                                'reacted_by': existing_msg.reacted_by,
+                                'reacted_at': existing_msg.reacted_at.isoformat() if existing_msg.reacted_at else None,
+                            }
+                            send_websocket_notification(tenant_schema, ws_reaction_data, from_number)
+                        except WhatsAppMessage.DoesNotExist:
+                            logger.warning(f"Cannot find message for reaction: {reacted_msg_id}")
+                        continue
+
                     # Skip if message already exists
                     if WhatsAppMessage.objects.filter(message_id=message_id).exists():
                         logger.info(f"Skipping duplicate message: {message_id}")
