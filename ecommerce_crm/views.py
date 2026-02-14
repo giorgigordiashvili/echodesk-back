@@ -139,7 +139,7 @@ class AttributeDefinitionViewSet(NoCacheMixin, viewsets.ModelViewSet):
     """
     queryset = AttributeDefinition.objects.filter(is_active=True)
     serializer_class = AttributeDefinitionSerializer
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter, DjangoFilterBackend]
     search_fields = ['key']
     filterset_fields = ['attribute_type', 'is_filterable']
@@ -264,7 +264,7 @@ class ProductViewSet(NoCacheMixin, viewsets.ModelViewSet):
     """
     ViewSet for products with advanced filtering and sorting (Public access for frontend)
     """
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_class = ProductFilter
     search_fields = ['sku', 'slug']
@@ -497,7 +497,7 @@ class EcommerceClientViewSet(NoCacheMixin, viewsets.ModelViewSet):
     """ViewSet for managing ecommerce clients (Public access for frontend)"""
     queryset = EcommerceClient.objects.all()
     serializer_class = EcommerceClientSerializer
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['first_name', 'last_name', 'email', 'phone_number']
     filterset_fields = ['is_active', 'is_verified']
