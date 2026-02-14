@@ -1,26 +1,79 @@
-name: Lint
+name: CI
 
 on:
   push:
-    branches: [ main, develop, qa ]
+    branches: [ main, qa ]
   pull_request:
-    branches: [ main, develop, qa ]
+    branches: [ main, qa ]
 
 jobs:
-  lint:
+  checks:
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
     - uses: actions/checkout@v3
 
-    - name: Set up Python 3.9
+    - name: Set up Python 3.12
       uses: actions/setup-python@v4
       with:
-        python-version: '3.9'
+        python-version: '3.12'
 
-    - name: Install flake8
-      run: pip install flake8
+    - name: Cache pip
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
 
-    - name: Check for syntax errors and undefined names
+    - name: Install dependencies
       run: |
+        pip install -r requirements.txt
+
+    - name: Syntax & undefined name check
+      run: |
+        pip install flake8
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+
+    - name: Django system check
+      env:
+        SECRET_KEY: ci-test-key
+        DB_NAME: test_db
+        DB_USER: postgres
+        DB_PASSWORD: postgres
+        DB_HOST: localhost
+        DB_PORT: 5432
+        DEBUG: "False"
+        MAIN_DOMAIN: echodesk.ge
+        API_DOMAIN: api.echodesk.ge
+        SENDGRID_API_KEY: fake
+      run: |
+        python manage.py check --deploy --fail-level WARNING
+
+    - name: Check for missing migrations
+      env:
+        SECRET_KEY: ci-test-key
+        DB_NAME: test_db
+        DB_USER: postgres
+        DB_PASSWORD: postgres
+        DB_HOST: localhost
+        DB_PORT: 5432
+        DEBUG: "False"
+        MAIN_DOMAIN: echodesk.ge
+        API_DOMAIN: api.echodesk.ge
+        SENDGRID_API_KEY: fake
+      run: |
+        python manage.py makemigrations --check --dry-run
