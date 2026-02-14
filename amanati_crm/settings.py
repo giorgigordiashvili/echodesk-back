@@ -8,14 +8,12 @@ from decouple import config
 import sentry_sdk
 
 # Initialize Sentry for error tracking and performance monitoring
+SENTRY_DSN = config('SENTRY_DSN', default='')
 sentry_sdk.init(
-    dsn="https://8332ec36828620b76c2fc782e8c44d66@o4510624823443456.ingest.de.sentry.io/4510624824754256",
-    # Add data like request headers and IP for users
-    send_default_pii=True,
-    # Set traces_sample_rate to 1.0 to capture 100% of transactions for tracing
-    traces_sample_rate=1.0,
-    # Set profile_session_sample_rate to 1.0 to profile 100% of profile sessions
-    profile_session_sample_rate=1.0,
+    dsn=SENTRY_DSN,
+    send_default_pii=False,  # Don't send PII to Sentry (GDPR)
+    traces_sample_rate=0.2,  # Sample 20% of transactions (was 100%)
+    profile_session_sample_rate=0.1,  # Sample 10% of profiles (was 100%)
     # Set profile_lifecycle to "trace" to automatically run the profiler on when there is an active transaction
     profile_lifecycle="trace",
     # Environment tag
@@ -26,10 +24,10 @@ sentry_sdk.init(
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = config('SECRET_KEY', default='your-secret-key-here')
+SECRET_KEY = config('SECRET_KEY')  # Required - no default for security
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = config('DEBUG', default=True, cast=bool)
+DEBUG = config('DEBUG', default=False, cast=bool)
 
 # Main domain configuration
 MAIN_DOMAIN = config('MAIN_DOMAIN', default='echodesk.ge')
@@ -95,6 +93,7 @@ TENANT_APPS = [
     'django.contrib.admin',
     'rest_framework',
     'rest_framework.authtoken',
+    'rest_framework_simplejwt.token_blacklist',
     'drf_spectacular',
     'django_filters',
     'channels',  # Add channels for WebSocket support
@@ -256,7 +255,7 @@ SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(hours=1),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
     'ROTATE_REFRESH_TOKENS': True,
-    'BLACKLIST_AFTER_ROTATION': False,
+    'BLACKLIST_AFTER_ROTATION': True,
     'UPDATE_LAST_LOGIN': True,
     'ALGORITHM': 'HS256',
     'SIGNING_KEY': SECRET_KEY,
@@ -286,7 +285,7 @@ SPECTACULAR_SETTINGS = {
 }
 
 # CORS settings - Allow wildcard subdomains for multi-tenant frontend
-CORS_ALLOW_ALL_ORIGINS = True  # Temporarily allow all origins for development and testing
+CORS_ALLOW_ALL_ORIGINS = False  # Use CORS_ALLOWED_ORIGIN_REGEXES instead
 
 # If you want to be more restrictive in production, use this instead:
 # CORS_ALLOW_ALL_ORIGINS = DEBUG  # Allow all in development, restrict in production

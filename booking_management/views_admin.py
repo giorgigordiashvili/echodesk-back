@@ -85,7 +85,7 @@ def dashboard_stats(request):
             'popular_services': list(popular_services)
         },
         'overall': {
-            'total_clients': BookingClient.objects.count(),
+            'total_clients': Client.objects.count(),
             'total_revenue': float(total_revenue),
             'active_staff': BookingStaff.objects.filter(is_active_for_bookings=True).count()
         }

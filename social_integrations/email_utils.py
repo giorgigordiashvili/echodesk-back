@@ -24,7 +24,7 @@ from django.core.files.storage import default_storage
 logger = logging.getLogger(__name__)
 
 
-def decode_imap_utf7(s) -> str:
+def decode_imap_utf7(s: str) -> str:
     """
     Decode IMAP Modified UTF-7 encoded folder names.
 
@@ -35,65 +35,42 @@ def decode_imap_utf7(s) -> str:
         s: The IMAP Modified UTF-7 encoded string
 
     Returns:
-        The decoded Unicode string, or empty string if input is None/empty
+        The decoded Unicode string
     """
-    # Guard against None and non-string types
     if s is None:
         return ''
-
-    # Convert bytes to string if needed
-    if isinstance(s, bytes):
-        try:
-            s = s.decode('utf-8', errors='replace')
-        except Exception:
-            return ''
-
-    # Ensure we have a string
-    if not isinstance(s, str):
-        try:
-            s = str(s)
-        except Exception:
-            return ''
-
     if not s or '&' not in s:
         return s
 
-    try:
-        result = []
-        i = 0
-        while i < len(s):
-            if s[i] == '&':
-                end = s.find('-', i)
-                if end == -1:
-                    result.append(s[i:])
-                    break
-                if end == i + 1:
-                    # "&-" represents a literal "&"
-                    result.append('&')
-                else:
-                    encoded = s[i+1:end]
-                    if encoded is None:
-                        i = end + 1
-                        continue
-                    # Replace , with / for standard base64
-                    encoded = str(encoded).replace(',', '/')
-                    # Add padding if needed
-                    padding = (4 - len(encoded) % 4) % 4
-                    encoded += '=' * padding
-                    try:
-                        decoded = base64.b64decode(encoded).decode('utf-16-be')
-                        result.append(decoded)
-                    except Exception:
-                        # If decoding fails, keep original
-                        result.append(s[i:end+1])
-                i = end + 1
+    result = []
+    i = 0
+    while i < len(s):
+        if s[i] == '&':
+            end = s.find('-', i)
+            if end == -1:
+                result.append(s[i:])
+                break
+            if end == i + 1:
+                # "&-" represents a literal "&"
+                result.append('&')
             else:
-                result.append(s[i])
-                i += 1
-        return ''.join(result)
-    except Exception as e:
-        logger.warning(f"Failed to decode IMAP UTF-7 string: {e}")
-        return str(s) if s else ''
+                encoded = s[i+1:end]
+                # Replace , with / for standard base64
+                encoded = encoded.replace(',', '/')
+                # Add padding if needed
+                padding = (4 - len(encoded) % 4) % 4
+                encoded += '=' * padding
+                try:
+                    decoded = base64.b64decode(encoded).decode('utf-16-be')
+                    result.append(decoded)
+                except Exception:
+                    # If decoding fails, keep original
+                    result.append(s[i:end+1])
+            i = end + 1
+        else:
+            result.append(s[i])
+            i += 1
+    return ''.join(result)
 
 
 def decode_mime_header(header_value: str) -> str:
@@ -264,40 +241,20 @@ def get_imap_folders(connection) -> List[str]:
         imap.logout()
 
         folders = []
-        if result == 'OK' and folder_list:
+        if result == 'OK':
             for folder_data in folder_list:
-                try:
-                    if folder_data is None:
-                        continue
-                    # Handle both bytes and tuple responses from IMAP
-                    if isinstance(folder_data, tuple):
-                        folder_data = folder_data[0] if folder_data else None
-                        if folder_data is None:
-                            continue
-                    # Handle string responses
-                    if isinstance(folder_data, str):
-                        decoded = folder_data
-                    elif isinstance(folder_data, bytes):
-                        decoded = folder_data.decode('utf-8', errors='replace')
-                    else:
-                        continue
-
-                    if not decoded:
-                        continue
-
+                if isinstance(folder_data, bytes):
                     # Parse folder name from IMAP response like: (\HasNoChildren) "/" "INBOX"
+                    decoded = folder_data.decode('utf-8', errors='replace')
                     # Extract the folder name (last quoted string or last word)
                     parts = decoded.rsplit('" ', 1)
                     if len(parts) == 2:
-                        folder_name = parts[1].strip('"') if parts[1] else ''
+                        folder_name = parts[1].strip('"')
                     else:
                         # Fallback: get last part after delimiter
                         parts = decoded.split(' ')
-                        folder_name = parts[-1].strip('"') if parts[-1] else ''
-                    if folder_name:
-                        folders.append(folder_name)
-                except Exception as e:
-                    logger.warning(f"Error parsing folder in get_imap_folders: {e}")
+                        folder_name = parts[-1].strip('"')
+                    folders.append(folder_name)
 
         return folders
     except Exception as e:
@@ -768,44 +725,19 @@ def _find_sent_folder(imap) -> Optional[str]:
             return None
 
         available_folders = []
-        if not folders:
-            return None
         for folder_data in folders:
-            try:
-                if folder_data is None:
-                    continue
-                # Handle both bytes and tuple responses from IMAP
-                if isinstance(folder_data, tuple):
-                    folder_data = folder_data[0] if folder_data else None
-                    if folder_data is None:
-                        continue
-                # Handle string responses
-                if isinstance(folder_data, str):
-                    decoded = folder_data
-                elif isinstance(folder_data, bytes):
-                    decoded = folder_data.decode('utf-8', errors='replace')
-                else:
-                    continue
-
-                if not decoded:
-                    continue
-
+            if folder_data is None:
+                continue
+            if isinstance(folder_data, bytes):
+                # Parse folder name from response like: (\HasNoChildren) "/" "Sent"
+                decoded = folder_data.decode('utf-8', errors='replace')
                 # Extract folder name (last quoted string or last part)
                 if '"' in decoded:
                     parts = decoded.split('"')
                     if len(parts) >= 2:
-                        raw_name = parts[-2]
-                        if not raw_name:
-                            continue
-                        if not isinstance(raw_name, str):
-                            raw_name = str(raw_name) if raw_name else ''
-                        if not raw_name:
-                            continue
-                        folder_name = decode_imap_utf7(raw_name) or raw_name
+                        folder_name = decode_imap_utf7(parts[-2])
                         if folder_name:
                             available_folders.append(folder_name)
-            except Exception as e:
-                logger.warning(f"Error parsing folder in _find_sent_folder: {e}")
 
         # Try to find a matching sent folder
         for sent_name in sent_folder_names:
@@ -813,12 +745,12 @@ def _find_sent_folder(imap) -> Optional[str]:
                 return sent_name
             # Case-insensitive match
             for folder in available_folders:
-                if folder and folder.lower() == sent_name.lower():
+                if folder.lower() == sent_name.lower():
                     return folder
 
         # Try partial match for 'sent' keyword
         for folder in available_folders:
-            if folder and isinstance(folder, str) and 'sent' in folder.lower():
+            if 'sent' in folder.lower():
                 return folder
 
     except Exception as e:
@@ -1063,51 +995,22 @@ def sync_imap_messages(connection, max_messages: int = 500) -> int:
 
         # Get all available folders
         result, folders_data = imap.list()
-        if result == 'OK' and folders_data:
+        if result == 'OK':
             all_folders = []
             folders_to_sync = []
             skipped_folders = []
 
             for folder_data in folders_data:
-                try:
-                    if folder_data is None:
-                        continue
-                    # Handle both bytes and tuple responses from IMAP
-                    if isinstance(folder_data, tuple):
-                        # Some servers return tuples - try to extract bytes from first element
-                        folder_data = folder_data[0] if folder_data else None
-                        if folder_data is None:
-                            continue
-                    # Handle string responses (some servers return strings directly)
-                    if isinstance(folder_data, str):
-                        decoded = folder_data
-                    elif isinstance(folder_data, bytes):
-                        decoded = folder_data.decode('utf-8', errors='replace')
-                    else:
-                        # Unknown type, try to convert to string
-                        try:
-                            decoded = str(folder_data)
-                        except Exception:
-                            continue
-
-                    if not decoded:
-                        continue
-
+                if folder_data is None:
+                    continue
+                if isinstance(folder_data, bytes):
+                    decoded = folder_data.decode('utf-8', errors='replace')
                     # Extract folder name from response like: (\HasNoChildren) "/" "INBOX"
                     if '"' in decoded:
                         parts = decoded.split('"')
                         if len(parts) >= 2:
                             raw_folder_name = parts[-2]  # Keep raw for IMAP operations
-                            if not raw_folder_name:
-                                continue
-                            # Ensure raw_folder_name is a string
-                            if not isinstance(raw_folder_name, str):
-                                raw_folder_name = str(raw_folder_name) if raw_folder_name else ''
-                            if not raw_folder_name:
-                                continue
                             display_folder_name = decode_imap_utf7(raw_folder_name) or raw_folder_name  # Decode for display/DB
-                            if not display_folder_name:
-                                continue
                             all_folders.append(display_folder_name)
                             # Skip Drafts, All Mail, Trash, Sent, and Spam
                             skip_folders = ['Drafts', '[Gmail]/Drafts', '[Gmail]/All Mail', 'Trash', '[Gmail]/Trash', 'Deleted', 'Deleted Items', 'Deleted Messages', 'Sent', '[Gmail]/Sent Mail', 'Sent Items', 'Sent Messages', 'Spam', '[Gmail]/Spam', 'Junk', 'Junk E-mail']
@@ -1116,8 +1019,6 @@ def sync_imap_messages(connection, max_messages: int = 500) -> int:
                             else:
                                 # Store tuple of (raw_name, display_name)
                                 folders_to_sync.append((raw_folder_name, display_folder_name))
-                except Exception as folder_parse_error:
-                    logger.warning(f"[EMAIL_SYNC] Failed to parse folder data: {folder_parse_error}")
 
             # Log folder discovery details
             logger.info(f"[EMAIL_SYNC] ===== FOLDER DISCOVERY for {connection.email_address} =====")
@@ -1313,43 +1214,16 @@ def get_available_folders(connection) -> List[Dict[str, Any]]:
         result, folders_data = imap.list()
         folders = []
 
-        if result == 'OK' and folders_data:
+        if result == 'OK':
             for folder_data in folders_data:
-                try:
-                    if folder_data is None:
-                        continue
-                    # Handle both bytes and tuple responses from IMAP
-                    if isinstance(folder_data, tuple):
-                        folder_data = folder_data[0] if folder_data else None
-                        if folder_data is None:
-                            continue
-                    # Handle string responses
-                    if isinstance(folder_data, str):
-                        decoded = folder_data
-                    elif isinstance(folder_data, bytes):
-                        decoded = folder_data.decode('utf-8', errors='replace')
-                    else:
-                        continue
-
-                    if not decoded:
-                        continue
-
+                if folder_data is None:
+                    continue
+                if isinstance(folder_data, bytes):
+                    decoded = folder_data.decode('utf-8', errors='replace')
                     if '"' in decoded:
                         parts = decoded.split('"')
                         if len(parts) >= 2:
-                            raw_name = parts[-2]
-                            if not raw_name:
-                                continue
-                            if not isinstance(raw_name, str):
-                                raw_name = str(raw_name) if raw_name else ''
-                            if not raw_name:
-                                continue
-                            folder_name = decode_imap_utf7(raw_name) or raw_name
-                            if not folder_name:
-                                continue
-                            # Ensure folder_name is a string for .replace() calls
-                            if not isinstance(folder_name, str):
-                                folder_name = str(folder_name) if folder_name else ''
+                            folder_name = decode_imap_utf7(parts[-2])
                             if not folder_name:
                                 continue
                             # Skip Drafts, All Mail, Trash, Sent, and Spam
@@ -1359,8 +1233,6 @@ def get_available_folders(connection) -> List[Dict[str, Any]]:
                                     'name': folder_name,
                                     'display_name': folder_name.replace('[Gmail]/', '').replace('INBOX/', '')
                                 })
-                except Exception as e:
-                    logger.warning(f"Error parsing folder in get_available_folders: {e}")
 
         imap.logout()
         return folders
@@ -1413,51 +1285,20 @@ def debug_email_sync(connection) -> Dict[str, Any]:
             debug_info['errors'].append(f"Failed to list folders: {result}")
             return debug_info
 
-        if not folders_data:
-            debug_info['errors'].append("No folders returned from IMAP server")
-            return debug_info
-
         skip_folders = ['Drafts', '[Gmail]/Drafts', '[Gmail]/All Mail', 'Trash', '[Gmail]/Trash',
                        'Deleted', 'Deleted Items', 'Deleted Messages', 'Sent', '[Gmail]/Sent Mail',
                        'Sent Items', 'Sent Messages', 'Spam', '[Gmail]/Spam', 'Junk', 'Junk E-mail']
 
         for folder_data in folders_data:
-            try:
-                if folder_data is None:
-                    continue
-                # Handle both bytes and tuple responses from IMAP
-                if isinstance(folder_data, tuple):
-                    folder_data = folder_data[0] if folder_data else None
-                    if folder_data is None:
-                        continue
-                # Handle string responses
-                if isinstance(folder_data, str):
-                    decoded = folder_data
-                elif isinstance(folder_data, bytes):
-                    decoded = folder_data.decode('utf-8', errors='replace')
-                else:
-                    continue
-
-                if not decoded:
-                    continue
-
+            if folder_data is None:
+                continue
+            if isinstance(folder_data, bytes):
+                decoded = folder_data.decode('utf-8', errors='replace')
                 if '"' in decoded:
                     parts = decoded.split('"')
                     if len(parts) >= 2:
                         raw_folder_name = parts[-2]  # Keep raw for IMAP
-                        if not raw_folder_name:
-                            continue
-                        if not isinstance(raw_folder_name, str):
-                            raw_folder_name = str(raw_folder_name) if raw_folder_name else ''
-                        if not raw_folder_name:
-                            continue
                         display_folder_name = decode_imap_utf7(raw_folder_name) or raw_folder_name  # Decode for display
-                        if not display_folder_name:
-                            continue
-                        if not isinstance(display_folder_name, str):
-                            display_folder_name = str(display_folder_name) if display_folder_name else ''
-                        if not display_folder_name:
-                            continue
 
                         # Check if skipped
                         is_skipped = any(skip.lower() == display_folder_name.lower() for skip in skip_folders)
@@ -1508,8 +1349,6 @@ def debug_email_sync(connection) -> Dict[str, Any]:
                             debug_info['folders'].append(folder_info)
                         else:
                             debug_info['skipped_folders'].append(folder_info)
-            except Exception as e:
-                logger.warning(f"Error parsing folder in debug_email_sync: {e}")
 
         imap.logout()
 

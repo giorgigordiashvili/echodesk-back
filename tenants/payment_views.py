@@ -29,6 +29,16 @@ from django.contrib.auth import get_user_model
 from django.db import transaction
 import logging
 import subprocess
+
+# Package model was removed (feature-based pricing now).
+# Stub class to prevent NameError in deprecated code paths.
+class _DeprecatedPackage:
+    DoesNotExist = type('DoesNotExist', (Exception,), {})
+    class objects:
+        @staticmethod
+        def get(**kwargs):
+            raise _DeprecatedPackage.DoesNotExist('Package-based pricing is deprecated')
+Package = _DeprecatedPackage
 import sys
 
 User = get_user_model()
@@ -1273,11 +1283,11 @@ def bog_webhook(request):
             return Response({'status': 'success', 'action': action})
 
         except Tenant.DoesNotExist:
-            logger.error(f'Tenant not found: {tenant_id}')
+            logger.error('Tenant not found in webhook')
             return Response({'error': 'Tenant not found'}, status=status.HTTP_404_NOT_FOUND)
 
         except Package.DoesNotExist:
-            logger.error(f'Package not found: {package_id}')
+            logger.error('Package not found in webhook')
             return Response({'error': 'Package not found'}, status=status.HTTP_404_NOT_FOUND)
 
         except Exception as e:
