@@ -458,7 +458,7 @@ class BOGPaymentService:
                 return result
             else:
                 error_msg = f'Saved card charge failed: {response.status_code} - {response.text}'
-                logger.error(error_msg)
+                logger.warning(error_msg)
                 raise ValueError(error_msg)
 
         except requests.RequestException as e:
@@ -623,7 +623,7 @@ class BOGPaymentService:
                 return result
             else:
                 error_msg = f'Subscription charge failed: {response.status_code} - {response.text}'
-                logger.error(error_msg)
+                logger.warning(error_msg)
                 raise ValueError(error_msg)
 
         except requests.RequestException as e:
