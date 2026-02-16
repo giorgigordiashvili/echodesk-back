@@ -1319,7 +1319,7 @@ def bog_webhook(request):
                 attempted_at=timezone.now(),
                 completed_at=timezone.now(),
                 failed_reason=body.get('message', 'Payment rejected by BOG'),
-                bog_error_code=response_code,
+                bog_error_code=response_code or '',
                 bog_response=body,
             )
 
