@@ -607,7 +607,7 @@ class PaymentAttempt(models.Model):
 
     # Failure details
     failed_reason = models.TextField(blank=True)
-    bog_error_code = models.CharField(max_length=50, blank=True)
+    bog_error_code = models.CharField(max_length=50, blank=True, default='')
     bog_response = models.JSONField(default=dict, blank=True)
 
     # Retry tracking

@@ -39,7 +39,10 @@ class HelpCategoryListSerializer(serializers.ModelSerializer):
 
 class HelpCategoryDetailSerializer(serializers.ModelSerializer):
     """Serializer for category detail with articles"""
+    name = serializers.SerializerMethodField()
+    description = serializers.SerializerMethodField()
     articles = serializers.SerializerMethodField()
+    article_count = serializers.SerializerMethodField()
 
     class Meta:
         model = HelpCategory
@@ -47,8 +50,23 @@ class HelpCategoryDetailSerializer(serializers.ModelSerializer):
             'id', 'name', 'slug', 'description', 'icon',
             'position', 'is_active', 'show_on_public',
             'show_in_dashboard', 'required_feature_key',
-            'articles', 'created_at', 'updated_at'
+            'article_count', 'articles', 'created_at', 'updated_at'
         ]
+
+    def _get_language(self):
+        request = self.context.get('request')
+        if request and hasattr(request, 'query_params'):
+            return request.query_params.get('lang', 'en')
+        return 'en'
+
+    def get_name(self, obj):
+        return obj.get_name(self._get_language())
+
+    def get_description(self, obj):
+        return obj.get_description(self._get_language())
+
+    def get_article_count(self, obj):
+        return obj.articles.filter(is_active=True).count()
 
     def get_articles(self, obj):
         articles = obj.articles.filter(is_active=True)
