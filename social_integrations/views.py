@@ -1077,7 +1077,8 @@ def facebook_webhook(request):
                                         message_text=message_text,
                                         timestamp=convert_facebook_timestamp(int(timestamp) if timestamp else 0),
                                         is_from_page=(sender_id == page_id),
-                                        profile_pic_url=profile_pic_url
+                                        profile_pic_url=profile_pic_url,
+                                        is_echo=False,
                                     )
                                     logger.info(f"✅ Saved test message: {message_text}")
 
@@ -1347,7 +1348,8 @@ def facebook_webhook(request):
                                                 is_from_page=(sender_id == page_id),
                                                 profile_pic_url=profile_pic_url,
                                                 reply_to_message_id=reply_to_message_id,
-                                                reply_to=reply_to_obj
+                                                reply_to=reply_to_obj,
+                                                is_echo=False,
                                             )
                                             logger.info(f"✅ Saved message from {sender_name}: {message_text[:50] if message_text else f'[{attachment_type}]'}")
 
@@ -1882,7 +1884,8 @@ def test_database_save(request):
             message_text="This is a test message created manually",
             timestamp=timezone.now(),
             is_from_page=False,
-            profile_pic_url=None
+            profile_pic_url=None,
+            is_echo=False,
         )
 
         return Response({
@@ -3075,7 +3078,8 @@ def send_rating_request_facebook(conversation_id, page_id, message):
                     sender_name=page.page_name,
                     message_text=message,
                     timestamp=datetime.now(),
-                    is_from_page=True
+                    is_from_page=True,
+                    is_echo=False,
                 )
             except Exception as e:
                 logger.warning(f"Failed to save rating message: {e}")
