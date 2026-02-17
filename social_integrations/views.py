@@ -2989,6 +2989,13 @@ def webhook_status(request):
     })
 
 
+@extend_schema(
+    tags=['Social Settings'],
+    summary='Get or update social integration settings',
+    description='Get or update social integration settings for the current tenant including auto-reply configuration.',
+    request=SocialIntegrationSettingsSerializer,
+    responses={200: SocialIntegrationSettingsSerializer}
+)
 @api_view(['GET', 'PUT', 'PATCH'])
 @permission_classes([IsAuthenticated, CanManageSocialSettings])
 def social_settings(request):
