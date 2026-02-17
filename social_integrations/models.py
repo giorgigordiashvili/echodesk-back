@@ -697,6 +697,36 @@ class SocialIntegrationSettings(models.Model):
         help_text="Sound file for System notifications"
     )
 
+    # Auto-Reply Settings - Timezone & Away Hours
+    timezone = models.CharField(
+        max_length=50,
+        default='UTC',
+        help_text="Business timezone (e.g., 'Asia/Tbilisi', 'Europe/London')"
+    )
+    away_hours_enabled = models.BooleanField(
+        default=False,
+        help_text="Enable away hours schedule for auto-replies"
+    )
+    # Store as JSON: {"monday": [0,1,2,3,4,5,6,7,8,18,19,20,21,22,23], "tuesday": [...], ...}
+    # Each day contains array of hours (0-23) when business is AWAY
+    away_hours_schedule = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Weekly away schedule - each day maps to array of away hours (0-23)"
+    )
+
+    # Per-Platform Auto-Reply Settings (stored as JSON)
+    # Format: {
+    #   "facebook": {"welcome_enabled": true, "welcome_message": "...", "away_enabled": true, "away_message": "..."},
+    #   "instagram": {"welcome_enabled": true, "welcome_message": "...", "away_enabled": false, "away_message": ""},
+    #   "whatsapp": {"welcome_enabled": false, "welcome_message": "", "away_enabled": true, "away_message": "..."}
+    # }
+    auto_reply_settings = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Per-platform auto-reply settings (welcome/away messages)"
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -714,6 +744,50 @@ class SocialIntegrationSettings(models.Model):
         elif self.refresh_interval > 60000:
             self.refresh_interval = 60000
         super().save(*args, **kwargs)
+
+
+class ConversationAutoReply(models.Model):
+    """Tracks auto-reply history per conversation for welcome/away message cooldowns"""
+    PLATFORM_CHOICES = [
+        ('facebook', 'Facebook'),
+        ('instagram', 'Instagram'),
+        ('whatsapp', 'WhatsApp'),
+    ]
+
+    platform = models.CharField(
+        max_length=20,
+        choices=PLATFORM_CHOICES,
+        help_text="Messaging platform"
+    )
+    account_id = models.CharField(
+        max_length=100,
+        help_text="Account identifier (page_id for FB, instagram_account_id for IG, waba_id for WhatsApp)"
+    )
+    conversation_id = models.CharField(
+        max_length=100,
+        help_text="Customer identifier (sender_id for FB/IG, from_number for WhatsApp)"
+    )
+    last_welcome_sent = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the last welcome message was sent to this conversation"
+    )
+    last_away_sent = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the last away message was sent to this conversation"
+    )
+
+    class Meta:
+        unique_together = ['platform', 'account_id', 'conversation_id']
+        indexes = [
+            models.Index(fields=['platform', 'account_id', 'conversation_id']),
+        ]
+        verbose_name = "Conversation Auto-Reply"
+        verbose_name_plural = "Conversation Auto-Replies"
+
+    def __str__(self):
+        return f"{self.platform} - {self.conversation_id}"
 
 
 class ChatAssignment(models.Model):

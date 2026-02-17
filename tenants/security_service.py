@@ -135,13 +135,18 @@ class SecurityService:
         request,
         user=None,
         attempted_email: str = '',
-        failure_reason: str = ''
+        failure_reason: str = '',
+        tenant=None
     ):
         """
         Create a SecurityLog entry with all metadata.
-        Must be called within tenant schema context.
+        Tenant can be passed explicitly or extracted from request.
         """
         from .models import SecurityLog
+
+        # Get tenant from request if not explicitly provided
+        if tenant is None and hasattr(request, 'tenant'):
+            tenant = request.tenant
 
         ip_address = cls.get_client_ip(request)
         user_agent = request.META.get('HTTP_USER_AGENT', '')
@@ -150,6 +155,7 @@ class SecurityService:
 
         try:
             log = SecurityLog.objects.create(
+                tenant=tenant,
                 user_id=user.id if user else None,
                 attempted_email=attempted_email or (user.email if user else ''),
                 event_type=event_type,

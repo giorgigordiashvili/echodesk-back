@@ -24,7 +24,7 @@ from .models import (
     FacebookPageConnection, FacebookMessage, OrphanedFacebookMessage,
     InstagramAccountConnection, InstagramMessage,
     WhatsAppBusinessAccount, WhatsAppMessage, WhatsAppMessageTemplate,
-    WhatsAppContact, SocialIntegrationSettings,
+    WhatsAppContact, SocialIntegrationSettings, ConversationAutoReply,
     ChatAssignment, ChatRating,
     EmailConnection, EmailMessage, EmailDraft,
     TikTokCreatorAccount, TikTokMessage,
@@ -172,6 +172,260 @@ def find_tenant_by_whatsapp_phone_number_id(phone_number_id):
             continue
 
     return None
+
+
+# ============================================================================
+# AUTO-REPLY HELPER FUNCTIONS
+# ============================================================================
+
+def process_auto_reply(platform, account_id, conversation_id, sender_name, connection):
+    """
+    Process auto-reply for incoming message.
+    Returns True if auto-reply was sent, False otherwise.
+    Does NOT mark messages as read.
+
+    Args:
+        platform: 'facebook', 'instagram', or 'whatsapp'
+        account_id: page_id, instagram_account_id, or waba_id
+        conversation_id: sender_id or from_number
+        sender_name: Customer's display name for personalization
+        connection: FacebookPageConnection, InstagramAccountConnection, or WhatsAppBusinessAccount
+    """
+    import pytz
+
+    try:
+        settings = SocialIntegrationSettings.objects.first()
+        if not settings or not settings.auto_reply_settings:
+            return False
+
+        # Get platform-specific settings
+        platform_settings = settings.auto_reply_settings.get(platform, {})
+        if not platform_settings:
+            return False
+
+        # Get or create conversation tracking
+        tracking, created = ConversationAutoReply.objects.get_or_create(
+            platform=platform,
+            account_id=account_id,
+            conversation_id=conversation_id,
+        )
+
+        now = timezone.now()
+
+        # Check if within away hours using schedule grid
+        is_away = False
+        if settings.away_hours_enabled and settings.away_hours_schedule:
+            try:
+                business_tz = pytz.timezone(settings.timezone)
+                local_dt = now.astimezone(business_tz)
+                current_hour = local_dt.hour
+                current_day = local_dt.strftime('%A').lower()  # monday, tuesday, etc.
+
+                day_schedule = settings.away_hours_schedule.get(current_day, [])
+                is_away = current_hour in day_schedule
+                logger.info(f"🕐 Auto-reply check: {current_day} {current_hour}:00 in {settings.timezone}, is_away={is_away}")
+            except Exception as e:
+                logger.error(f"Error checking away hours: {e}")
+
+        # Determine which message to send
+        message_to_send = None
+        is_welcome = False
+
+        # Check welcome message (12 hour cooldown) - platform specific
+        welcome_enabled = platform_settings.get('welcome_enabled', False)
+        welcome_message = platform_settings.get('welcome_message', '')
+        if welcome_enabled and welcome_message:
+            should_send_welcome = (
+                tracking.last_welcome_sent is None or
+                (now - tracking.last_welcome_sent).total_seconds() >= 12 * 3600
+            )
+            if should_send_welcome:
+                message_to_send = welcome_message
+                is_welcome = True
+                logger.info(f"📬 Will send welcome message (last sent: {tracking.last_welcome_sent})")
+
+        # Away message takes precedence if within away hours - platform specific
+        away_enabled = platform_settings.get('away_enabled', False)
+        away_message = platform_settings.get('away_message', '')
+        if is_away and away_enabled and away_message:
+            message_to_send = away_message
+            is_welcome = False
+            logger.info(f"📬 Will send away message (is_away={is_away})")
+
+        if not message_to_send:
+            return False
+
+        # Replace placeholders
+        message_to_send = message_to_send.replace('{{customer_name}}', sender_name or 'there')
+
+        # Send the auto-reply (platform-specific)
+        success = send_auto_reply(platform, conversation_id, message_to_send, connection)
+
+        if success:
+            if is_welcome:
+                tracking.last_welcome_sent = now
+            else:
+                tracking.last_away_sent = now
+            tracking.save()
+            logger.info(f"✅ Auto-reply sent successfully to {conversation_id}")
+
+        return success
+
+    except Exception as e:
+        logger.error(f"❌ Error processing auto-reply: {e}")
+        return False
+
+
+def send_auto_reply(platform, recipient_id, message_text, connection):
+    """Send auto-reply message via platform API"""
+    if platform == 'facebook':
+        return send_facebook_auto_reply(recipient_id, message_text, connection)
+    elif platform == 'instagram':
+        return send_instagram_auto_reply(recipient_id, message_text, connection)
+    elif platform == 'whatsapp':
+        return send_whatsapp_auto_reply(recipient_id, message_text, connection)
+    return False
+
+
+def send_facebook_auto_reply(recipient_id, message_text, page_connection):
+    """Send Facebook auto-reply and save to DB"""
+    try:
+        send_url = "https://graph.facebook.com/v23.0/me/messages"
+        message_data = {
+            'recipient': {'id': recipient_id},
+            'message': {'text': message_text},
+            'messaging_type': 'RESPONSE'
+        }
+        response = requests.post(
+            send_url,
+            json=message_data,
+            params={'access_token': page_connection.page_access_token},
+            timeout=30
+        )
+
+        if response.status_code == 200:
+            response_data = response.json()
+            message_id = response_data.get('message_id', f"auto_{datetime.now().timestamp()}")
+
+            # Save to database
+            FacebookMessage.objects.create(
+                page_connection=page_connection,
+                message_id=message_id,
+                sender_id=page_connection.page_id,
+                sender_name=page_connection.page_name,
+                message_text=message_text,
+                timestamp=timezone.now(),
+                is_from_page=True,
+                source='echodesk',
+                is_echo=False,
+                sent_by=None,  # Auto-reply, no user
+            )
+            logger.info(f"✅ Facebook auto-reply sent: {message_id}")
+            return True
+        else:
+            logger.error(f"❌ Facebook auto-reply failed: {response.status_code} - {response.text}")
+            return False
+
+    except Exception as e:
+        logger.error(f"❌ Facebook auto-reply exception: {e}")
+        return False
+
+
+def send_instagram_auto_reply(recipient_id, message_text, account_connection):
+    """Send Instagram auto-reply and save to DB"""
+    try:
+        send_url = f"https://graph.facebook.com/v23.0/{account_connection.instagram_account_id}/messages"
+        message_data = {
+            'recipient': {'id': recipient_id},
+            'message': {'text': message_text}
+        }
+        response = requests.post(
+            send_url,
+            json=message_data,
+            params={'access_token': account_connection.access_token},
+            timeout=30
+        )
+
+        if response.status_code == 200:
+            response_data = response.json()
+            message_id = response_data.get('message_id', f"auto_{datetime.now().timestamp()}")
+
+            # Save to database
+            InstagramMessage.objects.create(
+                account_connection=account_connection,
+                message_id=message_id,
+                sender_id=account_connection.instagram_account_id,
+                sender_name=account_connection.username,
+                sender_username=account_connection.username,
+                message_text=message_text,
+                timestamp=timezone.now(),
+                is_from_business=True,
+                source='echodesk',
+                is_echo=False,
+                sent_by=None,  # Auto-reply, no user
+            )
+            logger.info(f"✅ Instagram auto-reply sent: {message_id}")
+            return True
+        else:
+            logger.error(f"❌ Instagram auto-reply failed: {response.status_code} - {response.text}")
+            return False
+
+    except Exception as e:
+        logger.error(f"❌ Instagram auto-reply exception: {e}")
+        return False
+
+
+def send_whatsapp_auto_reply(recipient_number, message_text, account):
+    """Send WhatsApp auto-reply and save to DB"""
+    try:
+        # Format phone number (remove + if present for API)
+        to_number = recipient_number.lstrip('+')
+
+        send_url = f"https://graph.facebook.com/v23.0/{account.phone_number_id}/messages"
+        message_data = {
+            'messaging_product': 'whatsapp',
+            'to': to_number,
+            'type': 'text',
+            'text': {'body': message_text}
+        }
+
+        response = requests.post(
+            send_url,
+            json=message_data,
+            headers={'Authorization': f'Bearer {account.access_token}'},
+            timeout=30
+        )
+
+        if response.status_code == 200:
+            response_data = response.json()
+            messages = response_data.get('messages', [])
+            message_id = messages[0].get('id') if messages else f"auto_{datetime.now().timestamp()}"
+
+            # Save to database
+            WhatsAppMessage.objects.create(
+                business_account=account,
+                message_id=message_id,
+                from_number=account.phone_number,
+                to_number=recipient_number,
+                contact_name='',
+                message_text=message_text,
+                message_type='text',
+                timestamp=timezone.now(),
+                is_from_business=True,
+                status='sent',
+                source='cloud_api',
+                is_echo=False,
+                sent_by=None,  # Auto-reply, no user
+            )
+            logger.info(f"✅ WhatsApp auto-reply sent: {message_id}")
+            return True
+        else:
+            logger.error(f"❌ WhatsApp auto-reply failed: {response.status_code} - {response.text}")
+            return False
+
+    except Exception as e:
+        logger.error(f"❌ WhatsApp auto-reply exception: {e}")
+        return False
 
 
 class FacebookPageConnectionViewSet(viewsets.ModelViewSet):
@@ -1363,6 +1617,15 @@ def facebook_webhook(request):
                                                     message_id=message_id
                                                 )
 
+                                                # Process auto-reply (doesn't mark as read)
+                                                process_auto_reply(
+                                                    platform='facebook',
+                                                    account_id=page_id,
+                                                    conversation_id=sender_id,
+                                                    sender_name=sender_name,
+                                                    connection=page_connection
+                                                )
+
                                             # Send WebSocket notification for real-time updates
                                             from django.db import connection
                                             current_schema = getattr(connection, 'schema_name', None)
@@ -2502,6 +2765,15 @@ def instagram_webhook(request):
                                             message_id=message_id
                                         )
 
+                                        # Process auto-reply (doesn't mark as read)
+                                        process_auto_reply(
+                                            platform='instagram',
+                                            account_id=account_connection.instagram_account_id,
+                                            conversation_id=sender_id,
+                                            sender_name=sender_name or sender_username,
+                                            connection=account_connection
+                                        )
+
                                         # Send WebSocket notification for real-time updates
                                         from django.db import connection
                                         current_schema = getattr(connection, 'schema_name', None)
@@ -2720,6 +2992,13 @@ def webhook_status(request):
     })
 
 
+@extend_schema(
+    tags=['Social Settings'],
+    summary='Get or update social integration settings',
+    description='Get or update social integration settings for the current tenant including auto-reply configuration.',
+    request=SocialIntegrationSettingsSerializer,
+    responses={200: SocialIntegrationSettingsSerializer}
+)
 @api_view(['GET', 'PUT', 'PATCH'])
 @permission_classes([IsAuthenticated, CanManageSocialSettings])
 def social_settings(request):
@@ -5003,6 +5282,15 @@ def whatsapp_webhook(request):
                         conversation_id=from_number.lstrip('+'),  # Remove + for matching
                         account_id=account.waba_id,
                         message_id=message_id
+                    )
+
+                    # Process auto-reply (doesn't mark as read)
+                    process_auto_reply(
+                        platform='whatsapp',
+                        account_id=account.waba_id,
+                        conversation_id=from_number,
+                        sender_name=contact_name,
+                        connection=account
                     )
 
                     # Send WebSocket notification
