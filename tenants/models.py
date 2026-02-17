@@ -1014,7 +1014,7 @@ class DashboardAppearanceSettings(models.Model):
 class SecurityLog(models.Model):
     """
     Logs security events like login, logout, and token expiry.
-    This model is stored in each tenant's schema.
+    This model is stored in the public schema since it references Tenant.
     """
     EVENT_TYPES = [
         ('login_success', 'Successful Login'),
@@ -1029,6 +1029,16 @@ class SecurityLog(models.Model):
         ('tablet', 'Tablet'),
         ('unknown', 'Unknown'),
     ]
+
+    # Tenant reference for filtering logs by tenant
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name='security_logs',
+        null=True,
+        blank=True,
+        help_text='Tenant this log belongs to'
+    )
 
     # Note: Using IntegerField instead of ForeignKey to avoid cross-schema FK issues
     # in multi-tenant setup. The user may exist in a different schema context.
@@ -1077,8 +1087,9 @@ class SecurityLog(models.Model):
         db_table = 'tenants_security_log'
         ordering = ['-created_at']
         indexes = [
-            models.Index(fields=['user_id', '-created_at']),
-            models.Index(fields=['event_type', '-created_at']),
+            models.Index(fields=['tenant', '-created_at']),
+            models.Index(fields=['tenant', 'user_id', '-created_at']),
+            models.Index(fields=['tenant', 'event_type', '-created_at']),
             models.Index(fields=['ip_address', '-created_at']),
         ]
 
