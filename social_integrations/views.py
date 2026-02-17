@@ -231,26 +231,33 @@ def process_auto_reply(platform, account_id, conversation_id, sender_name, conne
         message_to_send = None
         is_welcome = False
 
-        # Check welcome message (12 hour cooldown) - platform specific
+        # Check welcome message - only once per conversation (session)
         welcome_enabled = platform_settings.get('welcome_enabled', False)
         welcome_message = platform_settings.get('welcome_message', '')
         if welcome_enabled and welcome_message:
-            should_send_welcome = (
-                tracking.last_welcome_sent is None or
-                (now - tracking.last_welcome_sent).total_seconds() >= 12 * 3600
-            )
-            if should_send_welcome:
+            # Only send welcome message if never sent before for this conversation
+            if tracking.last_welcome_sent is None:
                 message_to_send = welcome_message
                 is_welcome = True
-                logger.info(f"📬 Will send welcome message (last sent: {tracking.last_welcome_sent})")
+                logger.info(f"📬 Will send welcome message (first time for this conversation)")
+            else:
+                logger.info(f"⏭️ Skipping welcome message (already sent: {tracking.last_welcome_sent})")
 
         # Away message takes precedence if within away hours - platform specific
+        # Only send one away message per 12 hours per conversation
         away_enabled = platform_settings.get('away_enabled', False)
         away_message = platform_settings.get('away_message', '')
         if is_away and away_enabled and away_message:
-            message_to_send = away_message
-            is_welcome = False
-            logger.info(f"📬 Will send away message (is_away={is_away})")
+            should_send_away = (
+                tracking.last_away_sent is None or
+                (now - tracking.last_away_sent).total_seconds() >= 12 * 3600
+            )
+            if should_send_away:
+                message_to_send = away_message
+                is_welcome = False
+                logger.info(f"📬 Will send away message (last sent: {tracking.last_away_sent})")
+            else:
+                logger.info(f"⏭️ Skipping away message (sent {tracking.last_away_sent}, cooldown active)")
 
         if not message_to_send:
             return False
