@@ -231,26 +231,33 @@ def process_auto_reply(platform, account_id, conversation_id, sender_name, conne
         message_to_send = None
         is_welcome = False
 
-        # Check welcome message (12 hour cooldown) - platform specific
+        # Check welcome message - only once per conversation (session)
         welcome_enabled = platform_settings.get('welcome_enabled', False)
         welcome_message = platform_settings.get('welcome_message', '')
         if welcome_enabled and welcome_message:
-            should_send_welcome = (
-                tracking.last_welcome_sent is None or
-                (now - tracking.last_welcome_sent).total_seconds() >= 12 * 3600
-            )
-            if should_send_welcome:
+            # Only send welcome message if never sent before for this conversation
+            if tracking.last_welcome_sent is None:
                 message_to_send = welcome_message
                 is_welcome = True
-                logger.info(f"📬 Will send welcome message (last sent: {tracking.last_welcome_sent})")
+                logger.info(f"📬 Will send welcome message (first time for this conversation)")
+            else:
+                logger.info(f"⏭️ Skipping welcome message (already sent: {tracking.last_welcome_sent})")
 
         # Away message takes precedence if within away hours - platform specific
+        # Only send one away message per 12 hours per conversation
         away_enabled = platform_settings.get('away_enabled', False)
         away_message = platform_settings.get('away_message', '')
         if is_away and away_enabled and away_message:
-            message_to_send = away_message
-            is_welcome = False
-            logger.info(f"📬 Will send away message (is_away={is_away})")
+            should_send_away = (
+                tracking.last_away_sent is None or
+                (now - tracking.last_away_sent).total_seconds() >= 12 * 3600
+            )
+            if should_send_away:
+                message_to_send = away_message
+                is_welcome = False
+                logger.info(f"📬 Will send away message (last sent: {tracking.last_away_sent})")
+            else:
+                logger.info(f"⏭️ Skipping away message (sent {tracking.last_away_sent}, cooldown active)")
 
         if not message_to_send:
             return False
@@ -307,11 +314,11 @@ def send_facebook_auto_reply(recipient_id, message_text, page_connection):
             response_data = response.json()
             message_id = response_data.get('message_id', f"auto_{datetime.now().timestamp()}")
 
-            # Save to database
+            # Save to database - use recipient_id for conversation grouping
             FacebookMessage.objects.create(
                 page_connection=page_connection,
                 message_id=message_id,
-                sender_id=page_connection.page_id,
+                sender_id=recipient_id,  # Use recipient_id for conversation grouping
                 sender_name=page_connection.page_name,
                 message_text=message_text,
                 timestamp=timezone.now(),
@@ -320,7 +327,7 @@ def send_facebook_auto_reply(recipient_id, message_text, page_connection):
                 is_echo=False,
                 sent_by=None,  # Auto-reply, no user
             )
-            logger.info(f"✅ Facebook auto-reply sent: {message_id}")
+            logger.info(f"✅ Facebook auto-reply sent to {recipient_id}: {message_id}")
             return True
         else:
             logger.error(f"❌ Facebook auto-reply failed: {response.status_code} - {response.text}")
@@ -334,15 +341,29 @@ def send_facebook_auto_reply(recipient_id, message_text, page_connection):
 def send_instagram_auto_reply(recipient_id, message_text, account_connection):
     """Send Instagram auto-reply and save to DB"""
     try:
-        send_url = f"https://graph.facebook.com/v23.0/{account_connection.instagram_account_id}/messages"
+        # Instagram messages are sent through the Facebook Page, not the Instagram account directly
+        # We use /me/messages with platform=instagram parameter
+        if not account_connection.facebook_page:
+            logger.error("❌ Instagram auto-reply failed: No linked Facebook Page")
+            return False
+
+        send_url = "https://graph.facebook.com/v23.0/me/messages"
         message_data = {
             'recipient': {'id': recipient_id},
-            'message': {'text': message_text}
+            'message': {'text': message_text},
+            'messaging_type': 'RESPONSE'  # Required for Instagram within 24hr window
         }
+
+        # Use the Facebook Page's access token with platform=instagram
+        access_token = account_connection.facebook_page.page_access_token
+
         response = requests.post(
             send_url,
             json=message_data,
-            params={'access_token': account_connection.access_token},
+            params={
+                'access_token': access_token,
+                'platform': 'instagram'
+            },
             timeout=30
         )
 
@@ -350,11 +371,11 @@ def send_instagram_auto_reply(recipient_id, message_text, account_connection):
             response_data = response.json()
             message_id = response_data.get('message_id', f"auto_{datetime.now().timestamp()}")
 
-            # Save to database
+            # Save to database - use recipient_id for conversation grouping
             InstagramMessage.objects.create(
                 account_connection=account_connection,
                 message_id=message_id,
-                sender_id=account_connection.instagram_account_id,
+                sender_id=recipient_id,  # Use recipient_id for conversation grouping
                 sender_name=account_connection.username,
                 sender_username=account_connection.username,
                 message_text=message_text,
@@ -364,7 +385,7 @@ def send_instagram_auto_reply(recipient_id, message_text, account_connection):
                 is_echo=False,
                 sent_by=None,  # Auto-reply, no user
             )
-            logger.info(f"✅ Instagram auto-reply sent: {message_id}")
+            logger.info(f"✅ Instagram auto-reply sent to {recipient_id}: {message_id}")
             return True
         else:
             logger.error(f"❌ Instagram auto-reply failed: {response.status_code} - {response.text}")
