@@ -23,6 +23,7 @@ class FacebookMessageSerializer(serializers.ModelSerializer):
     page_id = serializers.CharField(source='page_connection.page_id', read_only=True)
     page_name = serializers.CharField(source='page_connection.page_name', read_only=True)
     reply_to_id = serializers.PrimaryKeyRelatedField(source='reply_to', read_only=True)
+    sent_by_name = serializers.SerializerMethodField()
 
     class Meta:
         model = FacebookMessage
@@ -35,11 +36,19 @@ class FacebookMessageSerializer(serializers.ModelSerializer):
             # Reaction fields
             'reaction', 'reaction_emoji', 'reacted_by', 'reacted_at',
             # Reply fields
-            'reply_to_message_id', 'reply_to_id'
+            'reply_to_message_id', 'reply_to_id',
+            # Source tracking fields
+            'source', 'is_echo', 'sent_by', 'sent_by_name',
         ]
         read_only_fields = ['id', 'is_delivered', 'delivered_at', 'is_read', 'read_at', 'created_at',
                            'reaction', 'reaction_emoji', 'reacted_by', 'reacted_at',
-                           'reply_to_message_id', 'reply_to_id']
+                           'reply_to_message_id', 'reply_to_id',
+                           'source', 'is_echo', 'sent_by', 'sent_by_name']
+
+    def get_sent_by_name(self, obj):
+        if obj.sent_by:
+            return f"{obj.sent_by.first_name} {obj.sent_by.last_name}".strip() or obj.sent_by.email
+        return None
 
 
 class FacebookSendMessageSerializer(serializers.Serializer):
@@ -64,6 +73,7 @@ class InstagramAccountConnectionSerializer(serializers.ModelSerializer):
 class InstagramMessageSerializer(serializers.ModelSerializer):
     account_id = serializers.CharField(source='account_connection.instagram_account_id', read_only=True)
     account_username = serializers.CharField(source='account_connection.username', read_only=True)
+    sent_by_name = serializers.SerializerMethodField()
 
     class Meta:
         model = InstagramMessage
@@ -72,9 +82,17 @@ class InstagramMessageSerializer(serializers.ModelSerializer):
             'message_text', 'attachment_type', 'attachment_url', 'attachments',
             'timestamp', 'is_from_business', 'is_delivered', 'delivered_at', 'is_read', 'read_at',
             'is_read_by_staff', 'read_by_staff_at',
-            'account_id', 'account_username', 'created_at'
+            'account_id', 'account_username', 'created_at',
+            # Source tracking fields
+            'source', 'is_echo', 'sent_by', 'sent_by_name',
         ]
-        read_only_fields = ['id', 'is_delivered', 'delivered_at', 'is_read', 'read_at', 'created_at']
+        read_only_fields = ['id', 'is_delivered', 'delivered_at', 'is_read', 'read_at', 'created_at',
+                           'source', 'is_echo', 'sent_by', 'sent_by_name']
+
+    def get_sent_by_name(self, obj):
+        if obj.sent_by:
+            return f"{obj.sent_by.first_name} {obj.sent_by.last_name}".strip() or obj.sent_by.email
+        return None
 
 
 class InstagramSendMessageSerializer(serializers.Serializer):
@@ -106,6 +124,7 @@ class WhatsAppMessageSerializer(serializers.ModelSerializer):
     business_phone = serializers.CharField(source='business_account.display_phone_number', read_only=True)
     waba_id = serializers.CharField(source='business_account.waba_id', read_only=True)
     template_name = serializers.CharField(source='template.name', read_only=True, allow_null=True)
+    sent_by_name = serializers.SerializerMethodField()
 
     class Meta:
         model = WhatsAppMessage
@@ -118,13 +137,21 @@ class WhatsAppMessageSerializer(serializers.ModelSerializer):
             'template_parameters',
             # Coexistence fields
             'source', 'is_echo', 'is_edited', 'edited_at', 'original_text', 'is_revoked', 'revoked_at',
+            # Author tracking
+            'sent_by', 'sent_by_name',
             'created_at'
         ]
         read_only_fields = [
             'id', 'status', 'is_delivered', 'delivered_at', 'is_read', 'read_at',
             'source', 'is_echo', 'is_edited', 'edited_at', 'original_text', 'is_revoked', 'revoked_at',
+            'sent_by', 'sent_by_name',
             'created_at'
         ]
+
+    def get_sent_by_name(self, obj):
+        if obj.sent_by:
+            return f"{obj.sent_by.first_name} {obj.sent_by.last_name}".strip() or obj.sent_by.email
+        return None
 
 
 class WhatsAppSendMessageSerializer(serializers.Serializer):

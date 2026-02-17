@@ -58,6 +58,13 @@ class FacebookMessage(models.Model):
         ('fallback', 'Fallback'),
     ]
 
+    # Message source choices for tracking where messages originate
+    SOURCE_CHOICES = [
+        ('echodesk', 'EchoDesk'),
+        ('facebook_app', 'Facebook App'),
+        ('messenger_app', 'Messenger App'),
+    ]
+
     page_connection = models.ForeignKey(FacebookPageConnection, on_delete=models.CASCADE, related_name='messages')
     message_id = models.CharField(max_length=100, unique=True)
     sender_id = models.CharField(max_length=100)
@@ -105,6 +112,26 @@ class FacebookMessage(models.Model):
         blank=True,
         related_name='replies',
         help_text='Reference to the message this is replying to'
+    )
+
+    # Message source tracking
+    source = models.CharField(
+        max_length=20,
+        choices=SOURCE_CHOICES,
+        default='echodesk',
+        help_text="Source of the message: EchoDesk, Facebook App, or Messenger App"
+    )
+    is_echo = models.BooleanField(
+        default=False,
+        help_text="Message echoed from external app (sent by user on app, echoed to API)"
+    )
+    sent_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='sent_facebook_messages',
+        help_text='Staff member who sent this message via EchoDesk'
     )
 
     class Meta:
@@ -202,6 +229,12 @@ class InstagramMessage(models.Model):
         ('story_reply', 'Story Reply'),
     ]
 
+    # Message source choices for tracking where messages originate
+    SOURCE_CHOICES = [
+        ('echodesk', 'EchoDesk'),
+        ('instagram_app', 'Instagram App'),
+    ]
+
     account_connection = models.ForeignKey(
         InstagramAccountConnection,
         on_delete=models.CASCADE,
@@ -237,6 +270,26 @@ class InstagramMessage(models.Model):
         blank=True,
         related_name='deleted_instagram_messages',
         help_text='Staff member who deleted this message'
+    )
+
+    # Message source tracking
+    source = models.CharField(
+        max_length=20,
+        choices=SOURCE_CHOICES,
+        default='echodesk',
+        help_text="Source of the message: EchoDesk or Instagram App"
+    )
+    is_echo = models.BooleanField(
+        default=False,
+        help_text="Message echoed from external app (sent by user on app, echoed to API)"
+    )
+    sent_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='sent_instagram_messages',
+        help_text='Staff member who sent this message via EchoDesk'
     )
 
     class Meta:
@@ -441,6 +494,14 @@ class WhatsAppMessage(models.Model):
     is_echo = models.BooleanField(
         default=False,
         help_text="Message echoed from Business App (sent by user on app, echoed to API)"
+    )
+    sent_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='sent_whatsapp_messages',
+        help_text='Staff member who sent this message via EchoDesk'
     )
 
     # Edit support
