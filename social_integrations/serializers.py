@@ -3,7 +3,7 @@ from .models import (
     FacebookPageConnection, FacebookMessage,
     InstagramAccountConnection, InstagramMessage,
     WhatsAppBusinessAccount, WhatsAppMessage, WhatsAppMessageTemplate,
-    WhatsAppContact, SocialIntegrationSettings,
+    WhatsAppContact, SocialIntegrationSettings, ConversationAutoReply,
     ChatAssignment, ChatRating,
     EmailConnection, EmailMessage, EmailDraft,
     TikTokCreatorAccount, TikTokMessage,
@@ -269,6 +269,9 @@ class SocialIntegrationSettingsSerializer(serializers.ModelSerializer):
             'notification_sound_facebook', 'notification_sound_instagram',
             'notification_sound_whatsapp', 'notification_sound_email',
             'notification_sound_team_chat', 'notification_sound_system',
+            # Auto-reply settings
+            'timezone', 'away_hours_enabled', 'away_hours_schedule',
+            'auto_reply_settings',
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
@@ -279,6 +282,50 @@ class SocialIntegrationSettingsSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Refresh interval must be at least 1000ms (1 second)")
         if value > 60000:
             raise serializers.ValidationError("Refresh interval must be at most 60000ms (60 seconds)")
+        return value
+
+    def validate_timezone(self, value):
+        """Ensure timezone is valid"""
+        import pytz
+        try:
+            pytz.timezone(value)
+        except pytz.exceptions.UnknownTimeZoneError:
+            raise serializers.ValidationError(f"Invalid timezone: {value}")
+        return value
+
+    def validate_away_hours_schedule(self, value):
+        """Validate away hours schedule format"""
+        valid_days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+        if not isinstance(value, dict):
+            raise serializers.ValidationError("Away hours schedule must be a dictionary")
+
+        for day, hours in value.items():
+            if day.lower() not in valid_days:
+                raise serializers.ValidationError(f"Invalid day: {day}")
+            if not isinstance(hours, list):
+                raise serializers.ValidationError(f"Hours for {day} must be a list")
+            for hour in hours:
+                if not isinstance(hour, int) or hour < 0 or hour > 23:
+                    raise serializers.ValidationError(f"Invalid hour {hour} for {day}. Hours must be integers 0-23.")
+        return value
+
+    def validate_auto_reply_settings(self, value):
+        """Validate auto-reply settings format"""
+        valid_platforms = ['facebook', 'instagram', 'whatsapp']
+        if not isinstance(value, dict):
+            raise serializers.ValidationError("Auto-reply settings must be a dictionary")
+
+        for platform, settings in value.items():
+            if platform not in valid_platforms:
+                raise serializers.ValidationError(f"Invalid platform: {platform}")
+            if not isinstance(settings, dict):
+                raise serializers.ValidationError(f"Settings for {platform} must be a dictionary")
+
+            # Validate structure
+            allowed_keys = ['welcome_enabled', 'welcome_message', 'away_enabled', 'away_message']
+            for key in settings.keys():
+                if key not in allowed_keys:
+                    raise serializers.ValidationError(f"Invalid setting key '{key}' for {platform}")
         return value
 
 
