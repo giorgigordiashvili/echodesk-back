@@ -68,7 +68,8 @@ def list_security_logs(request):
             status=status.HTTP_403_FORBIDDEN
         )
 
-    queryset = SecurityLog.objects.all()
+    # Filter by current tenant
+    queryset = SecurityLog.objects.filter(tenant=request.tenant)
 
     # Apply filters
     event_type = request.GET.get('event_type')
@@ -151,7 +152,8 @@ def security_logs_stats(request):
     days = int(request.GET.get('days', 30))
     since_date = timezone.now() - timedelta(days=days)
 
-    logs = SecurityLog.objects.filter(created_at__gte=since_date)
+    # Filter by current tenant
+    logs = SecurityLog.objects.filter(tenant=request.tenant, created_at__gte=since_date)
 
     # Basic counts
     total_logins = logs.filter(event_type='login_success').count()
@@ -227,7 +229,8 @@ def my_security_logs(request):
             status=status.HTTP_403_FORBIDDEN
         )
 
-    queryset = SecurityLog.objects.filter(user_id=request.user.id).order_by('-created_at')
+    # Filter by current tenant and user
+    queryset = SecurityLog.objects.filter(tenant=request.tenant, user_id=request.user.id).order_by('-created_at')
 
     paginator = SecurityLogPagination()
     paginator.page_size = 20
