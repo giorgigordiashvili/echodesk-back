@@ -17,6 +17,7 @@ channels>=4.0.0
 channels-redis>=4.1.0
 daphne>=4.0.0
 django-storages>=1.14.0
+pytz>=2024.1
 boto3>=1.40.0
 sendgrid==6.12.5
 pywebpush>=1.14.0
