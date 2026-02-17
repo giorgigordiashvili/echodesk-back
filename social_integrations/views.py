@@ -1182,7 +1182,7 @@ def facebook_webhook(request):
                                                     echo_message = FacebookMessage.objects.create(
                                                         page_connection=page_connection,
                                                         message_id=message_id,
-                                                        sender_id=page_id,  # Sent by page
+                                                        sender_id=recipient_id,  # Use recipient_id for conversation grouping (same as direct send API)
                                                         sender_name=page_connection.page_name,
                                                         message_text=message_text,
                                                         attachment_type=attachment_type,
@@ -1192,7 +1192,7 @@ def facebook_webhook(request):
                                                         is_from_page=True,
                                                         is_delivered=True,
                                                     )
-                                                    logger.info(f"✅ Created echo message from Facebook: {message_id}")
+                                                    logger.info(f"✅ Created echo message from Facebook: {message_id} (recipient: {recipient_id})")
 
                                                     # Send WebSocket notification
                                                     ws_data = {
@@ -2351,7 +2351,7 @@ def instagram_webhook(request):
                                                 echo_message = InstagramMessage.objects.create(
                                                     account_connection=account_connection,
                                                     message_id=message_id,
-                                                    sender_id=instagram_account_id,  # Sent by business
+                                                    sender_id=recipient_id,  # Use recipient_id for conversation grouping (same as direct send API)
                                                     sender_name=account_connection.username,
                                                     sender_username=account_connection.username,
                                                     message_text=message_text,
@@ -2362,7 +2362,7 @@ def instagram_webhook(request):
                                                     is_from_business=True,
                                                     is_delivered=True,
                                                 )
-                                                logger.info(f"✅ Created Instagram echo message: {message_id}")
+                                                logger.info(f"✅ Created Instagram echo message: {message_id} (recipient: {recipient_id})")
 
                                                 # Send WebSocket notification
                                                 ws_data = {
