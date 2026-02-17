@@ -64,7 +64,8 @@ class CanManageSocialSettings(permissions.BasePermission):
     """
     Permission to manage social media integration settings
 
-    - Only admins or users with explicit permission can manage settings
+    - Read access (GET): Users with social_integrations feature
+    - Write access (POST/PUT/PATCH/DELETE): Admins only or users with manage_social_settings permission
     """
     message = "You do not have permission to manage social media settings."
 
@@ -72,7 +73,11 @@ class CanManageSocialSettings(permissions.BasePermission):
         if not request.user or not request.user.is_authenticated:
             return False
 
-        # Only admins or users with explicit permission
+        # Read-only permissions: Check if user has social_integrations feature
+        if request.method in permissions.SAFE_METHODS:
+            return request.user.has_feature('social_integrations')
+
+        # Write permissions require admin role or explicit permission
         return (
             request.user.role == 'admin' or
             request.user.has_permission('manage_social_settings')
