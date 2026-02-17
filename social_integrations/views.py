@@ -890,7 +890,10 @@ def facebook_send_message(request):
                     timestamp=datetime.now(),
                     is_from_page=True,
                     reply_to_message_id=reply_to_message_id if reply_to_message_id else None,
-                    reply_to=reply_to_obj
+                    reply_to=reply_to_obj,
+                    source='echodesk',
+                    is_echo=False,
+                    sent_by=request.user,
                 )
             except Exception as e:
                 logger.warning(f"Failed to save sent message: {e}")
@@ -1191,6 +1194,9 @@ def facebook_webhook(request):
                                                         timestamp=timestamp_dt,
                                                         is_from_page=True,
                                                         is_delivered=True,
+                                                        source='facebook_app',  # Message sent from Facebook/Messenger app
+                                                        is_echo=True,
+                                                        sent_by=None,  # Not sent via EchoDesk
                                                     )
                                                     logger.info(f"✅ Created echo message from Facebook: {message_id} (recipient: {recipient_id})")
 
@@ -2180,7 +2186,10 @@ def instagram_send_message(request):
                     sender_username=account_connection.username,
                     message_text=message_text,
                     timestamp=datetime.now(),
-                    is_from_business=True
+                    is_from_business=True,
+                    source='echodesk',
+                    is_echo=False,
+                    sent_by=request.user,
                 )
                 print(f"✅ Saved sent message to database")
             except Exception as e:
@@ -2361,6 +2370,9 @@ def instagram_webhook(request):
                                                     timestamp=timestamp_dt,
                                                     is_from_business=True,
                                                     is_delivered=True,
+                                                    source='instagram_app',  # Message sent from Instagram app
+                                                    is_echo=True,
+                                                    sent_by=None,  # Not sent via EchoDesk
                                                 )
                                                 logger.info(f"✅ Created Instagram echo message: {message_id} (recipient: {recipient_id})")
 
@@ -4657,7 +4669,8 @@ def whatsapp_send_message(request):
                 message_type='text',
                 timestamp=timezone.now(),
                 is_from_business=True,
-                status='sent'
+                status='sent',
+                sent_by=request.user,
             )
             logger.info(f"✅ Saved sent WhatsApp message: {message_id}")
 
