@@ -307,11 +307,11 @@ def send_facebook_auto_reply(recipient_id, message_text, page_connection):
             response_data = response.json()
             message_id = response_data.get('message_id', f"auto_{datetime.now().timestamp()}")
 
-            # Save to database
+            # Save to database - use recipient_id for conversation grouping
             FacebookMessage.objects.create(
                 page_connection=page_connection,
                 message_id=message_id,
-                sender_id=page_connection.page_id,
+                sender_id=recipient_id,  # Use recipient_id for conversation grouping
                 sender_name=page_connection.page_name,
                 message_text=message_text,
                 timestamp=timezone.now(),
@@ -320,7 +320,7 @@ def send_facebook_auto_reply(recipient_id, message_text, page_connection):
                 is_echo=False,
                 sent_by=None,  # Auto-reply, no user
             )
-            logger.info(f"✅ Facebook auto-reply sent: {message_id}")
+            logger.info(f"✅ Facebook auto-reply sent to {recipient_id}: {message_id}")
             return True
         else:
             logger.error(f"❌ Facebook auto-reply failed: {response.status_code} - {response.text}")
@@ -334,15 +334,29 @@ def send_facebook_auto_reply(recipient_id, message_text, page_connection):
 def send_instagram_auto_reply(recipient_id, message_text, account_connection):
     """Send Instagram auto-reply and save to DB"""
     try:
-        send_url = f"https://graph.facebook.com/v23.0/{account_connection.instagram_account_id}/messages"
+        # Instagram messages are sent through the Facebook Page, not the Instagram account directly
+        # We use /me/messages with platform=instagram parameter
+        if not account_connection.facebook_page:
+            logger.error("❌ Instagram auto-reply failed: No linked Facebook Page")
+            return False
+
+        send_url = "https://graph.facebook.com/v23.0/me/messages"
         message_data = {
             'recipient': {'id': recipient_id},
-            'message': {'text': message_text}
+            'message': {'text': message_text},
+            'messaging_type': 'RESPONSE'  # Required for Instagram within 24hr window
         }
+
+        # Use the Facebook Page's access token with platform=instagram
+        access_token = account_connection.facebook_page.page_access_token
+
         response = requests.post(
             send_url,
             json=message_data,
-            params={'access_token': account_connection.access_token},
+            params={
+                'access_token': access_token,
+                'platform': 'instagram'
+            },
             timeout=30
         )
 
@@ -350,11 +364,11 @@ def send_instagram_auto_reply(recipient_id, message_text, account_connection):
             response_data = response.json()
             message_id = response_data.get('message_id', f"auto_{datetime.now().timestamp()}")
 
-            # Save to database
+            # Save to database - use recipient_id for conversation grouping
             InstagramMessage.objects.create(
                 account_connection=account_connection,
                 message_id=message_id,
-                sender_id=account_connection.instagram_account_id,
+                sender_id=recipient_id,  # Use recipient_id for conversation grouping
                 sender_name=account_connection.username,
                 sender_username=account_connection.username,
                 message_text=message_text,
@@ -364,7 +378,7 @@ def send_instagram_auto_reply(recipient_id, message_text, account_connection):
                 is_echo=False,
                 sent_by=None,  # Auto-reply, no user
             )
-            logger.info(f"✅ Instagram auto-reply sent: {message_id}")
+            logger.info(f"✅ Instagram auto-reply sent to {recipient_id}: {message_id}")
             return True
         else:
             logger.error(f"❌ Instagram auto-reply failed: {response.status_code} - {response.text}")
