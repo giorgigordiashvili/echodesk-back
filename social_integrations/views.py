@@ -191,7 +191,11 @@ def process_auto_reply(platform, account_id, conversation_id, sender_name, conne
         sender_name: Customer's display name for personalization
         connection: FacebookPageConnection, InstagramAccountConnection, or WhatsAppBusinessAccount
     """
-    import pytz
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:
+        from pytz import timezone as _pytz_tz
+        ZoneInfo = _pytz_tz
 
     try:
         settings = SocialIntegrationSettings.objects.first()
@@ -216,7 +220,7 @@ def process_auto_reply(platform, account_id, conversation_id, sender_name, conne
         is_away = False
         if settings.away_hours_enabled and settings.away_hours_schedule:
             try:
-                business_tz = pytz.timezone(settings.timezone)
+                business_tz = ZoneInfo(settings.timezone)
                 local_dt = now.astimezone(business_tz)
                 current_hour = local_dt.hour
                 current_day = local_dt.strftime('%A').lower()  # monday, tuesday, etc.
