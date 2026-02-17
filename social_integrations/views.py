@@ -195,7 +195,7 @@ class FacebookMessageViewSet(viewsets.ReadOnlyModelViewSet):
         base_queryset = FacebookMessage.objects.filter(
             page_connection__in=tenant_pages,
             is_deleted=False
-        ).select_related('page_connection')
+        ).select_related('page_connection', 'sent_by')
 
         # Check if hiding assigned chats is enabled
         settings_obj = SocialIntegrationSettings.objects.first()
