@@ -3851,6 +3851,7 @@ def unified_conversations(request):
     - page: Page number (default: 1)
     - page_size: Results per page (default: 50, max: 200)
     - folder: Email folder filter (default: INBOX)
+    - assigned: If true, only return conversations assigned to the current user
     """
     # Parse query parameters
     platforms_param = request.query_params.get('platforms', 'facebook,instagram,whatsapp,email')
@@ -3859,6 +3860,7 @@ def unified_conversations(request):
     page = int(request.query_params.get('page', 1))
     page_size = min(int(request.query_params.get('page_size', 50)), 200)
     email_folder = request.query_params.get('folder', 'INBOX')
+    assigned_only = request.query_params.get('assigned', '').lower() == 'true'
 
     all_conversations = []
 
@@ -3867,8 +3869,27 @@ def unified_conversations(request):
     hide_assigned = settings_obj and settings_obj.hide_assigned_chats
     is_admin = request.user.is_superuser or request.user.is_staff
 
+    # Get all assignments for current user if filtering by assigned
+    user_assignments = set()
+    if assigned_only:
+        assignments = ChatAssignment.objects.filter(
+            assigned_user=request.user,
+            status__in=['active', 'in_session']
+        )
+        for a in assignments:
+            # Create a tuple key: (platform, account_id, conversation_id)
+            user_assignments.add((a.platform, a.account_id, a.conversation_id))
+
+    # Helper to check if conversation is assigned to current user
+    def is_assigned_to_user(platform, account_id, conversation_id):
+        return (platform, account_id, conversation_id) in user_assignments
+
     # Helper to check if conversation should be visible based on assignment
     def is_conversation_visible(platform, account_id, conversation_id):
+        # If filtering by assigned, only show assigned conversations
+        if assigned_only:
+            return is_assigned_to_user(platform, account_id, conversation_id)
+
         if not hide_assigned or is_admin:
             return True
 
