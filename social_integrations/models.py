@@ -1706,3 +1706,51 @@ class SocialAccount(models.Model):
 
     def __str__(self):
         return f"{self.client.name} - {self.platform}: {self.display_name or self.platform_id}"
+
+
+class ConversationArchive(models.Model):
+    """
+    Tracks archived conversations across all platforms.
+    When a conversation is archived, it's hidden from the main list
+    and shown in the history/archive tab.
+    """
+    PLATFORM_CHOICES = [
+        ('facebook', 'Facebook'),
+        ('instagram', 'Instagram'),
+        ('whatsapp', 'WhatsApp'),
+        ('email', 'Email'),
+        ('tiktok', 'TikTok'),
+    ]
+
+    platform = models.CharField(max_length=20, choices=PLATFORM_CHOICES)
+    conversation_id = models.CharField(
+        max_length=255,
+        help_text="Platform-specific conversation ID (sender_id, from_number, thread_id)"
+    )
+    account_id = models.CharField(
+        max_length=255,
+        help_text="Account connection ID (page_id, instagram_account_id, waba_id, connection_id)"
+    )
+
+    # Archive metadata
+    archived_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='archived_conversations'
+    )
+    archived_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-archived_at']
+        verbose_name = "Conversation Archive"
+        verbose_name_plural = "Conversation Archives"
+        unique_together = [['platform', 'conversation_id', 'account_id']]
+        indexes = [
+            models.Index(fields=['platform', 'account_id']),
+            models.Index(fields=['archived_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.platform} - {self.conversation_id} (archived {self.archived_at})"

@@ -26,7 +26,7 @@ from .models import (
     InstagramAccountConnection, InstagramMessage,
     WhatsAppBusinessAccount, WhatsAppMessage, WhatsAppMessageTemplate,
     WhatsAppContact, SocialIntegrationSettings, ConversationAutoReply,
-    ChatAssignment, ChatRating,
+    ChatAssignment, ChatRating, ConversationArchive,
     EmailConnection, EmailMessage, EmailDraft,
     TikTokCreatorAccount, TikTokMessage,
     EmailSignature, QuickReply,
@@ -3852,6 +3852,7 @@ def unified_conversations(request):
     - page_size: Results per page (default: 50, max: 200)
     - folder: Email folder filter (default: INBOX)
     - assigned: If true, only return conversations assigned to the current user
+    - archived: If true, only return archived conversations (history)
     """
     # Parse query parameters
     platforms_param = request.query_params.get('platforms', 'facebook,instagram,whatsapp,email')
@@ -3861,6 +3862,7 @@ def unified_conversations(request):
     page_size = min(int(request.query_params.get('page_size', 50)), 200)
     email_folder = request.query_params.get('folder', 'INBOX')
     assigned_only = request.query_params.get('assigned', '').lower() == 'true'
+    archived_only = request.query_params.get('archived', '').lower() == 'true'
 
     all_conversations = []
 
@@ -3868,6 +3870,15 @@ def unified_conversations(request):
     settings_obj = SocialIntegrationSettings.objects.first()
     hide_assigned = settings_obj and settings_obj.hide_assigned_chats
     is_admin = request.user.is_superuser or request.user.is_staff
+
+    # Load archived conversation keys for filtering
+    archived_conversations = set(
+        ConversationArchive.objects.values_list('platform', 'conversation_id', 'account_id')
+    )
+
+    # Helper to check if conversation is archived
+    def is_conversation_archived(platform, account_id, conversation_id):
+        return (platform, conversation_id, account_id) in archived_conversations
 
     # Get all assignments for current user if filtering by assigned
     user_assignments = set()
@@ -3884,8 +3895,18 @@ def unified_conversations(request):
     def is_assigned_to_user(platform, account_id, conversation_id):
         return (platform, account_id, conversation_id) in user_assignments
 
-    # Helper to check if conversation should be visible based on assignment
+    # Helper to check if conversation should be visible based on assignment and archive status
     def is_conversation_visible(platform, account_id, conversation_id):
+        # Check archive status first
+        is_archived = is_conversation_archived(platform, account_id, conversation_id)
+        if archived_only:
+            # Only show archived conversations
+            if not is_archived:
+                return False
+        else:
+            # Hide archived conversations from main list
+            if is_archived:
+                return False
         # If filtering by assigned, only show assigned conversations
         if assigned_only:
             return is_assigned_to_user(platform, account_id, conversation_id)
@@ -8081,3 +8102,373 @@ class SocialClientCustomFieldViewSet(viewsets.ModelViewSet):
                 SocialClientCustomField.objects.filter(id=field_id).update(position=position)
 
         return Response({'status': 'reordered'})
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def mark_all_conversations_read(request):
+    """
+    Mark all unread messages across all conversations as read by staff.
+
+    Request body (optional):
+    {
+        "platform": "facebook" | "instagram" | "whatsapp" | "email" | "all"  (default: "all")
+    }
+
+    Returns count of messages marked as read.
+    """
+    logger = logging.getLogger(__name__)
+
+    try:
+        platform = request.data.get('platform', 'all').lower()
+        now = timezone.now()
+        total_updated = 0
+
+        # Mark Facebook messages as read
+        if platform in ['all', 'facebook']:
+            count = FacebookMessage.objects.filter(
+                is_from_page=False,
+                is_read_by_staff=False
+            ).update(
+                is_read_by_staff=True,
+                read_by_staff_at=now
+            )
+            total_updated += count
+            logger.info(f"Marked {count} Facebook messages as read")
+
+        # Mark Instagram messages as read
+        if platform in ['all', 'instagram']:
+            count = InstagramMessage.objects.filter(
+                is_from_business=False,
+                is_read_by_staff=False
+            ).update(
+                is_read_by_staff=True,
+                read_by_staff_at=now
+            )
+            total_updated += count
+            logger.info(f"Marked {count} Instagram messages as read")
+
+        # Mark WhatsApp messages as read
+        if platform in ['all', 'whatsapp']:
+            count = WhatsAppMessage.objects.filter(
+                is_from_business=False,
+                is_read_by_staff=False
+            ).update(
+                is_read_by_staff=True,
+                read_by_staff_at=now
+            )
+            total_updated += count
+            logger.info(f"Marked {count} WhatsApp messages as read")
+
+        # Mark Email messages as read
+        if platform in ['all', 'email']:
+            count = EmailMessage.objects.filter(
+                is_from_business=False,
+                is_read_by_staff=False
+            ).update(
+                is_read_by_staff=True,
+                read_by_staff_at=now
+            )
+            total_updated += count
+            logger.info(f"Marked {count} Email messages as read")
+
+        return Response({
+            'success': True,
+            'messages_marked_read': total_updated,
+            'platform': platform
+        })
+
+    except Exception as e:
+        logger.error(f"Error marking all conversations as read: {e}")
+        return Response({
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def archive_conversation(request):
+    """
+    Archive one or more conversations. Archived conversations are hidden
+    from the main list and shown in the history/archive tab.
+
+    Request body:
+    {
+        "conversations": [
+            {
+                "platform": "facebook" | "instagram" | "whatsapp" | "email",
+                "conversation_id": "sender_id or from_number or thread_id",
+                "account_id": "page_id or account_id or waba_id or connection_id"
+            }
+        ]
+    }
+
+    Returns count of conversations archived.
+    """
+    logger = logging.getLogger(__name__)
+
+    try:
+        conversations = request.data.get('conversations', [])
+
+        if not conversations:
+            return Response({
+                'error': 'No conversations provided'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        archived_count = 0
+        errors = []
+
+        for conv in conversations:
+            platform = conv.get('platform')
+            conversation_id = conv.get('conversation_id')
+            account_id = conv.get('account_id')
+
+            if not all([platform, conversation_id, account_id]):
+                errors.append({
+                    'conversation': conv,
+                    'error': 'Missing required fields (platform, conversation_id, account_id)'
+                })
+                continue
+
+            # Create or update the archive record
+            archive, created = ConversationArchive.objects.get_or_create(
+                platform=platform,
+                conversation_id=conversation_id,
+                account_id=account_id,
+                defaults={
+                    'archived_by': request.user
+                }
+            )
+
+            if created:
+                archived_count += 1
+                logger.info(f"Archived conversation: {platform}/{account_id}/{conversation_id}")
+            else:
+                # Already archived, update the timestamp
+                archive.archived_at = timezone.now()
+                archive.archived_by = request.user
+                archive.save()
+                logger.info(f"Updated archive timestamp: {platform}/{account_id}/{conversation_id}")
+
+        response_data = {
+            'success': True,
+            'archived_count': archived_count,
+            'message': f"Archived {archived_count} conversation(s)"
+        }
+
+        if errors:
+            response_data['errors'] = errors
+
+        return Response(response_data)
+
+    except Exception as e:
+        logger.error(f"Error archiving conversations: {e}")
+        return Response({
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def unarchive_conversation(request):
+    """
+    Unarchive (restore) one or more conversations back to the main list.
+
+    Request body:
+    {
+        "conversations": [
+            {
+                "platform": "facebook" | "instagram" | "whatsapp" | "email",
+                "conversation_id": "sender_id or from_number or thread_id",
+                "account_id": "page_id or account_id or waba_id or connection_id"
+            }
+        ]
+    }
+
+    Returns count of conversations unarchived.
+    """
+    logger = logging.getLogger(__name__)
+
+    try:
+        conversations = request.data.get('conversations', [])
+
+        if not conversations:
+            return Response({
+                'error': 'No conversations provided'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        unarchived_count = 0
+        errors = []
+
+        for conv in conversations:
+            platform = conv.get('platform')
+            conversation_id = conv.get('conversation_id')
+            account_id = conv.get('account_id')
+
+            if not all([platform, conversation_id, account_id]):
+                errors.append({
+                    'conversation': conv,
+                    'error': 'Missing required fields (platform, conversation_id, account_id)'
+                })
+                continue
+
+            # Delete the archive record
+            deleted_count, _ = ConversationArchive.objects.filter(
+                platform=platform,
+                conversation_id=conversation_id,
+                account_id=account_id
+            ).delete()
+
+            if deleted_count > 0:
+                unarchived_count += 1
+                logger.info(f"Unarchived conversation: {platform}/{account_id}/{conversation_id}")
+
+        response_data = {
+            'success': True,
+            'unarchived_count': unarchived_count,
+            'message': f"Unarchived {unarchived_count} conversation(s)"
+        }
+
+        if errors:
+            response_data['errors'] = errors
+
+        return Response(response_data)
+
+    except Exception as e:
+        logger.error(f"Error unarchiving conversations: {e}")
+        return Response({
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def archive_all_conversations(request):
+    """
+    Archive all conversations (move everything to history).
+    This will archive all active (non-archived) conversations across all platforms.
+
+    Request body (optional):
+    {
+        "platform": "facebook" | "instagram" | "whatsapp" | "email" | "all"  (default: "all")
+    }
+
+    Returns count of conversations archived.
+    """
+    logger = logging.getLogger(__name__)
+
+    try:
+        platform_filter = request.data.get('platform', 'all').lower()
+        archived_count = 0
+
+        # Get all existing archived conversation keys for quick lookup
+        existing_archives = set(
+            ConversationArchive.objects.values_list('platform', 'conversation_id', 'account_id')
+        )
+
+        conversations_to_archive = []
+
+        # Gather Facebook conversations
+        if platform_filter in ['all', 'facebook']:
+            fb_pages = FacebookPageConnection.objects.filter(is_active=True)
+            for page in fb_pages:
+                # Get unique sender_ids for this page
+                sender_ids = FacebookMessage.objects.filter(
+                    page_connection=page,
+                    is_deleted=False
+                ).values_list('sender_id', flat=True).distinct()
+
+                for sender_id in sender_ids:
+                    key = ('facebook', sender_id, page.page_id)
+                    if key not in existing_archives:
+                        conversations_to_archive.append({
+                            'platform': 'facebook',
+                            'conversation_id': sender_id,
+                            'account_id': page.page_id
+                        })
+
+        # Gather Instagram conversations
+        if platform_filter in ['all', 'instagram']:
+            ig_accounts = InstagramAccountConnection.objects.filter(is_active=True)
+            for account in ig_accounts:
+                sender_ids = InstagramMessage.objects.filter(
+                    account_connection=account,
+                    is_deleted=False
+                ).values_list('sender_id', flat=True).distinct()
+
+                for sender_id in sender_ids:
+                    key = ('instagram', sender_id, account.instagram_account_id)
+                    if key not in existing_archives:
+                        conversations_to_archive.append({
+                            'platform': 'instagram',
+                            'conversation_id': sender_id,
+                            'account_id': account.instagram_account_id
+                        })
+
+        # Gather WhatsApp conversations
+        if platform_filter in ['all', 'whatsapp']:
+            wa_accounts = WhatsAppBusinessAccount.objects.filter(is_active=True)
+            for account in wa_accounts:
+                from_numbers = WhatsAppMessage.objects.filter(
+                    business_account=account,
+                    is_deleted=False
+                ).values_list('from_number', flat=True).distinct()
+
+                for from_number in from_numbers:
+                    # Normalize phone number
+                    normalized = from_number.lstrip('+') if from_number else from_number
+                    key = ('whatsapp', normalized, account.waba_id)
+                    if key not in existing_archives:
+                        conversations_to_archive.append({
+                            'platform': 'whatsapp',
+                            'conversation_id': normalized,
+                            'account_id': account.waba_id
+                        })
+
+        # Gather Email conversations
+        if platform_filter in ['all', 'email']:
+            email_connections = EmailConnection.objects.filter(is_active=True)
+            for connection in email_connections:
+                thread_ids = EmailMessage.objects.filter(
+                    connection=connection,
+                    is_deleted=False
+                ).values_list('thread_id', flat=True).distinct()
+
+                for thread_id in thread_ids:
+                    key = ('email', thread_id, str(connection.id))
+                    if key not in existing_archives:
+                        conversations_to_archive.append({
+                            'platform': 'email',
+                            'conversation_id': thread_id,
+                            'account_id': str(connection.id)
+                        })
+
+        # Bulk create archive records
+        archive_objects = [
+            ConversationArchive(
+                platform=conv['platform'],
+                conversation_id=conv['conversation_id'],
+                account_id=conv['account_id'],
+                archived_by=request.user
+            )
+            for conv in conversations_to_archive
+        ]
+
+        if archive_objects:
+            ConversationArchive.objects.bulk_create(archive_objects, ignore_conflicts=True)
+            archived_count = len(archive_objects)
+
+        logger.info(f"Archived {archived_count} conversations (platform: {platform_filter})")
+
+        return Response({
+            'success': True,
+            'archived_count': archived_count,
+            'platform': platform_filter,
+            'message': f"Archived {archived_count} conversation(s)"
+        })
+
+    except Exception as e:
+        logger.error(f"Error archiving all conversations: {e}")
+        return Response({
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
