@@ -5109,8 +5109,8 @@ def whatsapp_webhook(request):
             # Find tenant for this phone number
             tenant_schema = find_tenant_by_whatsapp_phone_number_id(phone_number_id)
             if not tenant_schema:
-                logger.error(f"No tenant found for phone_number_id: {phone_number_id}")
-                return JsonResponse({'status': 'error', 'message': 'No tenant found'}, status=404)
+                logger.warning(f"No tenant found for phone_number_id: {phone_number_id} — ignoring unregistered webhook")
+                return JsonResponse({'status': 'ignored', 'message': 'No tenant found for this phone_number_id'}, status=200)
 
             logger.info(f"Processing WhatsApp webhook for tenant: {tenant_schema}")
 
