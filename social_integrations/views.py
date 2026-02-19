@@ -2233,7 +2233,7 @@ class InstagramMessageViewSet(viewsets.ReadOnlyModelViewSet):
     filterset_fields = {
         'account_connection__instagram_account_id': ['exact'],
         'sender_id': ['exact'],
-        'is_from_account': ['exact'],
+        'is_from_business': ['exact'],
         'is_read_by_staff': ['exact'],
     }
     ordering_fields = ['timestamp', 'created_at']
