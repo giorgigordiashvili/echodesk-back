@@ -4129,7 +4129,7 @@ def unified_conversations(request):
                             'timestamp': latest_msg.timestamp,
                             'is_from_business': latest_msg.is_from_business,
                             'attachment_type': latest_msg.message_type if latest_msg.message_type != 'text' else None,
-                            'platform_message_id': latest_msg.wamid,
+                            'platform_message_id': latest_msg.message_id,
                         },
                         'message_count': conv_data['msg_count'],
                         'unread_count': unread_count,
