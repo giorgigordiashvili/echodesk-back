@@ -5434,62 +5434,66 @@ def whatsapp_webhook(request):
 
                 # Handle smb_message_echoes webhook (messages sent from WhatsApp Business App)
                 if webhook_field == 'smb_message_echoes':
-                    echo_entries = value.get('smb_message_echoes', [])
-                    for entry in echo_entries:
-                        echo_messages = entry.get('messages', [])
-                        for echo_msg in echo_messages:
-                            echo_msg_id = echo_msg.get('id')
+                    # The data is in 'message_echoes' array, not 'smb_message_echoes'
+                    echo_messages = value.get('message_echoes', [])
+                    for echo_msg in echo_messages:
+                        echo_msg_id = echo_msg.get('id')
 
-                            # Skip if message already exists
-                            if WhatsAppMessage.objects.filter(message_id=echo_msg_id).exists():
-                                logger.debug(f"Skipping duplicate echo message: {echo_msg_id}")
-                                continue
+                        # Skip if message already exists
+                        if WhatsAppMessage.objects.filter(message_id=echo_msg_id).exists():
+                            logger.debug(f"Skipping duplicate echo message: {echo_msg_id}")
+                            continue
 
-                            echo_to = echo_msg.get('to', '')
-                            echo_timestamp = echo_msg.get('timestamp', '')
-                            echo_type = echo_msg.get('type', 'text')
-                            echo_text = ''
+                        echo_from = echo_msg.get('from', '')
+                        echo_to = echo_msg.get('to', '')
+                        echo_timestamp = echo_msg.get('timestamp', '')
+                        echo_type = echo_msg.get('type', 'text')
+                        echo_text = ''
 
-                            if echo_type == 'text':
-                                echo_text = echo_msg.get('text', {}).get('body', '')
-                            elif echo_type == 'image':
-                                echo_text = echo_msg.get('image', {}).get('caption', '')
-                            elif echo_type == 'video':
-                                echo_text = echo_msg.get('video', {}).get('caption', '')
-                            elif echo_type == 'document':
-                                echo_text = echo_msg.get('document', {}).get('filename', '')
+                        if echo_type == 'text':
+                            echo_text = echo_msg.get('text', {}).get('body', '')
+                        elif echo_type == 'image':
+                            echo_text = echo_msg.get('image', {}).get('caption', '')
+                        elif echo_type == 'video':
+                            echo_text = echo_msg.get('video', {}).get('caption', '')
+                        elif echo_type == 'document':
+                            echo_text = echo_msg.get('document', {}).get('filename', '')
+                        elif echo_type == 'audio':
+                            echo_text = '[Audio]'
+                        elif echo_type == 'sticker':
+                            echo_text = '[Sticker]'
 
-                            message_timestamp = datetime.fromtimestamp(int(echo_timestamp), tz=timezone.utc) if echo_timestamp else timezone.now()
+                        message_timestamp = datetime.fromtimestamp(int(echo_timestamp), tz=timezone.utc) if echo_timestamp else timezone.now()
 
-                            echo_message_obj = WhatsAppMessage.objects.create(
-                                business_account=account,
-                                message_id=echo_msg_id,
-                                from_number=account.phone_number,
-                                to_number=echo_to,
-                                message_text=echo_text,
-                                message_type=echo_type,
-                                timestamp=message_timestamp,
-                                is_from_business=True,
-                                source='business_app',
-                                is_echo=True,
-                                status='sent',
-                            )
-                            logger.info(f"📤 Received SMB echo message: {echo_msg_id} to {echo_to}")
+                        echo_message_obj = WhatsAppMessage.objects.create(
+                            business_account=account,
+                            message_id=echo_msg_id,
+                            from_number=echo_from or account.phone_number,
+                            to_number=echo_to,
+                            message_text=echo_text,
+                            message_type=echo_type,
+                            timestamp=message_timestamp,
+                            is_from_business=True,
+                            source='business_app',
+                            is_echo=True,
+                            status='sent',
+                        )
+                        logger.info(f"📤 Received SMB echo message: {echo_msg_id} to {echo_to}: {echo_text[:50] if echo_text else f'[{echo_type}]'}")
 
-                            # Send WebSocket notification for echo
-                            ws_echo_data = {
-                                'id': echo_message_obj.id,
-                                'message_id': echo_message_obj.message_id,
-                                'from_number': echo_message_obj.from_number,
-                                'to_number': echo_message_obj.to_number,
-                                'message_text': echo_message_obj.message_text,
-                                'message_type': echo_message_obj.message_type,
-                                'timestamp': echo_message_obj.timestamp.isoformat(),
-                                'is_from_business': True,
-                                'is_echo': True,
-                                'source': 'business_app',
-                            }
-                            send_websocket_notification(tenant_schema, ws_echo_data, echo_to)
+                        # Send WebSocket notification for echo
+                        ws_echo_data = {
+                            'id': echo_message_obj.id,
+                            'message_id': echo_message_obj.message_id,
+                            'from_number': echo_message_obj.from_number,
+                            'to_number': echo_message_obj.to_number,
+                            'message_text': echo_message_obj.message_text,
+                            'message_type': echo_message_obj.message_type,
+                            'timestamp': echo_message_obj.timestamp.isoformat(),
+                            'is_from_business': True,
+                            'is_echo': True,
+                            'source': 'business_app',
+                        }
+                        send_websocket_notification(tenant_schema, ws_echo_data, echo_to)
 
                 # Handle account_update webhook (coexistence account status changes)
                 if webhook_field == 'account_update':
