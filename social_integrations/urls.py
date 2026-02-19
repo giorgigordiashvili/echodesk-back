@@ -101,6 +101,9 @@ urlpatterns = [
     path('rating-statistics/', views.rating_statistics, name='rating_statistics'),
     path('rating-statistics/user/<int:user_id>/', views.user_chat_sessions, name='user_chat_sessions'),
 
+    # Unified conversations endpoint
+    path('conversations/', views.unified_conversations, name='unified_conversations'),
+
     # Unread messages count endpoint
     path('unread-count/', views.unread_messages_count, name='unread_messages_count'),
 
