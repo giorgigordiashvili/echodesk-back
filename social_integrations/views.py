@@ -15,10 +15,11 @@ from django.shortcuts import redirect
 from django.urls import reverse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
-from rest_framework import viewsets, status, serializers as drf_serializers
+from rest_framework import viewsets, status, serializers as drf_serializers, filters
 from rest_framework.decorators import api_view, permission_classes, action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import extend_schema
 from .models import (
     FacebookPageConnection, FacebookMessage, OrphanedFacebookMessage,
@@ -45,6 +46,7 @@ from .serializers import (
     SocialClientSerializer, SocialClientListSerializer, SocialClientCreateSerializer,
     SocialClientCustomFieldSerializer, SocialAccountSerializer, SocialAccountLinkSerializer
 )
+from .pagination import SocialMessagePagination
 from .permissions import (
     CanManageSocialConnections, CanViewSocialMessages,
     CanSendSocialMessages, CanManageSocialSettings, IsSuperAdmin, IsStaffUser
@@ -467,6 +469,16 @@ class FacebookPageConnectionViewSet(viewsets.ModelViewSet):
 class FacebookMessageViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = FacebookMessageSerializer
     permission_classes = [IsAuthenticated, CanViewSocialMessages]
+    pagination_class = SocialMessagePagination
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = {
+        'page_connection__page_id': ['exact'],
+        'sender_id': ['exact'],
+        'is_from_page': ['exact'],
+        'is_read_by_staff': ['exact'],
+    }
+    ordering_fields = ['timestamp', 'created_at']
+    ordering = ['-timestamp']
 
     def get_queryset(self):
         tenant_pages = FacebookPageConnection.objects.all()  # All pages for this tenant
@@ -475,6 +487,11 @@ class FacebookMessageViewSet(viewsets.ReadOnlyModelViewSet):
             page_connection__in=tenant_pages,
             is_deleted=False
         ).select_related('page_connection', 'sent_by')
+
+        # Apply page_id filter from query params (support both formats)
+        page_id = self.request.query_params.get('page_id')
+        if page_id:
+            base_queryset = base_queryset.filter(page_connection__page_id=page_id)
 
         # Check if hiding assigned chats is enabled
         settings_obj = SocialIntegrationSettings.objects.first()
@@ -2211,6 +2228,16 @@ class InstagramAccountConnectionViewSet(viewsets.ModelViewSet):
 class InstagramMessageViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = InstagramMessageSerializer
     permission_classes = [IsAuthenticated, CanViewSocialMessages]
+    pagination_class = SocialMessagePagination
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = {
+        'account_connection__instagram_account_id': ['exact'],
+        'sender_id': ['exact'],
+        'is_from_account': ['exact'],
+        'is_read_by_staff': ['exact'],
+    }
+    ordering_fields = ['timestamp', 'created_at']
+    ordering = ['-timestamp']
 
     def get_queryset(self):
         tenant_accounts = InstagramAccountConnection.objects.all()  # All accounts for this tenant
@@ -2218,7 +2245,12 @@ class InstagramMessageViewSet(viewsets.ReadOnlyModelViewSet):
         base_queryset = InstagramMessage.objects.filter(
             account_connection__in=tenant_accounts,
             is_deleted=False
-        ).select_related('account_connection')
+        ).select_related('account_connection', 'sent_by')
+
+        # Apply account_id filter from query params (support both formats)
+        account_id = self.request.query_params.get('account_id')
+        if account_id:
+            base_queryset = base_queryset.filter(account_connection__instagram_account_id=account_id)
 
         # Check if hiding assigned chats is enabled
         settings_obj = SocialIntegrationSettings.objects.first()
@@ -4336,6 +4368,18 @@ class WhatsAppBusinessAccountViewSet(viewsets.ModelViewSet):
 class WhatsAppMessageViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = WhatsAppMessageSerializer
     permission_classes = [IsAuthenticated, CanViewSocialMessages]
+    pagination_class = SocialMessagePagination
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = {
+        'business_account__waba_id': ['exact'],
+        'business_account__phone_number_id': ['exact'],
+        'from_number': ['exact'],
+        'to_number': ['exact'],
+        'is_from_business': ['exact'],
+        'is_read_by_staff': ['exact'],
+    }
+    ordering_fields = ['timestamp', 'created_at']
+    ordering = ['-timestamp']
 
     def get_queryset(self):
         tenant_accounts = WhatsAppBusinessAccount.objects.all()  # All accounts for this tenant
@@ -4343,7 +4387,15 @@ class WhatsAppMessageViewSet(viewsets.ReadOnlyModelViewSet):
         base_queryset = WhatsAppMessage.objects.filter(
             business_account__in=tenant_accounts,
             is_deleted=False
-        ).select_related('business_account', 'template')
+        ).select_related('business_account', 'template', 'sent_by')
+
+        # Apply waba_id or phone_number_id filter from query params
+        waba_id = self.request.query_params.get('waba_id')
+        phone_number_id = self.request.query_params.get('phone_number_id')
+        if waba_id:
+            base_queryset = base_queryset.filter(business_account__waba_id=waba_id)
+        if phone_number_id:
+            base_queryset = base_queryset.filter(business_account__phone_number_id=phone_number_id)
 
         # Check if hiding assigned chats is enabled
         settings_obj = SocialIntegrationSettings.objects.first()
