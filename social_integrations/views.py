@@ -8240,6 +8240,33 @@ def archive_conversation(request):
                 }
             )
 
+            # Mark all messages in this conversation as read
+            now = timezone.now()
+            if platform == 'facebook':
+                FacebookMessage.objects.filter(
+                    sender_id=conversation_id,
+                    is_from_page=False,
+                    is_read_by_staff=False
+                ).update(is_read_by_staff=True, read_by_staff_at=now)
+            elif platform == 'instagram':
+                InstagramMessage.objects.filter(
+                    sender_id=conversation_id,
+                    is_from_business=False,
+                    is_read_by_staff=False
+                ).update(is_read_by_staff=True, read_by_staff_at=now)
+            elif platform == 'whatsapp':
+                WhatsAppMessage.objects.filter(
+                    from_number=conversation_id,
+                    is_from_business=False,
+                    is_read_by_staff=False
+                ).update(is_read_by_staff=True, read_by_staff_at=now)
+            elif platform == 'email':
+                EmailMessage.objects.filter(
+                    thread_id=conversation_id,
+                    is_from_business=False,
+                    is_read_by_staff=False
+                ).update(is_read_by_staff=True, read_by_staff_at=now)
+
             if created:
                 archived_count += 1
                 logger.info(f"Archived conversation: {platform}/{account_id}/{conversation_id}")
@@ -8458,7 +8485,39 @@ def archive_all_conversations(request):
             ConversationArchive.objects.bulk_create(archive_objects, ignore_conflicts=True)
             archived_count = len(archive_objects)
 
-        logger.info(f"Archived {archived_count} conversations (platform: {platform_filter})")
+        # Mark all messages as read for archived conversations
+        now = timezone.now()
+        messages_marked_read = 0
+
+        if platform_filter in ['all', 'facebook']:
+            count = FacebookMessage.objects.filter(
+                is_from_page=False,
+                is_read_by_staff=False
+            ).update(is_read_by_staff=True, read_by_staff_at=now)
+            messages_marked_read += count
+
+        if platform_filter in ['all', 'instagram']:
+            count = InstagramMessage.objects.filter(
+                is_from_business=False,
+                is_read_by_staff=False
+            ).update(is_read_by_staff=True, read_by_staff_at=now)
+            messages_marked_read += count
+
+        if platform_filter in ['all', 'whatsapp']:
+            count = WhatsAppMessage.objects.filter(
+                is_from_business=False,
+                is_read_by_staff=False
+            ).update(is_read_by_staff=True, read_by_staff_at=now)
+            messages_marked_read += count
+
+        if platform_filter in ['all', 'email']:
+            count = EmailMessage.objects.filter(
+                is_from_business=False,
+                is_read_by_staff=False
+            ).update(is_read_by_staff=True, read_by_staff_at=now)
+            messages_marked_read += count
+
+        logger.info(f"Archived {archived_count} conversations, marked {messages_marked_read} messages as read (platform: {platform_filter})")
 
         return Response({
             'success': True,
