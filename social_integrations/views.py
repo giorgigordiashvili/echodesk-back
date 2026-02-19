@@ -4213,7 +4213,7 @@ def unified_conversations(request):
                     connection=conn,
                     folder=email_folder
                 ).values('thread_id').annotate(
-                    last_timestamp=Max('received_at'),
+                    last_timestamp=Max('timestamp'),
                     msg_count=Count('id')
                 ).order_by('-last_timestamp')
 
@@ -4234,8 +4234,8 @@ def unified_conversations(request):
                     # Apply search filter
                     if search_query:
                         matches = thread_messages.filter(
-                            Q(sender_name__icontains=search_query) |
-                            Q(sender_email__icontains=search_query) |
+                            Q(from_name__icontains=search_query) |
+                            Q(from_email__icontains=search_query) |
                             Q(subject__icontains=search_query) |
                             Q(body_text__icontains=search_query)
                         ).exists()
@@ -4243,18 +4243,18 @@ def unified_conversations(request):
                             continue
 
                     # Get latest message
-                    latest_msg = thread_messages.order_by('-received_at').first()
+                    latest_msg = thread_messages.order_by('-timestamp').first()
                     if not latest_msg:
                         continue
 
                     # Get customer info from incoming emails
-                    customer_msg = thread_messages.filter(is_outgoing=False).order_by('-received_at').first()
-                    customer_name = customer_msg.sender_name or customer_msg.sender_email if customer_msg else latest_msg.sender_email
-                    customer_email = customer_msg.sender_email if customer_msg else latest_msg.sender_email
+                    customer_msg = thread_messages.filter(is_from_business=False).order_by('-timestamp').first()
+                    customer_name = customer_msg.from_name or customer_msg.from_email if customer_msg else latest_msg.from_email
+                    customer_email = customer_msg.from_email if customer_msg else latest_msg.from_email
 
                     # Count unread messages
                     unread_count = thread_messages.filter(
-                        is_outgoing=False,
+                        is_from_business=False,
                         is_read=False
                     ).count()
 
@@ -4267,8 +4267,8 @@ def unified_conversations(request):
                         'last_message': {
                             'id': str(latest_msg.id),
                             'text': latest_msg.body_text[:200] if latest_msg.body_text else '',
-                            'timestamp': latest_msg.received_at,
-                            'is_from_business': latest_msg.is_outgoing,
+                            'timestamp': latest_msg.timestamp,
+                            'is_from_business': latest_msg.is_from_business,
                             'attachment_type': 'attachment' if latest_msg.attachments else None,
                             'platform_message_id': latest_msg.message_id,
                         },
