@@ -4515,6 +4515,108 @@ def mark_conversation_read(request):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def mark_conversation_unread(request):
+    """
+    Mark a conversation as unread by staff.
+    This marks only the last incoming message as unread (so it appears in unread list).
+
+    Request body:
+    {
+        "platform": "facebook" | "instagram" | "whatsapp" | "email",
+        "conversation_id": "sender_id for fb/ig, thread_id for email, or from_number for whatsapp"
+    }
+    """
+    logger = logging.getLogger(__name__)
+
+    try:
+        platform = request.data.get('platform')
+        conversation_id = request.data.get('conversation_id')
+
+        if not platform or not conversation_id:
+            return Response({
+                'error': 'platform and conversation_id are required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        updated_count = 0
+
+        if platform == 'facebook':
+            # Mark the last incoming message as unread
+            last_message = FacebookMessage.objects.filter(
+                sender_id=conversation_id,
+                is_from_page=False,
+                is_read_by_staff=True
+            ).order_by('-timestamp').first()
+
+            if last_message:
+                last_message.is_read_by_staff = False
+                last_message.read_by_staff_at = None
+                last_message.save()
+                updated_count = 1
+
+        elif platform == 'instagram':
+            # Mark the last incoming message as unread
+            last_message = InstagramMessage.objects.filter(
+                sender_id=conversation_id,
+                is_from_business=False,
+                is_read_by_staff=True
+            ).order_by('-timestamp').first()
+
+            if last_message:
+                last_message.is_read_by_staff = False
+                last_message.read_by_staff_at = None
+                last_message.save()
+                updated_count = 1
+
+        elif platform == 'whatsapp':
+            # Mark the last incoming message as unread
+            last_message = WhatsAppMessage.objects.filter(
+                from_number=conversation_id,
+                is_from_business=False,
+                is_read_by_staff=True
+            ).order_by('-timestamp').first()
+
+            if last_message:
+                last_message.is_read_by_staff = False
+                last_message.read_by_staff_at = None
+                last_message.save()
+                updated_count = 1
+
+        elif platform == 'email':
+            # Mark the last incoming message in this thread as unread
+            last_message = EmailMessage.objects.filter(
+                thread_id=conversation_id,
+                is_from_business=False,
+                is_read_by_staff=True,
+                is_deleted=False
+            ).order_by('-timestamp').first()
+
+            if last_message:
+                last_message.is_read_by_staff = False
+                last_message.read_by_staff_at = None
+                last_message.is_read = False
+                last_message.save()
+                updated_count = 1
+        else:
+            return Response({
+                'error': f'Invalid platform: {platform}'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        logger.info(f"Marked {updated_count} {platform} messages as unread for conversation {conversation_id}")
+
+        return Response({
+            'success': True,
+            'messages_marked_unread': updated_count
+        })
+
+    except Exception as e:
+        logger.error(f"Error marking conversation as unread: {e}")
+        return Response({
+            'error': f'Failed to mark conversation as unread: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 @api_view(['DELETE'])
 @permission_classes([IsAuthenticated, IsStaffUser])
 def delete_conversation(request):
