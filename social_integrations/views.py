@@ -20,7 +20,7 @@ from rest_framework.decorators import api_view, permission_classes, action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes
 from .models import (
     FacebookPageConnection, FacebookMessage, OrphanedFacebookMessage,
     InstagramAccountConnection, InstagramMessage,
@@ -45,7 +45,7 @@ from .serializers import (
     EmailSignatureSerializer, QuickReplySerializer, QuickReplyUseSerializer, QuickReplyVariablesSerializer,
     SocialClientSerializer, SocialClientListSerializer, SocialClientCreateSerializer,
     SocialClientCustomFieldSerializer, SocialAccountSerializer, SocialAccountLinkSerializer,
-    UnifiedConversationSerializer
+    UnifiedConversationSerializer, PaginatedUnifiedConversationSerializer
 )
 from .pagination import SocialMessagePagination
 from .permissions import (
@@ -3780,6 +3780,53 @@ def user_chat_sessions(request, user_id):
     })
 
 
+@extend_schema(
+    summary="Get unified conversations from all social platforms",
+    description="""
+    Returns paginated list of conversations from Facebook, Instagram, WhatsApp, and Email.
+    Each conversation includes sender info, last message, unread count, and account details.
+    Supports search by sender name and message text, and filtering by platform.
+    """,
+    parameters=[
+        OpenApiParameter(
+            name='platforms',
+            type=OpenApiTypes.STR,
+            location=OpenApiParameter.QUERY,
+            description='Comma-separated list of platforms to include (facebook,instagram,whatsapp,email)',
+            required=False,
+        ),
+        OpenApiParameter(
+            name='search',
+            type=OpenApiTypes.STR,
+            location=OpenApiParameter.QUERY,
+            description='Search query (searches sender_name and message_text)',
+            required=False,
+        ),
+        OpenApiParameter(
+            name='page',
+            type=OpenApiTypes.INT,
+            location=OpenApiParameter.QUERY,
+            description='Page number (default: 1)',
+            required=False,
+        ),
+        OpenApiParameter(
+            name='page_size',
+            type=OpenApiTypes.INT,
+            location=OpenApiParameter.QUERY,
+            description='Results per page (default: 50, max: 200)',
+            required=False,
+        ),
+        OpenApiParameter(
+            name='folder',
+            type=OpenApiTypes.STR,
+            location=OpenApiParameter.QUERY,
+            description='Email folder filter (default: INBOX)',
+            required=False,
+        ),
+    ],
+    responses={200: PaginatedUnifiedConversationSerializer},
+    tags=['Social - Conversations'],
+)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, CanViewSocialMessages])
 def unified_conversations(request):

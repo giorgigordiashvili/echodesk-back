@@ -1020,3 +1020,11 @@ class UnifiedConversationSerializer(serializers.Serializer):
     account_id = serializers.CharField()
     # Email-specific field
     subject = serializers.CharField(allow_null=True, allow_blank=True, required=False)
+
+
+class PaginatedUnifiedConversationSerializer(serializers.Serializer):
+    """Paginated response for unified conversations"""
+    count = serializers.IntegerField(help_text="Total number of conversations")
+    next = serializers.CharField(allow_null=True, help_text="URL for next page")
+    previous = serializers.CharField(allow_null=True, help_text="URL for previous page")
+    results = UnifiedConversationSerializer(many=True)
