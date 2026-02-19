@@ -107,8 +107,9 @@ urlpatterns = [
     # Unread messages count endpoint
     path('unread-count/', views.unread_messages_count, name='unread_messages_count'),
 
-    # Mark conversation as read endpoint
+    # Mark conversation as read/unread endpoint
     path('mark-read/', views.mark_conversation_read, name='mark_conversation_read'),
+    path('mark-unread/', views.mark_conversation_unread, name='mark_conversation_unread'),
     path('mark-all-read/', views.mark_all_conversations_read, name='mark_all_conversations_read'),
 
     # Archive/History endpoints
