@@ -456,6 +456,34 @@ def send_whatsapp_auto_reply(recipient_number, message_text, account):
         return False
 
 
+# ============================================================================
+# AUTO-UNARCHIVE HELPER FUNCTION
+# ============================================================================
+
+def auto_unarchive_conversation(platform, conversation_id, account_id):
+    """
+    Automatically unarchive a conversation when a new message is received.
+    This ensures conversations that receive new messages pop back into the main inbox.
+
+    Args:
+        platform: 'facebook', 'instagram', 'whatsapp', or 'email'
+        conversation_id: sender_id, from_number, or thread_id
+        account_id: page_id, instagram_account_id, waba_id, or email connection id
+    """
+    try:
+        deleted_count, _ = ConversationArchive.objects.filter(
+            platform=platform,
+            conversation_id=conversation_id,
+            account_id=account_id
+        ).delete()
+
+        if deleted_count > 0:
+            logger.info(f"✅ Auto-unarchived {platform} conversation {conversation_id} (was archived)")
+
+    except Exception as e:
+        logger.error(f"❌ Failed to auto-unarchive conversation: {e}")
+
+
 class FacebookPageConnectionViewSet(viewsets.ModelViewSet):
     serializer_class = FacebookPageConnectionSerializer
     permission_classes = [IsAuthenticated, CanManageSocialConnections]
@@ -1661,6 +1689,13 @@ def facebook_webhook(request):
                                                     message_id=message_id
                                                 )
 
+                                                # Auto-unarchive if conversation was in history
+                                                auto_unarchive_conversation(
+                                                    platform='facebook',
+                                                    conversation_id=sender_id,
+                                                    account_id=page_id
+                                                )
+
                                                 # Process auto-reply (doesn't mark as read)
                                                 process_auto_reply(
                                                     platform='facebook',
@@ -2841,6 +2876,13 @@ def instagram_webhook(request):
                                             conversation_id=sender_id,
                                             account_id=account_connection.instagram_account_id,
                                             message_id=message_id
+                                        )
+
+                                        # Auto-unarchive if conversation was in history
+                                        auto_unarchive_conversation(
+                                            platform='instagram',
+                                            conversation_id=sender_id,
+                                            account_id=account_connection.instagram_account_id
                                         )
 
                                         # Process auto-reply (doesn't mark as read)
@@ -5980,6 +6022,13 @@ def whatsapp_webhook(request):
                         conversation_id=from_number.lstrip('+'),  # Remove + for matching
                         account_id=account.waba_id,
                         message_id=message_id
+                    )
+
+                    # Auto-unarchive if conversation was in history
+                    auto_unarchive_conversation(
+                        platform='whatsapp',
+                        conversation_id=from_number,
+                        account_id=account.waba_id
                     )
 
                     # Process auto-reply (doesn't mark as read)
