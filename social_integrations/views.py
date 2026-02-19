@@ -44,7 +44,8 @@ from .serializers import (
     TikTokCreatorAccountSerializer, TikTokMessageSerializer, TikTokSendMessageSerializer,
     EmailSignatureSerializer, QuickReplySerializer, QuickReplyUseSerializer, QuickReplyVariablesSerializer,
     SocialClientSerializer, SocialClientListSerializer, SocialClientCreateSerializer,
-    SocialClientCustomFieldSerializer, SocialAccountSerializer, SocialAccountLinkSerializer
+    SocialClientCustomFieldSerializer, SocialAccountSerializer, SocialAccountLinkSerializer,
+    UnifiedConversationSerializer
 )
 from .pagination import SocialMessagePagination
 from .permissions import (
@@ -3772,6 +3773,414 @@ def user_chat_sessions(request, user_id):
         'end_date': end_date.isoformat(),
         'sessions': sessions,
         'total_sessions': len(sessions),
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, CanViewSocialMessages])
+def unified_conversations(request):
+    """
+    Get unified conversations from all social platforms (Facebook, Instagram, WhatsApp, Email).
+
+    Returns paginated list of conversations with:
+    - conversation_id: Unique identifier (e.g., fb_pageId_senderId, ig_accountId_senderId)
+    - platform: facebook, instagram, whatsapp, or email
+    - sender_id: Customer identifier (sender_id, from_number, email address)
+    - sender_name: Customer name
+    - profile_pic_url: Customer avatar URL
+    - last_message: Most recent message details
+    - message_count: Total messages in conversation
+    - unread_count: Unread messages from customer
+    - account_name: Business account name
+    - account_id: Business account identifier
+
+    Query parameters:
+    - platforms: Comma-separated list of platforms (default: all)
+    - search: Search query (searches sender_name and message_text)
+    - page: Page number (default: 1)
+    - page_size: Results per page (default: 50, max: 200)
+    - folder: Email folder filter (default: INBOX)
+    """
+    # Parse query parameters
+    platforms_param = request.query_params.get('platforms', 'facebook,instagram,whatsapp,email')
+    enabled_platforms = [p.strip().lower() for p in platforms_param.split(',')]
+    search_query = request.query_params.get('search', '').strip().lower()
+    page = int(request.query_params.get('page', 1))
+    page_size = min(int(request.query_params.get('page_size', 50)), 200)
+    email_folder = request.query_params.get('folder', 'INBOX')
+
+    all_conversations = []
+
+    # Check assignment settings
+    settings_obj = SocialIntegrationSettings.objects.first()
+    hide_assigned = settings_obj and settings_obj.hide_assigned_chats
+    is_admin = request.user.is_superuser or request.user.is_staff
+
+    # Helper to check if conversation should be visible based on assignment
+    def is_conversation_visible(platform, account_id, conversation_id):
+        if not hide_assigned or is_admin:
+            return True
+
+        # Get active assignments
+        active_assignments = ChatAssignment.objects.filter(
+            platform=platform,
+            account_id=account_id,
+            status__in=['active', 'in_session']
+        )
+
+        # Check if this conversation is assigned
+        assignment = active_assignments.filter(conversation_id=conversation_id).first()
+
+        if not assignment:
+            return True  # Not assigned, visible to all
+
+        return assignment.assigned_user == request.user  # Only visible if assigned to current user
+
+    # Load Facebook conversations
+    if 'facebook' in enabled_platforms:
+        try:
+            pages = FacebookPageConnection.objects.all()
+            for page_conn in pages:
+                # Get all messages for this page grouped by sender
+                messages = FacebookMessage.objects.filter(
+                    page_connection=page_conn,
+                    is_deleted=False
+                ).values('sender_id').annotate(
+                    last_timestamp=Max('timestamp'),
+                    msg_count=Count('id')
+                ).order_by('-last_timestamp')
+
+                for conv_data in messages:
+                    sender_id = conv_data['sender_id']
+
+                    # Check assignment visibility
+                    if not is_conversation_visible('facebook', page_conn.page_id, sender_id):
+                        continue
+
+                    # Get conversation messages
+                    conv_messages = FacebookMessage.objects.filter(
+                        page_connection=page_conn,
+                        sender_id=sender_id,
+                        is_deleted=False
+                    ).select_related('page_connection')
+
+                    # Apply search filter
+                    if search_query:
+                        matches = conv_messages.filter(
+                            Q(sender_name__icontains=search_query) |
+                            Q(message_text__icontains=search_query)
+                        ).exists()
+                        if not matches:
+                            continue
+
+                    # Get latest message
+                    latest_msg = conv_messages.order_by('-timestamp').first()
+                    if not latest_msg:
+                        continue
+
+                    # Get customer info from incoming messages
+                    customer_msg = conv_messages.filter(is_from_page=False).order_by('-timestamp').first()
+                    customer_name = customer_msg.sender_name if customer_msg else "Unknown"
+                    customer_avatar = customer_msg.profile_pic_url if customer_msg else None
+
+                    # Count unread messages (incoming, not read by staff)
+                    unread_count = conv_messages.filter(
+                        is_from_page=False,
+                        is_read_by_staff=False
+                    ).count()
+
+                    conversation = {
+                        'conversation_id': f"fb_{page_conn.page_id}_{sender_id}",
+                        'platform': 'facebook',
+                        'sender_id': sender_id,
+                        'sender_name': customer_name,
+                        'profile_pic_url': customer_avatar,
+                        'last_message': {
+                            'id': str(latest_msg.id),
+                            'text': latest_msg.message_text,
+                            'timestamp': latest_msg.timestamp,
+                            'is_from_business': latest_msg.is_from_page,
+                            'attachment_type': latest_msg.attachment_type,
+                            'platform_message_id': latest_msg.message_id,
+                        },
+                        'message_count': conv_data['msg_count'],
+                        'unread_count': unread_count,
+                        'account_name': page_conn.page_name,
+                        'account_id': page_conn.page_id,
+                    }
+                    all_conversations.append(conversation)
+        except Exception as e:
+            logger.error(f"Error loading Facebook conversations: {e}")
+
+    # Load Instagram conversations
+    if 'instagram' in enabled_platforms:
+        try:
+            accounts = InstagramAccountConnection.objects.all()
+            for account in accounts:
+                # Get all messages grouped by sender
+                messages = InstagramMessage.objects.filter(
+                    account_connection=account,
+                    is_deleted=False
+                ).values('sender_id').annotate(
+                    last_timestamp=Max('timestamp'),
+                    msg_count=Count('id')
+                ).order_by('-last_timestamp')
+
+                for conv_data in messages:
+                    sender_id = conv_data['sender_id']
+
+                    # Check assignment visibility
+                    if not is_conversation_visible('instagram', account.instagram_account_id, sender_id):
+                        continue
+
+                    # Get conversation messages
+                    conv_messages = InstagramMessage.objects.filter(
+                        account_connection=account,
+                        sender_id=sender_id,
+                        is_deleted=False
+                    ).select_related('account_connection')
+
+                    # Apply search filter
+                    if search_query:
+                        matches = conv_messages.filter(
+                            Q(sender_name__icontains=search_query) |
+                            Q(sender_username__icontains=search_query) |
+                            Q(message_text__icontains=search_query)
+                        ).exists()
+                        if not matches:
+                            continue
+
+                    # Get latest message
+                    latest_msg = conv_messages.order_by('-timestamp').first()
+                    if not latest_msg:
+                        continue
+
+                    # Get customer info from incoming messages
+                    customer_msg = conv_messages.filter(is_from_business=False).order_by('-timestamp').first()
+                    customer_name = customer_msg.sender_name or customer_msg.sender_username if customer_msg else sender_id
+                    customer_avatar = customer_msg.sender_profile_pic if customer_msg else None
+
+                    # Count unread messages
+                    unread_count = conv_messages.filter(
+                        is_from_business=False,
+                        is_read_by_staff=False
+                    ).count()
+
+                    conversation = {
+                        'conversation_id': f"ig_{account.instagram_account_id}_{sender_id}",
+                        'platform': 'instagram',
+                        'sender_id': sender_id,
+                        'sender_name': customer_name,
+                        'profile_pic_url': customer_avatar,
+                        'last_message': {
+                            'id': str(latest_msg.id),
+                            'text': latest_msg.message_text,
+                            'timestamp': latest_msg.timestamp,
+                            'is_from_business': latest_msg.is_from_business,
+                            'attachment_type': latest_msg.attachment_type,
+                            'platform_message_id': latest_msg.message_id,
+                        },
+                        'message_count': conv_data['msg_count'],
+                        'unread_count': unread_count,
+                        'account_name': f"@{account.username}",
+                        'account_id': account.instagram_account_id,
+                    }
+                    all_conversations.append(conversation)
+        except Exception as e:
+            logger.error(f"Error loading Instagram conversations: {e}")
+
+    # Load WhatsApp conversations
+    if 'whatsapp' in enabled_platforms:
+        try:
+            accounts = WhatsAppBusinessAccount.objects.all()
+            for account in accounts:
+                # Get all messages grouped by from_number (customer phone)
+                messages = WhatsAppMessage.objects.filter(
+                    business_account=account,
+                    is_deleted=False
+                ).values('from_number').annotate(
+                    last_timestamp=Max('timestamp'),
+                    msg_count=Count('id')
+                ).order_by('-last_timestamp')
+
+                for conv_data in messages:
+                    from_number = conv_data['from_number']
+
+                    # Normalize phone number for conversation ID
+                    normalized_phone = from_number.lstrip('+')
+
+                    # Check assignment visibility
+                    if not is_conversation_visible('whatsapp', account.waba_id, normalized_phone):
+                        continue
+
+                    # Get conversation messages
+                    conv_messages = WhatsAppMessage.objects.filter(
+                        business_account=account,
+                        from_number=from_number,
+                        is_deleted=False
+                    ).select_related('business_account')
+
+                    # Apply search filter
+                    if search_query:
+                        matches = conv_messages.filter(
+                            Q(contact_name__icontains=search_query) |
+                            Q(message_text__icontains=search_query) |
+                            Q(from_number__icontains=search_query)
+                        ).exists()
+                        if not matches:
+                            continue
+
+                    # Get latest message
+                    latest_msg = conv_messages.order_by('-timestamp').first()
+                    if not latest_msg:
+                        continue
+
+                    # Get customer info from incoming messages
+                    customer_msg = conv_messages.filter(is_from_business=False).order_by('-timestamp').first()
+                    customer_name = customer_msg.contact_name if customer_msg else from_number
+
+                    # Count unread messages
+                    unread_count = conv_messages.filter(
+                        is_from_business=False,
+                        is_read_by_staff=False
+                    ).count()
+
+                    conversation = {
+                        'conversation_id': f"wa_{account.waba_id}_{normalized_phone}",
+                        'platform': 'whatsapp',
+                        'sender_id': from_number,
+                        'sender_name': customer_name or from_number,
+                        'profile_pic_url': None,  # WhatsApp doesn't provide profile pics in webhooks
+                        'last_message': {
+                            'id': str(latest_msg.id),
+                            'text': latest_msg.message_text,
+                            'timestamp': latest_msg.timestamp,
+                            'is_from_business': latest_msg.is_from_business,
+                            'attachment_type': latest_msg.message_type if latest_msg.message_type != 'text' else None,
+                            'platform_message_id': latest_msg.wamid,
+                        },
+                        'message_count': conv_data['msg_count'],
+                        'unread_count': unread_count,
+                        'account_name': account.business_name or account.display_phone_number,
+                        'account_id': account.waba_id,
+                    }
+                    all_conversations.append(conversation)
+        except Exception as e:
+            logger.error(f"Error loading WhatsApp conversations: {e}")
+
+    # Load Email conversations
+    if 'email' in enabled_platforms:
+        try:
+            connections = EmailConnection.objects.filter(is_active=True)
+            for conn in connections:
+                # Get emails grouped by thread_id, filtered by folder
+                messages = EmailMessage.objects.filter(
+                    connection=conn,
+                    folder=email_folder
+                ).values('thread_id').annotate(
+                    last_timestamp=Max('received_at'),
+                    msg_count=Count('id')
+                ).order_by('-last_timestamp')
+
+                for conv_data in messages:
+                    thread_id = conv_data['thread_id']
+
+                    # Check assignment visibility
+                    if not is_conversation_visible('email', str(conn.id), thread_id):
+                        continue
+
+                    # Get thread messages
+                    thread_messages = EmailMessage.objects.filter(
+                        connection=conn,
+                        thread_id=thread_id,
+                        folder=email_folder
+                    ).select_related('connection')
+
+                    # Apply search filter
+                    if search_query:
+                        matches = thread_messages.filter(
+                            Q(sender_name__icontains=search_query) |
+                            Q(sender_email__icontains=search_query) |
+                            Q(subject__icontains=search_query) |
+                            Q(body_text__icontains=search_query)
+                        ).exists()
+                        if not matches:
+                            continue
+
+                    # Get latest message
+                    latest_msg = thread_messages.order_by('-received_at').first()
+                    if not latest_msg:
+                        continue
+
+                    # Get customer info from incoming emails
+                    customer_msg = thread_messages.filter(is_outgoing=False).order_by('-received_at').first()
+                    customer_name = customer_msg.sender_name or customer_msg.sender_email if customer_msg else latest_msg.sender_email
+                    customer_email = customer_msg.sender_email if customer_msg else latest_msg.sender_email
+
+                    # Count unread messages
+                    unread_count = thread_messages.filter(
+                        is_outgoing=False,
+                        is_read=False
+                    ).count()
+
+                    conversation = {
+                        'conversation_id': f"email_{conn.id}_{thread_id}",
+                        'platform': 'email',
+                        'sender_id': customer_email,
+                        'sender_name': customer_name or customer_email,
+                        'profile_pic_url': None,
+                        'last_message': {
+                            'id': str(latest_msg.id),
+                            'text': latest_msg.body_text[:200] if latest_msg.body_text else '',
+                            'timestamp': latest_msg.received_at,
+                            'is_from_business': latest_msg.is_outgoing,
+                            'attachment_type': 'attachment' if latest_msg.attachments else None,
+                            'platform_message_id': latest_msg.message_id,
+                        },
+                        'message_count': conv_data['msg_count'],
+                        'unread_count': unread_count,
+                        'account_name': conn.email,
+                        'account_id': str(conn.id),
+                        'subject': latest_msg.subject,
+                    }
+                    all_conversations.append(conversation)
+        except Exception as e:
+            logger.error(f"Error loading Email conversations: {e}")
+
+    # Sort all conversations by last message timestamp (most recent first)
+    all_conversations.sort(
+        key=lambda x: x['last_message']['timestamp'],
+        reverse=True
+    )
+
+    # Paginate
+    total_count = len(all_conversations)
+    start_idx = (page - 1) * page_size
+    end_idx = start_idx + page_size
+    paginated_conversations = all_conversations[start_idx:end_idx]
+
+    # Build pagination URLs
+    base_url = request.build_absolute_uri().split('?')[0]
+    params = request.query_params.copy()
+
+    next_url = None
+    if end_idx < total_count:
+        params['page'] = page + 1
+        next_url = f"{base_url}?{params.urlencode()}"
+
+    previous_url = None
+    if page > 1:
+        params['page'] = page - 1
+        previous_url = f"{base_url}?{params.urlencode()}"
+
+    # Serialize and return
+    serializer = UnifiedConversationSerializer(paginated_conversations, many=True)
+
+    return Response({
+        'count': total_count,
+        'next': next_url,
+        'previous': previous_url,
+        'results': serializer.data
     })
 
 

@@ -987,3 +987,29 @@ class SocialClientByAccountSerializer(serializers.Serializer):
     client = SocialClientSerializer(allow_null=True)
     social_account = SocialAccountSerializer(allow_null=True)
     found = serializers.BooleanField()
+
+
+class LastMessageSerializer(serializers.Serializer):
+    """Serializer for last message in a conversation"""
+    id = serializers.CharField()
+    text = serializers.CharField(allow_null=True, allow_blank=True)
+    timestamp = serializers.DateTimeField()
+    is_from_business = serializers.BooleanField()
+    attachment_type = serializers.CharField(allow_null=True, allow_blank=True, required=False)
+    platform_message_id = serializers.CharField()
+
+
+class UnifiedConversationSerializer(serializers.Serializer):
+    """Serializer for unified conversation across all platforms"""
+    conversation_id = serializers.CharField()
+    platform = serializers.ChoiceField(choices=['facebook', 'instagram', 'whatsapp', 'email'])
+    sender_id = serializers.CharField()
+    sender_name = serializers.CharField(allow_null=True, allow_blank=True)
+    profile_pic_url = serializers.CharField(allow_null=True, allow_blank=True, required=False)
+    last_message = LastMessageSerializer()
+    message_count = serializers.IntegerField()
+    unread_count = serializers.IntegerField()
+    account_name = serializers.CharField()
+    account_id = serializers.CharField()
+    # Email-specific field
+    subject = serializers.CharField(allow_null=True, allow_blank=True, required=False)
