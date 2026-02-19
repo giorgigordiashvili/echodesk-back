@@ -466,13 +466,14 @@ class FacebookMessageViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = FacebookMessageSerializer
     permission_classes = [IsAuthenticated, CanViewSocialMessages]
     pagination_class = SocialMessagePagination
-    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = {
         'page_connection__page_id': ['exact'],
         'sender_id': ['exact'],
         'is_from_page': ['exact'],
         'is_read_by_staff': ['exact'],
     }
+    search_fields = ['sender_name', 'message_text']
     ordering_fields = ['timestamp', 'created_at']
     ordering = ['-timestamp']
 
@@ -2225,13 +2226,14 @@ class InstagramMessageViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = InstagramMessageSerializer
     permission_classes = [IsAuthenticated, CanViewSocialMessages]
     pagination_class = SocialMessagePagination
-    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = {
         'account_connection__instagram_account_id': ['exact'],
         'sender_id': ['exact'],
         'is_from_business': ['exact'],
         'is_read_by_staff': ['exact'],
     }
+    search_fields = ['sender_name', 'sender_username', 'message_text']
     ordering_fields = ['timestamp', 'created_at']
     ordering = ['-timestamp']
 
@@ -4365,7 +4367,7 @@ class WhatsAppMessageViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = WhatsAppMessageSerializer
     permission_classes = [IsAuthenticated, CanViewSocialMessages]
     pagination_class = SocialMessagePagination
-    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = {
         'business_account__waba_id': ['exact'],
         'business_account__phone_number_id': ['exact'],
@@ -4374,6 +4376,7 @@ class WhatsAppMessageViewSet(viewsets.ReadOnlyModelViewSet):
         'is_from_business': ['exact'],
         'is_read_by_staff': ['exact'],
     }
+    search_fields = ['contact_name', 'message_text', 'from_number', 'to_number']
     ordering_fields = ['timestamp', 'created_at']
     ordering = ['-timestamp']
 
