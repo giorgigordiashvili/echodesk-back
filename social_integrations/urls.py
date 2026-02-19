@@ -109,6 +109,12 @@ urlpatterns = [
 
     # Mark conversation as read endpoint
     path('mark-read/', views.mark_conversation_read, name='mark_conversation_read'),
+    path('mark-all-read/', views.mark_all_conversations_read, name='mark_all_conversations_read'),
+
+    # Archive/History endpoints
+    path('conversations/archive/', views.archive_conversation, name='archive_conversation'),
+    path('conversations/unarchive/', views.unarchive_conversation, name='unarchive_conversation'),
+    path('conversations/archive-all/', views.archive_all_conversations, name='archive_all_conversations'),
 
     # Delete conversation endpoint (superadmin only)
     path('delete-conversation/', views.delete_conversation, name='delete_conversation'),
