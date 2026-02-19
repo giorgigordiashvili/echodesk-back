@@ -286,11 +286,18 @@ class SocialIntegrationSettingsSerializer(serializers.ModelSerializer):
 
     def validate_timezone(self, value):
         """Ensure timezone is valid"""
-        import pytz
         try:
-            pytz.timezone(value)
-        except pytz.exceptions.UnknownTimeZoneError:
-            raise serializers.ValidationError(f"Invalid timezone: {value}")
+            from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+            try:
+                ZoneInfo(value)
+            except (ZoneInfoNotFoundError, KeyError):
+                raise serializers.ValidationError(f"Invalid timezone: {value}")
+        except ImportError:
+            import pytz
+            try:
+                pytz.timezone(value)
+            except pytz.exceptions.UnknownTimeZoneError:
+                raise serializers.ValidationError(f"Invalid timezone: {value}")
         return value
 
     def validate_away_hours_schedule(self, value):
