@@ -106,8 +106,35 @@ def extract_customer_information(message_event):
     return customer_info
 
 
-def send_websocket_notification(tenant_schema, message_data, conversation_id):
-    """Send WebSocket notification for new message"""
+def get_assignment_for_conversation(platform, conversation_id, account_id):
+    """
+    Look up if a conversation is assigned to a user.
+    Returns the assigned_user_id or None if not assigned.
+    """
+    try:
+        assignment = ChatAssignment.objects.filter(
+            platform=platform,
+            conversation_id=conversation_id,
+            account_id=account_id,
+            status__in=['active', 'in_session']  # Only active assignments
+        ).first()
+        if assignment and assignment.assigned_user:
+            return assignment.assigned_user.id
+        return None
+    except Exception as e:
+        logger.error(f"Failed to get assignment for conversation: {e}")
+        return None
+
+
+def send_websocket_notification(tenant_schema, message_data, conversation_id, assigned_user_id=None):
+    """Send WebSocket notification for new message
+
+    Args:
+        tenant_schema: The tenant schema name
+        message_data: The message data dict
+        conversation_id: The conversation ID
+        assigned_user_id: The ID of the user assigned to this chat, or None if unassigned
+    """
     try:
         channel_layer = get_channel_layer()
         if channel_layer is None:
@@ -123,7 +150,8 @@ def send_websocket_notification(tenant_schema, message_data, conversation_id):
                 'type': 'new_message',
                 'message': message_data,
                 'conversation_id': conversation_id,
-                'timestamp': message_data.get('timestamp')
+                'timestamp': message_data.get('timestamp'),
+                'assigned_user_id': assigned_user_id,  # None if unassigned, user_id if assigned
             }
         )
 
@@ -1725,7 +1753,13 @@ def facebook_webhook(request):
                                                 }
                                                 # Conversation ID is the sender_id (the customer)
                                                 ws_conversation_id = sender_id
-                                                send_websocket_notification(current_schema, ws_message_data, ws_conversation_id)
+                                                # Get assignment for notification filtering
+                                                assigned_user_id = get_assignment_for_conversation(
+                                                    platform='facebook',
+                                                    conversation_id=sender_id,
+                                                    account_id=page_id
+                                                )
+                                                send_websocket_notification(current_schema, ws_message_data, ws_conversation_id, assigned_user_id)
 
                                         except Exception as e:
                                             logger.error(f"❌ Failed to save message: {e}")
@@ -2913,7 +2947,13 @@ def instagram_webhook(request):
                                             }
                                             # Conversation ID is the sender_id (the customer)
                                             ws_conversation_id = sender_id
-                                            send_websocket_notification(current_schema, ws_message_data, ws_conversation_id)
+                                            # Get assignment for notification filtering
+                                            assigned_user_id = get_assignment_for_conversation(
+                                                platform='instagram',
+                                                conversation_id=sender_id,
+                                                account_id=account_connection.instagram_account_id
+                                            )
+                                            send_websocket_notification(current_schema, ws_message_data, ws_conversation_id, assigned_user_id)
                                         else:
                                             logger.warning(f"⚠️ WebSocket: Could not determine tenant schema - skipping notification")
 
@@ -6058,7 +6098,13 @@ def whatsapp_webhook(request):
                         'timestamp': message_obj.timestamp.isoformat(),
                         'is_from_business': message_obj.is_from_business,
                     }
-                    send_websocket_notification(tenant_schema, ws_message_data, from_number)
+                    # Get assignment for notification filtering
+                    assigned_user_id = get_assignment_for_conversation(
+                        platform='whatsapp',
+                        conversation_id=from_number,
+                        account_id=account.waba_id
+                    )
+                    send_websocket_notification(tenant_schema, ws_message_data, from_number, assigned_user_id)
 
                 # Handle message status updates
                 statuses = value.get('statuses', [])
@@ -7601,7 +7647,13 @@ def process_tiktok_message_event(event):
             'is_from_creator': msg_obj.is_from_creator,
             'account_id': account.open_id,
         }
-        send_websocket_notification(tenant_schema, ws_message_data, msg_obj.conversation_id)
+        # Get assignment for notification filtering
+        assigned_user_id = get_assignment_for_conversation(
+            platform='tiktok',
+            conversation_id=msg_obj.conversation_id,
+            account_id=account.open_id
+        )
+        send_websocket_notification(tenant_schema, ws_message_data, msg_obj.conversation_id, assigned_user_id)
 
         logger.info(f"TikTok message saved: {message_id}")
 

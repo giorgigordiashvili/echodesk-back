@@ -110,7 +110,8 @@ class MessagesConsumer(AsyncWebsocketConsumer):
             'type': 'new_message',
             'message': event['message'],
             'conversation_id': event['conversation_id'],
-            'timestamp': event['timestamp']
+            'timestamp': event['timestamp'],
+            'assigned_user_id': event.get('assigned_user_id'),  # None if unassigned
         }))
     
     async def message_status_update(self, event):
