@@ -969,6 +969,51 @@ def _sync_folder(imap, connection, imap_folder_name: str, db_folder_name: str, m
     return new_count
 
 
+def _connect_imap(connection, max_retries: int = 3):
+    """
+    Connect and authenticate to IMAP server with retry logic for transient errors.
+
+    Retries on socket/SSL errors (e.g. EOF during TLS) with exponential backoff.
+
+    Args:
+        connection: EmailConnection model instance
+        max_retries: Number of connection attempts
+
+    Returns:
+        Authenticated IMAP connection object
+    """
+    import time
+    import ssl
+    import socket
+
+    last_error = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            if connection.imap_use_ssl:
+                imap = imaplib.IMAP4_SSL(connection.imap_server, connection.imap_port, timeout=30)
+            else:
+                imap = imaplib.IMAP4(connection.imap_server, connection.imap_port)
+                imap.starttls()
+
+            imap.login(connection.username, connection.get_password())
+            return imap
+        except (ssl.SSLError, socket.error, OSError, imaplib.IMAP4.abort) as e:
+            last_error = e
+            if attempt < max_retries:
+                wait = 2 ** attempt  # 2s, 4s
+                logger.warning(
+                    f"IMAP connection attempt {attempt}/{max_retries} failed for "
+                    f"{connection.email_address}: {e}. Retrying in {wait}s..."
+                )
+                time.sleep(wait)
+            else:
+                logger.error(
+                    f"IMAP connection failed after {max_retries} attempts for "
+                    f"{connection.email_address}: {e}"
+                )
+                raise
+
+
 def sync_imap_messages(connection, max_messages: int = 500) -> int:
     """
     Sync messages from IMAP server for a given connection.
@@ -982,14 +1027,8 @@ def sync_imap_messages(connection, max_messages: int = 500) -> int:
         Number of new messages synced
     """
     try:
-        # Connect to IMAP
-        if connection.imap_use_ssl:
-            imap = imaplib.IMAP4_SSL(connection.imap_server, connection.imap_port, timeout=30)
-        else:
-            imap = imaplib.IMAP4(connection.imap_server, connection.imap_port)
-            imap.starttls()
-
-        imap.login(connection.username, connection.get_password())
+        # Connect to IMAP (with retry for transient SSL/socket errors)
+        imap = _connect_imap(connection)
 
         total_new_count = 0
 
