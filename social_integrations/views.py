@@ -8,6 +8,7 @@ from channels.layers import get_channel_layer
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from tenant_schemas.utils import schema_context
+from django.db import ProgrammingError
 from django.db.models import F, Q, Max, Count
 from django.http import JsonResponse, HttpResponse
 from django.utils import timezone
@@ -508,6 +509,9 @@ def auto_unarchive_conversation(platform, conversation_id, account_id):
         if deleted_count > 0:
             logger.info(f"✅ Auto-unarchived {platform} conversation {conversation_id} (was archived)")
 
+    except ProgrammingError:
+        # Table doesn't exist yet (migration not applied on this tenant) — safe to ignore
+        logger.debug("ConversationArchive table not yet created, skipping unarchive check")
     except Exception as e:
         logger.error(f"❌ Failed to auto-unarchive conversation: {e}")
 
