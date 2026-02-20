@@ -1754,6 +1754,9 @@ def facebook_webhook(request):
                                                     'is_from_page': message_obj.is_from_page,
                                                     'reply_to_message_id': message_obj.reply_to_message_id,
                                                     'reply_to_id': message_obj.reply_to_id if message_obj.reply_to else None,
+                                                    'platform': 'facebook',
+                                                    'account_id': page_id,
+                                                    'chat_id': f'fb_{page_id}_{sender_id}',
                                                 }
                                                 # Conversation ID is the sender_id (the customer)
                                                 ws_conversation_id = sender_id
@@ -2948,6 +2951,9 @@ def instagram_webhook(request):
                                                 'attachments': message_obj.attachments,
                                                 'timestamp': message_obj.timestamp.isoformat() if message_obj.timestamp else None,
                                                 'is_from_business': message_obj.is_from_business,
+                                                'platform': 'instagram',
+                                                'account_id': account_connection.instagram_account_id,
+                                                'chat_id': f'ig_{account_connection.instagram_account_id}_{sender_id}',
                                             }
                                             # Conversation ID is the sender_id (the customer)
                                             ws_conversation_id = sender_id
@@ -6101,6 +6107,9 @@ def whatsapp_webhook(request):
                         'attachments': message_obj.attachments,
                         'timestamp': message_obj.timestamp.isoformat(),
                         'is_from_business': message_obj.is_from_business,
+                        'platform': 'whatsapp',
+                        'account_id': account.waba_id,
+                        'chat_id': f'wa_{account.waba_id}_{from_number}',
                     }
                     # Get assignment for notification filtering
                     assigned_user_id = get_assignment_for_conversation(
@@ -7650,6 +7659,7 @@ def process_tiktok_message_event(event):
             'timestamp': msg_obj.timestamp.isoformat(),
             'is_from_creator': msg_obj.is_from_creator,
             'account_id': account.open_id,
+            'chat_id': f'tt_{account.open_id}_{msg_obj.conversation_id}',
         }
         # Get assignment for notification filtering
         assigned_user_id = get_assignment_for_conversation(
