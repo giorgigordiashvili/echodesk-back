@@ -3550,7 +3550,7 @@ def send_rating_request_instagram(conversation_id, account_id, message):
                     sender_username=account.username or account.instagram_account_id,
                     message_text=message,
                     timestamp=datetime.now(),
-                    is_from_account=True
+                    is_from_business=True
                 )
             except Exception as e:
                 logger.warning(f"Failed to save rating message: {e}")
