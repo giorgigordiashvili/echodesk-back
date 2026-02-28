@@ -557,33 +557,52 @@ class FacebookMessageViewSet(viewsets.ReadOnlyModelViewSet):
 
         # Check if hiding assigned chats is enabled
         settings_obj = SocialIntegrationSettings.objects.first()
-        if not settings_obj or not settings_obj.hide_assigned_chats:
-            return base_queryset  # Return all messages (no hiding)
+        if settings_obj and settings_obj.hide_assigned_chats:
+            # Admin/superuser sees all messages
+            if not (self.request.user.is_superuser or self.request.user.is_staff):
+                # Get page IDs for this tenant
+                page_ids = list(tenant_pages.values_list('page_id', flat=True))
 
-        # Admin/superuser sees all messages
-        if self.request.user.is_superuser or self.request.user.is_staff:
-            return base_queryset
+                # Get conversations assigned to current user
+                my_assigned = ChatAssignment.objects.filter(
+                    assigned_user=self.request.user,
+                    platform='facebook',
+                    account_id__in=page_ids
+                ).values_list('conversation_id', flat=True)
 
-        # Get page IDs for this tenant
-        page_ids = list(tenant_pages.values_list('page_id', flat=True))
+                # Get all assigned conversations for Facebook
+                all_assigned = ChatAssignment.objects.filter(
+                    platform='facebook',
+                    account_id__in=page_ids
+                ).values_list('conversation_id', flat=True)
 
-        # Get conversations assigned to current user
-        my_assigned = ChatAssignment.objects.filter(
-            assigned_user=self.request.user,
-            platform='facebook',
-            account_id__in=page_ids
-        ).values_list('conversation_id', flat=True)
+                # Return: assigned to me OR not assigned to anyone
+                base_queryset = base_queryset.filter(
+                    Q(sender_id__in=my_assigned) | ~Q(sender_id__in=all_assigned)
+                )
 
-        # Get all assigned conversations for Facebook
-        all_assigned = ChatAssignment.objects.filter(
-            platform='facebook',
-            account_id__in=page_ids
-        ).values_list('conversation_id', flat=True)
+        # Check for initial_load parameter - returns unread messages + 10 most recent
+        initial_load = self.request.query_params.get('initial_load', '').lower() == 'true'
+        sender_id = self.request.query_params.get('sender_id')
 
-        # Return: assigned to me OR not assigned to anyone
-        return base_queryset.filter(
-            Q(sender_id__in=my_assigned) | ~Q(sender_id__in=all_assigned)
-        )
+        if initial_load and sender_id:
+            # Filter to this conversation
+            conv_queryset = base_queryset.filter(sender_id=sender_id)
+
+            # Count unread incoming messages
+            unread_count = conv_queryset.filter(
+                is_from_page=False,
+                is_read_by_staff=False
+            ).count()
+
+            # Get unread + 10 messages (minimum 10)
+            limit = max(unread_count + 10, 10)
+
+            # Return the most recent `limit` messages
+            recent_ids = list(conv_queryset.order_by('-timestamp').values_list('id', flat=True)[:limit])
+            return base_queryset.filter(id__in=recent_ids)
+
+        return base_queryset
 
 
 @api_view(['GET'])
@@ -2333,33 +2352,52 @@ class InstagramMessageViewSet(viewsets.ReadOnlyModelViewSet):
 
         # Check if hiding assigned chats is enabled
         settings_obj = SocialIntegrationSettings.objects.first()
-        if not settings_obj or not settings_obj.hide_assigned_chats:
-            return base_queryset  # Return all messages (no hiding)
+        if settings_obj and settings_obj.hide_assigned_chats:
+            # Admin/superuser sees all messages
+            if not (self.request.user.is_superuser or self.request.user.is_staff):
+                # Get account IDs for this tenant
+                account_ids = list(tenant_accounts.values_list('instagram_account_id', flat=True))
 
-        # Admin/superuser sees all messages
-        if self.request.user.is_superuser or self.request.user.is_staff:
-            return base_queryset
+                # Get conversations assigned to current user
+                my_assigned = ChatAssignment.objects.filter(
+                    assigned_user=self.request.user,
+                    platform='instagram',
+                    account_id__in=account_ids
+                ).values_list('conversation_id', flat=True)
 
-        # Get account IDs for this tenant
-        account_ids = list(tenant_accounts.values_list('instagram_account_id', flat=True))
+                # Get all assigned conversations for Instagram
+                all_assigned = ChatAssignment.objects.filter(
+                    platform='instagram',
+                    account_id__in=account_ids
+                ).values_list('conversation_id', flat=True)
 
-        # Get conversations assigned to current user
-        my_assigned = ChatAssignment.objects.filter(
-            assigned_user=self.request.user,
-            platform='instagram',
-            account_id__in=account_ids
-        ).values_list('conversation_id', flat=True)
+                # Return: assigned to me OR not assigned to anyone
+                base_queryset = base_queryset.filter(
+                    Q(sender_id__in=my_assigned) | ~Q(sender_id__in=all_assigned)
+                )
 
-        # Get all assigned conversations for Instagram
-        all_assigned = ChatAssignment.objects.filter(
-            platform='instagram',
-            account_id__in=account_ids
-        ).values_list('conversation_id', flat=True)
+        # Check for initial_load parameter - returns unread messages + 10 most recent
+        initial_load = self.request.query_params.get('initial_load', '').lower() == 'true'
+        sender_id = self.request.query_params.get('sender_id')
 
-        # Return: assigned to me OR not assigned to anyone
-        return base_queryset.filter(
-            Q(sender_id__in=my_assigned) | ~Q(sender_id__in=all_assigned)
-        )
+        if initial_load and sender_id:
+            # Filter to this conversation
+            conv_queryset = base_queryset.filter(sender_id=sender_id)
+
+            # Count unread incoming messages
+            unread_count = conv_queryset.filter(
+                is_from_business=False,
+                is_read_by_staff=False
+            ).count()
+
+            # Get unread + 10 messages (minimum 10)
+            limit = max(unread_count + 10, 10)
+
+            # Return the most recent `limit` messages
+            recent_ids = list(conv_queryset.order_by('-timestamp').values_list('id', flat=True)[:limit])
+            return base_queryset.filter(id__in=recent_ids)
+
+        return base_queryset
 
 
 @api_view(['GET'])
@@ -5125,36 +5163,57 @@ class WhatsAppMessageViewSet(viewsets.ReadOnlyModelViewSet):
 
         # Check if hiding assigned chats is enabled
         settings_obj = SocialIntegrationSettings.objects.first()
-        if not settings_obj or not settings_obj.hide_assigned_chats:
-            return base_queryset  # Return all messages (no hiding)
+        if settings_obj and settings_obj.hide_assigned_chats:
+            # Admin/superuser sees all messages
+            if not (self.request.user.is_superuser or self.request.user.is_staff):
+                # Get WABA IDs for this tenant
+                waba_ids = list(tenant_accounts.values_list('waba_id', flat=True))
 
-        # Admin/superuser sees all messages
-        if self.request.user.is_superuser or self.request.user.is_staff:
-            return base_queryset
+                # Get conversations assigned to current user
+                my_assigned = ChatAssignment.objects.filter(
+                    assigned_user=self.request.user,
+                    platform='whatsapp',
+                    account_id__in=waba_ids
+                ).values_list('conversation_id', flat=True)
 
-        # Get WABA IDs for this tenant
-        waba_ids = list(tenant_accounts.values_list('waba_id', flat=True))
+                # Get all assigned conversations for WhatsApp
+                all_assigned = ChatAssignment.objects.filter(
+                    platform='whatsapp',
+                    account_id__in=waba_ids
+                ).values_list('conversation_id', flat=True)
 
-        # Get conversations assigned to current user
-        my_assigned = ChatAssignment.objects.filter(
-            assigned_user=self.request.user,
-            platform='whatsapp',
-            account_id__in=waba_ids
-        ).values_list('conversation_id', flat=True)
+                # For WhatsApp, we need to check both from_number and to_number
+                # conversation_id is the customer's phone number (from_number for incoming, to_number for outgoing)
+                # Return: messages where customer is in my_assigned OR customer is not in all_assigned
+                base_queryset = base_queryset.filter(
+                    Q(from_number__in=my_assigned) | Q(to_number__in=my_assigned) |
+                    (~Q(from_number__in=all_assigned) & ~Q(to_number__in=all_assigned))
+                )
 
-        # Get all assigned conversations for WhatsApp
-        all_assigned = ChatAssignment.objects.filter(
-            platform='whatsapp',
-            account_id__in=waba_ids
-        ).values_list('conversation_id', flat=True)
+        # Check for initial_load parameter - returns unread messages + 10 most recent
+        initial_load = self.request.query_params.get('initial_load', '').lower() == 'true'
+        from_number = self.request.query_params.get('from_number')
 
-        # For WhatsApp, we need to check both from_number and to_number
-        # conversation_id is the customer's phone number (from_number for incoming, to_number for outgoing)
-        # Return: messages where customer is in my_assigned OR customer is not in all_assigned
-        return base_queryset.filter(
-            Q(from_number__in=my_assigned) | Q(to_number__in=my_assigned) |
-            (~Q(from_number__in=all_assigned) & ~Q(to_number__in=all_assigned))
-        )
+        if initial_load and from_number:
+            # Filter to this conversation (both directions)
+            conv_queryset = base_queryset.filter(
+                Q(from_number=from_number) | Q(to_number=from_number)
+            )
+
+            # Count unread incoming messages
+            unread_count = conv_queryset.filter(
+                is_from_business=False,
+                is_read_by_staff=False
+            ).count()
+
+            # Get unread + 10 messages (minimum 10)
+            limit = max(unread_count + 10, 10)
+
+            # Return the most recent `limit` messages
+            recent_ids = list(conv_queryset.order_by('-timestamp').values_list('id', flat=True)[:limit])
+            return base_queryset.filter(id__in=recent_ids)
+
+        return base_queryset
 
 
 class WhatsAppContactViewSet(viewsets.ReadOnlyModelViewSet):
