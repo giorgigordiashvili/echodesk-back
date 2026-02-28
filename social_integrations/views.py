@@ -3915,6 +3915,13 @@ def user_chat_sessions(request, user_id):
             description='Email folder filter (default: INBOX)',
             required=False,
         ),
+        OpenApiParameter(
+            name='unread_only',
+            type=OpenApiTypes.BOOL,
+            location=OpenApiParameter.QUERY,
+            description='Only return conversations with unread messages (default: true)',
+            required=False,
+        ),
     ],
     responses={200: PaginatedUnifiedConversationSerializer},
     tags=['Social - Conversations'],
@@ -3945,6 +3952,7 @@ def unified_conversations(request):
     - folder: Email folder filter (default: INBOX)
     - assigned: If true, only return conversations assigned to the current user
     - archived: If true, only return archived conversations (history)
+    - unread_only: If true (default), only return conversations with unread messages
     """
     # Parse query parameters
     platforms_param = request.query_params.get('platforms', 'facebook,instagram,whatsapp,email')
@@ -3955,6 +3963,7 @@ def unified_conversations(request):
     email_folder = request.query_params.get('folder', 'INBOX')
     assigned_only = request.query_params.get('assigned', '').lower() == 'true'
     archived_only = request.query_params.get('archived', '').lower() == 'true'
+    unread_only = request.query_params.get('unread_only', 'true').lower() == 'true'
 
     all_conversations = []
 
@@ -4027,13 +4036,31 @@ def unified_conversations(request):
             pages = FacebookPageConnection.objects.all()
             for page_conn in pages:
                 # Get all messages for this page grouped by sender
-                messages = FacebookMessage.objects.filter(
-                    page_connection=page_conn,
-                    is_deleted=False
-                ).values('sender_id').annotate(
-                    last_timestamp=Max('timestamp'),
-                    msg_count=Count('id')
-                ).order_by('-last_timestamp')
+                if unread_only:
+                    # Only get sender_ids that have unread messages
+                    sender_ids_with_unread = FacebookMessage.objects.filter(
+                        page_connection=page_conn,
+                        is_deleted=False,
+                        is_from_page=False,
+                        is_read_by_staff=False
+                    ).values_list('sender_id', flat=True).distinct()
+
+                    messages = FacebookMessage.objects.filter(
+                        page_connection=page_conn,
+                        is_deleted=False,
+                        sender_id__in=sender_ids_with_unread
+                    ).values('sender_id').annotate(
+                        last_timestamp=Max('timestamp'),
+                        msg_count=Count('id')
+                    ).order_by('-last_timestamp')
+                else:
+                    messages = FacebookMessage.objects.filter(
+                        page_connection=page_conn,
+                        is_deleted=False
+                    ).values('sender_id').annotate(
+                        last_timestamp=Max('timestamp'),
+                        msg_count=Count('id')
+                    ).order_by('-last_timestamp')
 
                 for conv_data in messages:
                     sender_id = conv_data['sender_id']
@@ -4103,13 +4130,31 @@ def unified_conversations(request):
             accounts = InstagramAccountConnection.objects.all()
             for account in accounts:
                 # Get all messages grouped by sender
-                messages = InstagramMessage.objects.filter(
-                    account_connection=account,
-                    is_deleted=False
-                ).values('sender_id').annotate(
-                    last_timestamp=Max('timestamp'),
-                    msg_count=Count('id')
-                ).order_by('-last_timestamp')
+                if unread_only:
+                    # Only get sender_ids that have unread messages
+                    sender_ids_with_unread = InstagramMessage.objects.filter(
+                        account_connection=account,
+                        is_deleted=False,
+                        is_from_business=False,
+                        is_read_by_staff=False
+                    ).values_list('sender_id', flat=True).distinct()
+
+                    messages = InstagramMessage.objects.filter(
+                        account_connection=account,
+                        is_deleted=False,
+                        sender_id__in=sender_ids_with_unread
+                    ).values('sender_id').annotate(
+                        last_timestamp=Max('timestamp'),
+                        msg_count=Count('id')
+                    ).order_by('-last_timestamp')
+                else:
+                    messages = InstagramMessage.objects.filter(
+                        account_connection=account,
+                        is_deleted=False
+                    ).values('sender_id').annotate(
+                        last_timestamp=Max('timestamp'),
+                        msg_count=Count('id')
+                    ).order_by('-last_timestamp')
 
                 for conv_data in messages:
                     sender_id = conv_data['sender_id']
@@ -4180,13 +4225,31 @@ def unified_conversations(request):
             accounts = WhatsAppBusinessAccount.objects.all()
             for account in accounts:
                 # Get all messages grouped by from_number (customer phone)
-                messages = WhatsAppMessage.objects.filter(
-                    business_account=account,
-                    is_deleted=False
-                ).values('from_number').annotate(
-                    last_timestamp=Max('timestamp'),
-                    msg_count=Count('id')
-                ).order_by('-last_timestamp')
+                if unread_only:
+                    # Only get from_numbers that have unread messages
+                    from_numbers_with_unread = WhatsAppMessage.objects.filter(
+                        business_account=account,
+                        is_deleted=False,
+                        is_from_business=False,
+                        is_read_by_staff=False
+                    ).values_list('from_number', flat=True).distinct()
+
+                    messages = WhatsAppMessage.objects.filter(
+                        business_account=account,
+                        is_deleted=False,
+                        from_number__in=from_numbers_with_unread
+                    ).values('from_number').annotate(
+                        last_timestamp=Max('timestamp'),
+                        msg_count=Count('id')
+                    ).order_by('-last_timestamp')
+                else:
+                    messages = WhatsAppMessage.objects.filter(
+                        business_account=account,
+                        is_deleted=False
+                    ).values('from_number').annotate(
+                        last_timestamp=Max('timestamp'),
+                        msg_count=Count('id')
+                    ).order_by('-last_timestamp')
 
                 for conv_data in messages:
                     from_number = conv_data['from_number']
@@ -4263,12 +4326,28 @@ def unified_conversations(request):
                 if email_folder and email_folder.lower() not in ('all', 'all folders'):
                     base_filter['folder'] = email_folder
 
-                messages = EmailMessage.objects.filter(
-                    **base_filter
-                ).values('thread_id').annotate(
-                    last_timestamp=Max('timestamp'),
-                    msg_count=Count('id')
-                ).order_by('-last_timestamp')
+                if unread_only:
+                    # Only get thread_ids that have unread messages
+                    thread_ids_with_unread = EmailMessage.objects.filter(
+                        **base_filter,
+                        is_from_business=False,
+                        is_read=False
+                    ).values_list('thread_id', flat=True).distinct()
+
+                    messages = EmailMessage.objects.filter(
+                        **base_filter,
+                        thread_id__in=thread_ids_with_unread
+                    ).values('thread_id').annotate(
+                        last_timestamp=Max('timestamp'),
+                        msg_count=Count('id')
+                    ).order_by('-last_timestamp')
+                else:
+                    messages = EmailMessage.objects.filter(
+                        **base_filter
+                    ).values('thread_id').annotate(
+                        last_timestamp=Max('timestamp'),
+                        msg_count=Count('id')
+                    ).order_by('-last_timestamp')
 
                 for conv_data in messages:
                     thread_id = conv_data['thread_id']
