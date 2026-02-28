@@ -4042,24 +4042,24 @@ def unified_conversations(request):
                 )
 
                 if unread_only:
-                    sender_ids = list(base_qs.filter(
+                    sender_ids = list(set(base_qs.filter(
                         is_from_page=False,
                         is_read_by_staff=False
-                    ).values_list('sender_id', flat=True).distinct())
+                    ).values_list('sender_id', flat=True)))
                     if not sender_ids:
                         continue
                 else:
-                    sender_ids = list(base_qs.values_list('sender_id', flat=True).distinct())
+                    sender_ids = list(set(base_qs.values_list('sender_id', flat=True)))
                     if not sender_ids:
                         continue
 
                 if search_query:
-                    sender_ids = list(base_qs.filter(
+                    sender_ids = list(set(base_qs.filter(
                         sender_id__in=sender_ids
                     ).filter(
                         Q(sender_name__icontains=search_query) |
                         Q(message_text__icontains=search_query)
-                    ).values_list('sender_id', flat=True).distinct())
+                    ).values_list('sender_id', flat=True)))
                     if not sender_ids:
                         continue
 
@@ -4139,25 +4139,25 @@ def unified_conversations(request):
                 )
 
                 if unread_only:
-                    sender_ids = list(base_qs.filter(
+                    sender_ids = list(set(base_qs.filter(
                         is_from_business=False,
                         is_read_by_staff=False
-                    ).values_list('sender_id', flat=True).distinct())
+                    ).values_list('sender_id', flat=True)))
                     if not sender_ids:
                         continue
                 else:
-                    sender_ids = list(base_qs.values_list('sender_id', flat=True).distinct())
+                    sender_ids = list(set(base_qs.values_list('sender_id', flat=True)))
                     if not sender_ids:
                         continue
 
                 if search_query:
-                    sender_ids = list(base_qs.filter(
+                    sender_ids = list(set(base_qs.filter(
                         sender_id__in=sender_ids
                     ).filter(
                         Q(sender_name__icontains=search_query) |
                         Q(sender_username__icontains=search_query) |
                         Q(message_text__icontains=search_query)
-                    ).values_list('sender_id', flat=True).distinct())
+                    ).values_list('sender_id', flat=True)))
                     if not sender_ids:
                         continue
 
@@ -4238,25 +4238,25 @@ def unified_conversations(request):
                 )
 
                 if unread_only:
-                    from_numbers = list(base_qs.filter(
+                    from_numbers = list(set(base_qs.filter(
                         is_from_business=False,
                         is_read_by_staff=False
-                    ).values_list('from_number', flat=True).distinct())
+                    ).values_list('from_number', flat=True)))
                     if not from_numbers:
                         continue
                 else:
-                    from_numbers = list(base_qs.values_list('from_number', flat=True).distinct())
+                    from_numbers = list(set(base_qs.values_list('from_number', flat=True)))
                     if not from_numbers:
                         continue
 
                 if search_query:
-                    from_numbers = list(base_qs.filter(
+                    from_numbers = list(set(base_qs.filter(
                         from_number__in=from_numbers
                     ).filter(
                         Q(contact_name__icontains=search_query) |
                         Q(message_text__icontains=search_query) |
                         Q(from_number__icontains=search_query)
-                    ).values_list('from_number', flat=True).distinct())
+                    ).values_list('from_number', flat=True)))
                     if not from_numbers:
                         continue
 
@@ -4342,26 +4342,26 @@ def unified_conversations(request):
                 base_qs = EmailMessage.objects.filter(**base_filter)
 
                 if unread_only:
-                    thread_ids = list(base_qs.filter(
+                    thread_ids = list(set(base_qs.filter(
                         is_from_business=False,
                         is_read=False
-                    ).values_list('thread_id', flat=True).distinct())
+                    ).values_list('thread_id', flat=True)))
                     if not thread_ids:
                         continue
                 else:
-                    thread_ids = list(base_qs.values_list('thread_id', flat=True).distinct())
+                    thread_ids = list(set(base_qs.values_list('thread_id', flat=True)))
                     if not thread_ids:
                         continue
 
                 if search_query:
-                    thread_ids = list(base_qs.filter(
+                    thread_ids = list(set(base_qs.filter(
                         thread_id__in=thread_ids
                     ).filter(
                         Q(from_name__icontains=search_query) |
                         Q(from_email__icontains=search_query) |
                         Q(subject__icontains=search_query) |
                         Q(body_text__icontains=search_query)
-                    ).values_list('thread_id', flat=True).distinct())
+                    ).values_list('thread_id', flat=True)))
                     if not thread_ids:
                         continue
 
