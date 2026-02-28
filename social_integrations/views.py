@@ -4030,92 +4030,96 @@ def unified_conversations(request):
 
         return assignment.assigned_user == request.user  # Only visible if assigned to current user
 
-    # Load Facebook conversations (optimized - single query per page)
+    # Load Facebook conversations (optimized - batch fetch with DISTINCT ON)
     if 'facebook' in enabled_platforms:
         try:
             pages = FacebookPageConnection.objects.all()
             for page_conn in pages:
-                # Build base queryset
+                # Step 1: Get sender_ids to include
                 base_qs = FacebookMessage.objects.filter(
                     page_connection=page_conn,
                     is_deleted=False
                 )
 
-                # If unread_only, filter to only sender_ids with unread messages
                 if unread_only:
-                    sender_ids_with_unread = base_qs.filter(
+                    sender_ids = list(base_qs.filter(
                         is_from_page=False,
                         is_read_by_staff=False
-                    ).values_list('sender_id', flat=True).distinct()
-                    base_qs = base_qs.filter(sender_id__in=sender_ids_with_unread)
+                    ).values_list('sender_id', flat=True).distinct())
+                    if not sender_ids:
+                        continue
+                else:
+                    sender_ids = list(base_qs.values_list('sender_id', flat=True).distinct())
+                    if not sender_ids:
+                        continue
 
-                # Apply search filter at the base level if provided
                 if search_query:
-                    matching_senders = base_qs.filter(
+                    sender_ids = list(base_qs.filter(
+                        sender_id__in=sender_ids
+                    ).filter(
                         Q(sender_name__icontains=search_query) |
                         Q(message_text__icontains=search_query)
-                    ).values_list('sender_id', flat=True).distinct()
-                    base_qs = base_qs.filter(sender_id__in=matching_senders)
+                    ).values_list('sender_id', flat=True).distinct())
+                    if not sender_ids:
+                        continue
 
-                # Get latest message subquery for each sender
-                latest_msg_subquery = FacebookMessage.objects.filter(
+                # Step 2: Get aggregated counts
+                agg_data = {
+                    item['sender_id']: item
+                    for item in base_qs.filter(sender_id__in=sender_ids).values('sender_id').annotate(
+                        last_timestamp=Max('timestamp'),
+                        msg_count=Count('id'),
+                        unread_count=Count('id', filter=Q(is_from_page=False, is_read_by_staff=False)),
+                    )
+                }
+
+                # Step 3: Batch fetch latest message per sender using DISTINCT ON
+                latest_messages = FacebookMessage.objects.filter(
                     page_connection=page_conn,
-                    sender_id=OuterRef('sender_id'),
+                    sender_id__in=sender_ids,
                     is_deleted=False
-                ).order_by('-timestamp')
+                ).order_by('sender_id', '-timestamp').distinct('sender_id')
+                latest_msg_map = {msg.sender_id: msg for msg in latest_messages}
 
-                # Get customer info subquery (latest incoming message)
-                customer_msg_subquery = FacebookMessage.objects.filter(
+                # Step 4: Batch fetch customer info (latest incoming message)
+                customer_messages = FacebookMessage.objects.filter(
                     page_connection=page_conn,
-                    sender_id=OuterRef('sender_id'),
+                    sender_id__in=sender_ids,
                     is_deleted=False,
                     is_from_page=False
-                ).order_by('-timestamp')
+                ).order_by('sender_id', '-timestamp').distinct('sender_id')
+                customer_msg_map = {msg.sender_id: msg for msg in customer_messages}
 
-                # Single aggregated query with all needed data
-                conversations_data = base_qs.values('sender_id').annotate(
-                    last_timestamp=Max('timestamp'),
-                    msg_count=Count('id'),
-                    unread_count=Count('id', filter=Q(is_from_page=False, is_read_by_staff=False)),
-                    # Latest message info
-                    latest_msg_id=Subquery(latest_msg_subquery.values('id')[:1]),
-                    latest_msg_text=Subquery(latest_msg_subquery.values('message_text')[:1]),
-                    latest_msg_timestamp=Subquery(latest_msg_subquery.values('timestamp')[:1]),
-                    latest_msg_is_from_page=Subquery(latest_msg_subquery.values('is_from_page')[:1]),
-                    latest_msg_attachment_type=Subquery(latest_msg_subquery.values('attachment_type')[:1]),
-                    latest_msg_message_id=Subquery(latest_msg_subquery.values('message_id')[:1]),
-                    # Customer info from latest incoming message
-                    customer_name=Subquery(customer_msg_subquery.values('sender_name')[:1]),
-                    customer_avatar=Subquery(customer_msg_subquery.values('profile_pic_url')[:1]),
-                ).order_by('-last_timestamp')
+                # Step 5: Build conversations sorted by last_timestamp
+                sorted_senders = sorted(sender_ids, key=lambda s: agg_data.get(s, {}).get('last_timestamp') or datetime.min, reverse=True)
 
-                for conv_data in conversations_data:
-                    sender_id = conv_data['sender_id']
-
-                    # Check assignment visibility
+                for sender_id in sorted_senders:
                     if not is_conversation_visible('facebook', page_conn.page_id, sender_id):
                         continue
 
-                    # Skip if no latest message (shouldn't happen but safety check)
-                    if not conv_data['latest_msg_id']:
+                    latest_msg = latest_msg_map.get(sender_id)
+                    if not latest_msg:
                         continue
+
+                    agg = agg_data.get(sender_id, {})
+                    customer_msg = customer_msg_map.get(sender_id)
 
                     conversation = {
                         'conversation_id': f"fb_{page_conn.page_id}_{sender_id}",
                         'platform': 'facebook',
                         'sender_id': sender_id,
-                        'sender_name': conv_data['customer_name'] or "Unknown",
-                        'profile_pic_url': conv_data['customer_avatar'],
+                        'sender_name': customer_msg.sender_name if customer_msg else "Unknown",
+                        'profile_pic_url': customer_msg.profile_pic_url if customer_msg else None,
                         'last_message': {
-                            'id': str(conv_data['latest_msg_id']),
-                            'text': conv_data['latest_msg_text'],
-                            'timestamp': conv_data['latest_msg_timestamp'],
-                            'is_from_business': conv_data['latest_msg_is_from_page'],
-                            'attachment_type': conv_data['latest_msg_attachment_type'],
-                            'platform_message_id': conv_data['latest_msg_message_id'],
+                            'id': str(latest_msg.id),
+                            'text': latest_msg.message_text,
+                            'timestamp': latest_msg.timestamp,
+                            'is_from_business': latest_msg.is_from_page,
+                            'attachment_type': latest_msg.attachment_type,
+                            'platform_message_id': latest_msg.message_id,
                         },
-                        'message_count': conv_data['msg_count'],
-                        'unread_count': conv_data['unread_count'],
+                        'message_count': agg.get('msg_count', 0),
+                        'unread_count': agg.get('unread_count', 0),
                         'account_name': page_conn.page_name,
                         'account_id': page_conn.page_id,
                     }
@@ -4123,97 +4127,98 @@ def unified_conversations(request):
         except Exception as e:
             logger.error(f"Error loading Facebook conversations: {e}")
 
-    # Load Instagram conversations (optimized - single query per account)
+    # Load Instagram conversations (optimized - batch fetch with DISTINCT ON)
     if 'instagram' in enabled_platforms:
         try:
             accounts = InstagramAccountConnection.objects.all()
             for account in accounts:
-                # Build base queryset
+                # Step 1: Get sender_ids to include
                 base_qs = InstagramMessage.objects.filter(
                     account_connection=account,
                     is_deleted=False
                 )
 
-                # If unread_only, filter to only sender_ids with unread messages
                 if unread_only:
-                    sender_ids_with_unread = base_qs.filter(
+                    sender_ids = list(base_qs.filter(
                         is_from_business=False,
                         is_read_by_staff=False
-                    ).values_list('sender_id', flat=True).distinct()
-                    base_qs = base_qs.filter(sender_id__in=sender_ids_with_unread)
+                    ).values_list('sender_id', flat=True).distinct())
+                    if not sender_ids:
+                        continue
+                else:
+                    sender_ids = list(base_qs.values_list('sender_id', flat=True).distinct())
+                    if not sender_ids:
+                        continue
 
-                # Apply search filter at the base level if provided
                 if search_query:
-                    matching_senders = base_qs.filter(
+                    sender_ids = list(base_qs.filter(
+                        sender_id__in=sender_ids
+                    ).filter(
                         Q(sender_name__icontains=search_query) |
                         Q(sender_username__icontains=search_query) |
                         Q(message_text__icontains=search_query)
-                    ).values_list('sender_id', flat=True).distinct()
-                    base_qs = base_qs.filter(sender_id__in=matching_senders)
+                    ).values_list('sender_id', flat=True).distinct())
+                    if not sender_ids:
+                        continue
 
-                # Get latest message subquery for each sender
-                latest_msg_subquery = InstagramMessage.objects.filter(
+                # Step 2: Get aggregated counts
+                agg_data = {
+                    item['sender_id']: item
+                    for item in base_qs.filter(sender_id__in=sender_ids).values('sender_id').annotate(
+                        last_timestamp=Max('timestamp'),
+                        msg_count=Count('id'),
+                        unread_count=Count('id', filter=Q(is_from_business=False, is_read_by_staff=False)),
+                    )
+                }
+
+                # Step 3: Batch fetch latest message per sender using DISTINCT ON
+                latest_messages = InstagramMessage.objects.filter(
                     account_connection=account,
-                    sender_id=OuterRef('sender_id'),
+                    sender_id__in=sender_ids,
                     is_deleted=False
-                ).order_by('-timestamp')
+                ).order_by('sender_id', '-timestamp').distinct('sender_id')
+                latest_msg_map = {msg.sender_id: msg for msg in latest_messages}
 
-                # Get customer info subquery (latest incoming message)
-                customer_msg_subquery = InstagramMessage.objects.filter(
+                # Step 4: Batch fetch customer info (latest incoming message)
+                customer_messages = InstagramMessage.objects.filter(
                     account_connection=account,
-                    sender_id=OuterRef('sender_id'),
+                    sender_id__in=sender_ids,
                     is_deleted=False,
                     is_from_business=False
-                ).order_by('-timestamp')
+                ).order_by('sender_id', '-timestamp').distinct('sender_id')
+                customer_msg_map = {msg.sender_id: msg for msg in customer_messages}
 
-                # Single aggregated query with all needed data
-                conversations_data = base_qs.values('sender_id').annotate(
-                    last_timestamp=Max('timestamp'),
-                    msg_count=Count('id'),
-                    unread_count=Count('id', filter=Q(is_from_business=False, is_read_by_staff=False)),
-                    # Latest message info
-                    latest_msg_id=Subquery(latest_msg_subquery.values('id')[:1]),
-                    latest_msg_text=Subquery(latest_msg_subquery.values('message_text')[:1]),
-                    latest_msg_timestamp=Subquery(latest_msg_subquery.values('timestamp')[:1]),
-                    latest_msg_is_from_business=Subquery(latest_msg_subquery.values('is_from_business')[:1]),
-                    latest_msg_attachment_type=Subquery(latest_msg_subquery.values('attachment_type')[:1]),
-                    latest_msg_message_id=Subquery(latest_msg_subquery.values('message_id')[:1]),
-                    # Customer info from latest incoming message
-                    customer_name=Subquery(customer_msg_subquery.values('sender_name')[:1]),
-                    customer_username=Subquery(customer_msg_subquery.values('sender_username')[:1]),
-                    customer_avatar=Subquery(customer_msg_subquery.values('sender_profile_pic')[:1]),
-                ).order_by('-last_timestamp')
+                # Step 5: Build conversations sorted by last_timestamp
+                sorted_senders = sorted(sender_ids, key=lambda s: agg_data.get(s, {}).get('last_timestamp') or datetime.min, reverse=True)
 
-                for conv_data in conversations_data:
-                    sender_id = conv_data['sender_id']
-
-                    # Check assignment visibility
+                for sender_id in sorted_senders:
                     if not is_conversation_visible('instagram', account.instagram_account_id, sender_id):
                         continue
 
-                    # Skip if no latest message
-                    if not conv_data['latest_msg_id']:
+                    latest_msg = latest_msg_map.get(sender_id)
+                    if not latest_msg:
                         continue
 
-                    # Determine customer name
-                    customer_name = conv_data['customer_name'] or conv_data['customer_username'] or sender_id
+                    agg = agg_data.get(sender_id, {})
+                    customer_msg = customer_msg_map.get(sender_id)
+                    customer_name = (customer_msg.sender_name or customer_msg.sender_username) if customer_msg else sender_id
 
                     conversation = {
                         'conversation_id': f"ig_{account.instagram_account_id}_{sender_id}",
                         'platform': 'instagram',
                         'sender_id': sender_id,
                         'sender_name': customer_name,
-                        'profile_pic_url': conv_data['customer_avatar'],
+                        'profile_pic_url': customer_msg.sender_profile_pic if customer_msg else None,
                         'last_message': {
-                            'id': str(conv_data['latest_msg_id']),
-                            'text': conv_data['latest_msg_text'],
-                            'timestamp': conv_data['latest_msg_timestamp'],
-                            'is_from_business': conv_data['latest_msg_is_from_business'],
-                            'attachment_type': conv_data['latest_msg_attachment_type'],
-                            'platform_message_id': conv_data['latest_msg_message_id'],
+                            'id': str(latest_msg.id),
+                            'text': latest_msg.message_text,
+                            'timestamp': latest_msg.timestamp,
+                            'is_from_business': latest_msg.is_from_business,
+                            'attachment_type': latest_msg.attachment_type,
+                            'platform_message_id': latest_msg.message_id,
                         },
-                        'message_count': conv_data['msg_count'],
-                        'unread_count': conv_data['unread_count'],
+                        'message_count': agg.get('msg_count', 0),
+                        'unread_count': agg.get('unread_count', 0),
                         'account_name': f"@{account.username}",
                         'account_id': account.instagram_account_id,
                     }
@@ -4221,99 +4226,101 @@ def unified_conversations(request):
         except Exception as e:
             logger.error(f"Error loading Instagram conversations: {e}")
 
-    # Load WhatsApp conversations (optimized - single query per account)
+    # Load WhatsApp conversations (optimized - batch fetch with DISTINCT ON)
     if 'whatsapp' in enabled_platforms:
         try:
             accounts = WhatsAppBusinessAccount.objects.all()
             for account in accounts:
-                # Build base queryset
+                # Step 1: Get from_numbers to include
                 base_qs = WhatsAppMessage.objects.filter(
                     business_account=account,
                     is_deleted=False
                 )
 
-                # If unread_only, filter to only from_numbers with unread messages
                 if unread_only:
-                    from_numbers_with_unread = base_qs.filter(
+                    from_numbers = list(base_qs.filter(
                         is_from_business=False,
                         is_read_by_staff=False
-                    ).values_list('from_number', flat=True).distinct()
-                    base_qs = base_qs.filter(from_number__in=from_numbers_with_unread)
+                    ).values_list('from_number', flat=True).distinct())
+                    if not from_numbers:
+                        continue
+                else:
+                    from_numbers = list(base_qs.values_list('from_number', flat=True).distinct())
+                    if not from_numbers:
+                        continue
 
-                # Apply search filter at the base level if provided
                 if search_query:
-                    matching_numbers = base_qs.filter(
+                    from_numbers = list(base_qs.filter(
+                        from_number__in=from_numbers
+                    ).filter(
                         Q(contact_name__icontains=search_query) |
                         Q(message_text__icontains=search_query) |
                         Q(from_number__icontains=search_query)
-                    ).values_list('from_number', flat=True).distinct()
-                    base_qs = base_qs.filter(from_number__in=matching_numbers)
+                    ).values_list('from_number', flat=True).distinct())
+                    if not from_numbers:
+                        continue
 
-                # Get latest message subquery for each from_number
-                latest_msg_subquery = WhatsAppMessage.objects.filter(
+                # Step 2: Get aggregated counts
+                agg_data = {
+                    item['from_number']: item
+                    for item in base_qs.filter(from_number__in=from_numbers).values('from_number').annotate(
+                        last_timestamp=Max('timestamp'),
+                        msg_count=Count('id'),
+                        unread_count=Count('id', filter=Q(is_from_business=False, is_read_by_staff=False)),
+                    )
+                }
+
+                # Step 3: Batch fetch latest message per from_number using DISTINCT ON
+                latest_messages = WhatsAppMessage.objects.filter(
                     business_account=account,
-                    from_number=OuterRef('from_number'),
+                    from_number__in=from_numbers,
                     is_deleted=False
-                ).order_by('-timestamp')
+                ).order_by('from_number', '-timestamp').distinct('from_number')
+                latest_msg_map = {msg.from_number: msg for msg in latest_messages}
 
-                # Get customer info subquery (latest incoming message)
-                customer_msg_subquery = WhatsAppMessage.objects.filter(
+                # Step 4: Batch fetch customer info (latest incoming message)
+                customer_messages = WhatsAppMessage.objects.filter(
                     business_account=account,
-                    from_number=OuterRef('from_number'),
+                    from_number__in=from_numbers,
                     is_deleted=False,
                     is_from_business=False
-                ).order_by('-timestamp')
+                ).order_by('from_number', '-timestamp').distinct('from_number')
+                customer_msg_map = {msg.from_number: msg for msg in customer_messages}
 
-                # Single aggregated query with all needed data
-                conversations_data = base_qs.values('from_number').annotate(
-                    last_timestamp=Max('timestamp'),
-                    msg_count=Count('id'),
-                    unread_count=Count('id', filter=Q(is_from_business=False, is_read_by_staff=False)),
-                    # Latest message info
-                    latest_msg_id=Subquery(latest_msg_subquery.values('id')[:1]),
-                    latest_msg_text=Subquery(latest_msg_subquery.values('message_text')[:1]),
-                    latest_msg_timestamp=Subquery(latest_msg_subquery.values('timestamp')[:1]),
-                    latest_msg_is_from_business=Subquery(latest_msg_subquery.values('is_from_business')[:1]),
-                    latest_msg_message_type=Subquery(latest_msg_subquery.values('message_type')[:1]),
-                    latest_msg_message_id=Subquery(latest_msg_subquery.values('message_id')[:1]),
-                    # Customer info from latest incoming message
-                    customer_name=Subquery(customer_msg_subquery.values('contact_name')[:1]),
-                ).order_by('-last_timestamp')
+                # Step 5: Build conversations sorted by last_timestamp
+                sorted_numbers = sorted(from_numbers, key=lambda n: agg_data.get(n, {}).get('last_timestamp') or datetime.min, reverse=True)
 
-                for conv_data in conversations_data:
-                    from_number = conv_data['from_number']
-
-                    # Normalize phone number for conversation ID
+                for from_number in sorted_numbers:
                     normalized_phone = from_number.lstrip('+')
 
-                    # Check assignment visibility
                     if not is_conversation_visible('whatsapp', account.waba_id, normalized_phone):
                         continue
 
-                    # Skip if no latest message
-                    if not conv_data['latest_msg_id']:
+                    latest_msg = latest_msg_map.get(from_number)
+                    if not latest_msg:
                         continue
 
-                    # Determine attachment type
-                    msg_type = conv_data['latest_msg_message_type']
+                    agg = agg_data.get(from_number, {})
+                    customer_msg = customer_msg_map.get(from_number)
+                    msg_type = latest_msg.message_type
                     attachment_type = msg_type if msg_type and msg_type != 'text' else None
 
                     conversation = {
                         'conversation_id': f"wa_{account.waba_id}_{normalized_phone}",
                         'platform': 'whatsapp',
                         'sender_id': from_number,
-                        'sender_name': conv_data['customer_name'] or from_number,
-                        'profile_pic_url': None,  # WhatsApp doesn't provide profile pics in webhooks
+                        'sender_name': customer_msg.contact_name if customer_msg and customer_msg.contact_name else from_number,
+                        'profile_pic_url': None,
                         'last_message': {
-                            'id': str(conv_data['latest_msg_id']),
-                            'text': conv_data['latest_msg_text'],
-                            'timestamp': conv_data['latest_msg_timestamp'],
-                            'is_from_business': conv_data['latest_msg_is_from_business'],
+                            'id': str(latest_msg.id),
+                            'text': latest_msg.message_text,
+                            'timestamp': latest_msg.timestamp,
+                            'is_from_business': latest_msg.is_from_business,
                             'attachment_type': attachment_type,
-                            'platform_message_id': conv_data['latest_msg_message_id'],
+                            'platform_message_id': latest_msg.message_id,
                         },
-                        'message_count': conv_data['msg_count'],
-                        'unread_count': conv_data['unread_count'],
+                        'message_count': agg.get('msg_count', 0),
+                        'unread_count': agg.get('unread_count', 0),
                         'account_name': account.business_name or account.display_phone_number,
                         'account_id': account.waba_id,
                     }
@@ -4321,7 +4328,7 @@ def unified_conversations(request):
         except Exception as e:
             logger.error(f"Error loading WhatsApp conversations: {e}")
 
-    # Load Email conversations (optimized - single query per connection)
+    # Load Email conversations (optimized - batch fetch with DISTINCT ON)
     if 'email' in enabled_platforms:
         try:
             connections = EmailConnection.objects.filter(is_active=True)
@@ -4331,85 +4338,77 @@ def unified_conversations(request):
                 if email_folder and email_folder.lower() not in ('all', 'all folders'):
                     base_filter['folder'] = email_folder
 
-                # Build base queryset
+                # Step 1: Get thread_ids to include
                 base_qs = EmailMessage.objects.filter(**base_filter)
 
-                # If unread_only, filter to only thread_ids with unread messages
                 if unread_only:
-                    thread_ids_with_unread = base_qs.filter(
+                    thread_ids = list(base_qs.filter(
                         is_from_business=False,
                         is_read=False
-                    ).values_list('thread_id', flat=True).distinct()
-                    base_qs = base_qs.filter(thread_id__in=thread_ids_with_unread)
+                    ).values_list('thread_id', flat=True).distinct())
+                    if not thread_ids:
+                        continue
+                else:
+                    thread_ids = list(base_qs.values_list('thread_id', flat=True).distinct())
+                    if not thread_ids:
+                        continue
 
-                # Apply search filter at the base level if provided
                 if search_query:
-                    matching_threads = base_qs.filter(
+                    thread_ids = list(base_qs.filter(
+                        thread_id__in=thread_ids
+                    ).filter(
                         Q(from_name__icontains=search_query) |
                         Q(from_email__icontains=search_query) |
                         Q(subject__icontains=search_query) |
                         Q(body_text__icontains=search_query)
-                    ).values_list('thread_id', flat=True).distinct()
-                    base_qs = base_qs.filter(thread_id__in=matching_threads)
+                    ).values_list('thread_id', flat=True).distinct())
+                    if not thread_ids:
+                        continue
 
-                # Build folder filter for subqueries
-                folder_filter = {'connection': conn}
-                if email_folder and email_folder.lower() not in ('all', 'all folders'):
-                    folder_filter['folder'] = email_folder
+                # Step 2: Get aggregated counts
+                agg_data = {
+                    item['thread_id']: item
+                    for item in base_qs.filter(thread_id__in=thread_ids).values('thread_id').annotate(
+                        last_timestamp=Max('timestamp'),
+                        msg_count=Count('id'),
+                        unread_count=Count('id', filter=Q(is_from_business=False, is_read=False)),
+                    )
+                }
 
-                # Get latest message subquery for each thread
-                latest_msg_subquery = EmailMessage.objects.filter(
-                    **folder_filter,
-                    thread_id=OuterRef('thread_id')
-                ).order_by('-timestamp')
+                # Step 3: Batch fetch latest message per thread using DISTINCT ON
+                latest_messages = EmailMessage.objects.filter(
+                    **base_filter,
+                    thread_id__in=thread_ids
+                ).order_by('thread_id', '-timestamp').distinct('thread_id')
+                latest_msg_map = {msg.thread_id: msg for msg in latest_messages}
 
-                # Get customer info subquery (latest incoming message)
-                customer_msg_subquery = EmailMessage.objects.filter(
-                    **folder_filter,
-                    thread_id=OuterRef('thread_id'),
+                # Step 4: Batch fetch customer info (latest incoming message)
+                customer_messages = EmailMessage.objects.filter(
+                    **base_filter,
+                    thread_id__in=thread_ids,
                     is_from_business=False
-                ).order_by('-timestamp')
+                ).order_by('thread_id', '-timestamp').distinct('thread_id')
+                customer_msg_map = {msg.thread_id: msg for msg in customer_messages}
 
-                # Single aggregated query with all needed data
-                conversations_data = base_qs.values('thread_id').annotate(
-                    last_timestamp=Max('timestamp'),
-                    msg_count=Count('id'),
-                    unread_count=Count('id', filter=Q(is_from_business=False, is_read=False)),
-                    # Latest message info
-                    latest_msg_id=Subquery(latest_msg_subquery.values('id')[:1]),
-                    latest_msg_body_text=Subquery(latest_msg_subquery.values('body_text')[:1]),
-                    latest_msg_timestamp=Subquery(latest_msg_subquery.values('timestamp')[:1]),
-                    latest_msg_is_from_business=Subquery(latest_msg_subquery.values('is_from_business')[:1]),
-                    latest_msg_attachments=Subquery(latest_msg_subquery.values('attachments')[:1]),
-                    latest_msg_message_id=Subquery(latest_msg_subquery.values('message_id')[:1]),
-                    latest_msg_subject=Subquery(latest_msg_subquery.values('subject')[:1]),
-                    # Customer info from latest incoming message
-                    customer_from_name=Subquery(customer_msg_subquery.values('from_name')[:1]),
-                    customer_from_email=Subquery(customer_msg_subquery.values('from_email')[:1]),
-                ).order_by('-last_timestamp')
+                # Step 5: Build conversations sorted by last_timestamp
+                sorted_threads = sorted(thread_ids, key=lambda t: agg_data.get(t, {}).get('last_timestamp') or datetime.min, reverse=True)
 
-                for conv_data in conversations_data:
-                    thread_id = conv_data['thread_id']
-
-                    # Check assignment visibility
+                for thread_id in sorted_threads:
                     if not is_conversation_visible('email', str(conn.id), thread_id):
                         continue
 
-                    # Skip if no latest message
-                    if not conv_data['latest_msg_id']:
+                    latest_msg = latest_msg_map.get(thread_id)
+                    if not latest_msg:
                         continue
 
-                    # Determine customer info
-                    customer_email = conv_data['customer_from_email'] or ''
-                    customer_name = conv_data['customer_from_name'] or customer_email
+                    agg = agg_data.get(thread_id, {})
+                    customer_msg = customer_msg_map.get(thread_id)
+                    customer_email = customer_msg.from_email if customer_msg else ''
+                    customer_name = (customer_msg.from_name or customer_msg.from_email) if customer_msg else ''
 
                     # Truncate body text
-                    body_text = conv_data['latest_msg_body_text'] or ''
+                    body_text = latest_msg.body_text or ''
                     truncated_text = body_text[:200] if body_text else ''
-
-                    # Check for attachments
-                    attachments = conv_data['latest_msg_attachments']
-                    attachment_type = 'attachment' if attachments else None
 
                     conversation = {
                         'conversation_id': f"email_{conn.id}_{thread_id}",
@@ -4418,18 +4417,18 @@ def unified_conversations(request):
                         'sender_name': customer_name or customer_email,
                         'profile_pic_url': None,
                         'last_message': {
-                            'id': str(conv_data['latest_msg_id']),
+                            'id': str(latest_msg.id),
                             'text': truncated_text,
-                            'timestamp': conv_data['latest_msg_timestamp'],
-                            'is_from_business': conv_data['latest_msg_is_from_business'],
-                            'attachment_type': attachment_type,
-                            'platform_message_id': conv_data['latest_msg_message_id'],
+                            'timestamp': latest_msg.timestamp,
+                            'is_from_business': latest_msg.is_from_business,
+                            'attachment_type': 'attachment' if latest_msg.attachments else None,
+                            'platform_message_id': latest_msg.message_id,
                         },
-                        'message_count': conv_data['msg_count'],
-                        'unread_count': conv_data['unread_count'],
+                        'message_count': agg.get('msg_count', 0),
+                        'unread_count': agg.get('unread_count', 0),
                         'account_name': conn.email_address,
                         'account_id': str(conn.id),
-                        'subject': conv_data['latest_msg_subject'],
+                        'subject': latest_msg.subject,
                     }
                     all_conversations.append(conversation)
         except Exception as e:
