@@ -3,6 +3,8 @@ Email utility functions for IMAP/SMTP operations.
 """
 import imaplib
 import smtplib
+import ssl
+import socket
 import email
 import hashlib
 import logging
@@ -1049,6 +1051,14 @@ def sync_imap_messages(connection, max_messages: int = 500) -> int:
         logger.info(f"Synced {total_new_count} total new emails for {connection.email_address}")
         return total_new_count
 
+    except (ssl.SSLError, socket.error, OSError, imaplib.IMAP4.abort) as e:
+        # Transient SSL/socket errors (e.g. BAD_LENGTH, EOF violations) are
+        # expected with flaky mail servers.  Log as warning so they don't
+        # fire Sentry alerts — the next sync cycle will retry automatically.
+        logger.warning(f"Transient email sync error for {connection.email_address}: {e}")
+        connection.last_sync_error = str(e)
+        connection.save()
+        return 0
     except Exception as e:
         logger.error(f"Email sync error for {connection.email_address}: {e}")
         connection.last_sync_error = str(e)
