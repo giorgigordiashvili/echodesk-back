@@ -4093,7 +4093,7 @@ def get_rating_info(request, token):
     # Look up the rating by token in the tenant's schema
     try:
         from tenant_schemas.utils import schema_context
-        from tenants.models import Client as TenantClient
+        from tenants.models import Tenant as TenantClient
 
         # Find the tenant by subdomain
         try:
@@ -4188,7 +4188,7 @@ def submit_public_rating(request, token):
 
     try:
         from tenant_schemas.utils import schema_context
-        from tenants.models import Client as TenantClient
+        from tenants.models import Tenant as TenantClient
 
         # Find the tenant by subdomain
         try:
