@@ -1253,6 +1253,9 @@ def facebook_send_message(request):
             
             # Optionally save the sent message to our database
             try:
+                from .consumers import send_new_message_notification
+                from django.db import connection
+
                 # Look up the original message if this is a reply
                 reply_to_obj = None
                 if reply_to_message_id:
@@ -1260,13 +1263,14 @@ def facebook_send_message(request):
                         message_id=reply_to_message_id
                     ).first()
 
-                FacebookMessage.objects.create(
+                timestamp = datetime.now()
+                fb_message = FacebookMessage.objects.create(
                     page_connection=page_connection,
-                    message_id=message_id or f"sent_{datetime.now().timestamp()}",
+                    message_id=message_id or f"sent_{timestamp.timestamp()}",
                     sender_id=recipient_id,  # Use recipient_id for conversation grouping (same as incoming messages)
                     sender_name=page_connection.page_name,
                     message_text=message_text,
-                    timestamp=datetime.now(),
+                    timestamp=timestamp,
                     is_from_page=True,
                     reply_to_message_id=reply_to_message_id if reply_to_message_id else None,
                     reply_to=reply_to_obj,
@@ -1274,9 +1278,25 @@ def facebook_send_message(request):
                     is_echo=False,
                     sent_by=request.user,
                 )
+
+                # Broadcast via WebSocket so the message appears in real-time
+                tenant_schema = connection.schema_name
+                message_data = {
+                    'id': fb_message.id,
+                    'message_id': fb_message.message_id,
+                    'platform': 'facebook',
+                    'sender_id': recipient_id,
+                    'sender_name': page_connection.page_name,
+                    'message_text': message_text,
+                    'timestamp': timestamp.isoformat(),
+                    'is_from_page': True,
+                    'page_id': page_id,
+                    'sent_by': request.user.email if request.user else None,
+                }
+                async_to_sync(send_new_message_notification)(tenant_schema, recipient_id, message_data)
             except Exception as e:
-                logger.warning(f"Failed to save sent message: {e}")
-            
+                logger.warning(f"Failed to save/broadcast sent message: {e}")
+
             return Response({
                 'status': 'sent',
                 'message_id': message_id,
@@ -2621,21 +2641,41 @@ def instagram_send_message(request):
 
             # Optionally save the sent message to our database
             try:
-                InstagramMessage.objects.create(
+                from .consumers import send_new_message_notification
+                from django.db import connection
+
+                timestamp = datetime.now()
+                ig_message = InstagramMessage.objects.create(
                     account_connection=account_connection,
-                    message_id=message_id or f"sent_{datetime.now().timestamp()}",
+                    message_id=message_id or f"sent_{timestamp.timestamp()}",
                     sender_id=recipient_id,  # Use recipient_id for conversation grouping (same as incoming messages)
                     sender_username=account_connection.username,
                     message_text=message_text,
-                    timestamp=datetime.now(),
+                    timestamp=timestamp,
                     is_from_business=True,
                     source='echodesk',
                     is_echo=False,
                     sent_by=request.user,
                 )
                 print(f"✅ Saved sent message to database")
+
+                # Broadcast via WebSocket so the message appears in real-time
+                tenant_schema = connection.schema_name
+                message_data = {
+                    'id': ig_message.id,
+                    'message_id': ig_message.message_id,
+                    'platform': 'instagram',
+                    'sender_id': recipient_id,
+                    'sender_username': account_connection.username,
+                    'message_text': message_text,
+                    'timestamp': timestamp.isoformat(),
+                    'is_from_business': True,
+                    'account_id': instagram_account_id,
+                    'sent_by': request.user.email if request.user else None,
+                }
+                async_to_sync(send_new_message_notification)(tenant_schema, recipient_id, message_data)
             except Exception as e:
-                print(f"⚠️ Failed to save sent message to database: {e}")
+                print(f"⚠️ Failed to save/broadcast sent message to database: {e}")
 
             return Response({
                 'status': 'sent',
@@ -3607,6 +3647,9 @@ def get_assignment_status(request):
 
 def send_rating_request_facebook(conversation_id, page_id, message):
     """Send a rating request via Facebook Messenger and store locally"""
+    from .consumers import send_new_message_notification
+    from django.db import connection
+
     try:
         page = FacebookPageConnection.objects.get(page_id=page_id, is_active=True)
         url = f"https://graph.facebook.com/v21.0/{page_id}/messages"
@@ -3618,20 +3661,35 @@ def send_rating_request_facebook(conversation_id, page_id, message):
         response = requests.post(url, json=payload, headers=headers)
         if response.ok:
             message_id = response.json().get('message_id')
+            timestamp = datetime.now()
             # Store the message locally so it appears in the chat
             try:
-                FacebookMessage.objects.create(
+                fb_message = FacebookMessage.objects.create(
                     page_connection=page,
-                    message_id=message_id or f"rating_{datetime.now().timestamp()}",
+                    message_id=message_id or f"rating_{timestamp.timestamp()}",
                     sender_id=conversation_id,
                     sender_name=page.page_name,
                     message_text=message,
-                    timestamp=datetime.now(),
+                    timestamp=timestamp,
                     is_from_page=True,
                     is_echo=False,
                 )
+                # Broadcast via WebSocket
+                tenant_schema = connection.schema_name
+                message_data = {
+                    'id': fb_message.id,
+                    'message_id': fb_message.message_id,
+                    'platform': 'facebook',
+                    'sender_id': conversation_id,
+                    'sender_name': page.page_name,
+                    'message_text': message,
+                    'timestamp': timestamp.isoformat(),
+                    'is_from_page': True,
+                    'page_id': page_id,
+                }
+                async_to_sync(send_new_message_notification)(tenant_schema, conversation_id, message_data)
             except Exception as e:
-                logger.warning(f"Failed to save rating message: {e}")
+                logger.warning(f"Failed to save/broadcast rating message: {e}")
             return message_id
     except Exception as e:
         logger.error(f"Failed to send FB rating request: {e}")
@@ -3640,6 +3698,9 @@ def send_rating_request_facebook(conversation_id, page_id, message):
 
 def send_rating_request_instagram(conversation_id, account_id, message):
     """Send a rating request via Instagram DM and store locally"""
+    from .consumers import send_new_message_notification
+    from django.db import connection
+
     try:
         account = InstagramAccountConnection.objects.get(instagram_account_id=account_id, is_active=True)
         url = f"https://graph.facebook.com/v21.0/{account_id}/messages"
@@ -3651,19 +3712,34 @@ def send_rating_request_instagram(conversation_id, account_id, message):
         response = requests.post(url, json=payload, headers=headers)
         if response.ok:
             message_id = response.json().get('message_id')
+            timestamp = datetime.now()
             # Store the message locally so it appears in the chat
             try:
-                InstagramMessage.objects.create(
+                ig_message = InstagramMessage.objects.create(
                     account_connection=account,
-                    message_id=message_id or f"rating_{datetime.now().timestamp()}",
+                    message_id=message_id or f"rating_{timestamp.timestamp()}",
                     sender_id=conversation_id,
                     sender_username=account.username or account.instagram_account_id,
                     message_text=message,
-                    timestamp=datetime.now(),
+                    timestamp=timestamp,
                     is_from_business=True
                 )
+                # Broadcast via WebSocket
+                tenant_schema = connection.schema_name
+                message_data = {
+                    'id': ig_message.id,
+                    'message_id': ig_message.message_id,
+                    'platform': 'instagram',
+                    'sender_id': conversation_id,
+                    'sender_username': account.username or account.instagram_account_id,
+                    'message_text': message,
+                    'timestamp': timestamp.isoformat(),
+                    'is_from_business': True,
+                    'account_id': account_id,
+                }
+                async_to_sync(send_new_message_notification)(tenant_schema, conversation_id, message_data)
             except Exception as e:
-                logger.warning(f"Failed to save rating message: {e}")
+                logger.warning(f"Failed to save/broadcast rating message: {e}")
             return message_id
     except Exception as e:
         logger.error(f"Failed to send IG rating request: {e}")
@@ -3672,6 +3748,9 @@ def send_rating_request_instagram(conversation_id, account_id, message):
 
 def send_rating_request_whatsapp(conversation_id, waba_id, message):
     """Send a rating request via WhatsApp and store locally"""
+    from .consumers import send_new_message_notification
+    from django.db import connection
+
     try:
         account = WhatsAppBusinessAccount.objects.get(waba_id=waba_id, is_active=True)
         # Format phone number (add + if not present)
@@ -3692,20 +3771,35 @@ def send_rating_request_whatsapp(conversation_id, waba_id, message):
         if response.ok:
             data = response.json()
             message_id = data.get('messages', [{}])[0].get('id')
+            timestamp = datetime.now()
             # Store the message locally so it appears in the chat
             try:
-                WhatsAppMessage.objects.create(
+                wa_message = WhatsAppMessage.objects.create(
                     business_account=account,
-                    message_id=message_id or f"rating_{datetime.now().timestamp()}",
+                    message_id=message_id or f"rating_{timestamp.timestamp()}",
                     from_number=account.display_phone_number or account.phone_number_id,
                     to_number=to_number,
                     message_text=message,
                     message_type='text',
-                    timestamp=datetime.now(),
+                    timestamp=timestamp,
                     is_from_business=True
                 )
+                # Broadcast via WebSocket
+                tenant_schema = connection.schema_name
+                message_data = {
+                    'id': wa_message.id,
+                    'message_id': wa_message.message_id,
+                    'platform': 'whatsapp',
+                    'from_number': account.display_phone_number or account.phone_number_id,
+                    'to_number': to_number,
+                    'message_text': message,
+                    'timestamp': timestamp.isoformat(),
+                    'is_from_business': True,
+                    'waba_id': waba_id,
+                }
+                async_to_sync(send_new_message_notification)(tenant_schema, to_number, message_data)
             except Exception as e:
-                logger.warning(f"Failed to save rating message: {e}")
+                logger.warning(f"Failed to save/broadcast rating message: {e}")
             return message_id
     except Exception as e:
         logger.error(f"Failed to send WA rating request: {e}")
@@ -6067,19 +6161,42 @@ def whatsapp_send_message(request):
         # Save sent message to database
         message_id = response_data.get('messages', [{}])[0].get('id', '')
         if message_id:
-            WhatsAppMessage.objects.create(
+            from .consumers import send_new_message_notification
+            from django.db import connection
+
+            timestamp = timezone.now()
+            wa_message = WhatsAppMessage.objects.create(
                 business_account=account,
                 message_id=message_id,
                 from_number=account.phone_number,
                 to_number=to_number,
                 message_text=message_text,
                 message_type='text',
-                timestamp=timezone.now(),
+                timestamp=timestamp,
                 is_from_business=True,
                 status='sent',
                 sent_by=request.user,
             )
             logger.info(f"✅ Saved sent WhatsApp message: {message_id}")
+
+            # Broadcast via WebSocket so the message appears in real-time
+            try:
+                tenant_schema = connection.schema_name
+                message_data = {
+                    'id': wa_message.id,
+                    'message_id': wa_message.message_id,
+                    'platform': 'whatsapp',
+                    'from_number': account.phone_number,
+                    'to_number': to_number,
+                    'message_text': message_text,
+                    'timestamp': timestamp.isoformat(),
+                    'is_from_business': True,
+                    'waba_id': waba_id,
+                    'sent_by': request.user.email if request.user else None,
+                }
+                async_to_sync(send_new_message_notification)(tenant_schema, to_number, message_data)
+            except Exception as e:
+                logger.warning(f"Failed to broadcast sent message: {e}")
 
         return Response({
             'status': 'success',
