@@ -4036,11 +4036,20 @@ def get_rating_info(request, token):
                     'error': 'Already rated'
                 }, status=status.HTTP_409_CONFLICT)
 
+            # Build logo URL if tenant has a logo
+            logo_url = None
+            if hasattr(tenant, 'logo') and tenant.logo:
+                try:
+                    logo_url = request.build_absolute_uri(tenant.logo.url)
+                except Exception:
+                    pass
+
             return Response({
                 'valid': True,
                 'expired': False,
                 'already_rated': False,
                 'tenant_name': tenant.name if hasattr(tenant, 'name') else subdomain,
+                'tenant_logo_url': logo_url,
             })
 
     except Exception as e:
