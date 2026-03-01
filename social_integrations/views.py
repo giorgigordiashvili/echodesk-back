@@ -19,7 +19,8 @@ from django.views.decorators.http import require_http_methods
 from rest_framework import viewsets, status, serializers as drf_serializers, filters
 from rest_framework.decorators import api_view, permission_classes, action
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
+import secrets
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes
 from .models import (
@@ -40,6 +41,7 @@ from .serializers import (
     WhatsAppMessageTemplateSerializer, WhatsAppTemplateCreateSerializer, WhatsAppTemplateSendSerializer,
     WhatsAppContactSerializer, SocialIntegrationSettingsSerializer,
     ChatAssignmentSerializer, ChatAssignmentCreateSerializer, ChatRatingSerializer,
+    PublicRatingInfoSerializer, PublicRatingSubmitSerializer,
     EmailConnectionSerializer, EmailConnectionCreateSerializer, EmailMessageSerializer,
     EmailSendSerializer, EmailDraftSerializer, EmailMessageActionSerializer, EmailFolderSerializer,
     TikTokCreatorAccountSerializer, TikTokMessageSerializer, TikTokSendMessageSerializer,
@@ -3466,24 +3468,44 @@ def end_session(request):
 
     # Check if customer rating collection is enabled
     collect_rating = settings_obj.collect_customer_rating if settings_obj else False
+    link_based_rating = settings_obj.link_based_rating_enabled if settings_obj else False
 
     message_id = None
+    rating_link = None
+
     if collect_rating:
-        # Send rating request message in Georgian
-        rating_message = "გმადლობთ ჩვენთან საუბრისთვის! გთხოვთ შეაფასოთ თქვენი გამოცდილება 1-დან 5-მდე (უპასუხეთ ციფრით)."
+        if link_based_rating:
+            # Link-based rating: Generate token and send link
+            from datetime import timedelta
 
-        try:
-            if platform == 'facebook':
-                message_id = send_rating_request_facebook(conversation_id, account_id, rating_message)
-            elif platform == 'instagram':
-                message_id = send_rating_request_instagram(conversation_id, account_id, rating_message)
-            elif platform == 'whatsapp':
-                message_id = send_rating_request_whatsapp(conversation_id, account_id, rating_message)
-        except Exception as e:
-            logger.error(f"Failed to send rating request: {e}")
+            # Generate secure token
+            rating_token = secrets.token_urlsafe(32)
+            token_expires_at = timezone.now() + timedelta(days=7)
 
-        # Create pending rating to track the response
-        if message_id:
+            # Build rating link using tenant subdomain
+            host = request.get_host().split(':')[0]  # Remove port
+            subdomain = host.split('.')[0] if '.' in host else 'app'
+            # Use echodesk.ge domain for production, or current host for dev
+            if 'localhost' in host or '127.0.0.1' in host:
+                rating_link = f"http://{host}/review?token={rating_token}"
+            else:
+                rating_link = f"https://{subdomain}.echodesk.ge/review?token={rating_token}"
+
+            # Get message template (use Georgian by default)
+            message_template = settings_obj.rating_request_message_template_ka
+            rating_message = message_template.replace('{link}', rating_link)
+
+            try:
+                if platform == 'facebook':
+                    message_id = send_rating_request_facebook(conversation_id, account_id, rating_message)
+                elif platform == 'instagram':
+                    message_id = send_rating_request_instagram(conversation_id, account_id, rating_message)
+                elif platform == 'whatsapp':
+                    message_id = send_rating_request_whatsapp(conversation_id, account_id, rating_message)
+            except Exception as e:
+                logger.error(f"Failed to send link-based rating request: {e}")
+
+            # Create pending rating with token
             ChatRating.objects.create(
                 assignment=assignment,
                 rated_user=request.user,
@@ -3493,13 +3515,53 @@ def end_session(request):
                 session_started_at=assignment.session_started_at,
                 session_ended_at=assignment.session_ended_at,
                 rating=0,  # Pending - waiting for customer response
-                rating_request_message_id=message_id
+                rating_request_message_id=message_id or '',
+                rating_token=rating_token,
+                token_expires_at=token_expires_at,
             )
+            logger.info(f"Link-based rating request created for {platform} conversation {conversation_id}")
+
+        else:
+            # Traditional rating: Send message asking for 1-5 reply
+            rating_message = "გმადლობთ ჩვენთან საუბრისთვის! გთხოვთ შეაფასოთ თქვენი გამოცდილება 1-დან 5-მდე (უპასუხეთ ციფრით)."
+
+            try:
+                if platform == 'facebook':
+                    message_id = send_rating_request_facebook(conversation_id, account_id, rating_message)
+                elif platform == 'instagram':
+                    message_id = send_rating_request_instagram(conversation_id, account_id, rating_message)
+                elif platform == 'whatsapp':
+                    message_id = send_rating_request_whatsapp(conversation_id, account_id, rating_message)
+            except Exception as e:
+                logger.error(f"Failed to send rating request: {e}")
+
+            # Create pending rating to track the response
+            if message_id:
+                ChatRating.objects.create(
+                    assignment=assignment,
+                    rated_user=request.user,
+                    platform=platform,
+                    conversation_id=conversation_id,
+                    account_id=account_id,
+                    session_started_at=assignment.session_started_at,
+                    session_ended_at=assignment.session_ended_at,
+                    rating=0,  # Pending - waiting for customer response
+                    rating_request_message_id=message_id
+                )
 
     logger.info(f"Session ended: {assignment.full_conversation_id} by {request.user.email}")
+
+    response_message = 'Session ended'
+    if collect_rating:
+        if link_based_rating:
+            response_message = 'Session ended, rating link sent'
+        elif message_id:
+            response_message = 'Session ended, rating request sent'
+
     return Response({
-        'message': 'Session ended, rating request sent' if message_id else 'Session ended',
-        'assignment': ChatAssignmentSerializer(assignment).data
+        'message': response_message,
+        'assignment': ChatAssignmentSerializer(assignment).data,
+        'rating_link': rating_link if link_based_rating else None
     })
 
 
@@ -3908,6 +3970,179 @@ def user_chat_sessions(request, user_id):
         'sessions': sessions,
         'total_sessions': len(sessions),
     })
+
+
+# =============================================================================
+# PUBLIC RATING ENDPOINTS (No authentication required)
+# =============================================================================
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def get_rating_info(request, token):
+    """
+    Validate rating token and return tenant info.
+    Public endpoint - no authentication required.
+    """
+    from django.db import connection
+    from datetime import timedelta
+
+    # Get tenant from subdomain
+    host = request.get_host().split(':')[0]  # Remove port
+    subdomain = host.split('.')[0] if '.' in host else None
+
+    if not subdomain:
+        return Response({
+            'valid': False,
+            'error': 'Invalid request'
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    # Look up the rating by token in the tenant's schema
+    try:
+        from tenant_schemas.utils import schema_context
+        from tenants.models import Client as TenantClient
+
+        # Find the tenant by subdomain
+        try:
+            tenant = TenantClient.objects.get(schema_name=subdomain)
+        except TenantClient.DoesNotExist:
+            return Response({
+                'valid': False,
+                'error': 'Tenant not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        # Switch to tenant schema and look up the rating
+        with schema_context(tenant.schema_name):
+            try:
+                rating = ChatRating.objects.get(rating_token=token)
+            except ChatRating.DoesNotExist:
+                return Response({
+                    'valid': False,
+                    'error': 'Invalid token'
+                }, status=status.HTTP_404_NOT_FOUND)
+
+            # Check if token is expired
+            if rating.token_expires_at and rating.token_expires_at < timezone.now():
+                return Response({
+                    'valid': False,
+                    'expired': True,
+                    'error': 'Token has expired'
+                }, status=status.HTTP_410_GONE)
+
+            # Check if already rated
+            if rating.rating > 0:
+                return Response({
+                    'valid': False,
+                    'already_rated': True,
+                    'error': 'Already rated'
+                }, status=status.HTTP_409_CONFLICT)
+
+            return Response({
+                'valid': True,
+                'expired': False,
+                'already_rated': False,
+                'tenant_name': tenant.name if hasattr(tenant, 'name') else subdomain,
+            })
+
+    except Exception as e:
+        logger.error(f"Error validating rating token: {e}")
+        return Response({
+            'valid': False,
+            'error': 'Server error'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def submit_public_rating(request, token):
+    """
+    Submit a public rating.
+    Public endpoint - no authentication required.
+    Accepts rating (1, 3, or 5) and optional comment.
+    """
+    # Validate input
+    serializer = PublicRatingSubmitSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    rating_value = serializer.validated_data['rating']
+    comment = serializer.validated_data.get('comment', '')
+
+    # Limit comment length
+    if len(comment) > 1000:
+        return Response({
+            'error': 'Comment too long (max 1000 characters)'
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    # Get tenant from subdomain
+    host = request.get_host().split(':')[0]  # Remove port
+    subdomain = host.split('.')[0] if '.' in host else None
+
+    if not subdomain:
+        return Response({
+            'success': False,
+            'error': 'Invalid request'
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        from tenant_schemas.utils import schema_context
+        from tenants.models import Client as TenantClient
+
+        # Find the tenant by subdomain
+        try:
+            tenant = TenantClient.objects.get(schema_name=subdomain)
+        except TenantClient.DoesNotExist:
+            return Response({
+                'success': False,
+                'error': 'Tenant not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        # Switch to tenant schema and submit the rating
+        with schema_context(tenant.schema_name):
+            try:
+                rating = ChatRating.objects.get(rating_token=token)
+            except ChatRating.DoesNotExist:
+                return Response({
+                    'success': False,
+                    'error': 'Invalid token'
+                }, status=status.HTTP_404_NOT_FOUND)
+
+            # Check if token is expired
+            if rating.token_expires_at and rating.token_expires_at < timezone.now():
+                return Response({
+                    'success': False,
+                    'error': 'Token has expired'
+                }, status=status.HTTP_410_GONE)
+
+            # Check if already rated
+            if rating.rating > 0:
+                return Response({
+                    'success': False,
+                    'error': 'Already rated'
+                }, status=status.HTTP_409_CONFLICT)
+
+            # Update the rating
+            rating.rating = rating_value
+            rating.comment = comment
+            # Clear the token after use (single-use)
+            rating.rating_token = None
+            rating.save()
+
+            # Delete the assignment if it exists (chat becomes available again)
+            if rating.assignment:
+                rating.assignment.delete()
+                logger.info(f"Assignment deleted after link-based rating for {rating.platform} conversation {rating.conversation_id}")
+
+            return Response({
+                'success': True,
+                'message': 'Thank you for your feedback!'
+            })
+
+    except Exception as e:
+        logger.error(f"Error submitting public rating: {e}")
+        return Response({
+            'success': False,
+            'error': 'Server error'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @extend_schema(

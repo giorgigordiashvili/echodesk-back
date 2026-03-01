@@ -266,6 +266,10 @@ class SocialIntegrationSettingsSerializer(serializers.ModelSerializer):
             'id', 'refresh_interval',
             'chat_assignment_enabled', 'session_management_enabled',
             'hide_assigned_chats', 'collect_customer_rating',
+            # Link-based rating settings
+            'link_based_rating_enabled',
+            'rating_request_message_template_ka',
+            'rating_request_message_template_en',
             'notification_sound_facebook', 'notification_sound_instagram',
             'notification_sound_whatsapp', 'notification_sound_email',
             'notification_sound_team_chat', 'notification_sound_system',
@@ -380,10 +384,24 @@ class ChatRatingSerializer(serializers.ModelSerializer):
         model = ChatRating
         fields = [
             'id', 'assignment', 'assignment_id', 'platform', 'conversation_id',
-            'rating', 'rating_request_message_id', 'rating_response_message_id',
+            'rating', 'comment', 'rating_request_message_id', 'rating_response_message_id',
             'created_at'
         ]
         read_only_fields = ['id', 'created_at', 'assignment_id', 'platform', 'conversation_id']
+
+
+class PublicRatingInfoSerializer(serializers.Serializer):
+    """Serializer for public rating info response"""
+    valid = serializers.BooleanField()
+    expired = serializers.BooleanField(default=False)
+    already_rated = serializers.BooleanField(default=False)
+    tenant_name = serializers.CharField(allow_null=True, required=False)
+
+
+class PublicRatingSubmitSerializer(serializers.Serializer):
+    """Serializer for public rating submission"""
+    rating = serializers.ChoiceField(choices=[1, 3, 5], help_text="Rating value: 1 (bad), 3 (good), 5 (excellent)")
+    comment = serializers.CharField(max_length=1000, required=False, allow_blank=True, help_text="Optional comment")
 
 
 # =============================================================================

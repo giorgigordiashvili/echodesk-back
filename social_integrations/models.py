@@ -665,6 +665,20 @@ class SocialIntegrationSettings(models.Model):
         help_text="When enabled, customers will be asked to rate the session after it ends."
     )
 
+    # Link-based rating settings
+    link_based_rating_enabled = models.BooleanField(
+        default=False,
+        help_text="When enabled, customers receive a link to rate their experience instead of replying to a message."
+    )
+    rating_request_message_template_ka = models.TextField(
+        default="გმადლობთ ჩვენთან საუბრისთვის! გთხოვთ შეაფასოთ თქვენი გამოცდილება: {link}",
+        help_text="Georgian template for rating request message. Use {link} as placeholder."
+    )
+    rating_request_message_template_en = models.TextField(
+        default="Thank you for chatting with us! Please rate your experience: {link}",
+        help_text="English template for rating request message. Use {link} as placeholder."
+    )
+
     # Notification sound settings (per platform)
     notification_sound_facebook = models.CharField(
         max_length=255,
@@ -922,6 +936,25 @@ class ChatRating(models.Model):
         validators=[MinValueValidator(1), MaxValueValidator(5)],
         default=0,
         help_text="Customer rating from 1-5 (0 = pending response)"
+    )
+
+    # Link-based rating fields
+    rating_token = models.CharField(
+        max_length=64,
+        unique=True,
+        null=True,
+        blank=True,
+        help_text="Secure token for link-based rating"
+    )
+    token_expires_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the rating token expires"
+    )
+    comment = models.TextField(
+        blank=True,
+        default='',
+        help_text="Optional comment from customer"
     )
 
     # Session timing

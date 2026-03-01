@@ -101,6 +101,10 @@ urlpatterns = [
     path('rating-statistics/', views.rating_statistics, name='rating_statistics'),
     path('rating-statistics/user/<int:user_id>/', views.user_chat_sessions, name='user_chat_sessions'),
 
+    # Public rating endpoints (no authentication required)
+    path('public/rating/<str:token>/', views.get_rating_info, name='public_rating_info'),
+    path('public/rating/<str:token>/submit/', views.submit_public_rating, name='public_rating_submit'),
+
     # Unified conversations endpoint
     path('conversations/', views.unified_conversations, name='unified_conversations'),
 
