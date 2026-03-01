@@ -4566,6 +4566,9 @@ def unified_conversations(request):
     # Load WhatsApp conversations (optimized - single DISTINCT ON query)
     if 'whatsapp' in enabled_platforms:
         try:
+            from django.db.models import Case, When, Value, CharField
+            from django.db.models.functions import Coalesce
+
             accounts = WhatsAppBusinessAccount.objects.all()
             for account in accounts:
                 base_filter = {
@@ -4573,64 +4576,72 @@ def unified_conversations(request):
                     'is_deleted': False,
                 }
 
-                # Get latest message per from_number using DISTINCT ON
-                latest_messages_qs = WhatsAppMessage.objects.filter(
+                # Annotate with customer_number: use to_number when business sends, from_number when customer sends
+                # This ensures we group by the CUSTOMER's number, not the business number
+                annotated_qs = WhatsAppMessage.objects.filter(
                     **base_filter
-                ).order_by('from_number', '-timestamp').distinct('from_number')
+                ).annotate(
+                    customer_number=Case(
+                        When(is_from_business=True, then='to_number'),
+                        default='from_number',
+                        output_field=CharField()
+                    )
+                )
+
+                # Get latest message per customer_number using DISTINCT ON
+                latest_messages_qs = annotated_qs.order_by('customer_number', '-timestamp').distinct('customer_number')
 
                 # Apply search filter if provided
                 if search_query:
-                    matching_numbers = WhatsAppMessage.objects.filter(
-                        **base_filter
-                    ).filter(
+                    matching_numbers = annotated_qs.filter(
                         Q(contact_name__icontains=search_query) |
                         Q(message_text__icontains=search_query) |
-                        Q(from_number__icontains=search_query)
-                    ).values_list('from_number', flat=True).distinct()
-                    latest_messages_qs = latest_messages_qs.filter(from_number__in=matching_numbers)
+                        Q(from_number__icontains=search_query) |
+                        Q(to_number__icontains=search_query)
+                    ).values_list('customer_number', flat=True).distinct()
+                    latest_messages_qs = latest_messages_qs.filter(customer_number__in=matching_numbers)
 
                 latest_messages = list(latest_messages_qs)
                 if not latest_messages:
                     continue
 
-                from_numbers = [msg.from_number for msg in latest_messages]
+                customer_numbers = [msg.customer_number for msg in latest_messages]
 
-                # Batch fetch unread counts only
-                unread_counts = {
-                    item['from_number']: item['unread_count']
-                    for item in WhatsAppMessage.objects.filter(
-                        **base_filter,
-                        from_number__in=from_numbers,
-                        is_from_business=False,
-                        is_read_by_staff=False
-                    ).values('from_number').annotate(unread_count=Count('id'))
-                }
+                # Batch fetch unread counts only (messages FROM customer, not from business)
+                unread_counts = {}
+                for item in WhatsAppMessage.objects.filter(
+                    **base_filter,
+                    from_number__in=customer_numbers,
+                    is_from_business=False,
+                    is_read_by_staff=False
+                ).values('from_number').annotate(unread_count=Count('id')):
+                    unread_counts[item['from_number']] = item['unread_count']
 
-                # Batch fetch customer info
+                # Batch fetch customer info (messages FROM customer for name)
                 customer_messages = WhatsAppMessage.objects.filter(
                     **base_filter,
-                    from_number__in=from_numbers,
+                    from_number__in=customer_numbers,
                     is_from_business=False
                 ).order_by('from_number', '-timestamp').distinct('from_number')
                 customer_msg_map = {msg.from_number: msg for msg in customer_messages}
 
                 # Build conversations
                 for msg in latest_messages:
-                    from_number = msg.from_number
-                    normalized_phone = from_number.lstrip('+')
+                    customer_number = msg.customer_number
+                    normalized_phone = customer_number.lstrip('+')
 
                     if not is_conversation_visible('whatsapp', account.waba_id, normalized_phone):
                         continue
 
-                    customer_msg = customer_msg_map.get(from_number)
+                    customer_msg = customer_msg_map.get(customer_number)
                     msg_type = msg.message_type
                     attachment_type = msg_type if msg_type and msg_type != 'text' else None
 
                     conversation = {
                         'conversation_id': f"wa_{account.waba_id}_{normalized_phone}",
                         'platform': 'whatsapp',
-                        'sender_id': from_number,
-                        'sender_name': customer_msg.contact_name if customer_msg and customer_msg.contact_name else from_number,
+                        'sender_id': customer_number,
+                        'sender_name': customer_msg.contact_name if customer_msg and customer_msg.contact_name else customer_number,
                         'profile_pic_url': None,
                         'last_message': {
                             'id': str(msg.id),
@@ -4641,7 +4652,7 @@ def unified_conversations(request):
                             'platform_message_id': msg.message_id,
                         },
                         'message_count': 0,
-                        'unread_count': unread_counts.get(from_number, 0),
+                        'unread_count': unread_counts.get(customer_number, 0),
                         'account_name': account.business_name or account.display_phone_number,
                         'account_id': account.waba_id,
                     }
