@@ -1615,6 +1615,16 @@ def facebook_webhook(request):
                                                     )
                                                     logger.info(f"✅ Created echo message from Facebook: {message_id} (recipient: {recipient_id})")
 
+                                                    # Look up recipient's name from previous incoming messages
+                                                    recipient_name = None
+                                                    previous_msg = FacebookMessage.objects.filter(
+                                                        page_connection=page_connection,
+                                                        sender_id=recipient_id,
+                                                        is_from_page=False
+                                                    ).order_by('-timestamp').first()
+                                                    if previous_msg and previous_msg.sender_name:
+                                                        recipient_name = previous_msg.sender_name
+
                                                     # Send WebSocket notification
                                                     ws_data = {
                                                         'id': echo_message.id,
@@ -1623,6 +1633,7 @@ def facebook_webhook(request):
                                                         'sender_id': page_id,  # The page is the sender when is_from_page=True
                                                         'sender_name': echo_message.sender_name,
                                                         'recipient_id': recipient_id,  # The user we're messaging
+                                                        'recipient_name': recipient_name,  # The user's name (for frontend sidebar)
                                                         'message_text': echo_message.message_text,
                                                         'attachment_type': echo_message.attachment_type,
                                                         'attachment_url': echo_message.attachment_url,
