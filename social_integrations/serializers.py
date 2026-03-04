@@ -67,22 +67,35 @@ class FacebookMessageSerializer(serializers.ModelSerializer):
         # The view typically passes the conversation_id (customer's sender_id)
         conversation_id = self.context.get('conversation_id') if self.context else None
         if conversation_id:
+            # Use cached recipient names from view context to avoid N+1 queries
+            recipient_names_cache = self.context.get('_recipient_names_cache', {})
+            cache_key = f"{obj.page_connection_id}:{conversation_id}"
+            if cache_key in recipient_names_cache:
+                return recipient_names_cache[cache_key]
+
             incoming_msg = FacebookMessage.objects.filter(
                 page_connection=obj.page_connection,
                 sender_id=conversation_id,
                 is_from_page=False
-            ).exclude(sender_name__isnull=True).exclude(sender_name='').first()
+            ).exclude(sender_name__isnull=True).exclude(sender_name='').values_list('sender_name', flat=True).first()
             if incoming_msg:
-                return incoming_msg.sender_name
+                recipient_names_cache[cache_key] = incoming_msg
+                return incoming_msg
 
-        # Fallback: find any incoming message from the same page connection
-        # This works when messages are fetched per-conversation
+        # Fallback: use cached lookup per page_connection to avoid N+1 queries
+        recipient_names_cache = self.context.get('_recipient_names_cache', {})
+        cache_key = f"{obj.page_connection_id}:_fallback"
+        if cache_key in recipient_names_cache:
+            return recipient_names_cache[cache_key]
+
         incoming_msg = FacebookMessage.objects.filter(
             page_connection=obj.page_connection,
             is_from_page=False
-        ).exclude(sender_name__isnull=True).exclude(sender_name='').first()
+        ).exclude(sender_name__isnull=True).exclude(sender_name='').values_list('sender_name', flat=True).first()
         if incoming_msg:
-            return incoming_msg.sender_name
+            recipient_names_cache[cache_key] = incoming_msg
+            return incoming_msg
+        recipient_names_cache[cache_key] = None
         return None
 
 
@@ -140,21 +153,35 @@ class InstagramMessageSerializer(serializers.ModelSerializer):
         # Look at the conversation context passed via serializer context
         conversation_id = self.context.get('conversation_id') if self.context else None
         if conversation_id:
+            # Use cached recipient names from view context to avoid N+1 queries
+            recipient_names_cache = self.context.get('_ig_recipient_names_cache', {})
+            cache_key = f"{obj.account_connection_id}:{conversation_id}"
+            if cache_key in recipient_names_cache:
+                return recipient_names_cache[cache_key]
+
             incoming_msg = InstagramMessage.objects.filter(
                 account_connection=obj.account_connection,
                 sender_id=conversation_id,
                 is_from_business=False
-            ).exclude(sender_name__isnull=True).exclude(sender_name='').first()
+            ).exclude(sender_name__isnull=True).exclude(sender_name='').values_list('sender_name', flat=True).first()
             if incoming_msg:
-                return incoming_msg.sender_name
+                recipient_names_cache[cache_key] = incoming_msg
+                return incoming_msg
 
-        # Fallback: find any incoming message from the same account connection
+        # Fallback: use cached lookup per account_connection to avoid N+1 queries
+        recipient_names_cache = self.context.get('_ig_recipient_names_cache', {})
+        cache_key = f"{obj.account_connection_id}:_fallback"
+        if cache_key in recipient_names_cache:
+            return recipient_names_cache[cache_key]
+
         incoming_msg = InstagramMessage.objects.filter(
             account_connection=obj.account_connection,
             is_from_business=False
-        ).exclude(sender_name__isnull=True).exclude(sender_name='').first()
+        ).exclude(sender_name__isnull=True).exclude(sender_name='').values_list('sender_name', flat=True).first()
         if incoming_msg:
-            return incoming_msg.sender_name
+            recipient_names_cache[cache_key] = incoming_msg
+            return incoming_msg
+        recipient_names_cache[cache_key] = None
         return None
 
 
@@ -989,7 +1016,7 @@ ClientSerializer = SocialClientSerializer
 
 class SocialClientListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for client list (without all nested details)"""
-    social_accounts_count = serializers.IntegerField(source='social_accounts.count', read_only=True)
+    social_accounts_count = serializers.SerializerMethodField()
     platforms = serializers.SerializerMethodField()
     booking_count = serializers.SerializerMethodField()
     full_name = serializers.ReadOnlyField()
@@ -1007,9 +1034,13 @@ class SocialClientListSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = fields
 
+    def get_social_accounts_count(self, obj):
+        """Use prefetched data instead of .count() to avoid N+1 queries"""
+        return len(obj.social_accounts.all())
+
     def get_platforms(self, obj):
-        """Return list of unique platforms linked to this client"""
-        return list(obj.social_accounts.values_list('platform', flat=True).distinct())
+        """Return list of unique platforms linked to this client (uses prefetch cache)"""
+        return list(set(sa.platform for sa in obj.social_accounts.all()))
 
     def get_booking_count(self, obj):
         """Return total booking count for booking-enabled clients"""
