@@ -1285,8 +1285,9 @@ def facebook_send_message(request):
                     'id': fb_message.id,
                     'message_id': fb_message.message_id,
                     'platform': 'facebook',
-                    'sender_id': recipient_id,
+                    'sender_id': page_id,  # The page is the sender when is_from_page=True
                     'sender_name': page_connection.page_name,
+                    'recipient_id': recipient_id,  # The user we're messaging
                     'message_text': message_text,
                     'timestamp': timestamp.isoformat(),
                     'is_from_page': True,
@@ -1604,15 +1605,16 @@ def facebook_webhook(request):
                                                     ws_data = {
                                                         'id': echo_message.id,
                                                         'message_id': echo_message.message_id,
-                                                        'sender_id': echo_message.sender_id,
+                                                        'platform': 'facebook',
+                                                        'sender_id': page_id,  # The page is the sender when is_from_page=True
                                                         'sender_name': echo_message.sender_name,
+                                                        'recipient_id': recipient_id,  # The user we're messaging
                                                         'message_text': echo_message.message_text,
                                                         'attachment_type': echo_message.attachment_type,
                                                         'attachment_url': echo_message.attachment_url,
                                                         'timestamp': echo_message.timestamp.isoformat(),
                                                         'is_from_page': True,
                                                         'page_id': page_id,
-                                                        'recipient_id': recipient_id,
                                                     }
                                                     send_websocket_notification(tenant_schema, ws_data, recipient_id)
 
@@ -2665,8 +2667,9 @@ def instagram_send_message(request):
                     'id': ig_message.id,
                     'message_id': ig_message.message_id,
                     'platform': 'instagram',
-                    'sender_id': recipient_id,
+                    'sender_id': instagram_account_id,  # The account is the sender when is_from_business=True
                     'sender_username': account_connection.username,
+                    'recipient_id': recipient_id,  # The user we're messaging
                     'message_text': message_text,
                     'timestamp': timestamp.isoformat(),
                     'is_from_business': True,
@@ -2862,16 +2865,17 @@ def instagram_webhook(request):
                                                 ws_data = {
                                                     'id': echo_message.id,
                                                     'message_id': echo_message.message_id,
-                                                    'sender_id': echo_message.sender_id,
+                                                    'platform': 'instagram',
+                                                    'sender_id': instagram_account_id,  # The account is the sender when is_from_business=True
                                                     'sender_name': echo_message.sender_name,
                                                     'sender_username': echo_message.sender_username,
+                                                    'recipient_id': recipient_id,  # The user we're messaging
                                                     'message_text': echo_message.message_text,
                                                     'attachment_type': echo_message.attachment_type,
                                                     'attachment_url': echo_message.attachment_url,
                                                     'timestamp': echo_message.timestamp.isoformat(),
                                                     'is_from_business': True,
                                                     'account_id': instagram_account_id,
-                                                    'recipient_id': recipient_id,
                                                 }
                                                 send_websocket_notification(tenant_schema, ws_data, recipient_id)
 
