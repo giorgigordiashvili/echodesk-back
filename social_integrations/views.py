@@ -1290,6 +1290,16 @@ def facebook_send_message(request):
                 if unarchived:
                     logger.info(f"📤 Unarchived conversation due to sent message: facebook/{page_id}/{recipient_id}")
 
+                # Delete completed assignments to allow new sessions
+                deleted_assignment = ChatAssignment.objects.filter(
+                    platform='facebook',
+                    conversation_id=recipient_id,
+                    account_id=page_id,
+                    status='completed'
+                ).delete()[0]
+                if deleted_assignment:
+                    logger.info(f"🔄 Deleted completed assignment for new conversation: facebook/{page_id}/{recipient_id}")
+
                 # Broadcast via WebSocket so the message appears in real-time
                 tenant_schema = connection.schema_name
 
@@ -1632,6 +1642,16 @@ def facebook_webhook(request):
                                                     ).delete()[0]
                                                     if unarchived:
                                                         logger.info(f"📤 Unarchived conversation due to echo message: facebook/{page_id}/{recipient_id}")
+
+                                                    # Delete completed assignments to allow new sessions
+                                                    deleted_assignment = ChatAssignment.objects.filter(
+                                                        platform='facebook',
+                                                        conversation_id=recipient_id,
+                                                        account_id=page_id,
+                                                        status='completed'
+                                                    ).delete()[0]
+                                                    if deleted_assignment:
+                                                        logger.info(f"🔄 Deleted completed assignment for new conversation: facebook/{page_id}/{recipient_id}")
 
                                                     # Look up recipient's name from previous incoming messages
                                                     recipient_name = None
@@ -2712,6 +2732,16 @@ def instagram_send_message(request):
                 ).delete()[0]
                 if unarchived:
                     print(f"📤 Unarchived conversation due to sent message: instagram/{instagram_account_id}/{recipient_id}")
+
+                # Delete completed assignments to allow new sessions
+                deleted_assignment = ChatAssignment.objects.filter(
+                    platform='instagram',
+                    conversation_id=recipient_id,
+                    account_id=instagram_account_id,
+                    status='completed'
+                ).delete()[0]
+                if deleted_assignment:
+                    print(f"🔄 Deleted completed assignment for new conversation: instagram/{instagram_account_id}/{recipient_id}")
 
                 # Broadcast via WebSocket so the message appears in real-time
                 tenant_schema = connection.schema_name
@@ -6288,6 +6318,16 @@ def whatsapp_send_message(request):
             ).delete()[0]
             if unarchived:
                 logger.info(f"📤 Unarchived conversation due to sent message: whatsapp/{waba_id}/{to_number}")
+
+            # Delete completed assignments to allow new sessions
+            deleted_assignment = ChatAssignment.objects.filter(
+                platform='whatsapp',
+                conversation_id=to_number,
+                account_id=waba_id,
+                status='completed'
+            ).delete()[0]
+            if deleted_assignment:
+                logger.info(f"🔄 Deleted completed assignment for new conversation: whatsapp/{waba_id}/{to_number}")
 
             # Broadcast via WebSocket so the message appears in real-time
             try:
