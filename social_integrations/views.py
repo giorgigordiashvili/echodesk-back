@@ -1283,6 +1283,17 @@ def facebook_send_message(request):
 
                 # Broadcast via WebSocket so the message appears in real-time
                 tenant_schema = connection.schema_name
+
+                # Look up recipient's name from previous incoming messages in this conversation
+                recipient_name = None
+                previous_msg = FacebookMessage.objects.filter(
+                    page_connection=page_connection,
+                    sender_id=recipient_id,
+                    is_from_page=False
+                ).order_by('-timestamp').first()
+                if previous_msg and previous_msg.sender_name:
+                    recipient_name = previous_msg.sender_name
+
                 message_data = {
                     'id': fb_message.id,
                     'message_id': fb_message.message_id,
@@ -1290,6 +1301,7 @@ def facebook_send_message(request):
                     'sender_id': page_id,  # The page is the sender when is_from_page=True
                     'sender_name': page_connection.page_name,
                     'recipient_id': recipient_id,  # The user we're messaging
+                    'recipient_name': recipient_name,  # The user's name (for new conversations in frontend)
                     'message_text': message_text,
                     'timestamp': timestamp.isoformat(),
                     'is_from_page': True,
@@ -2665,6 +2677,17 @@ def instagram_send_message(request):
 
                 # Broadcast via WebSocket so the message appears in real-time
                 tenant_schema = connection.schema_name
+
+                # Look up recipient's name from previous incoming messages in this conversation
+                recipient_name = None
+                previous_msg = InstagramMessage.objects.filter(
+                    account_connection=account_connection,
+                    sender_id=recipient_id,
+                    is_from_business=False
+                ).order_by('-timestamp').first()
+                if previous_msg:
+                    recipient_name = previous_msg.sender_name or previous_msg.sender_username
+
                 message_data = {
                     'id': ig_message.id,
                     'message_id': ig_message.message_id,
@@ -2672,6 +2695,7 @@ def instagram_send_message(request):
                     'sender_id': instagram_account_id,  # The account is the sender when is_from_business=True
                     'sender_username': account_connection.username,
                     'recipient_id': recipient_id,  # The user we're messaging
+                    'recipient_name': recipient_name,  # The user's name (for new conversations in frontend)
                     'message_text': message_text,
                     'timestamp': timestamp.isoformat(),
                     'is_from_business': True,
@@ -6221,12 +6245,24 @@ def whatsapp_send_message(request):
             # Broadcast via WebSocket so the message appears in real-time
             try:
                 tenant_schema = connection.schema_name
+
+                # Look up recipient's name (contact_name) from previous incoming messages
+                recipient_name = None
+                previous_msg = WhatsAppMessage.objects.filter(
+                    business_account=account,
+                    from_number=to_number,
+                    is_from_business=False
+                ).order_by('-timestamp').first()
+                if previous_msg and previous_msg.contact_name:
+                    recipient_name = previous_msg.contact_name
+
                 message_data = {
                     'id': wa_message.id,
                     'message_id': wa_message.message_id,
                     'platform': 'whatsapp',
                     'from_number': account.phone_number,
                     'to_number': to_number,
+                    'contact_name': recipient_name,  # The user's name (for new conversations in frontend)
                     'message_text': message_text,
                     'timestamp': timestamp.isoformat(),
                     'is_from_business': True,
