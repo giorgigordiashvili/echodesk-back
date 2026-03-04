@@ -29,7 +29,7 @@ from .models import (
     WhatsAppBusinessAccount, WhatsAppMessage, WhatsAppMessageTemplate,
     WhatsAppContact, SocialIntegrationSettings, ConversationAutoReply,
     ChatAssignment, ChatRating, ConversationArchive,
-    EmailConnection, EmailMessage, EmailDraft,
+    EmailConnection, EmailMessage, EmailDraft, EmailConnectionUserAssignment,
     TikTokCreatorAccount, TikTokMessage,
     EmailSignature, QuickReply,
     SocialClient, SocialClientCustomField, SocialClientCustomFieldValue, SocialAccount
@@ -44,6 +44,8 @@ from .serializers import (
     PublicRatingInfoSerializer, PublicRatingSubmitSerializer,
     EmailConnectionSerializer, EmailConnectionCreateSerializer, EmailMessageSerializer,
     EmailSendSerializer, EmailDraftSerializer, EmailMessageActionSerializer, EmailFolderSerializer,
+    EmailConnectionUserAssignmentSerializer, EmailConnectionUserAssignmentCreateSerializer,
+    EmailConnectionWithAssignmentsSerializer,
     TikTokCreatorAccountSerializer, TikTokMessageSerializer, TikTokSendMessageSerializer,
     EmailSignatureSerializer, QuickReplySerializer, QuickReplyUseSerializer, QuickReplyVariablesSerializer,
     SocialClientSerializer, SocialClientListSerializer, SocialClientCreateSerializer,
@@ -4325,6 +4327,7 @@ def unified_conversations(request):
     - folder: Email folder filter (default: INBOX)
     - assigned: If true, only return conversations assigned to the current user
     - archived: If true, only return archived conversations (history)
+    - connection_id: Filter emails by specific email connection ID
     """
     # Parse query parameters
     platforms_param = request.query_params.get('platforms', 'facebook,instagram,whatsapp,email')
@@ -4335,6 +4338,9 @@ def unified_conversations(request):
     email_folder = request.query_params.get('folder', 'INBOX')
     assigned_only = request.query_params.get('assigned', '').lower() == 'true'
     archived_only = request.query_params.get('archived', '').lower() == 'true'
+    # Email connection filter (for switching between email accounts)
+    connection_id_param = request.query_params.get('connection_id')
+    email_connection_id = int(connection_id_param) if connection_id_param else None
 
     all_conversations = []
 
@@ -4667,8 +4673,26 @@ def unified_conversations(request):
     # Load Email conversations (optimized - single DISTINCT ON query)
     if 'email' in enabled_platforms:
         try:
-            connections = EmailConnection.objects.filter(is_active=True)
+            connections = EmailConnection.objects.filter(is_active=True).prefetch_related('user_assignments')
+            # Filter by specific email connection if provided
+            if email_connection_id:
+                connections = connections.filter(id=email_connection_id)
+
+            # Helper to check if user can access an email connection
+            def can_access_email_connection(conn):
+                # If no user assignments, everyone can access
+                if not conn.user_assignments.exists():
+                    return True
+                # Admins can always access
+                if is_admin:
+                    return True
+                # Check if user is assigned to this connection
+                return conn.user_assignments.filter(user=request.user).exists()
+
             for conn in connections:
+                # Skip connections the user cannot access
+                if not can_access_email_connection(conn):
+                    continue
                 # Build base filter
                 base_filter = {'connection': conn}
                 if email_folder and email_folder.lower() not in ('all', 'all folders'):
@@ -7122,23 +7146,37 @@ def whatsapp_send_template_message(request):
 def email_connection_status(request):
     """Check Email connection status for current tenant - returns all connections"""
     try:
-        connections = EmailConnection.objects.all()
+        connections = EmailConnection.objects.all().prefetch_related(
+            'user_assignments__user', 'user_assignments__assigned_by'
+        )
 
-        connections_data = [{
-            'id': conn.id,
-            'email_address': conn.email_address,
-            'display_name': conn.display_name,
-            'imap_server': conn.imap_server,
-            'smtp_server': conn.smtp_server,
-            'is_active': conn.is_active,
-            'last_sync_at': conn.last_sync_at.isoformat() if conn.last_sync_at else None,
-            'last_sync_error': conn.last_sync_error,
-            'sync_folder': conn.sync_folder,
-            'connected_at': conn.created_at.isoformat(),
-            'signature_enabled': conn.signature_enabled,
-            'signature_html': conn.signature_html,
-            'signature_text': conn.signature_text,
-        } for conn in connections]
+        connections_data = []
+        for conn in connections:
+            # Get assigned users for this connection
+            assigned_users = [{
+                'id': assignment.id,
+                'user_id': assignment.user.id,
+                'user_email': assignment.user.email,
+                'user_name': assignment.user.get_full_name() or assignment.user.email,
+                'assigned_at': assignment.assigned_at.isoformat(),
+            } for assignment in conn.user_assignments.all()]
+
+            connections_data.append({
+                'id': conn.id,
+                'email_address': conn.email_address,
+                'display_name': conn.display_name,
+                'imap_server': conn.imap_server,
+                'smtp_server': conn.smtp_server,
+                'is_active': conn.is_active,
+                'last_sync_at': conn.last_sync_at.isoformat() if conn.last_sync_at else None,
+                'last_sync_error': conn.last_sync_error,
+                'sync_folder': conn.sync_folder,
+                'connected_at': conn.created_at.isoformat(),
+                'signature_enabled': conn.signature_enabled,
+                'signature_html': conn.signature_html,
+                'signature_text': conn.signature_text,
+                'assigned_users': assigned_users,
+            })
 
         return Response({
             'connected': connections.exists(),
@@ -7853,6 +7891,176 @@ class EmailDraftViewSet(viewsets.ModelViewSet):
             created_by=self.request.user,
             connection=connection
         )
+
+
+# =============================================================================
+# Email User Assignment Views
+# =============================================================================
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, CanManageSocialConnections])
+def email_assignments_list(request):
+    """
+    List all email connection assignments.
+    Returns email connections with their assigned users.
+    """
+    try:
+        connections = EmailConnection.objects.all().prefetch_related('user_assignments__user', 'user_assignments__assigned_by')
+        serializer = EmailConnectionWithAssignmentsSerializer(connections, many=True)
+        return Response(serializer.data)
+    except Exception as e:
+        logger.error(f"Failed to list email assignments: {e}")
+        return Response({
+            'error': f'Failed to list assignments: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET', 'PUT'])
+@permission_classes([IsAuthenticated, CanManageSocialConnections])
+def email_connection_assigned_users(request, connection_id):
+    """
+    GET: Get users assigned to a specific email connection.
+    PUT: Update (replace) the assigned users for an email connection.
+    """
+    try:
+        connection = EmailConnection.objects.filter(id=connection_id).first()
+        if not connection:
+            return Response({
+                'error': 'Email connection not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        if request.method == 'GET':
+            assignments = connection.user_assignments.select_related('user', 'assigned_by').all()
+            serializer = EmailConnectionUserAssignmentSerializer(assignments, many=True)
+            return Response({
+                'connection_id': connection.id,
+                'connection_email': connection.email_address,
+                'assigned_users': serializer.data
+            })
+
+        elif request.method == 'PUT':
+            from django.contrib.auth import get_user_model
+            User = get_user_model()
+
+            user_ids = request.data.get('user_ids', [])
+
+            # Validate that all user IDs exist
+            existing_users = User.objects.filter(id__in=user_ids)
+            if len(existing_users) != len(user_ids):
+                return Response({
+                    'error': 'One or more user IDs are invalid'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Remove existing assignments
+            connection.user_assignments.all().delete()
+
+            # Create new assignments
+            new_assignments = []
+            for user_id in user_ids:
+                assignment = EmailConnectionUserAssignment.objects.create(
+                    connection=connection,
+                    user_id=user_id,
+                    assigned_by=request.user
+                )
+                new_assignments.append(assignment)
+
+            serializer = EmailConnectionUserAssignmentSerializer(new_assignments, many=True)
+            return Response({
+                'message': f'Assigned {len(new_assignments)} users to {connection.email_address}',
+                'connection_id': connection.id,
+                'assigned_users': serializer.data
+            })
+
+    except Exception as e:
+        logger.error(f"Failed to manage email connection assignments: {e}")
+        return Response({
+            'error': f'Failed to manage assignments: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, CanManageSocialConnections])
+def email_assignment_create(request):
+    """
+    Create a new email connection assignment.
+    Expects: { connection_id: int, user_id: int }
+    """
+    try:
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+
+        connection_id = request.data.get('connection_id')
+        user_id = request.data.get('user_id')
+
+        if not connection_id or not user_id:
+            return Response({
+                'error': 'connection_id and user_id are required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        connection = EmailConnection.objects.filter(id=connection_id).first()
+        if not connection:
+            return Response({
+                'error': 'Email connection not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        user = User.objects.filter(id=user_id).first()
+        if not user:
+            return Response({
+                'error': 'User not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        # Check if assignment already exists
+        existing = EmailConnectionUserAssignment.objects.filter(
+            connection=connection, user=user
+        ).first()
+        if existing:
+            return Response({
+                'error': f'{user.email} is already assigned to {connection.email_address}'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Create the assignment
+        assignment = EmailConnectionUserAssignment.objects.create(
+            connection=connection,
+            user=user,
+            assigned_by=request.user
+        )
+
+        serializer = EmailConnectionUserAssignmentSerializer(assignment)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    except Exception as e:
+        logger.error(f"Failed to create email assignment: {e}")
+        return Response({
+            'error': f'Failed to create assignment: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated, CanManageSocialConnections])
+def email_assignment_delete(request, assignment_id):
+    """
+    Delete an email connection assignment.
+    """
+    try:
+        assignment = EmailConnectionUserAssignment.objects.filter(id=assignment_id).first()
+        if not assignment:
+            return Response({
+                'error': 'Assignment not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        user_email = assignment.user.email
+        connection_email = assignment.connection.email_address
+        assignment.delete()
+
+        return Response({
+            'message': f'Removed {user_email} from {connection_email}'
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to delete email assignment: {e}")
+        return Response({
+            'error': f'Failed to delete assignment: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 # =============================================================================

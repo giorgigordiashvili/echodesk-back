@@ -72,6 +72,12 @@ urlpatterns = [
     path('email/sync/settings/', views.email_update_sync_days, name='email_update_sync_days'),
     path('email/signature/', views.email_signature_view, name='email_signature'),
 
+    # Email User Assignment endpoints
+    path('email/assignments/', views.email_assignments_list, name='email_assignments_list'),
+    path('email/assignments/create/', views.email_assignment_create, name='email_assignment_create'),
+    path('email/assignments/<int:assignment_id>/', views.email_assignment_delete, name='email_assignment_delete'),
+    path('email/<int:connection_id>/assigned-users/', views.email_connection_assigned_users, name='email_connection_assigned_users'),
+
     # TikTok endpoints
     path('tiktok/oauth/start/', views.tiktok_oauth_start, name='tiktok_oauth_start'),
     path('tiktok/oauth/callback/', views.tiktok_oauth_callback, name='tiktok_oauth_callback'),

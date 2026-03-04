@@ -1348,6 +1348,35 @@ class TikTokMessage(models.Model):
         return f"TikTok DM {direction} @{sender}"
 
 
+class EmailConnectionUserAssignment(models.Model):
+    """Assigns specific email accounts to specific users."""
+    connection = models.ForeignKey(
+        EmailConnection,
+        on_delete=models.CASCADE,
+        related_name='user_assignments'
+    )
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='email_assignments'
+    )
+    assigned_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='email_assignments_created'
+    )
+    assigned_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('connection', 'user')
+        verbose_name = "Email Connection User Assignment"
+        verbose_name_plural = "Email Connection User Assignments"
+
+    def __str__(self):
+        return f"{self.user.email} -> {self.connection.email_address}"
+
+
 class EmailSignature(models.Model):
     """Stores email signature configuration for a tenant - singleton per tenant"""
 

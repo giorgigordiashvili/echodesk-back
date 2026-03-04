@@ -5,7 +5,7 @@ from .models import (
     WhatsAppBusinessAccount, WhatsAppMessage, WhatsAppMessageTemplate,
     WhatsAppContact, SocialIntegrationSettings, ConversationAutoReply,
     ChatAssignment, ChatRating,
-    EmailConnection, EmailMessage, EmailDraft,
+    EmailConnection, EmailMessage, EmailDraft, EmailConnectionUserAssignment,
     TikTokCreatorAccount, TikTokMessage,
     EmailSignature, QuickReply,
     SocialClient, SocialClientCustomField, SocialClientCustomFieldValue, SocialAccount
@@ -576,6 +576,64 @@ class EmailFolderSerializer(serializers.Serializer):
     name = serializers.CharField(help_text="Folder name")
     delimiter = serializers.CharField(help_text="Folder hierarchy delimiter")
     flags = serializers.ListField(child=serializers.CharField(), help_text="IMAP folder flags")
+
+
+class EmailConnectionUserAssignmentSerializer(serializers.ModelSerializer):
+    """Serializer for email connection user assignments"""
+    user_email = serializers.CharField(source='user.email', read_only=True)
+    user_name = serializers.SerializerMethodField()
+    assigned_by_email = serializers.CharField(source='assigned_by.email', read_only=True, allow_null=True)
+    assigned_by_name = serializers.SerializerMethodField()
+    connection_email = serializers.CharField(source='connection.email_address', read_only=True)
+
+    class Meta:
+        model = EmailConnectionUserAssignment
+        fields = [
+            'id', 'connection', 'user', 'user_email', 'user_name',
+            'assigned_by', 'assigned_by_email', 'assigned_by_name',
+            'connection_email', 'assigned_at'
+        ]
+        read_only_fields = ['id', 'assigned_by', 'assigned_at']
+
+    def get_user_name(self, obj):
+        if obj.user:
+            return obj.user.get_full_name() or obj.user.email
+        return None
+
+    def get_assigned_by_name(self, obj):
+        if obj.assigned_by:
+            return obj.assigned_by.get_full_name() or obj.assigned_by.email
+        return None
+
+
+class EmailConnectionUserAssignmentCreateSerializer(serializers.Serializer):
+    """Serializer for creating email connection user assignments"""
+    connection_id = serializers.IntegerField(help_text="Email connection ID")
+    user_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        help_text="List of user IDs to assign"
+    )
+
+
+class EmailConnectionWithAssignmentsSerializer(serializers.ModelSerializer):
+    """Email connection serializer with assigned users"""
+    assigned_users = EmailConnectionUserAssignmentSerializer(
+        source='user_assignments', many=True, read_only=True
+    )
+
+    class Meta:
+        model = EmailConnection
+        fields = [
+            'id', 'email_address', 'display_name',
+            'imap_server', 'imap_port', 'imap_use_ssl',
+            'smtp_server', 'smtp_port', 'smtp_use_tls', 'smtp_use_ssl',
+            'username', 'is_active',
+            'last_sync_at', 'last_sync_error',
+            'sync_folder', 'sync_days_back',
+            'assigned_users',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'last_sync_at', 'last_sync_error', 'created_at', 'updated_at']
 
 
 # =============================================================================
