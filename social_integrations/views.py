@@ -7863,27 +7863,66 @@ def email_action(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def email_folders(request):
-    """List available IMAP folders for the connected email"""
+    """List available IMAP folders for the connected email(s)
+
+    Query params:
+        connection_id: Optional - get folders for specific connection
+                       If not provided, returns folders for all active connections
+    """
     from .email_utils import get_imap_folders
 
     try:
-        connection = EmailConnection.objects.filter(is_active=True).first()
-        if not connection:
-            return Response({
-                'error': 'No active email connection found'
-            }, status=status.HTTP_404_NOT_FOUND)
+        connection_id = request.query_params.get('connection_id')
 
-        result = get_imap_folders(connection)
+        if connection_id:
+            # Get folders for specific connection
+            try:
+                connection = EmailConnection.objects.get(id=connection_id, is_active=True)
+            except EmailConnection.DoesNotExist:
+                return Response({
+                    'error': 'Email connection not found or inactive'
+                }, status=status.HTTP_404_NOT_FOUND)
 
-        if result['success']:
-            return Response({
-                'folders': result['folders']
-            })
+            result = get_imap_folders(connection)
+
+            if result['success']:
+                return Response({
+                    'connection_id': connection.id,
+                    'email': connection.email,
+                    'folders': result['folders']
+                })
+            else:
+                return Response({
+                    'error': 'Failed to get folders',
+                    'details': result.get('error', 'Unknown error')
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         else:
+            # Get folders for all active connections
+            connections = EmailConnection.objects.filter(is_active=True)
+
+            if not connections.exists():
+                return Response({
+                    'error': 'No active email connections found'
+                }, status=status.HTTP_404_NOT_FOUND)
+
+            all_connections_folders = []
+
+            for connection in connections:
+                result = get_imap_folders(connection)
+                connection_data = {
+                    'connection_id': connection.id,
+                    'email': connection.email,
+                    'folders': result['folders'] if result['success'] else [],
+                    'success': result['success'],
+                }
+                if not result['success']:
+                    connection_data['error'] = result.get('error', 'Unknown error')
+
+                all_connections_folders.append(connection_data)
+
             return Response({
-                'error': 'Failed to get folders',
-                'details': result.get('error', 'Unknown error')
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                'connections': all_connections_folders
+            })
 
     except Exception as e:
         logger.error(f"Failed to get email folders: {e}")

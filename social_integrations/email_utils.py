@@ -219,7 +219,7 @@ def test_smtp_connection(server: str, port: int, username: str, password: str,
         return False, f"SMTP connection error: {str(e)}"
 
 
-def get_imap_folders(connection) -> List[str]:
+def get_imap_folders(connection) -> Dict:
     """
     Get list of available folders from IMAP server.
 
@@ -227,7 +227,7 @@ def get_imap_folders(connection) -> List[str]:
         connection: EmailConnection model instance
 
     Returns:
-        List of folder names
+        Dict with 'success', 'folders', and optionally 'error'
     """
     try:
         if connection.imap_use_ssl:
@@ -256,10 +256,10 @@ def get_imap_folders(connection) -> List[str]:
                         folder_name = parts[-1].strip('"')
                     folders.append(folder_name)
 
-        return folders
+        return {'success': True, 'folders': folders}
     except Exception as e:
         logger.error(f"Failed to get IMAP folders: {e}")
-        return []
+        return {'success': False, 'folders': [], 'error': str(e)}
 
 
 def parse_address_list(address_string: str) -> List[Dict[str, str]]:
