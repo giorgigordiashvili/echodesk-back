@@ -5024,10 +5024,13 @@ def unified_conversations(request):
                 customer_msg_map = {msg.thread_id: msg for msg in customer_messages}
 
                 # Build conversations
+                is_inbox = email_folder and email_folder.upper() == 'INBOX'
                 for msg in latest_messages:
                     thread_id = msg.thread_id
-                    if not is_conversation_visible('email', str(conn.id), thread_id):
-                        continue
+                    # Only apply archive/assignment filtering for INBOX
+                    if is_inbox or email_folder.lower() in ('all', 'all folders'):
+                        if not is_conversation_visible('email', str(conn.id), thread_id):
+                            continue
 
                     customer_msg = customer_msg_map.get(thread_id)
                     customer_email = customer_msg.from_email if customer_msg else (msg.from_email if not msg.is_from_business else '')
