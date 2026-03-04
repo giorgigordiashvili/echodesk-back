@@ -1663,6 +1663,36 @@ def facebook_webhook(request):
                                                     if previous_msg and previous_msg.sender_name:
                                                         recipient_name = previous_msg.sender_name
 
+                                                    # Create or update SocialAccount for the recipient (auto-create client if needed)
+                                                    try:
+                                                        social_account = SocialAccount.objects.filter(
+                                                            platform='facebook',
+                                                            platform_id=recipient_id,
+                                                            account_connection_id=page_id
+                                                        ).first()
+
+                                                        if not social_account:
+                                                            # Create a new client and social account for this Facebook user
+                                                            display_name = recipient_name or f'Facebook User {recipient_id}'
+                                                            client = SocialClient.objects.create(
+                                                                name=display_name,
+                                                            )
+                                                            social_account = SocialAccount.objects.create(
+                                                                client=client,
+                                                                platform='facebook',
+                                                                platform_id=recipient_id,
+                                                                account_connection_id=page_id,
+                                                                display_name=display_name,
+                                                                is_auto_created=True,
+                                                            )
+                                                            logger.info(f"✅ Auto-created client and social account for echo message recipient: {recipient_id}")
+                                                        else:
+                                                            # Update last_message_at
+                                                            social_account.last_message_at = timestamp_dt
+                                                            social_account.save(update_fields=['last_message_at'])
+                                                    except Exception as client_err:
+                                                        logger.warning(f"⚠️ Could not create/update social account for echo recipient: {client_err}")
+
                                                     # Send WebSocket notification
                                                     ws_data = {
                                                         'id': echo_message.id,
@@ -2955,6 +2985,46 @@ def instagram_webhook(request):
                                                 )
                                                 logger.info(f"✅ Created Instagram echo message: {message_id} (recipient: {recipient_id})")
 
+                                                # Look up recipient's name from previous incoming messages
+                                                recipient_name = None
+                                                previous_msg = InstagramMessage.objects.filter(
+                                                    account_connection=account_connection,
+                                                    sender_id=recipient_id,
+                                                    is_from_business=False
+                                                ).order_by('-timestamp').first()
+                                                if previous_msg and previous_msg.sender_name:
+                                                    recipient_name = previous_msg.sender_name
+
+                                                # Create or update SocialAccount for the recipient (auto-create client if needed)
+                                                try:
+                                                    social_account = SocialAccount.objects.filter(
+                                                        platform='instagram',
+                                                        platform_id=recipient_id,
+                                                        account_connection_id=instagram_account_id
+                                                    ).first()
+
+                                                    if not social_account:
+                                                        # Create a new client and social account for this Instagram user
+                                                        display_name = recipient_name or f'Instagram User {recipient_id}'
+                                                        client = SocialClient.objects.create(
+                                                            name=display_name,
+                                                        )
+                                                        social_account = SocialAccount.objects.create(
+                                                            client=client,
+                                                            platform='instagram',
+                                                            platform_id=recipient_id,
+                                                            account_connection_id=instagram_account_id,
+                                                            display_name=display_name,
+                                                            is_auto_created=True,
+                                                        )
+                                                        logger.info(f"✅ Auto-created client and social account for Instagram echo recipient: {recipient_id}")
+                                                    else:
+                                                        # Update last_message_at
+                                                        social_account.last_message_at = timestamp_dt
+                                                        social_account.save(update_fields=['last_message_at'])
+                                                except Exception as client_err:
+                                                    logger.warning(f"⚠️ Could not create/update social account for Instagram echo recipient: {client_err}")
+
                                                 # Send WebSocket notification
                                                 ws_data = {
                                                     'id': echo_message.id,
@@ -2964,6 +3034,7 @@ def instagram_webhook(request):
                                                     'sender_name': echo_message.sender_name,
                                                     'sender_username': echo_message.sender_username,
                                                     'recipient_id': recipient_id,  # The user we're messaging
+                                                    'recipient_name': recipient_name,  # The user's name (for frontend sidebar)
                                                     'message_text': echo_message.message_text,
                                                     'attachment_type': echo_message.attachment_type,
                                                     'attachment_url': echo_message.attachment_url,
