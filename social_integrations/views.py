@@ -3839,6 +3839,14 @@ def end_session(request):
                     rating_request_message_id=message_id
                 )
 
+    # Archive the conversation (move to history)
+    ConversationArchive.objects.get_or_create(
+        platform=platform,
+        conversation_id=conversation_id,
+        account_id=account_id,
+        defaults={'archived_by': request.user}
+    )
+
     logger.info(f"Session ended: {assignment.full_conversation_id} by {request.user.email}")
 
     response_message = 'Session ended'
