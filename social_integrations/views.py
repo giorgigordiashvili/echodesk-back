@@ -7144,22 +7144,41 @@ def whatsapp_send_template_message(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def email_connection_status(request):
-    """Check Email connection status for current tenant - returns all connections"""
+    """Check Email connection status for current tenant - returns connections user can access"""
     try:
         connections = EmailConnection.objects.all().prefetch_related(
             'user_assignments__user', 'user_assignments__assigned_by'
         )
 
+        is_admin = request.user.is_superuser or request.user.is_staff
+
+        # Helper to check if user can access an email connection
+        def can_access_connection(conn):
+            # If no user assignments, everyone can access
+            if not conn.user_assignments.exists():
+                return True
+            # Admins can always access
+            if is_admin:
+                return True
+            # Check if user is assigned to this connection
+            return conn.user_assignments.filter(user=request.user).exists()
+
         connections_data = []
         for conn in connections:
-            # Get assigned users for this connection
-            assigned_users = [{
-                'id': assignment.id,
-                'user_id': assignment.user.id,
-                'user_email': assignment.user.email,
-                'user_name': assignment.user.get_full_name() or assignment.user.email,
-                'assigned_at': assignment.assigned_at.isoformat(),
-            } for assignment in conn.user_assignments.all()]
+            # Skip connections the user cannot access
+            if not can_access_connection(conn):
+                continue
+
+            # Get assigned users for this connection (only show to admins)
+            assigned_users = []
+            if is_admin:
+                assigned_users = [{
+                    'id': assignment.id,
+                    'user_id': assignment.user.id,
+                    'user_email': assignment.user.email,
+                    'user_name': assignment.user.get_full_name() or assignment.user.email,
+                    'assigned_at': assignment.assigned_at.isoformat(),
+                } for assignment in conn.user_assignments.all()]
 
             connections_data.append({
                 'id': conn.id,
@@ -7179,7 +7198,7 @@ def email_connection_status(request):
             })
 
         return Response({
-            'connected': connections.exists(),
+            'connected': len(connections_data) > 0,
             'connections': connections_data,
             # Keep backwards compatibility - return first connection as 'connection'
             'connection': connections_data[0] if connections_data else None
