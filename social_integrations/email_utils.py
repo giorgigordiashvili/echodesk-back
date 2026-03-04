@@ -254,7 +254,7 @@ def get_imap_folders(connection) -> Dict:
                         # Fallback: get last part after delimiter
                         parts = decoded.split(' ')
                         folder_name = parts[-1].strip('"')
-                    folders.append(folder_name)
+                    folders.append(decode_imap_utf7(folder_name))
 
         return {'success': True, 'folders': folders}
     except Exception as e:
