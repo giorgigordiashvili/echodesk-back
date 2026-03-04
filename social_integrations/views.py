@@ -1655,13 +1655,38 @@ def facebook_webhook(request):
 
                                                     # Look up recipient's name from previous incoming messages
                                                     recipient_name = None
+                                                    recipient_profile_pic = None
                                                     previous_msg = FacebookMessage.objects.filter(
                                                         page_connection=page_connection,
                                                         sender_id=recipient_id,
                                                         is_from_page=False
                                                     ).order_by('-timestamp').first()
-                                                    if previous_msg and previous_msg.sender_name:
-                                                        recipient_name = previous_msg.sender_name
+                                                    if previous_msg:
+                                                        if previous_msg.sender_name:
+                                                            recipient_name = previous_msg.sender_name
+                                                        if previous_msg.profile_pic_url:
+                                                            recipient_profile_pic = previous_msg.profile_pic_url
+
+                                                    # If no previous message, try to fetch profile from Facebook API
+                                                    if not recipient_name:
+                                                        try:
+                                                            profile_url = f"https://graph.facebook.com/{recipient_id}"
+                                                            profile_params = {
+                                                                'fields': 'name,first_name,last_name,profile_pic',
+                                                                'access_token': page_connection.page_access_token
+                                                            }
+                                                            profile_response = requests.get(profile_url, params=profile_params, timeout=10)
+                                                            if profile_response.status_code == 200:
+                                                                profile_data = profile_response.json()
+                                                                recipient_name = profile_data.get('name', '')
+                                                                if not recipient_name:
+                                                                    first = profile_data.get('first_name', '')
+                                                                    last = profile_data.get('last_name', '')
+                                                                    recipient_name = f"{first} {last}".strip()
+                                                                recipient_profile_pic = profile_data.get('profile_pic')
+                                                                logger.info(f"👤 Fetched profile for echo recipient {recipient_id}: {recipient_name}")
+                                                        except Exception as profile_err:
+                                                            logger.warning(f"⚠️ Could not fetch profile for echo recipient {recipient_id}: {profile_err}")
 
                                                     # Create or update SocialAccount for the recipient (auto-create client if needed)
                                                     try:
@@ -1676,6 +1701,7 @@ def facebook_webhook(request):
                                                             display_name = recipient_name or f'Facebook User {recipient_id}'
                                                             client = SocialClient.objects.create(
                                                                 name=display_name,
+                                                                profile_picture=recipient_profile_pic,
                                                             )
                                                             social_account = SocialAccount.objects.create(
                                                                 client=client,
@@ -1683,13 +1709,25 @@ def facebook_webhook(request):
                                                                 platform_id=recipient_id,
                                                                 account_connection_id=page_id,
                                                                 display_name=display_name,
+                                                                profile_pic_url=recipient_profile_pic,
                                                                 is_auto_created=True,
                                                             )
-                                                            logger.info(f"✅ Auto-created client and social account for echo message recipient: {recipient_id}")
+                                                            logger.info(f"✅ Auto-created client and social account for echo message recipient: {recipient_id} ({display_name})")
                                                         else:
-                                                            # Update last_message_at
+                                                            # Update last_message_at and name if we have better info
+                                                            update_fields = ['last_message_at']
                                                             social_account.last_message_at = timestamp_dt
-                                                            social_account.save(update_fields=['last_message_at'])
+                                                            if recipient_name and (not social_account.display_name or social_account.display_name.startswith('Facebook User')):
+                                                                social_account.display_name = recipient_name
+                                                                update_fields.append('display_name')
+                                                                # Also update client name
+                                                                if social_account.client:
+                                                                    social_account.client.name = recipient_name
+                                                                    social_account.client.save(update_fields=['name'])
+                                                            if recipient_profile_pic and not social_account.profile_pic_url:
+                                                                social_account.profile_pic_url = recipient_profile_pic
+                                                                update_fields.append('profile_pic_url')
+                                                            social_account.save(update_fields=update_fields)
                                                     except Exception as client_err:
                                                         logger.warning(f"⚠️ Could not create/update social account for echo recipient: {client_err}")
 
@@ -2987,13 +3025,38 @@ def instagram_webhook(request):
 
                                                 # Look up recipient's name from previous incoming messages
                                                 recipient_name = None
+                                                recipient_username = None
+                                                recipient_profile_pic = None
                                                 previous_msg = InstagramMessage.objects.filter(
                                                     account_connection=account_connection,
                                                     sender_id=recipient_id,
                                                     is_from_business=False
                                                 ).order_by('-timestamp').first()
-                                                if previous_msg and previous_msg.sender_name:
-                                                    recipient_name = previous_msg.sender_name
+                                                if previous_msg:
+                                                    if previous_msg.sender_name:
+                                                        recipient_name = previous_msg.sender_name
+                                                    if previous_msg.sender_username:
+                                                        recipient_username = previous_msg.sender_username
+                                                    if previous_msg.sender_profile_pic:
+                                                        recipient_profile_pic = previous_msg.sender_profile_pic
+
+                                                # If no previous message, try to fetch profile from Instagram API
+                                                if not recipient_name and not recipient_username:
+                                                    try:
+                                                        profile_url = f"https://graph.facebook.com/v23.0/{recipient_id}"
+                                                        profile_params = {
+                                                            'fields': 'name,username,profile_pic',
+                                                            'access_token': account_connection.access_token
+                                                        }
+                                                        profile_response = requests.get(profile_url, params=profile_params, timeout=10)
+                                                        if profile_response.status_code == 200:
+                                                            profile_data = profile_response.json()
+                                                            recipient_name = profile_data.get('name', '')
+                                                            recipient_username = profile_data.get('username', '')
+                                                            recipient_profile_pic = profile_data.get('profile_pic')
+                                                            logger.info(f"👤 Fetched profile for Instagram echo recipient {recipient_id}: {recipient_name} (@{recipient_username})")
+                                                    except Exception as profile_err:
+                                                        logger.warning(f"⚠️ Could not fetch profile for Instagram echo recipient {recipient_id}: {profile_err}")
 
                                                 # Create or update SocialAccount for the recipient (auto-create client if needed)
                                                 try:
@@ -3003,11 +3066,13 @@ def instagram_webhook(request):
                                                         account_connection_id=instagram_account_id
                                                     ).first()
 
+                                                    display_name = recipient_name or recipient_username or f'Instagram User {recipient_id}'
+
                                                     if not social_account:
                                                         # Create a new client and social account for this Instagram user
-                                                        display_name = recipient_name or f'Instagram User {recipient_id}'
                                                         client = SocialClient.objects.create(
                                                             name=display_name,
+                                                            profile_picture=recipient_profile_pic,
                                                         )
                                                         social_account = SocialAccount.objects.create(
                                                             client=client,
@@ -3015,13 +3080,29 @@ def instagram_webhook(request):
                                                             platform_id=recipient_id,
                                                             account_connection_id=instagram_account_id,
                                                             display_name=display_name,
+                                                            username=recipient_username,
+                                                            profile_pic_url=recipient_profile_pic,
                                                             is_auto_created=True,
                                                         )
-                                                        logger.info(f"✅ Auto-created client and social account for Instagram echo recipient: {recipient_id}")
+                                                        logger.info(f"✅ Auto-created client and social account for Instagram echo recipient: {recipient_id} ({display_name})")
                                                     else:
-                                                        # Update last_message_at
+                                                        # Update last_message_at and name if we have better info
+                                                        update_fields = ['last_message_at']
                                                         social_account.last_message_at = timestamp_dt
-                                                        social_account.save(update_fields=['last_message_at'])
+                                                        if display_name and (not social_account.display_name or social_account.display_name.startswith('Instagram User')):
+                                                            social_account.display_name = display_name
+                                                            update_fields.append('display_name')
+                                                            # Also update client name
+                                                            if social_account.client:
+                                                                social_account.client.name = display_name
+                                                                social_account.client.save(update_fields=['name'])
+                                                        if recipient_username and not social_account.username:
+                                                            social_account.username = recipient_username
+                                                            update_fields.append('username')
+                                                        if recipient_profile_pic and not social_account.profile_pic_url:
+                                                            social_account.profile_pic_url = recipient_profile_pic
+                                                            update_fields.append('profile_pic_url')
+                                                        social_account.save(update_fields=update_fields)
                                                 except Exception as client_err:
                                                     logger.warning(f"⚠️ Could not create/update social account for Instagram echo recipient: {client_err}")
 
@@ -4622,6 +4703,14 @@ def unified_conversations(request):
                 ).order_by('sender_id', '-timestamp').distinct('sender_id')
                 customer_msg_map = {msg.sender_id: msg for msg in customer_messages}
 
+                # Batch fetch SocialAccount info for customers without incoming messages
+                social_accounts = SocialAccount.objects.filter(
+                    platform='facebook',
+                    platform_id__in=sender_ids,
+                    account_connection_id=page_conn.page_id
+                )
+                social_account_map = {sa.platform_id: sa for sa in social_accounts}
+
                 # Build conversations
                 for msg in latest_messages:
                     sender_id = msg.sender_id
@@ -4629,13 +4718,25 @@ def unified_conversations(request):
                         continue
 
                     customer_msg = customer_msg_map.get(sender_id)
+                    social_account = social_account_map.get(sender_id)
+
+                    # Get customer name: prefer incoming message, then social account, then fallback
+                    if customer_msg and customer_msg.sender_name:
+                        customer_name = customer_msg.sender_name
+                        customer_pic = customer_msg.profile_pic_url
+                    elif social_account and social_account.display_name:
+                        customer_name = social_account.display_name
+                        customer_pic = social_account.profile_pic_url
+                    else:
+                        customer_name = f"Facebook User {sender_id}"
+                        customer_pic = None
 
                     conversation = {
                         'conversation_id': f"fb_{page_conn.page_id}_{sender_id}",
                         'platform': 'facebook',
                         'sender_id': sender_id,
-                        'sender_name': customer_msg.sender_name if customer_msg else (msg.sender_name or "Unknown"),
-                        'profile_pic_url': customer_msg.profile_pic_url if customer_msg else None,
+                        'sender_name': customer_name,
+                        'profile_pic_url': customer_pic,
                         'last_message': {
                             'id': str(msg.id),
                             'text': msg.message_text,
@@ -4704,6 +4805,14 @@ def unified_conversations(request):
                 ).order_by('sender_id', '-timestamp').distinct('sender_id')
                 customer_msg_map = {msg.sender_id: msg for msg in customer_messages}
 
+                # Batch fetch SocialAccount info for customers without incoming messages
+                social_accounts = SocialAccount.objects.filter(
+                    platform='instagram',
+                    platform_id__in=sender_ids,
+                    account_connection_id=account.instagram_account_id
+                )
+                social_account_map = {sa.platform_id: sa for sa in social_accounts}
+
                 # Build conversations
                 for msg in latest_messages:
                     sender_id = msg.sender_id
@@ -4711,14 +4820,25 @@ def unified_conversations(request):
                         continue
 
                     customer_msg = customer_msg_map.get(sender_id)
-                    customer_name = (customer_msg.sender_name or customer_msg.sender_username) if customer_msg else (msg.sender_name or msg.sender_username or sender_id)
+                    social_account = social_account_map.get(sender_id)
+
+                    # Get customer name: prefer incoming message, then social account, then fallback
+                    if customer_msg and (customer_msg.sender_name or customer_msg.sender_username):
+                        customer_name = customer_msg.sender_name or customer_msg.sender_username
+                        customer_pic = customer_msg.sender_profile_pic
+                    elif social_account and social_account.display_name:
+                        customer_name = social_account.display_name
+                        customer_pic = social_account.profile_pic_url
+                    else:
+                        customer_name = f"Instagram User {sender_id}"
+                        customer_pic = None
 
                     conversation = {
                         'conversation_id': f"ig_{account.instagram_account_id}_{sender_id}",
                         'platform': 'instagram',
                         'sender_id': sender_id,
                         'sender_name': customer_name,
-                        'profile_pic_url': customer_msg.sender_profile_pic if customer_msg else None,
+                        'profile_pic_url': customer_pic,
                         'last_message': {
                             'id': str(msg.id),
                             'text': msg.message_text,
