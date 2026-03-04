@@ -7668,19 +7668,36 @@ def email_update_connection(request):
         if 'signature_text' in request.data:
             connection.signature_text = request.data['signature_text']
 
+        # IMAP/SMTP connection settings
+        if 'imap_server' in request.data:
+            connection.imap_server = request.data['imap_server']
+        if 'imap_port' in request.data:
+            connection.imap_port = int(request.data['imap_port'])
+        if 'imap_use_ssl' in request.data:
+            connection.imap_use_ssl = request.data['imap_use_ssl']
+        if 'smtp_server' in request.data:
+            connection.smtp_server = request.data['smtp_server']
+        if 'smtp_port' in request.data:
+            connection.smtp_port = int(request.data['smtp_port'])
+        if 'smtp_use_tls' in request.data:
+            connection.smtp_use_tls = request.data['smtp_use_tls']
+        if 'smtp_use_ssl' in request.data:
+            connection.smtp_use_ssl = request.data['smtp_use_ssl']
+        if 'username' in request.data:
+            connection.username = request.data['username']
+        if 'password' in request.data and request.data['password']:
+            connection.password = request.data['password']
+        if 'sync_folder' in request.data:
+            connection.sync_folder = request.data['sync_folder']
+        if 'sync_days_back' in request.data:
+            connection.sync_days_back = int(request.data['sync_days_back'])
+
         connection.save()
 
         logger.info(f"Email connection updated: {connection.email_address}")
         return Response({
             'message': 'Connection updated successfully',
-            'connection': {
-                'id': connection.id,
-                'email_address': connection.email_address,
-                'display_name': connection.display_name,
-                'signature_enabled': connection.signature_enabled,
-                'signature_html': connection.signature_html,
-                'signature_text': connection.signature_text,
-            }
+            'connection': EmailConnectionSerializer(connection).data
         })
 
     except Exception as e:
