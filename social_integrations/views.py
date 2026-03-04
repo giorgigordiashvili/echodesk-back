@@ -7888,7 +7888,7 @@ def email_folders(request):
             if result['success']:
                 return Response({
                     'connection_id': connection.id,
-                    'email': connection.email,
+                    'email': connection.email_address,
                     'folders': result['folders']
                 })
             else:
@@ -7911,7 +7911,7 @@ def email_folders(request):
                 result = get_imap_folders(connection)
                 connection_data = {
                     'connection_id': connection.id,
-                    'email': connection.email,
+                    'email': connection.email_address,
                     'folders': result['folders'] if result['success'] else [],
                     'success': result['success'],
                 }
