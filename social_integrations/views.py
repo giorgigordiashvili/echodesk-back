@@ -9730,13 +9730,14 @@ def archive_all_conversations(request):
                             'account_id': account.waba_id
                         })
 
-        # Gather Email conversations
+        # Gather Email conversations (only INBOX threads)
         if include_all or 'email' in platforms:
             email_connections = EmailConnection.objects.filter(is_active=True)
             for connection in email_connections:
                 thread_ids = EmailMessage.objects.filter(
                     connection=connection,
-                    is_deleted=False
+                    is_deleted=False,
+                    folder='INBOX'
                 ).values_list('thread_id', flat=True).distinct()
 
                 for thread_id in thread_ids:
