@@ -9022,20 +9022,26 @@ def mark_all_conversations_read(request):
 
     Request body (optional):
     {
-        "platform": "facebook" | "instagram" | "whatsapp" | "email" | "all"  (default: "all")
+        "platform": "facebook" | "instagram" | "whatsapp" | "email" | "all" | "facebook,instagram,whatsapp"  (default: "all")
     }
+
+    Supports comma-separated platform values (e.g., "facebook,instagram,whatsapp" to exclude email).
 
     Returns count of messages marked as read.
     """
     logger = logging.getLogger(__name__)
 
     try:
-        platform = request.data.get('platform', 'all').lower()
+        platform_param = request.data.get('platform', 'all').lower()
         now = timezone.now()
         total_updated = 0
 
+        # Support comma-separated platforms
+        platforms = [p.strip() for p in platform_param.split(',')]
+        include_all = 'all' in platforms
+
         # Mark Facebook messages as read
-        if platform in ['all', 'facebook']:
+        if include_all or 'facebook' in platforms:
             count = FacebookMessage.objects.filter(
                 is_from_page=False,
                 is_read_by_staff=False
@@ -9047,7 +9053,7 @@ def mark_all_conversations_read(request):
             logger.info(f"Marked {count} Facebook messages as read")
 
         # Mark Instagram messages as read
-        if platform in ['all', 'instagram']:
+        if include_all or 'instagram' in platforms:
             count = InstagramMessage.objects.filter(
                 is_from_business=False,
                 is_read_by_staff=False
@@ -9059,7 +9065,7 @@ def mark_all_conversations_read(request):
             logger.info(f"Marked {count} Instagram messages as read")
 
         # Mark WhatsApp messages as read
-        if platform in ['all', 'whatsapp']:
+        if include_all or 'whatsapp' in platforms:
             count = WhatsAppMessage.objects.filter(
                 is_from_business=False,
                 is_read_by_staff=False
@@ -9071,7 +9077,7 @@ def mark_all_conversations_read(request):
             logger.info(f"Marked {count} WhatsApp messages as read")
 
         # Mark Email messages as read
-        if platform in ['all', 'email']:
+        if include_all or 'email' in platforms:
             count = EmailMessage.objects.filter(
                 is_from_business=False,
                 is_read_by_staff=False
@@ -9085,7 +9091,7 @@ def mark_all_conversations_read(request):
         return Response({
             'success': True,
             'messages_marked_read': total_updated,
-            'platform': platform
+            'platform': platform_param
         })
 
     except Exception as e:
@@ -9287,16 +9293,22 @@ def archive_all_conversations(request):
 
     Request body (optional):
     {
-        "platform": "facebook" | "instagram" | "whatsapp" | "email" | "all"  (default: "all")
+        "platform": "facebook" | "instagram" | "whatsapp" | "email" | "all" | "facebook,instagram,whatsapp"  (default: "all")
     }
+
+    Supports comma-separated platform values (e.g., "facebook,instagram,whatsapp" to exclude email).
 
     Returns count of conversations archived.
     """
     logger = logging.getLogger(__name__)
 
     try:
-        platform_filter = request.data.get('platform', 'all').lower()
+        platform_param = request.data.get('platform', 'all').lower()
         archived_count = 0
+
+        # Support comma-separated platforms
+        platforms = [p.strip() for p in platform_param.split(',')]
+        include_all = 'all' in platforms
 
         # Get all existing archived conversation keys for quick lookup
         existing_archives = set(
@@ -9306,7 +9318,7 @@ def archive_all_conversations(request):
         conversations_to_archive = []
 
         # Gather Facebook conversations
-        if platform_filter in ['all', 'facebook']:
+        if include_all or 'facebook' in platforms:
             fb_pages = FacebookPageConnection.objects.filter(is_active=True)
             for page in fb_pages:
                 # Get unique sender_ids for this page
@@ -9325,7 +9337,7 @@ def archive_all_conversations(request):
                         })
 
         # Gather Instagram conversations
-        if platform_filter in ['all', 'instagram']:
+        if include_all or 'instagram' in platforms:
             ig_accounts = InstagramAccountConnection.objects.filter(is_active=True)
             for account in ig_accounts:
                 sender_ids = InstagramMessage.objects.filter(
@@ -9343,7 +9355,7 @@ def archive_all_conversations(request):
                         })
 
         # Gather WhatsApp conversations
-        if platform_filter in ['all', 'whatsapp']:
+        if include_all or 'whatsapp' in platforms:
             wa_accounts = WhatsAppBusinessAccount.objects.filter(is_active=True)
             for account in wa_accounts:
                 from_numbers = WhatsAppMessage.objects.filter(
@@ -9363,7 +9375,7 @@ def archive_all_conversations(request):
                         })
 
         # Gather Email conversations
-        if platform_filter in ['all', 'email']:
+        if include_all or 'email' in platforms:
             email_connections = EmailConnection.objects.filter(is_active=True)
             for connection in email_connections:
                 thread_ids = EmailMessage.objects.filter(
@@ -9399,40 +9411,40 @@ def archive_all_conversations(request):
         now = timezone.now()
         messages_marked_read = 0
 
-        if platform_filter in ['all', 'facebook']:
+        if include_all or 'facebook' in platforms:
             count = FacebookMessage.objects.filter(
                 is_from_page=False,
                 is_read_by_staff=False
             ).update(is_read_by_staff=True, read_by_staff_at=now)
             messages_marked_read += count
 
-        if platform_filter in ['all', 'instagram']:
+        if include_all or 'instagram' in platforms:
             count = InstagramMessage.objects.filter(
                 is_from_business=False,
                 is_read_by_staff=False
             ).update(is_read_by_staff=True, read_by_staff_at=now)
             messages_marked_read += count
 
-        if platform_filter in ['all', 'whatsapp']:
+        if include_all or 'whatsapp' in platforms:
             count = WhatsAppMessage.objects.filter(
                 is_from_business=False,
                 is_read_by_staff=False
             ).update(is_read_by_staff=True, read_by_staff_at=now)
             messages_marked_read += count
 
-        if platform_filter in ['all', 'email']:
+        if include_all or 'email' in platforms:
             count = EmailMessage.objects.filter(
                 is_from_business=False,
                 is_read_by_staff=False
             ).update(is_read_by_staff=True, read_by_staff_at=now)
             messages_marked_read += count
 
-        logger.info(f"Archived {archived_count} conversations, marked {messages_marked_read} messages as read (platform: {platform_filter})")
+        logger.info(f"Archived {archived_count} conversations, marked {messages_marked_read} messages as read (platform: {platform_param})")
 
         return Response({
             'success': True,
             'archived_count': archived_count,
-            'platform': platform_filter,
+            'platform': platform_param,
             'message': f"Archived {archived_count} conversation(s)"
         })
 
