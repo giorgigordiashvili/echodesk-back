@@ -24,6 +24,7 @@ class FacebookMessageSerializer(serializers.ModelSerializer):
     page_name = serializers.CharField(source='page_connection.page_name', read_only=True)
     reply_to_id = serializers.PrimaryKeyRelatedField(source='reply_to', read_only=True)
     sent_by_name = serializers.SerializerMethodField()
+    recipient_name = serializers.SerializerMethodField()
 
     class Meta:
         model = FacebookMessage
@@ -39,15 +40,49 @@ class FacebookMessageSerializer(serializers.ModelSerializer):
             'reply_to_message_id', 'reply_to_id',
             # Source tracking fields
             'source', 'is_echo', 'sent_by', 'sent_by_name',
+            # Recipient tracking for outgoing messages
+            'recipient_name',
         ]
         read_only_fields = ['id', 'is_delivered', 'delivered_at', 'is_read', 'read_at', 'created_at',
                            'reaction', 'reaction_emoji', 'reacted_by', 'reacted_at',
                            'reply_to_message_id', 'reply_to_id',
-                           'source', 'is_echo', 'sent_by', 'sent_by_name']
+                           'source', 'is_echo', 'sent_by', 'sent_by_name', 'recipient_name']
 
     def get_sent_by_name(self, obj):
         if obj.sent_by:
             return f"{obj.sent_by.first_name} {obj.sent_by.last_name}".strip() or obj.sent_by.email
+        return None
+
+    def get_recipient_name(self, obj):
+        """Get recipient name for outgoing messages (from page to customer)"""
+        if not obj.is_from_page:
+            return None
+
+        # For outgoing messages, look up the customer's name
+        # First, try to get it from the reply_to message (most accurate)
+        if obj.reply_to and obj.reply_to.sender_name:
+            return obj.reply_to.sender_name
+
+        # Otherwise, look at the conversation context passed via serializer context
+        # The view typically passes the conversation_id (customer's sender_id)
+        conversation_id = self.context.get('conversation_id') if self.context else None
+        if conversation_id:
+            incoming_msg = FacebookMessage.objects.filter(
+                page_connection=obj.page_connection,
+                sender_id=conversation_id,
+                is_from_page=False
+            ).exclude(sender_name__isnull=True).exclude(sender_name='').first()
+            if incoming_msg:
+                return incoming_msg.sender_name
+
+        # Fallback: find any incoming message from the same page connection
+        # This works when messages are fetched per-conversation
+        incoming_msg = FacebookMessage.objects.filter(
+            page_connection=obj.page_connection,
+            is_from_page=False
+        ).exclude(sender_name__isnull=True).exclude(sender_name='').first()
+        if incoming_msg:
+            return incoming_msg.sender_name
         return None
 
 
@@ -74,6 +109,7 @@ class InstagramMessageSerializer(serializers.ModelSerializer):
     account_id = serializers.CharField(source='account_connection.instagram_account_id', read_only=True)
     account_username = serializers.CharField(source='account_connection.username', read_only=True)
     sent_by_name = serializers.SerializerMethodField()
+    recipient_name = serializers.SerializerMethodField()
 
     class Meta:
         model = InstagramMessage
@@ -85,13 +121,40 @@ class InstagramMessageSerializer(serializers.ModelSerializer):
             'account_id', 'account_username', 'created_at',
             # Source tracking fields
             'source', 'is_echo', 'sent_by', 'sent_by_name',
+            # Recipient tracking for outgoing messages
+            'recipient_name',
         ]
         read_only_fields = ['id', 'is_delivered', 'delivered_at', 'is_read', 'read_at', 'created_at',
-                           'source', 'is_echo', 'sent_by', 'sent_by_name']
+                           'source', 'is_echo', 'sent_by', 'sent_by_name', 'recipient_name']
 
     def get_sent_by_name(self, obj):
         if obj.sent_by:
             return f"{obj.sent_by.first_name} {obj.sent_by.last_name}".strip() or obj.sent_by.email
+        return None
+
+    def get_recipient_name(self, obj):
+        """Get recipient name for outgoing messages (from business to customer)"""
+        if not obj.is_from_business:
+            return None
+
+        # Look at the conversation context passed via serializer context
+        conversation_id = self.context.get('conversation_id') if self.context else None
+        if conversation_id:
+            incoming_msg = InstagramMessage.objects.filter(
+                account_connection=obj.account_connection,
+                sender_id=conversation_id,
+                is_from_business=False
+            ).exclude(sender_name__isnull=True).exclude(sender_name='').first()
+            if incoming_msg:
+                return incoming_msg.sender_name
+
+        # Fallback: find any incoming message from the same account connection
+        incoming_msg = InstagramMessage.objects.filter(
+            account_connection=obj.account_connection,
+            is_from_business=False
+        ).exclude(sender_name__isnull=True).exclude(sender_name='').first()
+        if incoming_msg:
+            return incoming_msg.sender_name
         return None
 
 
