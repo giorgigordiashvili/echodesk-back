@@ -876,15 +876,18 @@ def facebook_oauth_callback(request):
                 page_access_token = page.get('access_token')
 
                 if page_id and page_access_token and page_name:
-                    # Create new page connection for this tenant
-                    page_connection = FacebookPageConnection.objects.create(
+                    # Create or reactivate page connection for this tenant
+                    page_connection, created = FacebookPageConnection.objects.update_or_create(
                         page_id=page_id,
-                        page_name=page_name,
-                        page_access_token=page_access_token,
-                        is_active=True
+                        defaults={
+                            'page_name': page_name,
+                            'page_access_token': page_access_token,
+                            'is_active': True,
+                        }
                     )
 
-                    logger.info(f"✅ Created Facebook page connection: {page_name} ({page_id}) in schema {tenant_schema}")
+                    action = "Created" if created else "Reactivated"
+                    logger.info(f"✅ {action} Facebook page connection: {page_name} ({page_id}) in schema {tenant_schema}")
                     saved_pages += 1
 
                     # Subscribe page to webhooks
