@@ -8,7 +8,7 @@ from channels.layers import get_channel_layer
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from tenant_schemas.utils import schema_context
-from django.db import ProgrammingError
+from django.db import IntegrityError, ProgrammingError
 from django.db.models import F, Q, Max, Count, Subquery, OuterRef, Case, When, Value, CharField
 from django.http import JsonResponse, HttpResponse
 from django.utils import timezone
@@ -877,14 +877,29 @@ def facebook_oauth_callback(request):
 
                 if page_id and page_access_token and page_name:
                     # Create or reactivate page connection for this tenant
-                    page_connection, created = FacebookPageConnection.objects.update_or_create(
-                        page_id=page_id,
-                        defaults={
-                            'page_name': page_name,
-                            'page_access_token': page_access_token,
-                            'is_active': True,
-                        }
-                    )
+                    # Use try/except to handle race conditions with concurrent OAuth callbacks
+                    try:
+                        page_connection, created = FacebookPageConnection.objects.update_or_create(
+                            page_id=page_id,
+                            defaults={
+                                'page_name': page_name,
+                                'page_access_token': page_access_token,
+                                'is_active': True,
+                            }
+                        )
+                    except IntegrityError:
+                        # Race condition: another request already created this page connection
+                        # Fall back to updating the existing record
+                        page_connection = FacebookPageConnection.objects.filter(page_id=page_id).first()
+                        if page_connection:
+                            page_connection.page_name = page_name
+                            page_connection.page_access_token = page_access_token
+                            page_connection.is_active = True
+                            page_connection.save()
+                            created = False
+                        else:
+                            logger.error(f"❌ Could not create or find FacebookPageConnection for page {page_id}")
+                            continue
 
                     action = "Created" if created else "Reactivated"
                     logger.info(f"✅ {action} Facebook page connection: {page_name} ({page_id}) in schema {tenant_schema}")
@@ -3912,7 +3927,13 @@ def send_rating_request_facebook(conversation_id, page_id, message):
     from django.db import connection
 
     try:
-        page = FacebookPageConnection.objects.get(page_id=page_id, is_active=True)
+        # Try active connection first, then fall back to any connection with this page_id
+        page = FacebookPageConnection.objects.filter(page_id=page_id, is_active=True).first()
+        if not page:
+            page = FacebookPageConnection.objects.filter(page_id=page_id).first()
+        if not page:
+            logger.warning(f"No FacebookPageConnection found for page_id={page_id}, skipping rating request")
+            return None
         url = f"https://graph.facebook.com/v21.0/{page_id}/messages"
         payload = {
             "recipient": {"id": conversation_id},
