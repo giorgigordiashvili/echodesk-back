@@ -38,6 +38,10 @@ urlpatterns = [
     path('facebook/send-message/', views.facebook_send_message, name='facebook_send_message'),
     path('facebook/webhook/', views.facebook_webhook, name='facebook_webhook'),
 
+    # Platform-wide endpoints
+    path('clear-history/', views.clear_platform_history, name='clear_platform_history'),
+    path('messaging-window/', views.check_messaging_window, name='check_messaging_window'),
+
     # Instagram endpoints
     path('instagram/status/', views.instagram_connection_status, name='instagram_status'),
     path('instagram/disconnect/', views.instagram_disconnect, name='instagram_disconnect'),

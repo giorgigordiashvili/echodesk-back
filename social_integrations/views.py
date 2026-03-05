@@ -1014,14 +1014,11 @@ def facebook_disconnect(request):
     """
     Disconnect Facebook integration for current tenant
 
-    By default, performs soft delete (sets is_active=False) to preserve data.
-    Pass hard_delete=true in request body to permanently delete.
+    Always performs soft delete (sets is_active=False) to preserve messages.
+    Use the clear-history endpoint to permanently delete messages.
     """
     try:
         logger = logging.getLogger(__name__)
-
-        # Check if hard delete is requested
-        hard_delete = request.data.get('hard_delete', False) if hasattr(request, 'data') else False
 
         # Get all pages for this tenant
         pages_to_disconnect = FacebookPageConnection.objects.all()
@@ -1034,54 +1031,27 @@ def facebook_disconnect(request):
                 'message': 'No Facebook pages found to disconnect'
             })
 
-        if hard_delete:
-            # HARD DELETE: Permanently remove pages and messages
-            facebook_message_count = 0
-            for page in pages_to_disconnect:
-                messages_deleted = FacebookMessage.objects.filter(
-                    page_connection=page
-                ).count()
-                FacebookMessage.objects.filter(page_connection=page).delete()
-                facebook_message_count += messages_deleted
+        # SOFT DELETE: Deactivate pages, keep data for audit trail
+        now = timezone.now()
+        deactivated_count = pages_to_disconnect.update(
+            is_active=False,
+            deactivated_at=now,
+            deactivation_reason='manual',
+            updated_at=now
+        )
 
-            pages_to_disconnect.delete()
+        logger.info(f"✅ Facebook soft disconnect completed:")
+        logger.info(f"   - Facebook pages deactivated: {deactivated_count}")
+        logger.info(f"   - Deactivation reason: manual")
+        logger.info(f"   - Messages preserved for audit trail")
+        logger.info(f"   - Webhooks will now return 404 for these pages")
 
-            logger.info(f"✅ Facebook hard disconnect completed:")
-            logger.info(f"   - Facebook pages deleted: {page_count}")
-            logger.info(f"   - Facebook messages deleted: {facebook_message_count}")
-
-            return Response({
-                'status': 'hard_disconnected',
-                'facebook_pages_deleted': page_count,
-                'facebook_messages_deleted': facebook_message_count,
-                'deleted_pages': page_names,
-                'message': f'Permanently removed {page_count} Facebook page(s) and {facebook_message_count} messages'
-            })
-        else:
-            # SOFT DELETE: Deactivate pages, keep data for audit trail
-            from django.utils import timezone
-
-            now = timezone.now()
-            deactivated_count = pages_to_disconnect.update(
-                is_active=False,
-                deactivated_at=now,
-                deactivation_reason='manual',
-                updated_at=now
-            )
-
-            logger.info(f"✅ Facebook soft disconnect completed:")
-            logger.info(f"   - Facebook pages deactivated: {deactivated_count}")
-            logger.info(f"   - Deactivation reason: manual")
-            logger.info(f"   - Messages preserved for audit trail")
-            logger.info(f"   - Webhooks will now return 404 for these pages")
-
-            return Response({
-                'status': 'disconnected',
-                'facebook_pages_deactivated': deactivated_count,
-                'deactivated_pages': page_names,
-                'message': f'Deactivated {deactivated_count} Facebook page(s). Messages preserved. Webhooks will be rejected.',
-                'note': 'Pages are soft-deleted. Pass hard_delete=true to permanently remove data.'
-            })
+        return Response({
+            'status': 'disconnected',
+            'facebook_pages_deactivated': deactivated_count,
+            'deactivated_pages': page_names,
+            'message': f'Deactivated {deactivated_count} Facebook page(s). Messages preserved. Webhooks will be rejected.'
+        })
 
     except Exception as e:
         logger = logging.getLogger(__name__)
@@ -1097,14 +1067,11 @@ def facebook_page_disconnect(request, page_id):
     """
     Disconnect a specific Facebook page by page_id
 
-    Performs soft delete (sets is_active=False) by default.
-    Pass hard_delete=true to permanently delete.
+    Always performs soft delete (sets is_active=False) to preserve messages.
+    Use the clear-history endpoint to permanently delete messages.
     """
     try:
         logger = logging.getLogger(__name__)
-
-        # Check if hard delete is requested
-        hard_delete = request.data.get('hard_delete', False) if hasattr(request, 'data') else False
 
         # Get the specific page for this tenant
         try:
@@ -1116,44 +1083,24 @@ def facebook_page_disconnect(request, page_id):
 
         page_name = page.page_name
 
-        if hard_delete:
-            # HARD DELETE: Permanently remove page and messages
-            message_count = FacebookMessage.objects.filter(page_connection=page).count()
-            FacebookMessage.objects.filter(page_connection=page).delete()
-            page.delete()
+        # SOFT DELETE: Deactivate page, keep data
+        now = timezone.now()
+        page.is_active = False
+        page.deactivated_at = now
+        page.deactivation_reason = 'manual'
+        page.updated_at = now
+        page.save()
 
-            logger.info(f"✅ Hard deleted Facebook page: {page_name} (ID: {page_id})")
-            logger.info(f"   - Messages deleted: {message_count}")
+        logger.info(f"✅ Soft disconnected Facebook page: {page_name} (ID: {page_id})")
+        logger.info(f"   - Messages preserved for audit trail")
+        logger.info(f"   - Webhooks will now return 404 for this page")
 
-            return Response({
-                'status': 'hard_disconnected',
-                'page_id': page_id,
-                'page_name': page_name,
-                'messages_deleted': message_count,
-                'message': f'Permanently removed Facebook page "{page_name}" and {message_count} messages'
-            })
-        else:
-            # SOFT DELETE: Deactivate page, keep data
-            from django.utils import timezone
-
-            now = timezone.now()
-            page.is_active = False
-            page.deactivated_at = now
-            page.deactivation_reason = 'manual'
-            page.updated_at = now
-            page.save()
-
-            logger.info(f"✅ Soft disconnected Facebook page: {page_name} (ID: {page_id})")
-            logger.info(f"   - Messages preserved for audit trail")
-            logger.info(f"   - Webhooks will now return 404 for this page")
-
-            return Response({
-                'status': 'disconnected',
-                'page_id': page_id,
-                'page_name': page_name,
-                'message': f'Deactivated Facebook page "{page_name}". Messages preserved. Webhooks will be rejected.',
-                'note': 'Page is soft-deleted. Pass hard_delete=true to permanently remove data.'
-            })
+        return Response({
+            'status': 'disconnected',
+            'page_id': page_id,
+            'page_name': page_name,
+            'message': f'Deactivated Facebook page "{page_name}". Messages preserved. Webhooks will be rejected.'
+        })
 
     except Exception as e:
         logger = logging.getLogger(__name__)
@@ -1161,6 +1108,128 @@ def facebook_page_disconnect(request, page_id):
         return Response({
             'error': f'Failed to disconnect page: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, CanManageSocialConnections])
+def clear_platform_history(request):
+    """
+    Permanently delete all messages for a given platform.
+    Accepts { platform: 'facebook' | 'instagram' | 'whatsapp' }
+    """
+    logger = logging.getLogger(__name__)
+    platform = request.data.get('platform', '').lower()
+
+    if platform not in ('facebook', 'instagram', 'whatsapp'):
+        return Response({
+            'error': 'platform must be one of: facebook, instagram, whatsapp'
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        deleted_count = 0
+
+        if platform == 'facebook':
+            pages = FacebookPageConnection.objects.all()
+            for page in pages:
+                count, _ = FacebookMessage.objects.filter(page_connection=page).delete()
+                deleted_count += count
+
+        elif platform == 'instagram':
+            accounts = InstagramAccountConnection.objects.all()
+            for account in accounts:
+                count, _ = InstagramMessage.objects.filter(account_connection=account).delete()
+                deleted_count += count
+
+        elif platform == 'whatsapp':
+            accounts = WhatsAppBusinessAccount.objects.all()
+            for account in accounts:
+                count, _ = WhatsAppMessage.objects.filter(business_account=account).delete()
+                deleted_count += count
+
+        # Also remove archive records for this platform
+        archive_count, _ = ConversationArchive.objects.filter(platform=platform).delete()
+
+        logger.info(f"✅ Cleared {platform} history: {deleted_count} messages deleted, {archive_count} archives removed")
+
+        return Response({
+            'status': 'cleared',
+            'platform': platform,
+            'messages_deleted': deleted_count,
+            'archives_removed': archive_count,
+            'message': f'Permanently deleted {deleted_count} {platform} messages'
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to clear {platform} history: {e}")
+        return Response({
+            'error': f'Failed to clear history: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, CanViewSocialMessages])
+def check_messaging_window(request):
+    """
+    Check if the 24-hour messaging window is open for a conversation.
+    Query params: platform, conversation_id, account_id
+    Returns: { window_open: bool, hours_remaining: float | null }
+    """
+    platform = request.query_params.get('platform', '').lower()
+    conversation_id = request.query_params.get('conversation_id', '')
+    account_id = request.query_params.get('account_id', '')
+
+    if not all([platform, conversation_id, account_id]):
+        return Response({
+            'error': 'platform, conversation_id, and account_id are required'
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    if platform not in ('facebook', 'instagram', 'whatsapp'):
+        return Response({
+            'error': 'platform must be one of: facebook, instagram, whatsapp'
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    last_user_message = None
+
+    if platform == 'facebook':
+        last_user_message = FacebookMessage.objects.filter(
+            page_connection__page_id=account_id,
+            sender_id=conversation_id,
+            is_from_page=False
+        ).order_by('-timestamp').first()
+
+    elif platform == 'instagram':
+        last_user_message = InstagramMessage.objects.filter(
+            account_connection__instagram_account_id=account_id,
+            sender_id=conversation_id,
+            is_from_business=False
+        ).order_by('-timestamp').first()
+
+    elif platform == 'whatsapp':
+        last_user_message = WhatsAppMessage.objects.filter(
+            business_account__waba_id=account_id,
+            from_number=conversation_id,
+            is_from_business=False
+        ).order_by('-timestamp').first()
+
+    if not last_user_message:
+        return Response({
+            'window_open': False,
+            'hours_remaining': None,
+            'message': 'No messages from user found'
+        })
+
+    now = timezone.now()
+    time_since = now - last_user_message.timestamp
+    hours_passed = time_since.total_seconds() / 3600
+    window_open = hours_passed <= 24
+    hours_remaining = max(0, round(24 - hours_passed, 1)) if window_open else 0
+
+    return Response({
+        'window_open': window_open,
+        'hours_remaining': hours_remaining,
+        'last_user_message_at': last_user_message.timestamp.isoformat(),
+        'hours_passed': round(hours_passed, 1)
+    })
 
 
 @extend_schema(
@@ -1220,6 +1289,30 @@ def facebook_send_message(request):
             return Response({
                 'error': 'Page not found or not connected to this tenant'
             }, status=status.HTTP_404_NOT_FOUND)
+
+        # Check 24-hour messaging window
+        last_user_message = FacebookMessage.objects.filter(
+            page_connection=page_connection,
+            sender_id=recipient_id,
+            is_from_page=False
+        ).order_by('-timestamp').first()
+
+        if last_user_message:
+            time_since = datetime.now(last_user_message.timestamp.tzinfo) - last_user_message.timestamp
+            hours_passed = time_since.total_seconds() / 3600
+            if hours_passed > 24:
+                return Response({
+                    'error': f'Cannot send message: 24-hour messaging window expired ({hours_passed:.1f} hours since last user message)',
+                    'error_code': 'window_expired',
+                    'hours_passed': round(hours_passed, 1),
+                    'details': 'Facebook only allows responses within 24 hours of the last message from the user.'
+                }, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            return Response({
+                'error': 'Cannot send message: No conversation found with this user. The user must message you first.',
+                'error_code': 'no_conversation',
+                'details': 'Facebook requires the user to initiate the conversation before you can send messages.'
+            }, status=status.HTTP_400_BAD_REQUEST)
 
         # Send message using Facebook Graph API
         send_url = f"https://graph.facebook.com/v23.0/me/messages"
@@ -3627,6 +3720,15 @@ def assign_chat(request):
         status='in_session',
         session_started_at=timezone.now()
     )
+
+    # Unarchive conversation if it was archived (assigning from history should reactivate)
+    unarchived = ConversationArchive.objects.filter(
+        platform=platform,
+        conversation_id=conversation_id,
+        account_id=account_id
+    ).delete()[0]
+    if unarchived:
+        logger.info(f"📤 Unarchived conversation due to assignment: {platform}/{account_id}/{conversation_id}")
 
     logger.info(f"Chat assigned and session started: {assignment.full_conversation_id} -> {request.user.email}")
     return Response(ChatAssignmentSerializer(assignment).data, status=status.HTTP_201_CREATED)
@@ -6464,6 +6566,30 @@ def whatsapp_send_message(request):
             return Response({
                 'error': 'WhatsApp Business Account not found or inactive'
             }, status=status.HTTP_404_NOT_FOUND)
+
+        # Check 24-hour messaging window
+        last_user_message = WhatsAppMessage.objects.filter(
+            business_account=account,
+            from_number=to_number,
+            is_from_business=False
+        ).order_by('-timestamp').first()
+
+        if last_user_message:
+            time_since = timezone.now() - last_user_message.timestamp
+            hours_passed = time_since.total_seconds() / 3600
+            if hours_passed > 24:
+                return Response({
+                    'error': f'Cannot send message: 24-hour messaging window expired ({hours_passed:.1f} hours since last user message)',
+                    'error_code': 'window_expired',
+                    'hours_passed': round(hours_passed, 1),
+                    'details': 'WhatsApp only allows responses within 24 hours of the last message from the user. Use a message template instead.'
+                }, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            return Response({
+                'error': 'Cannot send message: No conversation found with this user. The user must message you first.',
+                'error_code': 'no_conversation',
+                'details': 'WhatsApp requires the user to initiate the conversation before you can send free-form messages.'
+            }, status=status.HTTP_400_BAD_REQUEST)
 
         # Send message via WhatsApp Cloud API
         fb_api_version = getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('WHATSAPP_API_VERSION', 'v23.0')
@@ -9699,6 +9825,12 @@ def archive_all_conversations(request):
             ConversationArchive.objects.values_list('platform', 'conversation_id', 'account_id')
         )
 
+        # Get all active assignments to skip (don't archive assigned chats)
+        active_assignments = set(
+            ChatAssignment.objects.filter(status='in_session')
+            .values_list('platform', 'conversation_id', 'account_id')
+        )
+
         conversations_to_archive = []
 
         # Gather Facebook conversations
@@ -9713,7 +9845,7 @@ def archive_all_conversations(request):
 
                 for sender_id in sender_ids:
                     key = ('facebook', sender_id, page.page_id)
-                    if key not in existing_archives:
+                    if key not in existing_archives and key not in active_assignments:
                         conversations_to_archive.append({
                             'platform': 'facebook',
                             'conversation_id': sender_id,
@@ -9731,7 +9863,7 @@ def archive_all_conversations(request):
 
                 for sender_id in sender_ids:
                     key = ('instagram', sender_id, account.instagram_account_id)
-                    if key not in existing_archives:
+                    if key not in existing_archives and key not in active_assignments:
                         conversations_to_archive.append({
                             'platform': 'instagram',
                             'conversation_id': sender_id,
@@ -9751,7 +9883,7 @@ def archive_all_conversations(request):
                     # Normalize phone number
                     normalized = from_number.lstrip('+') if from_number else from_number
                     key = ('whatsapp', normalized, account.waba_id)
-                    if key not in existing_archives:
+                    if key not in existing_archives and key not in active_assignments:
                         conversations_to_archive.append({
                             'platform': 'whatsapp',
                             'conversation_id': normalized,
@@ -9770,7 +9902,7 @@ def archive_all_conversations(request):
 
                 for thread_id in thread_ids:
                     key = ('email', thread_id, str(connection.id))
-                    if key not in existing_archives:
+                    if key not in existing_archives and key not in active_assignments:
                         conversations_to_archive.append({
                             'platform': 'email',
                             'conversation_id': thread_id,
