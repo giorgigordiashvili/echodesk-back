@@ -4383,16 +4383,25 @@ def user_chat_sessions(request, user_id):
         customer_identifier = rating.conversation_id
 
         if rating.platform == 'facebook':
-            # Try to get sender name from messages
-            msg = FacebookMessage.objects.filter(sender_id=rating.conversation_id).first()
+            # Get customer name from their incoming messages (not page's outgoing messages)
+            msg = FacebookMessage.objects.filter(
+                sender_id=rating.conversation_id,
+                is_from_page=False
+            ).first()
             if msg and msg.sender_name:
                 customer_name = msg.sender_name
         elif rating.platform == 'instagram':
-            msg = InstagramMessage.objects.filter(sender_id=rating.conversation_id).first()
+            msg = InstagramMessage.objects.filter(
+                sender_id=rating.conversation_id,
+                is_from_business=False
+            ).first()
             if msg and msg.sender_username:
                 customer_name = msg.sender_username
         elif rating.platform == 'whatsapp':
-            msg = WhatsAppMessage.objects.filter(from_number=rating.conversation_id).first()
+            msg = WhatsAppMessage.objects.filter(
+                from_number=rating.conversation_id,
+                is_from_business=False
+            ).first()
             if msg and msg.contact_name:
                 customer_name = msg.contact_name
 
