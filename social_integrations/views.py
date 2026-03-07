@@ -4426,6 +4426,13 @@ def user_chat_sessions(request, user_id):
             if msg and msg.contact_name:
                 customer_name = msg.contact_name
 
+        # Check if conversation is archived
+        is_archived = ConversationArchive.objects.filter(
+            platform=rating.platform,
+            conversation_id=rating.conversation_id,
+            account_id=rating.account_id,
+        ).exists()
+
         sessions.append({
             'id': rating.id,
             'platform': rating.platform,
@@ -4436,6 +4443,7 @@ def user_chat_sessions(request, user_id):
             'session_started_at': rating.session_started_at.isoformat() if rating.session_started_at else None,
             'session_ended_at': rating.session_ended_at.isoformat() if rating.session_ended_at else None,
             'created_at': rating.created_at.isoformat(),
+            'is_archived': is_archived,
         })
 
     # Get user info
