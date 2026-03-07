@@ -8182,7 +8182,11 @@ def email_sync_debug(request):
     from .email_utils import debug_email_sync
 
     try:
-        connection = EmailConnection.objects.filter(is_active=True).first()
+        connection_id = request.query_params.get('connection_id')
+        if connection_id:
+            connection = EmailConnection.objects.filter(id=connection_id, is_active=True).first()
+        else:
+            connection = EmailConnection.objects.filter(is_active=True).first()
         if not connection:
             return Response({
                 'error': 'No active email connection found'
@@ -8206,7 +8210,11 @@ def email_update_sync_days(request):
     Use 0 to sync ALL history.
     """
     try:
-        connection = EmailConnection.objects.filter(is_active=True).first()
+        connection_id = request.data.get('connection_id')
+        if connection_id:
+            connection = EmailConnection.objects.filter(id=connection_id, is_active=True).first()
+        else:
+            connection = EmailConnection.objects.filter(is_active=True).first()
         if not connection:
             return Response({
                 'error': 'No active email connection found'
