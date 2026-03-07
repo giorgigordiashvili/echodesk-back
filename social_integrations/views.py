@@ -271,17 +271,19 @@ def process_auto_reply(platform, account_id, conversation_id, sender_name, conne
         message_to_send = None
         is_welcome = False
 
-        # Check welcome message - only once per conversation (session)
+        # Check welcome message - only once per conversation (session), only during working hours
         welcome_enabled = platform_settings.get('welcome_enabled', False)
         welcome_message = platform_settings.get('welcome_message', '')
-        if welcome_enabled and welcome_message:
+        if welcome_enabled and welcome_message and not is_away:
             # Only send welcome message if never sent before for this conversation
             if tracking.last_welcome_sent is None:
                 message_to_send = welcome_message
                 is_welcome = True
-                logger.info(f"📬 Will send welcome message (first time for this conversation)")
+                logger.info(f"📬 Will send welcome message (first time for this conversation, during working hours)")
             else:
                 logger.info(f"⏭️ Skipping welcome message (already sent: {tracking.last_welcome_sent})")
+        elif welcome_enabled and welcome_message and is_away:
+            logger.info(f"⏭️ Skipping welcome message (outside working hours)")
 
         # Away message takes precedence if within away hours - platform specific
         # Only send one away message per 12 hours per conversation
