@@ -54,14 +54,13 @@ def get_oauth_url(state: str) -> str:
     """
     config = get_tiktok_config()
 
-    # Scopes for TikTok integration
-    # Currently using only Login Kit scopes (approved by default)
-    #
-    # To enable messaging, apply for these scopes in TikTok Developer Portal:
-    # - message.list.read, message.list.send, message.list.manage
-    # Then add them to this list after approval
     scopes = ",".join([
         "user.info.basic",
+        "user.info.profile",
+        "user.info.username",
+        "message.list.read",
+        "message.list.send",
+        "message.list.manage",
     ])
 
     params = {
@@ -216,12 +215,7 @@ def get_user_info(access_token: str) -> Dict[str, Any]:
     """
     url = f"{TIKTOK_API_BASE}/user/info/"
 
-    # Fields available with user.info.basic scope only
-    # Additional fields require additional scopes:
-    # - username: requires user.info.username
-    # - union_id: requires user.info.basic (but may not always be returned)
-    # - bio_description, profile_deep_link: requires user.info.profile
-    fields = "open_id,avatar_url,display_name"
+    fields = "open_id,avatar_url,display_name,username,bio_description,profile_deep_link"
 
     headers = {
         'Authorization': f'Bearer {access_token}',
