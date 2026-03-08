@@ -627,7 +627,7 @@ def facebook_oauth_start(request):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
         # Use public callback URL since Facebook needs a consistent redirect URI
-        redirect_uri = 'https://api.echodesk.ge/api/social/facebook/oauth/callback/'
+        redirect_uri = f'https://{settings.API_DOMAIN}/api/social/facebook/oauth/callback/'
         
         # Include tenant info in state parameter - no user_id needed since tenant is unique
         from urllib.parse import quote
@@ -720,7 +720,7 @@ def facebook_oauth_callback(request):
         # Validate that we have required parameters
         if not tenant_name:
             logger.error(f"No tenant_name found in state: {state}")
-            frontend_url = "https://amanati.echodesk.ge"  # Default fallback
+            frontend_url = f"https://{settings.MAIN_DOMAIN}"  # Default fallback
             error_msg = "Tenant name not found in state parameter"
             from urllib.parse import quote_plus
             return redirect(f"{frontend_url}/?facebook_status=error&message={quote_plus(error_msg)}")
@@ -729,7 +729,7 @@ def facebook_oauth_callback(request):
         tenant_schema = tenant_name if tenant_name else 'amanati'
         
         # Frontend dashboard URL using tenant name
-        frontend_url = f"https://{tenant_schema}.echodesk.ge"
+        frontend_url = f"https://{tenant_schema}.{settings.MAIN_DOMAIN}"
         
         # Find a suitable user for this tenant (superuser or admin)
         from tenant_schemas.utils import schema_context
@@ -758,13 +758,13 @@ def facebook_oauth_callback(request):
         
         if not user_id:
             logger.error(f"No active users found in tenant {tenant_schema}")
-            frontend_url = f"https://{tenant_schema}.echodesk.ge"
+            frontend_url = f"https://{tenant_schema}.{settings.MAIN_DOMAIN}"
             error_msg = f"No active users found in tenant {tenant_schema}"
             from urllib.parse import quote_plus
             return redirect(f"{frontend_url}/?facebook_status=error&message={quote_plus(error_msg)}")
         
         # Frontend dashboard URL
-        frontend_url = f"https://{tenant_schema}.echodesk.ge"
+        frontend_url = f"https://{tenant_schema}.{settings.MAIN_DOMAIN}"
         
         # Handle Facebook errors (user denied, etc.)
         if error:
@@ -785,7 +785,7 @@ def facebook_oauth_callback(request):
         token_params = {
             'client_id': getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_APP_ID'),
             'client_secret': getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_APP_SECRET'),
-            'redirect_uri': 'https://api.echodesk.ge/api/social/facebook/oauth/callback/',  # Must match OAuth URL exactly
+            'redirect_uri': f'https://{settings.API_DOMAIN}/api/social/facebook/oauth/callback/',  # Must match OAuth URL exactly
             'code': code
         }
         
@@ -997,9 +997,9 @@ def facebook_oauth_callback(request):
     except Exception as e:
         logger.error(f"Facebook OAuth callback processing failed: {e}")
         # Redirect to frontend with error message
-        frontend_url = f"https://amanati.echodesk.ge"  # Default fallback
+        frontend_url = f"https://{settings.MAIN_DOMAIN}"  # Default fallback
         if 'tenant_schema' in locals() and tenant_schema:
-            frontend_url = f"https://{tenant_schema}.echodesk.ge"
+            frontend_url = f"https://{tenant_schema}.{settings.MAIN_DOMAIN}"
         
         error_msg = f"OAuth processing failed: {str(e)}"
         from urllib.parse import quote_plus
@@ -6180,14 +6180,14 @@ def whatsapp_embedded_signup_callback(request):
             error_msg = error_description or error
             logger.error(f"Facebook OAuth error: {error_msg}")
             # Redirect to frontend with error
-            frontend_url = f"https://{tenant_name}.echodesk.ge" if tenant_name else "https://amanati.echodesk.ge"
+            frontend_url = f"https://{tenant_name}.{settings.MAIN_DOMAIN}" if tenant_name else f"https://{settings.MAIN_DOMAIN}"
             from urllib.parse import quote_plus
             return redirect(f"{frontend_url}/social/connections?whatsapp_status=error&message={quote_plus(error_msg)}")
 
         if not code:
             error_msg = 'Authorization code is required'
             if request.method == 'GET':
-                frontend_url = f"https://{tenant_name}.echodesk.ge" if tenant_name else "https://amanati.echodesk.ge"
+                frontend_url = f"https://{tenant_name}.{settings.MAIN_DOMAIN}" if tenant_name else f"https://{settings.MAIN_DOMAIN}"
                 from urllib.parse import quote_plus
                 return redirect(f"{frontend_url}/social/connections?whatsapp_status=error&message={quote_plus(error_msg)}")
             return Response({'error': error_msg}, status=status.HTTP_400_BAD_REQUEST)
@@ -6195,7 +6195,7 @@ def whatsapp_embedded_signup_callback(request):
         if not tenant_name:
             error_msg = 'Tenant name is required'
             if request.method == 'GET':
-                frontend_url = "https://amanati.echodesk.ge"
+                frontend_url = f"https://{settings.MAIN_DOMAIN}"
                 from urllib.parse import quote_plus
                 return redirect(f"{frontend_url}/social/connections?whatsapp_status=error&message={quote_plus(error_msg)}")
             return Response({'error': error_msg}, status=status.HTTP_400_BAD_REQUEST)
@@ -6439,14 +6439,14 @@ def whatsapp_embedded_signup_callback(request):
         if not saved_accounts:
             error_msg = 'No WhatsApp phone numbers could be configured'
             if request.method == 'GET':
-                frontend_url = f"https://{tenant_name}.echodesk.ge"
+                frontend_url = f"https://{tenant_name}.{settings.MAIN_DOMAIN}"
                 from urllib.parse import quote_plus
                 return redirect(f"{frontend_url}/social/connections?whatsapp_status=error&message={quote_plus(error_msg)}")
             return Response({'error': error_msg}, status=status.HTTP_400_BAD_REQUEST)
 
         # Success! Redirect back to frontend
         if request.method == 'GET':
-            frontend_url = f"https://{tenant_name}.echodesk.ge"
+            frontend_url = f"https://{tenant_name}.{settings.MAIN_DOMAIN}"
             from urllib.parse import quote_plus
             success_msg = f'Successfully connected {len(saved_accounts)} WhatsApp Business Account(s)'
             return redirect(f"{frontend_url}/social/connections?whatsapp_status=connected&accounts={len(saved_accounts)}&message={quote_plus(success_msg)}")
@@ -8742,7 +8742,7 @@ def tiktok_oauth_callback(request):
 
     # Build frontend URL from tenant schema
     if tenant_schema:
-        frontend_url = f"https://{tenant_schema}.echodesk.ge"
+        frontend_url = f"https://{tenant_schema}.{settings.MAIN_DOMAIN}"
     else:
         frontend_url = "https://echodesk.ge"
 
