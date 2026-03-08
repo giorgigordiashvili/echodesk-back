@@ -720,10 +720,10 @@ def facebook_oauth_callback(request):
         # Validate that we have required parameters
         if not tenant_name:
             logger.error(f"No tenant_name found in state: {state}")
-            frontend_url = f"https://{settings.MAIN_DOMAIN}"  # Default fallback
+            frontend_url = f"https://amanati.{settings.MAIN_DOMAIN}"  # Default fallback
             error_msg = "Tenant name not found in state parameter"
             from urllib.parse import quote_plus
-            return redirect(f"{frontend_url}/?facebook_status=error&message={quote_plus(error_msg)}")
+            return redirect(f"{frontend_url}/social/connections?facebook_status=error&message={quote_plus(error_msg)}")
         
         # Extract tenant schema name from tenant_name - use tenant_name directly as schema
         tenant_schema = tenant_name if tenant_name else 'amanati'
@@ -761,7 +761,7 @@ def facebook_oauth_callback(request):
             frontend_url = f"https://{tenant_schema}.{settings.MAIN_DOMAIN}"
             error_msg = f"No active users found in tenant {tenant_schema}"
             from urllib.parse import quote_plus
-            return redirect(f"{frontend_url}/?facebook_status=error&message={quote_plus(error_msg)}")
+            return redirect(f"{frontend_url}/social/connections?facebook_status=error&message={quote_plus(error_msg)}")
         
         # Frontend dashboard URL
         frontend_url = f"https://{tenant_schema}.{settings.MAIN_DOMAIN}"
@@ -771,14 +771,14 @@ def facebook_oauth_callback(request):
             error_msg = f"Facebook OAuth failed: {error_description or error}"
             logger.error(f"Facebook OAuth error: {error} - {error_description}")
             from urllib.parse import quote_plus
-            return redirect(f"{frontend_url}/?facebook_status=error&message={quote_plus(error_msg)}")
+            return redirect(f"{frontend_url}/social/connections?facebook_status=error&message={quote_plus(error_msg)}")
         
         # Handle missing code
         if not code:
             error_msg = "Authorization code not provided by Facebook"
             logger.error("Facebook OAuth callback missing authorization code")
             from urllib.parse import quote_plus
-            return redirect(f"{frontend_url}/?facebook_status=error&message={quote_plus(error_msg)}")
+            return redirect(f"{frontend_url}/social/connections?facebook_status=error&message={quote_plus(error_msg)}")
         
         # Exchange authorization code for access token
         token_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v23.0')}/oauth/access_token"
@@ -798,14 +798,14 @@ def facebook_oauth_callback(request):
             error_msg = f"Token exchange failed: {token_data.get('error', {}).get('message', 'Unknown error')}"
             logger.error(f"Facebook token exchange error: {token_data}")
             from urllib.parse import quote_plus
-            return redirect(f"{frontend_url}/?facebook_status=error&message={quote_plus(error_msg)}")
+            return redirect(f"{frontend_url}/social/connections?facebook_status=error&message={quote_plus(error_msg)}")
         
         user_access_token = token_data.get('access_token')
         if not user_access_token:
             error_msg = "No access token received from Facebook"
             logger.error("Facebook token exchange did not return access token")
             from urllib.parse import quote_plus
-            return redirect(f"{frontend_url}/?facebook_status=error&message={quote_plus(error_msg)}")
+            return redirect(f"{frontend_url}/social/connections?facebook_status=error&message={quote_plus(error_msg)}")
         
         # Get user's Facebook pages - simplified approach
         pages_url = f"https://graph.facebook.com/{getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v23.0')}/me/accounts"
@@ -828,7 +828,7 @@ def facebook_oauth_callback(request):
             error_msg = f"Failed to fetch pages: {pages_data.get('error', {}).get('message', 'Unknown error')}"
             logger.error(f"Facebook pages fetch error: {pages_data}")
             from urllib.parse import quote_plus
-            return redirect(f"{frontend_url}/?facebook_status=error&message={quote_plus(error_msg)}")
+            return redirect(f"{frontend_url}/social/connections?facebook_status=error&message={quote_plus(error_msg)}")
         
         pages = pages_data.get('data', [])
         
@@ -992,18 +992,18 @@ def facebook_oauth_callback(request):
         
         # Redirect to tenant frontend with success parameters
         from urllib.parse import quote_plus
-        return redirect(f"{frontend_url}/?facebook_status=connected&pages={saved_pages}&message={quote_plus(success_msg)}")
+        return redirect(f"{frontend_url}/social/connections?facebook_status=connected&pages={saved_pages}&message={quote_plus(success_msg)}")
         
     except Exception as e:
         logger.error(f"Facebook OAuth callback processing failed: {e}")
         # Redirect to frontend with error message
-        frontend_url = f"https://{settings.MAIN_DOMAIN}"  # Default fallback
+        frontend_url = f"https://amanati.{settings.MAIN_DOMAIN}"  # Default fallback
         if 'tenant_schema' in locals() and tenant_schema:
             frontend_url = f"https://{tenant_schema}.{settings.MAIN_DOMAIN}"
         
         error_msg = f"OAuth processing failed: {str(e)}"
         from urllib.parse import quote_plus
-        return redirect(f"{frontend_url}/?facebook_status=error&message={quote_plus(error_msg)}")
+        return redirect(f"{frontend_url}/social/connections?facebook_status=error&message={quote_plus(error_msg)}")
 
 
 @api_view(['GET'])
@@ -3912,7 +3912,7 @@ def end_session(request):
             if 'localhost' in host or '127.0.0.1' in host:
                 rating_link = f"http://{host}/review?token={rating_token}"
             else:
-                rating_link = f"https://{subdomain}.echodesk.ge/review?token={rating_token}"
+                rating_link = f"https://{subdomain}.{settings.MAIN_DOMAIN}/review?token={rating_token}"
 
             # Get message template (use Georgian by default)
             message_template = settings_obj.rating_request_message_template_ka
@@ -6082,7 +6082,7 @@ def whatsapp_oauth_start(request):
         config_id = '4254308474803749'
 
         # Use public callback URL since Facebook needs a consistent redirect URI
-        redirect_uri = 'https://api.echodesk.ge/api/social/whatsapp/embedded-signup/callback/'
+        redirect_uri = f'https://{settings.API_DOMAIN}/api/social/whatsapp/embedded-signup/callback/'
 
         # Include tenant info in state parameter
         from urllib.parse import quote
@@ -6180,14 +6180,14 @@ def whatsapp_embedded_signup_callback(request):
             error_msg = error_description or error
             logger.error(f"Facebook OAuth error: {error_msg}")
             # Redirect to frontend with error
-            frontend_url = f"https://{tenant_name}.{settings.MAIN_DOMAIN}" if tenant_name else f"https://{settings.MAIN_DOMAIN}"
+            frontend_url = f"https://{tenant_name}.{settings.MAIN_DOMAIN}" if tenant_name else f"https://amanati.{settings.MAIN_DOMAIN}"
             from urllib.parse import quote_plus
             return redirect(f"{frontend_url}/social/connections?whatsapp_status=error&message={quote_plus(error_msg)}")
 
         if not code:
             error_msg = 'Authorization code is required'
             if request.method == 'GET':
-                frontend_url = f"https://{tenant_name}.{settings.MAIN_DOMAIN}" if tenant_name else f"https://{settings.MAIN_DOMAIN}"
+                frontend_url = f"https://{tenant_name}.{settings.MAIN_DOMAIN}" if tenant_name else f"https://amanati.{settings.MAIN_DOMAIN}"
                 from urllib.parse import quote_plus
                 return redirect(f"{frontend_url}/social/connections?whatsapp_status=error&message={quote_plus(error_msg)}")
             return Response({'error': error_msg}, status=status.HTTP_400_BAD_REQUEST)
@@ -6195,7 +6195,7 @@ def whatsapp_embedded_signup_callback(request):
         if not tenant_name:
             error_msg = 'Tenant name is required'
             if request.method == 'GET':
-                frontend_url = f"https://{settings.MAIN_DOMAIN}"
+                frontend_url = f"https://amanati.{settings.MAIN_DOMAIN}"
                 from urllib.parse import quote_plus
                 return redirect(f"{frontend_url}/social/connections?whatsapp_status=error&message={quote_plus(error_msg)}")
             return Response({'error': error_msg}, status=status.HTTP_400_BAD_REQUEST)
@@ -6208,7 +6208,7 @@ def whatsapp_embedded_signup_callback(request):
         fb_api_version = getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_API_VERSION', 'v23.0')
 
         token_url = f"https://graph.facebook.com/{fb_api_version}/oauth/access_token"
-        redirect_uri = 'https://api.echodesk.ge/api/social/whatsapp/embedded-signup/callback/'
+        redirect_uri = f'https://{settings.API_DOMAIN}/api/social/whatsapp/embedded-signup/callback/'
         token_params = {
             'client_id': fb_app_id,
             'client_secret': fb_app_secret,
@@ -6461,7 +6461,7 @@ def whatsapp_embedded_signup_callback(request):
         logger.error(f"WhatsApp embedded signup callback failed: {e}")
         error_msg = f'Failed to process WhatsApp signup: {str(e)}'
         if request.method == 'GET':
-            frontend_url = f"https://{tenant_name if 'tenant_name' in locals() else 'amanati'}.echodesk.ge"
+            frontend_url = f"https://{tenant_name if 'tenant_name' in locals() else 'amanati'}.{settings.MAIN_DOMAIN}"
             from urllib.parse import quote_plus
             return redirect(f"{frontend_url}/social/connections?whatsapp_status=error&message={quote_plus(error_msg)}")
         return Response({
@@ -8744,7 +8744,7 @@ def tiktok_oauth_callback(request):
     if tenant_schema:
         frontend_url = f"https://{tenant_schema}.{settings.MAIN_DOMAIN}"
     else:
-        frontend_url = "https://echodesk.ge"
+        frontend_url = f"https://{settings.MAIN_DOMAIN}"
 
     # Handle OAuth errors
     if error:
@@ -10061,7 +10061,7 @@ def facebook_oauth_start_publishing(request):
         if not fb_app_id:
             return Response({'error': 'Facebook App ID not configured'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-        redirect_uri = 'https://api.echodesk.ge/api/social/facebook/oauth/callback/'
+        redirect_uri = f'https://{settings.API_DOMAIN}/api/social/facebook/oauth/callback/'
 
         from urllib.parse import quote
         tenant_obj = getattr(request, "tenant", None)
