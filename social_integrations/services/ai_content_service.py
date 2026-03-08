@@ -8,6 +8,29 @@ from social_integrations.models import AutoPostSettings, AutoPostContent
 logger = logging.getLogger(__name__)
 
 
+LANGUAGE_NAMES = {
+    'en': 'English',
+    'ka': 'Georgian (ქართული)',
+    'ru': 'Russian',
+    'de': 'German',
+    'fr': 'French',
+    'es': 'Spanish',
+    'it': 'Italian',
+    'tr': 'Turkish',
+    'ar': 'Arabic',
+    'zh': 'Chinese',
+    'ja': 'Japanese',
+    'ko': 'Korean',
+    'pt': 'Portuguese',
+    'nl': 'Dutch',
+    'pl': 'Polish',
+    'uk': 'Ukrainian',
+    'he': 'Hebrew',
+    'hi': 'Hindi',
+    'pa': 'Punjabi',
+}
+
+
 class AIContentService:
     def __init__(self):
         api_key = getattr(settings, 'OPENAI_API_KEY', '')
@@ -134,11 +157,14 @@ Product to feature:
                 f"- {p[:100]}..." for p in context['previous_posts'] if p
             )
 
+        lang_code = context.get('language', 'en')
+        lang_name = LANGUAGE_NAMES.get(lang_code, lang_code)
+
         prompt = f"""Generate a social media marketing post for a business.
 
 Company info: {context.get('company_description', 'A modern business')}
 Tone: {context.get('tone', 'professional')}
-Language: {context.get('language', 'en')}
+Language: {lang_name} (code: {lang_code})
 {product_info}
 {previous}
 
@@ -148,11 +174,12 @@ Return a JSON object with these fields:
 - "image_prompt": A short DALL-E prompt for generating a matching marketing image (only if no product image is used)
 
 Important:
-- Write in the specified language
+- You MUST write ALL text content in {lang_name}. Use the {lang_name} script and alphabet. Do NOT use any other language.
 - Make it engaging and on-brand
 - Do NOT repeat content from recent posts
 - Facebook: conversational, call-to-action
 - Instagram: visually descriptive, with hashtags
+- The image_prompt should always be in English (for DALL-E)
 
 Respond ONLY with valid JSON, no markdown."""
 
