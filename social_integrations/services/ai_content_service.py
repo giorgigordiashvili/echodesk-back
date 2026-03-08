@@ -109,16 +109,17 @@ class AIContentService:
 
         result = self._call_openai(tenant_context)
 
-        # Generate image for company posts if no product image
-        if not image_url and product is None:
-            try:
-                from .image_service import ImageService
-                image_service = ImageService()
-                image_url = image_service.generate_image(
-                    result.get('image_prompt', f"Marketing image for: {auto_settings.company_description[:100]}")
-                )
-            except Exception as e:
-                logger.warning(f"Failed to generate image: {e}")
+        # Always generate image with DALL-E if no product image available
+        if not image_url:
+            from .image_service import ImageService
+            image_service = ImageService()
+            if product:
+                default_prompt = f"Marketing product photo for: {tenant_context['product']['name']}"
+            else:
+                default_prompt = f"Marketing image for: {auto_settings.company_description[:100]}"
+            image_url = image_service.generate_image(
+                result.get('image_prompt', default_prompt)
+            )
 
         # Determine schedule
         now = timezone.now()
