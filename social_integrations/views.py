@@ -997,7 +997,7 @@ def facebook_oauth_callback(request):
     except Exception as e:
         logger.error(f"Facebook OAuth callback processing failed: {e}")
         # Redirect to frontend with error message
-        frontend_url = ff"https://{settings.MAIN_DOMAIN}"  # Default fallback
+        frontend_url = f"https://{settings.MAIN_DOMAIN}"  # Default fallback
         if 'tenant_schema' in locals() and tenant_schema:
             frontend_url = f"https://{tenant_schema}.{settings.MAIN_DOMAIN}"
         
