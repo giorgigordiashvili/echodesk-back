@@ -125,6 +125,25 @@ class AIContentService:
                 logger.warning(f"Failed to generate image: {e}")
                 image_url = None
 
+        # Fallback to page logo if no image
+        if not image_url:
+            try:
+                from social_integrations.models import FacebookPageConnection
+                page = FacebookPageConnection.objects.filter(is_active=True).first()
+                if page and page.page_access_token:
+                    import requests as http_requests
+                    resp = http_requests.get(
+                        f"https://graph.facebook.com/v23.0/{page.page_id}/picture",
+                        params={"redirect": "false", "type": "large", "access_token": page.page_access_token}
+                    )
+                    if resp.ok:
+                        pic_data = resp.json().get("data", {})
+                        if pic_data.get("url"):
+                            image_url = pic_data["url"]
+                            logger.info(f"Using page logo as fallback image")
+            except Exception as e:
+                logger.warning(f"Failed to get page logo fallback: {e}")
+
         # Determine schedule
         now = timezone.now()
         scheduled_for = now
