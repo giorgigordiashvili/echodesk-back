@@ -350,6 +350,70 @@ def cron_email_sync(request):
         }, status=500)
 
 
+@api_view(['GET', 'POST'])
+@permission_classes([AllowAny])
+def cron_generate_daily_posts(request):
+    """
+    HTTP endpoint to trigger daily AI post generation.
+    Should be called hourly — the command checks posting times internally.
+    """
+    token = request.headers.get('X-Cron-Token') or request.GET.get('token')
+    expected_token = getattr(settings, 'CRON_SECRET_TOKEN', None)
+
+    if not expected_token:
+        return Response({'error': 'Cron service not configured'}, status=500)
+
+    if not token or token != expected_token:
+        logger.warning(f'Unauthorized cron access attempt from {request.META.get("REMOTE_ADDR")}')
+        return Response({'error': 'Unauthorized'}, status=401)
+
+    try:
+        output = StringIO()
+        call_command('generate_daily_posts', stdout=output)
+        output_text = output.getvalue()
+        logger.info('Generate daily posts cron executed successfully')
+        return Response({
+            'status': 'success',
+            'message': 'Daily post generation completed',
+            'output': output_text,
+        })
+    except Exception as e:
+        logger.error(f'Generate daily posts cron failed: {e}')
+        return Response({'status': 'error', 'error': str(e)}, status=500)
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([AllowAny])
+def cron_publish_approved_posts(request):
+    """
+    HTTP endpoint to publish approved auto-posts.
+    Should be called every 15 minutes.
+    """
+    token = request.headers.get('X-Cron-Token') or request.GET.get('token')
+    expected_token = getattr(settings, 'CRON_SECRET_TOKEN', None)
+
+    if not expected_token:
+        return Response({'error': 'Cron service not configured'}, status=500)
+
+    if not token or token != expected_token:
+        logger.warning(f'Unauthorized cron access attempt from {request.META.get("REMOTE_ADDR")}')
+        return Response({'error': 'Unauthorized'}, status=401)
+
+    try:
+        output = StringIO()
+        call_command('publish_approved_posts', stdout=output)
+        output_text = output.getvalue()
+        logger.info('Publish approved posts cron executed successfully')
+        return Response({
+            'status': 'success',
+            'message': 'Approved posts published',
+            'output': output_text,
+        })
+    except Exception as e:
+        logger.error(f'Publish approved posts cron failed: {e}')
+        return Response({'status': 'error', 'error': str(e)}, status=500)
+
+
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def cron_health_check(request):
@@ -368,5 +432,7 @@ def cron_health_check(request):
             'payment_retries': '/api/cron/payment-retries/',
             'calculate_metrics': '/api/cron/calculate-metrics/',
             'email_sync': '/api/cron/email-sync/',
+            'generate_daily_posts': '/api/cron/generate-daily-posts/',
+            'publish_approved_posts': '/api/cron/publish-approved-posts/',
         }
     })

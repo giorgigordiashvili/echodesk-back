@@ -134,6 +134,20 @@ urlpatterns = [
     # Delete conversation endpoint (superadmin only)
     path('delete-conversation/', views.delete_conversation, name='delete_conversation'),
 
+    # Publishing OAuth (opt-in for auto-posting)
+    path('facebook/oauth/start-publishing/', views.facebook_oauth_start_publishing, name='facebook_oauth_start_publishing'),
+
+    # Auto-posting endpoints
+    path('auto-post/publishing-status/', views.auto_post_publishing_status, name='auto_post_publishing_status'),
+    path('auto-post/settings/', views.auto_post_settings, name='auto_post_settings'),
+    path('auto-post/list/', views.auto_post_list, name='auto_post_list'),
+    path('auto-post/<int:pk>/', views.auto_post_detail, name='auto_post_detail'),
+    path('auto-post/<int:pk>/approve/', views.auto_post_approve, name='auto_post_approve'),
+    path('auto-post/<int:pk>/reject/', views.auto_post_reject, name='auto_post_reject'),
+    path('auto-post/<int:pk>/edit/', views.auto_post_edit, name='auto_post_edit'),
+    path('auto-post/generate/', views.auto_post_generate, name='auto_post_generate'),
+    path('auto-post/<int:pk>/publish/', views.auto_post_publish, name='auto_post_publish'),
+
     # Admin OAuth endpoints
     path('admin/facebook/oauth/start/', admin_views.facebook_oauth_admin_start, name='admin_facebook_oauth_start'),
     path('admin/facebook/oauth/callback/', admin_views.facebook_oauth_admin_callback, name='admin_facebook_oauth_callback'),

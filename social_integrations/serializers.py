@@ -8,7 +8,8 @@ from .models import (
     EmailConnection, EmailMessage, EmailDraft, EmailConnectionUserAssignment,
     TikTokCreatorAccount, TikTokMessage,
     EmailSignature, QuickReply,
-    SocialClient, SocialClientCustomField, SocialClientCustomFieldValue, SocialAccount
+    SocialClient, SocialClientCustomField, SocialClientCustomFieldValue, SocialAccount,
+    AutoPostSettings, AutoPostContent,
 )
 
 
@@ -1167,3 +1168,57 @@ class PaginatedUnifiedConversationSerializer(serializers.Serializer):
     next = serializers.CharField(allow_null=True, help_text="URL for next page")
     previous = serializers.CharField(allow_null=True, help_text="URL for previous page")
     results = UnifiedConversationSerializer(many=True)
+
+
+class AutoPostSettingsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AutoPostSettings
+        fields = [
+            'id', 'is_enabled', 'company_description', 'posting_time', 'timezone',
+            'post_to_facebook', 'post_to_instagram', 'tone', 'content_source',
+            'content_language', 'require_approval', 'max_posts_per_day',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class AutoPostContentSerializer(serializers.ModelSerializer):
+    featured_product_name = serializers.SerializerMethodField()
+    approved_by_name = serializers.SerializerMethodField()
+    rejected_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AutoPostContent
+        fields = [
+            'id', 'status', 'facebook_text', 'instagram_text', 'image_url',
+            'featured_product', 'featured_product_name',
+            'target_facebook', 'target_instagram', 'scheduled_for',
+            'facebook_post_id', 'instagram_media_id', 'published_at',
+            'error_message', 'ai_model_used',
+            'approved_by', 'approved_by_name', 'approved_at',
+            'rejected_by', 'rejected_by_name', 'rejected_at', 'rejection_reason',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = [
+            'id', 'facebook_post_id', 'instagram_media_id', 'published_at',
+            'error_message', 'ai_model_used', 'approved_by', 'approved_at',
+            'rejected_by', 'rejected_at', 'created_at', 'updated_at',
+        ]
+
+    def get_featured_product_name(self, obj):
+        if obj.featured_product:
+            name = obj.featured_product.name
+            if isinstance(name, dict):
+                return name.get('en', name.get('ka', str(name)))
+            return str(name)
+        return None
+
+    def get_approved_by_name(self, obj):
+        if obj.approved_by:
+            return obj.approved_by.get_full_name() or obj.approved_by.email
+        return None
+
+    def get_rejected_by_name(self, obj):
+        if obj.rejected_by:
+            return obj.rejected_by.get_full_name() or obj.rejected_by.email
+        return None

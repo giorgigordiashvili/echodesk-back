@@ -32,7 +32,8 @@ from .models import (
     EmailConnection, EmailMessage, EmailDraft, EmailConnectionUserAssignment,
     TikTokCreatorAccount, TikTokMessage,
     EmailSignature, QuickReply,
-    SocialClient, SocialClientCustomField, SocialClientCustomFieldValue, SocialAccount
+    SocialClient, SocialClientCustomField, SocialClientCustomFieldValue, SocialAccount,
+    AutoPostSettings, AutoPostContent,
 )
 from .serializers import (
     FacebookPageConnectionSerializer, FacebookMessageSerializer, FacebookSendMessageSerializer,
@@ -50,7 +51,8 @@ from .serializers import (
     EmailSignatureSerializer, QuickReplySerializer, QuickReplyUseSerializer, QuickReplyVariablesSerializer,
     SocialClientSerializer, SocialClientListSerializer, SocialClientCreateSerializer,
     SocialClientCustomFieldSerializer, SocialAccountSerializer, SocialAccountLinkSerializer,
-    UnifiedConversationSerializer, PaginatedUnifiedConversationSerializer
+    UnifiedConversationSerializer, PaginatedUnifiedConversationSerializer,
+    AutoPostSettingsSerializer, AutoPostContentSerializer,
 )
 from .pagination import SocialMessagePagination
 from .permissions import (
@@ -689,19 +691,23 @@ def facebook_oauth_callback(request):
         
         # Parse state to get tenant info - no user_id needed
         tenant_name = None
+        is_publishing_upgrade = False
         if state:
             from urllib.parse import unquote
             # URL decode the state parameter in case it's encoded
             decoded_state = unquote(state)
             logger.info(f"Raw state parameter: {state}")
             logger.info(f"Decoded state parameter: {decoded_state}")
-            
-            # State format: "tenant=amanati" (simplified)
+
+            # State format: "tenant=amanati" or "tenant=amanati&publishing=true"
             try:
                 for param in decoded_state.split('&'):
                     if param.startswith('tenant='):
                         tenant_name = param.split('=', 1)[1]
                         logger.info(f"Parsed tenant_name: {tenant_name}")
+                    elif param.startswith('publishing='):
+                        is_publishing_upgrade = param.split('=', 1)[1].lower() == 'true'
+                        logger.info(f"Publishing upgrade: {is_publishing_upgrade}")
             except (ValueError, IndexError) as e:
                 logger.error(f"Error parsing state parameter: {e}")
                 return JsonResponse({
@@ -880,14 +886,17 @@ def facebook_oauth_callback(request):
                 if page_id and page_access_token and page_name:
                     # Create or reactivate page connection for this tenant
                     # Use try/except to handle race conditions with concurrent OAuth callbacks
-                    try:
-                        page_connection, created = FacebookPageConnection.objects.update_or_create(
-                            page_id=page_id,
-                            defaults={
+                    page_defaults = {
                                 'page_name': page_name,
                                 'page_access_token': page_access_token,
                                 'is_active': True,
                             }
+                    if is_publishing_upgrade:
+                        page_defaults['has_publishing_permission'] = True
+                    try:
+                        page_connection, created = FacebookPageConnection.objects.update_or_create(
+                            page_id=page_id,
+                            defaults=page_defaults,
                         )
                     except IntegrityError:
                         # Race condition: another request already created this page connection
@@ -897,6 +906,8 @@ def facebook_oauth_callback(request):
                             page_connection.page_name = page_name
                             page_connection.page_access_token = page_access_token
                             page_connection.is_active = True
+                            if is_publishing_upgrade:
+                                page_connection.has_publishing_permission = True
                             page_connection.save()
                             created = False
                         else:
@@ -10018,3 +10029,275 @@ def archive_all_conversations(request):
         return Response({
             'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ===========================
+# Auto-Posting Endpoints
+# ===========================
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, CanManageSocialConnections])
+def facebook_oauth_start_publishing(request):
+    """Generate Facebook OAuth URL for publishing permissions (opt-in).
+    Same flow as facebook_oauth_start but requests additional scopes:
+    pages_manage_posts, instagram_content_publish
+    """
+    try:
+        fb_app_id = getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('FACEBOOK_APP_ID')
+        if not fb_app_id:
+            return Response({'error': 'Facebook App ID not configured'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        redirect_uri = 'https://api.echodesk.ge/api/social/facebook/oauth/callback/'
+
+        from urllib.parse import quote
+        tenant_obj = getattr(request, "tenant", None)
+        if tenant_obj and hasattr(tenant_obj, 'schema_name'):
+            tenant_name = tenant_obj.schema_name
+        elif tenant_obj and hasattr(tenant_obj, 'name'):
+            tenant_name = tenant_obj.name
+        else:
+            tenant_name = "amanati"
+
+        # Include publishing flag in state so callback knows to set has_publishing_permission
+        state_raw = f'tenant={tenant_name}&publishing=true'
+        state = quote(state_raw)
+
+        # Request all existing scopes PLUS publishing scopes
+        scopes = (
+            'business_management,pages_show_list,pages_manage_metadata,pages_messaging,'
+            'pages_read_engagement,instagram_basic,instagram_manage_messages,public_profile,email,'
+            'pages_manage_posts,instagram_content_publish'
+        )
+
+        oauth_url = (
+            f"https://www.facebook.com/v23.0/dialog/oauth?"
+            f"client_id={fb_app_id}&"
+            f"redirect_uri={quote(redirect_uri)}&"
+            f"scope={scopes}&"
+            f"state={state}&"
+            f"response_type=code&"
+            f"auth_type=rerequest&"
+            f"display=popup"
+        )
+
+        return Response({
+            'oauth_url': oauth_url,
+            'redirect_uri': redirect_uri,
+            'instructions': 'Visit the OAuth URL to grant publishing permissions for your Facebook pages'
+        })
+    except Exception as e:
+        return Response({'error': f'Failed to generate OAuth URL: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def auto_post_publishing_status(request):
+    """Check which connections have publishing permissions"""
+    facebook_pages = FacebookPageConnection.objects.filter(is_active=True).values(
+        'id', 'page_id', 'page_name', 'has_publishing_permission'
+    )
+    instagram_accounts = InstagramAccountConnection.objects.filter(is_active=True).values(
+        'id', 'instagram_account_id', 'username'
+    )
+    # Instagram publishing permission is tied to its facebook_page connection
+    instagram_data = []
+    for ig in InstagramAccountConnection.objects.filter(is_active=True).select_related('facebook_page'):
+        instagram_data.append({
+            'id': ig.id,
+            'instagram_account_id': ig.instagram_account_id,
+            'username': ig.username,
+            'has_publishing_permission': ig.facebook_page.has_publishing_permission if ig.facebook_page else False,
+        })
+
+    return Response({
+        'facebook_pages': list(facebook_pages),
+        'instagram_accounts': instagram_data,
+    })
+
+
+@api_view(['GET', 'PUT'])
+@permission_classes([IsAuthenticated])
+def auto_post_settings(request):
+    """Get or update auto-post settings (singleton per tenant)"""
+    settings_obj, _ = AutoPostSettings.objects.get_or_create(pk=1, defaults={})
+
+    if request.method == 'GET':
+        serializer = AutoPostSettingsSerializer(settings_obj)
+        return Response(serializer.data)
+
+    serializer = AutoPostSettingsSerializer(settings_obj, data=request.data, partial=True)
+    serializer.is_valid(raise_exception=True)
+    serializer.save()
+    return Response(serializer.data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def auto_post_list(request):
+    """List auto-post contents with optional status filter"""
+    queryset = AutoPostContent.objects.all().select_related('featured_product', 'approved_by', 'rejected_by')
+    status_filter = request.GET.get('status')
+    if status_filter:
+        queryset = queryset.filter(status=status_filter)
+
+    page = int(request.GET.get('page', 1))
+    page_size = int(request.GET.get('page_size', 20))
+    start = (page - 1) * page_size
+    end = start + page_size
+    total = queryset.count()
+
+    serializer = AutoPostContentSerializer(queryset[start:end], many=True)
+    return Response({
+        'count': total,
+        'next': f'?page={page + 1}&page_size={page_size}' if end < total else None,
+        'previous': f'?page={page - 1}&page_size={page_size}' if page > 1 else None,
+        'results': serializer.data,
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def auto_post_detail(request, pk):
+    """Get auto-post content detail"""
+    try:
+        post = AutoPostContent.objects.select_related('featured_product', 'approved_by', 'rejected_by').get(pk=pk)
+    except AutoPostContent.DoesNotExist:
+        return Response({'error': 'Post not found'}, status=status.HTTP_404_NOT_FOUND)
+    serializer = AutoPostContentSerializer(post)
+    return Response(serializer.data)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def auto_post_approve(request, pk):
+    """Approve a draft post"""
+    try:
+        post = AutoPostContent.objects.get(pk=pk)
+    except AutoPostContent.DoesNotExist:
+        return Response({'error': 'Post not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if post.status != 'draft':
+        return Response({'error': f'Cannot approve post with status: {post.status}'}, status=status.HTTP_400_BAD_REQUEST)
+
+    post.status = 'approved'
+    post.approved_by = request.user
+    post.approved_at = timezone.now()
+    post.save()
+    serializer = AutoPostContentSerializer(post)
+    return Response(serializer.data)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def auto_post_reject(request, pk):
+    """Reject a draft post"""
+    try:
+        post = AutoPostContent.objects.get(pk=pk)
+    except AutoPostContent.DoesNotExist:
+        return Response({'error': 'Post not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if post.status != 'draft':
+        return Response({'error': f'Cannot reject post with status: {post.status}'}, status=status.HTTP_400_BAD_REQUEST)
+
+    post.status = 'rejected'
+    post.rejected_by = request.user
+    post.rejected_at = timezone.now()
+    post.rejection_reason = request.data.get('reason', '')
+    post.save()
+    serializer = AutoPostContentSerializer(post)
+    return Response(serializer.data)
+
+
+@api_view(['PUT'])
+@permission_classes([IsAuthenticated])
+def auto_post_edit(request, pk):
+    """Edit a draft post's text"""
+    try:
+        post = AutoPostContent.objects.get(pk=pk)
+    except AutoPostContent.DoesNotExist:
+        return Response({'error': 'Post not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if post.status not in ('draft', 'rejected'):
+        return Response({'error': f'Cannot edit post with status: {post.status}'}, status=status.HTTP_400_BAD_REQUEST)
+
+    allowed_fields = ['facebook_text', 'instagram_text', 'image_url', 'target_facebook', 'target_instagram']
+    for field in allowed_fields:
+        if field in request.data:
+            setattr(post, field, request.data[field])
+
+    # Reset to draft if it was rejected and now edited
+    if post.status == 'rejected':
+        post.status = 'draft'
+        post.rejected_by = None
+        post.rejected_at = None
+        post.rejection_reason = ''
+
+    post.save()
+    serializer = AutoPostContentSerializer(post)
+    return Response(serializer.data)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def auto_post_generate(request):
+    """Manually trigger post generation"""
+    from .services.ai_content_service import AIContentService
+
+    try:
+        auto_settings, _ = AutoPostSettings.objects.get_or_create(pk=1, defaults={})
+
+        service = AIContentService()
+        result = service.generate_post_for_tenant(auto_settings)
+
+        serializer = AutoPostContentSerializer(result)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    except Exception as e:
+        logger.error(f"Error generating auto-post: {e}")
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def auto_post_publish(request, pk):
+    """Manually publish an approved post"""
+    try:
+        post = AutoPostContent.objects.get(pk=pk)
+    except AutoPostContent.DoesNotExist:
+        return Response({'error': 'Post not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if post.status not in ('approved', 'failed'):
+        return Response({'error': f'Cannot publish post with status: {post.status}'}, status=status.HTTP_400_BAD_REQUEST)
+
+    from .services.facebook_publisher import FacebookPublisher
+    from .services.instagram_publisher import InstagramPublisher
+
+    errors = []
+
+    if post.target_facebook:
+        try:
+            fb_publisher = FacebookPublisher()
+            fb_post_id = fb_publisher.publish(post)
+            post.facebook_post_id = fb_post_id
+        except Exception as e:
+            errors.append(f"Facebook: {str(e)}")
+            logger.error(f"Facebook publish error for post {pk}: {e}")
+
+    if post.target_instagram:
+        try:
+            ig_publisher = InstagramPublisher()
+            ig_media_id = ig_publisher.publish(post)
+            post.instagram_media_id = ig_media_id
+        except Exception as e:
+            errors.append(f"Instagram: {str(e)}")
+            logger.error(f"Instagram publish error for post {pk}: {e}")
+
+    if errors:
+        post.status = 'failed'
+        post.error_message = '; '.join(errors)
+    else:
+        post.status = 'published'
+        post.published_at = timezone.now()
+
+    post.save()
+    serializer = AutoPostContentSerializer(post)
+    return Response(serializer.data)

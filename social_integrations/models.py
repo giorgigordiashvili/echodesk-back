@@ -23,6 +23,10 @@ class FacebookPageConnection(models.Model):
     page_name = models.CharField(max_length=200)
     page_access_token = models.TextField()
     is_active = models.BooleanField(default=True)
+    has_publishing_permission = models.BooleanField(
+        default=False,
+        help_text='Whether this connection has been granted publishing scopes (pages_manage_posts, instagram_content_publish)'
+    )
 
     # Deactivation tracking
     deactivated_at = models.DateTimeField(null=True, blank=True, help_text='When the page was deactivated')
@@ -1816,3 +1820,121 @@ class ConversationArchive(models.Model):
 
     def __str__(self):
         return f"{self.platform} - {self.conversation_id} (archived {self.archived_at})"
+
+
+class AutoPostSettings(models.Model):
+    """Singleton per tenant — AI auto-posting configuration"""
+
+    TONE_CHOICES = [
+        ('professional', 'Professional'),
+        ('casual', 'Casual'),
+        ('friendly', 'Friendly'),
+        ('promotional', 'Promotional'),
+        ('informative', 'Informative'),
+    ]
+
+    CONTENT_SOURCE_CHOICES = [
+        ('products', 'Products'),
+        ('company', 'Company Info'),
+        ('both', 'Both'),
+    ]
+
+    is_enabled = models.BooleanField(default=False, help_text='Master toggle for auto-posting')
+    company_description = models.TextField(blank=True, default='', help_text='AI context about the company')
+    posting_time = models.TimeField(default='10:00', help_text='Daily posting time')
+    timezone = models.CharField(max_length=50, default='UTC', help_text='Timezone for schedule calculation')
+    post_to_facebook = models.BooleanField(default=True)
+    post_to_instagram = models.BooleanField(default=True)
+    tone = models.CharField(max_length=20, choices=TONE_CHOICES, default='professional')
+    content_source = models.CharField(max_length=20, choices=CONTENT_SOURCE_CHOICES, default='both')
+    content_language = models.CharField(max_length=10, default='en', help_text='Language for generated content')
+    require_approval = models.BooleanField(default=True, help_text='If True, posts need manual approval before publishing')
+    max_posts_per_day = models.IntegerField(default=1, validators=[MinValueValidator(1), MaxValueValidator(10)])
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Auto Post Settings"
+        verbose_name_plural = "Auto Post Settings"
+
+    def __str__(self):
+        return f"AutoPostSettings (enabled={self.is_enabled})"
+
+
+class AutoPostContent(models.Model):
+    """Post queue and history for AI-generated social media posts"""
+
+    STATUS_CHOICES = [
+        ('draft', 'Draft'),
+        ('approved', 'Approved'),
+        ('published', 'Published'),
+        ('failed', 'Failed'),
+        ('rejected', 'Rejected'),
+    ]
+
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='draft')
+    facebook_text = models.TextField(blank=True, default='', help_text='Post text for Facebook')
+    instagram_text = models.TextField(blank=True, default='', help_text='Post text for Instagram (with hashtags)')
+    image_url = models.URLField(max_length=2000, blank=True, null=True, help_text='Product image or AI-generated image URL')
+    featured_product = models.ForeignKey(
+        'ecommerce_crm.Product',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='auto_posts',
+        help_text='Which product was featured'
+    )
+
+    # Targeting
+    target_facebook = models.BooleanField(default=True)
+    target_instagram = models.BooleanField(default=True)
+
+    # Scheduling
+    scheduled_for = models.DateTimeField(help_text='When to publish')
+
+    # Publishing results
+    facebook_post_id = models.CharField(max_length=255, blank=True, null=True)
+    instagram_media_id = models.CharField(max_length=255, blank=True, null=True)
+    published_at = models.DateTimeField(null=True, blank=True)
+    error_message = models.TextField(blank=True, default='')
+
+    # AI metadata
+    ai_model_used = models.CharField(max_length=50, blank=True, default='')
+
+    # Approval tracking
+    approved_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='approved_auto_posts'
+    )
+    approved_at = models.DateTimeField(null=True, blank=True)
+
+    # Rejection tracking
+    rejected_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='rejected_auto_posts'
+    )
+    rejected_at = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.TextField(blank=True, default='')
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = "Auto Post Content"
+        verbose_name_plural = "Auto Post Contents"
+        indexes = [
+            models.Index(fields=['status', 'scheduled_for']),
+            models.Index(fields=['created_at']),
+        ]
+
+    def __str__(self):
+        product_name = self.featured_product.name if self.featured_product else 'Company'
+        return f"AutoPost [{self.status}] - {product_name} ({self.scheduled_for})"

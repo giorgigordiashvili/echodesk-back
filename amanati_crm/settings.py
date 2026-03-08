@@ -437,6 +437,10 @@ FACEBOOK_APP_ID = config('FACEBOOK_APP_ID', default='')
 FACEBOOK_APP_SECRET = config('FACEBOOK_APP_SECRET', default='')
 FACEBOOK_APP_VERSION = config('FACEBOOK_APP_VERSION', default='v23.0')
 
+# OpenAI Configuration (for AI Auto-Posting)
+OPENAI_API_KEY = config('OPENAI_API_KEY', default='')
+OPENAI_MODEL = config('OPENAI_MODEL', default='gpt-4o')
+
 # TikTok Integration Settings
 TIKTOK_CLIENT_ID = config('TIKTOK_CLIENT_ID', default='')
 TIKTOK_CLIENT_SECRET = config('TIKTOK_CLIENT_SECRET', default='')

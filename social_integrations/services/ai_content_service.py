@@ -1,0 +1,190 @@
+import logging
+import json
+from django.conf import settings
+from openai import OpenAI
+
+from social_integrations.models import AutoPostSettings, AutoPostContent
+
+logger = logging.getLogger(__name__)
+
+
+class AIContentService:
+    def __init__(self):
+        api_key = getattr(settings, 'OPENAI_API_KEY', '')
+        if not api_key:
+            raise ValueError("OPENAI_API_KEY is not configured")
+        self.client = OpenAI(api_key=api_key)
+        self.model = getattr(settings, 'OPENAI_MODEL', 'gpt-4o')
+
+    def generate_post_for_tenant(self, auto_settings: AutoPostSettings) -> AutoPostContent:
+        """Generate a social media post based on tenant settings."""
+        from ecommerce_crm.models import Product
+        from django.utils import timezone
+        import random
+
+        product = None
+        image_url = None
+
+        # Determine content source
+        use_product = auto_settings.content_source in ('products', 'both')
+        use_company = auto_settings.content_source in ('company', 'both')
+
+        if use_product:
+            # Select a product, preferring ones not recently featured
+            recent_product_ids = AutoPostContent.objects.filter(
+                featured_product__isnull=False,
+            ).order_by('-created_at').values_list('featured_product_id', flat=True)[:10]
+
+            products = Product.objects.filter(status='active')
+            unfeatured = products.exclude(id__in=recent_product_ids)
+            product_pool = unfeatured if unfeatured.exists() else products
+
+            if product_pool.exists():
+                product = random.choice(list(product_pool[:20]))
+                image_url = product.image
+            elif not use_company:
+                # No products available and content_source is 'products' only
+                raise ValueError("No active products available to feature")
+
+        # If no product selected and we should use company info, or content_source is 'both' and random
+        should_post_about_company = (
+            product is None or
+            (use_company and use_product and random.random() < 0.3)
+        )
+
+        if should_post_about_company:
+            product = None
+            image_url = None
+
+        # Build context for AI
+        previous_posts = list(
+            AutoPostContent.objects.order_by('-created_at')
+            .values_list('facebook_text', flat=True)[:5]
+        )
+
+        tenant_context = {
+            'company_description': auto_settings.company_description,
+            'language': auto_settings.content_language,
+            'tone': auto_settings.tone,
+            'previous_posts': previous_posts,
+        }
+
+        if product:
+            product_name = product.name
+            if isinstance(product_name, dict):
+                product_name = product_name.get(auto_settings.content_language, product_name.get('en', str(product_name)))
+
+            product_desc = product.description
+            if isinstance(product_desc, dict):
+                product_desc = product_desc.get(auto_settings.content_language, product_desc.get('en', ''))
+
+            tenant_context['product'] = {
+                'name': str(product_name),
+                'description': str(product_desc) if product_desc else '',
+                'price': str(product.price) if product.price else '',
+            }
+
+        result = self._call_openai(tenant_context)
+
+        # Generate image for company posts if no product image
+        if not image_url and product is None:
+            try:
+                from .image_service import ImageService
+                image_service = ImageService()
+                image_url = image_service.generate_image(
+                    result.get('image_prompt', f"Marketing image for: {auto_settings.company_description[:100]}")
+                )
+            except Exception as e:
+                logger.warning(f"Failed to generate image: {e}")
+
+        # Determine schedule
+        now = timezone.now()
+        scheduled_for = now
+
+        # Create the content record
+        post = AutoPostContent.objects.create(
+            status='draft' if auto_settings.require_approval else 'approved',
+            facebook_text=result.get('facebook_text', ''),
+            instagram_text=result.get('instagram_text', ''),
+            image_url=image_url or '',
+            featured_product=product,
+            target_facebook=auto_settings.post_to_facebook,
+            target_instagram=auto_settings.post_to_instagram,
+            scheduled_for=scheduled_for,
+            ai_model_used=self.model,
+        )
+
+        return post
+
+    def _call_openai(self, context: dict) -> dict:
+        """Call OpenAI to generate post content."""
+        product_info = ""
+        if 'product' in context:
+            p = context['product']
+            product_info = f"""
+Product to feature:
+- Name: {p['name']}
+- Description: {p.get('description', 'N/A')}
+- Price: {p.get('price', 'N/A')}
+"""
+
+        previous = ""
+        if context.get('previous_posts'):
+            previous = "\nRecent posts (avoid repetition):\n" + "\n".join(
+                f"- {p[:100]}..." for p in context['previous_posts'] if p
+            )
+
+        prompt = f"""Generate a social media marketing post for a business.
+
+Company info: {context.get('company_description', 'A modern business')}
+Tone: {context.get('tone', 'professional')}
+Language: {context.get('language', 'en')}
+{product_info}
+{previous}
+
+Return a JSON object with these fields:
+- "facebook_text": The post text optimized for Facebook (no hashtags, engaging, under 500 chars)
+- "instagram_text": The post text optimized for Instagram (include 5-10 relevant hashtags at the end, under 2200 chars)
+- "image_prompt": A short DALL-E prompt for generating a matching marketing image (only if no product image is used)
+
+Important:
+- Write in the specified language
+- Make it engaging and on-brand
+- Do NOT repeat content from recent posts
+- Facebook: conversational, call-to-action
+- Instagram: visually descriptive, with hashtags
+
+Respond ONLY with valid JSON, no markdown."""
+
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "You are a social media marketing expert. Always respond with valid JSON only."},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.8,
+                max_tokens=1000,
+            )
+
+            content = response.choices[0].message.content.strip()
+            # Strip markdown code fences if present
+            if content.startswith('```'):
+                content = content.split('\n', 1)[1] if '\n' in content else content[3:]
+                if content.endswith('```'):
+                    content = content[:-3]
+                content = content.strip()
+
+            result = json.loads(content)
+            return result
+
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse OpenAI response as JSON: {e}")
+            return {
+                'facebook_text': 'Check out our latest offerings!',
+                'instagram_text': 'Check out our latest offerings! #business #marketing',
+                'image_prompt': 'Modern business marketing image',
+            }
+        except Exception as e:
+            logger.error(f"OpenAI API error: {e}")
+            raise
