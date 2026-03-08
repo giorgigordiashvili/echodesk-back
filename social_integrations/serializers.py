@@ -6,7 +6,7 @@ from .models import (
     WhatsAppContact, SocialIntegrationSettings, ConversationAutoReply,
     ChatAssignment, ChatRating,
     EmailConnection, EmailMessage, EmailDraft, EmailConnectionUserAssignment,
-    TikTokCreatorAccount, TikTokMessage,
+    TikTokShopAccount, TikTokMessage,
     EmailSignature, QuickReply,
     SocialClient, SocialClientCustomField, SocialClientCustomFieldValue, SocialAccount,
     AutoPostSettings, AutoPostContent,
@@ -704,65 +704,67 @@ class EmailConnectionWithAssignmentsSerializer(serializers.ModelSerializer):
 # TikTok Serializers
 # =============================================================================
 
-class TikTokCreatorAccountSerializer(serializers.ModelSerializer):
-    """Read-only serializer for TikTok creator accounts - NEVER exposes tokens"""
+class TikTokShopAccountSerializer(serializers.ModelSerializer):
+    """Read-only serializer for TikTok Shop accounts - NEVER exposes tokens"""
 
     class Meta:
-        model = TikTokCreatorAccount
+        model = TikTokShopAccount
         fields = [
-            'id', 'open_id', 'union_id', 'username', 'display_name', 'avatar_url',
-            'scope', 'is_active', 'token_expires_at',
+            'id', 'open_id', 'seller_name', 'seller_base_region',
+            'shop_id', 'shop_cipher', 'user_type',
+            'scope', 'is_active', 'token_expires_at', 'refresh_token_expires_at',
             'deactivated_at', 'deactivation_reason',
             'created_at', 'updated_at'
         ]
         read_only_fields = [
-            'id', 'open_id', 'union_id', 'scope', 'token_expires_at',
+            'id', 'open_id', 'seller_name', 'seller_base_region',
+            'shop_id', 'shop_cipher', 'user_type',
+            'scope', 'token_expires_at', 'refresh_token_expires_at',
             'deactivated_at', 'deactivation_reason',
             'created_at', 'updated_at'
         ]
 
 
 class TikTokMessageSerializer(serializers.ModelSerializer):
-    """Serializer for TikTok messages"""
-    account_username = serializers.CharField(source='creator_account.username', read_only=True)
-    account_display_name = serializers.CharField(source='creator_account.display_name', read_only=True)
-    account_id = serializers.CharField(source='creator_account.open_id', read_only=True)
+    """Serializer for TikTok Shop messages"""
+    account_seller_name = serializers.CharField(source='shop_account.seller_name', read_only=True)
+    account_id = serializers.CharField(source='shop_account.open_id', read_only=True)
 
     class Meta:
         model = TikTokMessage
         fields = [
-            'id', 'message_id', 'conversation_id',
-            'sender_id', 'sender_username', 'sender_display_name', 'sender_avatar_url',
+            'id', 'message_id', 'conversation_id', 'index',
+            'sender_id', 'sender_role', 'sender_im_user_id', 'buyer_user_id',
             'message_type', 'message_text', 'media_url', 'media_mime_type', 'attachments',
             'timestamp', 'is_from_creator',
             'is_delivered', 'delivered_at', 'is_read', 'read_at',
             'is_read_by_staff', 'read_by_staff_at',
             'error_message',
-            'account_username', 'account_display_name', 'account_id',
+            'account_seller_name', 'account_id',
             'created_at'
         ]
         read_only_fields = [
-            'id', 'message_id', 'conversation_id',
-            'sender_id', 'sender_username', 'sender_display_name', 'sender_avatar_url',
+            'id', 'message_id', 'conversation_id', 'index',
+            'sender_id', 'sender_role', 'sender_im_user_id', 'buyer_user_id',
             'message_type', 'media_url', 'media_mime_type', 'attachments',
             'timestamp', 'is_from_creator',
             'is_delivered', 'delivered_at', 'is_read', 'read_at',
             'error_message',
-            'account_username', 'account_display_name', 'account_id',
+            'account_seller_name', 'account_id',
             'created_at'
         ]
 
 
 class TikTokSendMessageSerializer(serializers.Serializer):
-    """Serializer for sending TikTok messages"""
+    """Serializer for sending TikTok Shop messages"""
     conversation_id = serializers.CharField(
         max_length=255,
-        help_text="Conversation ID (sender's open_id) to send message to"
+        help_text="Conversation ID to send message in"
     )
     message = serializers.CharField(help_text="Message text to send")
     message_type = serializers.ChoiceField(
-        choices=['text', 'image', 'video'],
-        default='text',
+        choices=['TEXT', 'IMAGE', 'VIDEO', 'PRODUCT_CARD', 'ORDER_CARD', 'EMOTICONS'],
+        default='TEXT',
         help_text="Type of message to send"
     )
     media_url = serializers.URLField(
@@ -773,18 +775,18 @@ class TikTokSendMessageSerializer(serializers.Serializer):
 
     def validate(self, data):
         """Validate message content based on type"""
-        msg_type = data.get('message_type', 'text')
-        if msg_type == 'text' and not data.get('message'):
+        msg_type = data.get('message_type', 'TEXT')
+        if msg_type == 'TEXT' and not data.get('message'):
             raise serializers.ValidationError({'message': "Message text is required for text messages"})
-        if msg_type in ('image', 'video') and not data.get('media_url'):
+        if msg_type in ('IMAGE', 'VIDEO') and not data.get('media_url'):
             raise serializers.ValidationError({'media_url': f"Media URL is required for {msg_type} messages"})
         return data
 
 
 class TikTokStatusSerializer(serializers.Serializer):
-    """Serializer for TikTok connection status response"""
+    """Serializer for TikTok Shop connection status response"""
     connected = serializers.BooleanField()
-    account = TikTokCreatorAccountSerializer(allow_null=True)
+    account = TikTokShopAccountSerializer(allow_null=True)
     token_expires_at = serializers.DateTimeField(allow_null=True)
     is_token_expired = serializers.BooleanField()
 

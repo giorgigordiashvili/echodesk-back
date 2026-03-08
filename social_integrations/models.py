@@ -1187,8 +1187,8 @@ class EmailDraft(models.Model):
         return f"Draft: {self.subject[:50] or 'No subject'}"
 
 
-class TikTokCreatorAccount(models.Model):
-    """Stores TikTok Creator/Business account connection details for a tenant"""
+class TikTokShopAccount(models.Model):
+    """Stores TikTok Shop seller account connection details for a tenant"""
 
     DEACTIVATION_REASONS = [
         ('expired_token', 'Access Token Expired'),
@@ -1197,25 +1197,29 @@ class TikTokCreatorAccount(models.Model):
         ('api_error', 'API Error'),
     ]
 
-    # TikTok identifiers
+    USER_TYPE_CHOICES = [
+        (0, 'Seller'),
+        (1, 'Creator'),
+        (3, 'Partner'),
+    ]
+
+    # TikTok Shop identifiers
     open_id = models.CharField(
         max_length=255,
         unique=True,
         help_text="TikTok user unique ID (open_id)"
     )
-    union_id = models.CharField(
-        max_length=255,
-        blank=True,
-        help_text="Cross-app user ID for same developer"
-    )
-    username = models.CharField(max_length=100, blank=True)
-    display_name = models.CharField(max_length=200, blank=True)
-    avatar_url = models.URLField(max_length=500, blank=True, null=True)
+    seller_name = models.CharField(max_length=200, blank=True, help_text="Seller name from token response")
+    seller_base_region = models.CharField(max_length=10, blank=True, help_text="Seller base region (e.g. GB)")
+    shop_id = models.CharField(max_length=255, blank=True, help_text="Shop ID from webhook payloads")
+    shop_cipher = models.CharField(max_length=255, blank=True, help_text="Shop cipher required for API calls")
+    user_type = models.IntegerField(choices=USER_TYPE_CHOICES, default=0, help_text="0=Seller, 1=Creator, 3=Partner")
 
     # OAuth tokens (encrypted using Django's Signer)
     access_token = models.TextField(help_text="Encrypted access token")
     refresh_token = models.TextField(help_text="Encrypted refresh token")
     token_expires_at = models.DateTimeField(help_text="When the access token expires")
+    refresh_token_expires_at = models.DateTimeField(null=True, blank=True, help_text="When the refresh token expires")
     scope = models.TextField(blank=True, help_text="Granted OAuth scopes")
 
     # Status
@@ -1233,11 +1237,11 @@ class TikTokCreatorAccount(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        verbose_name = "TikTok Creator Account"
-        verbose_name_plural = "TikTok Creator Accounts"
+        verbose_name = "TikTok Shop Account"
+        verbose_name_plural = "TikTok Shop Accounts"
 
     def __str__(self):
-        return f"@{self.username or self.open_id} - TikTok"
+        return f"{self.seller_name or self.open_id} - TikTok Shop"
 
     def set_tokens(self, access_token, refresh_token):
         """Encrypt and store tokens using Django's Signer"""
@@ -1266,18 +1270,33 @@ class TikTokCreatorAccount(models.Model):
 
 
 class TikTokMessage(models.Model):
-    """Stores TikTok Direct Messages"""
+    """Stores TikTok Shop Customer Service Messages"""
 
     MESSAGE_TYPE_CHOICES = [
-        ('text', 'Text'),
-        ('image', 'Image'),
-        ('video', 'Video'),
-        ('card', 'Card'),
-        ('sticker', 'Sticker'),
+        ('TEXT', 'Text'),
+        ('IMAGE', 'Image'),
+        ('VIDEO', 'Video'),
+        ('PRODUCT_CARD', 'Product Card'),
+        ('ORDER_CARD', 'Order Card'),
+        ('EMOTICONS', 'Emoticons'),
+        ('COUPON_CARD', 'Coupon Card'),
+        ('LOGISTICS_CARD', 'Logistics Card'),
+        ('RETURN_REFUND_CARD', 'Return/Refund Card'),
+        ('NOTIFICATION', 'Notification'),
+        ('ALLOCATED_SERVICE', 'Allocated Service'),
+        ('OTHER', 'Other'),
     ]
 
-    creator_account = models.ForeignKey(
-        TikTokCreatorAccount,
+    SENDER_ROLE_CHOICES = [
+        ('BUYER', 'Buyer'),
+        ('CUSTOMER_SERVICE', 'Customer Service'),
+        ('SHOP', 'Shop'),
+        ('SYSTEM', 'System'),
+        ('ROBOT', 'Robot'),
+    ]
+
+    shop_account = models.ForeignKey(
+        TikTokShopAccount,
         on_delete=models.CASCADE,
         related_name='messages'
     )
@@ -1287,17 +1306,23 @@ class TikTokMessage(models.Model):
     conversation_id = models.CharField(
         max_length=255,
         db_index=True,
-        help_text="Conversation ID for grouping messages with same user"
+        help_text="Conversation ID for grouping messages"
     )
+    index = models.CharField(max_length=255, blank=True, help_text="Message index for ordering")
 
     # Sender info
-    sender_id = models.CharField(max_length=255, help_text="TikTok open_id of sender")
-    sender_username = models.CharField(max_length=100, blank=True)
-    sender_display_name = models.CharField(max_length=200, blank=True)
-    sender_avatar_url = models.URLField(max_length=500, blank=True, null=True)
+    sender_id = models.CharField(max_length=255, help_text="Sender identifier")
+    sender_role = models.CharField(
+        max_length=20,
+        choices=SENDER_ROLE_CHOICES,
+        blank=True,
+        help_text="Role of the sender: BUYER, CUSTOMER_SERVICE, SHOP, SYSTEM, ROBOT"
+    )
+    sender_im_user_id = models.CharField(max_length=255, blank=True, help_text="Internal CS participant ID")
+    buyer_user_id = models.CharField(max_length=255, blank=True, help_text="Buyer user ID for querying orders")
 
     # Content
-    message_type = models.CharField(max_length=20, choices=MESSAGE_TYPE_CHOICES, default='text')
+    message_type = models.CharField(max_length=30, choices=MESSAGE_TYPE_CHOICES, default='TEXT')
     message_text = models.TextField(blank=True)
     media_url = models.URLField(max_length=1000, blank=True, null=True)
     media_mime_type = models.CharField(max_length=100, blank=True)
@@ -1305,7 +1330,7 @@ class TikTokMessage(models.Model):
 
     # Metadata
     timestamp = models.DateTimeField(help_text="Message timestamp from TikTok")
-    is_from_creator = models.BooleanField(default=False, help_text="True if sent by business/creator")
+    is_from_creator = models.BooleanField(default=False, help_text="True if sent by shop/customer service")
 
     # Status tracking
     is_delivered = models.BooleanField(default=False)
@@ -1335,8 +1360,8 @@ class TikTokMessage(models.Model):
     class Meta:
         ordering = ['-timestamp']
         indexes = [
-            models.Index(fields=['creator_account', 'conversation_id']),
-            models.Index(fields=['creator_account', 'timestamp']),
+            models.Index(fields=['shop_account', 'conversation_id']),
+            models.Index(fields=['shop_account', 'timestamp']),
             models.Index(fields=['sender_id', 'timestamp']),
         ]
         verbose_name = "TikTok Message"
@@ -1344,12 +1369,12 @@ class TikTokMessage(models.Model):
 
     def __str__(self):
         direction = "to" if self.is_from_creator else "from"
-        sender = self.sender_display_name or self.sender_username or self.sender_id
+        sender = self.sender_role or self.sender_id
         if self.message_text:
-            return f"TikTok DM {direction} @{sender} - {self.message_text[:50]}"
+            return f"TikTok Shop msg {direction} {sender} - {self.message_text[:50]}"
         elif self.message_type:
-            return f"TikTok DM {direction} @{sender} - [{self.message_type}]"
-        return f"TikTok DM {direction} @{sender}"
+            return f"TikTok Shop msg {direction} {sender} - [{self.message_type}]"
+        return f"TikTok Shop msg {direction} {sender}"
 
 
 class EmailConnectionUserAssignment(models.Model):

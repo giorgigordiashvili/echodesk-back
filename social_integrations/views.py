@@ -30,7 +30,7 @@ from .models import (
     WhatsAppContact, SocialIntegrationSettings, ConversationAutoReply,
     ChatAssignment, ChatRating, ConversationArchive,
     EmailConnection, EmailMessage, EmailDraft, EmailConnectionUserAssignment,
-    TikTokCreatorAccount, TikTokMessage,
+    TikTokShopAccount, TikTokMessage,
     EmailSignature, QuickReply,
     SocialClient, SocialClientCustomField, SocialClientCustomFieldValue, SocialAccount,
     AutoPostSettings, AutoPostContent,
@@ -47,7 +47,7 @@ from .serializers import (
     EmailSendSerializer, EmailDraftSerializer, EmailMessageActionSerializer, EmailFolderSerializer,
     EmailConnectionUserAssignmentSerializer, EmailConnectionUserAssignmentCreateSerializer,
     EmailConnectionWithAssignmentsSerializer,
-    TikTokCreatorAccountSerializer, TikTokMessageSerializer, TikTokSendMessageSerializer,
+    TikTokShopAccountSerializer, TikTokMessageSerializer, TikTokSendMessageSerializer,
     EmailSignatureSerializer, QuickReplySerializer, QuickReplyUseSerializer, QuickReplyVariablesSerializer,
     SocialClientSerializer, SocialClientListSerializer, SocialClientCreateSerializer,
     SocialClientCustomFieldSerializer, SocialAccountSerializer, SocialAccountLinkSerializer,
@@ -8655,12 +8655,12 @@ def email_assignment_delete(request, assignment_id):
 # TikTok Integration Views
 # =============================================================================
 
-def find_tenant_by_tiktok_open_id(open_id):
+def find_tenant_by_tiktok_shop_id(shop_id):
     """
-    Find the tenant schema that owns a TikTok creator account.
+    Find the tenant schema that owns a TikTok Shop account by shop_id.
 
     Args:
-        open_id: TikTok open_id to search for
+        shop_id: TikTok shop_id from webhook payloads
 
     Returns:
         Tenant schema name or None if not found
@@ -8670,7 +8670,7 @@ def find_tenant_by_tiktok_open_id(open_id):
     tenants = Tenant.objects.exclude(schema_name='public')
     for tenant in tenants:
         with schema_context(tenant.schema_name):
-            if TikTokCreatorAccount.objects.filter(open_id=open_id, is_active=True).exists():
+            if TikTokShopAccount.objects.filter(shop_id=shop_id, is_active=True).exists():
                 return tenant.schema_name
     return None
 
@@ -8708,13 +8708,12 @@ def tiktok_oauth_start(request):
 @require_http_methods(["GET", "POST"])
 def tiktok_oauth_callback(request):
     """
-    Handle TikTok OAuth callback.
-    Exchanges the authorization code for tokens and creates/updates the account connection.
-
-    Also handles TikTok ping events sent via POST for URL validation.
+    Handle TikTok Shop OAuth callback.
+    Exchanges the authorization code for tokens, fetches authorized shops,
+    and creates/updates the TikTokShopAccount connection.
     """
     import json
-    from .tiktok_utils import exchange_code_for_token, get_user_info
+    from .tiktok_utils import exchange_code_for_token, get_authorized_shops
 
     # Handle POST requests (TikTok sends ping events to validate URL)
     if request.method == 'POST':
@@ -8724,7 +8723,6 @@ def tiktok_oauth_callback(request):
             if event == 'tiktok.ping':
                 logger.info(f"TikTok ping received: {data}")
                 return JsonResponse({'status': 'ok', 'message': 'Ping received'})
-            # Return success for any other POST to pass validation
             return JsonResponse({'status': 'ok'})
         except Exception as e:
             logger.error(f"TikTok callback POST error: {e}")
@@ -8735,7 +8733,7 @@ def tiktok_oauth_callback(request):
     error = request.GET.get('error')
     error_description = request.GET.get('error_description', '')
 
-    # Parse tenant from state first (needed for frontend URL)
+    # Parse tenant from state
     tenant_schema = None
     for param in state.split('&'):
         if param.startswith('tenant='):
@@ -8750,7 +8748,7 @@ def tiktok_oauth_callback(request):
 
     # Handle OAuth errors
     if error:
-        logger.error(f"TikTok OAuth error: {error} - {error_description}")
+        logger.error(f"TikTok Shop OAuth error: {error} - {error_description}")
         return redirect(f'{frontend_url}/social/connections?tiktok_status=error&message={quote_plus(error_description)}')
 
     if not code:
@@ -8760,23 +8758,35 @@ def tiktok_oauth_callback(request):
         return redirect(f'{frontend_url}/social/connections?tiktok_status=error&message=Invalid+state+parameter')
 
     try:
-        # Exchange code for tokens
+        # Exchange code for tokens (TikTok Shop uses auth_code param name)
         tokens = exchange_code_for_token(code)
 
-        # Get user info
-        user_info = get_user_info(tokens['access_token'])
+        # Get authorized shops to obtain shop_cipher and shop_id
+        shop_cipher = ''
+        shop_id = ''
+        try:
+            shops = get_authorized_shops(tokens['access_token'])
+            if shops:
+                # Use the first shop
+                shop = shops[0]
+                shop_cipher = shop.get('cipher', '')
+                shop_id = shop.get('id', '')
+        except Exception as e:
+            logger.warning(f"Could not fetch authorized shops: {e}")
 
         # Save connection in the correct tenant schema
         with schema_context(tenant_schema):
-            account, created = TikTokCreatorAccount.objects.update_or_create(
-                open_id=tokens.get('open_id') or user_info.get('open_id'),
+            account, created = TikTokShopAccount.objects.update_or_create(
+                open_id=tokens.get('open_id'),
                 defaults={
-                    'union_id': user_info.get('union_id', ''),
-                    'username': user_info.get('username', ''),
-                    'display_name': user_info.get('display_name', ''),
-                    'avatar_url': user_info.get('avatar_url'),
-                    'token_expires_at': tokens['expires_at'],
-                    'scope': tokens.get('scope', ''),
+                    'seller_name': tokens.get('seller_name', ''),
+                    'seller_base_region': tokens.get('seller_base_region', ''),
+                    'shop_id': shop_id,
+                    'shop_cipher': shop_cipher,
+                    'user_type': tokens.get('user_type', 0),
+                    'token_expires_at': tokens['access_expires_at'],
+                    'refresh_token_expires_at': tokens['refresh_expires_at'],
+                    'scope': tokens.get('granted_scopes', ''),
                     'is_active': True,
                     'deactivated_at': None,
                     'deactivation_reason': '',
@@ -8787,12 +8797,12 @@ def tiktok_oauth_callback(request):
             account.set_tokens(tokens['access_token'], tokens['refresh_token'])
             account.save(update_fields=['access_token', 'refresh_token'])
 
-            logger.info(f"TikTok account {'created' if created else 'updated'}: @{account.username}")
+            logger.info(f"TikTok Shop account {'created' if created else 'updated'}: {account.seller_name}")
 
         return redirect(f'{frontend_url}/social/connections?tiktok_status=connected')
 
     except Exception as e:
-        logger.error(f"TikTok OAuth callback error: {e}")
+        logger.error(f"TikTok Shop OAuth callback error: {e}")
         return redirect(f'{frontend_url}/social/connections?tiktok_status=error&message={quote_plus(str(e))}')
 
 
@@ -8800,78 +8810,86 @@ def tiktok_oauth_callback(request):
 @require_http_methods(["GET", "POST"])
 def tiktok_webhook(request):
     """
-    Handle TikTok webhook events.
+    Handle TikTok Shop webhook events.
 
     GET: Webhook verification challenge
-    POST: Incoming message events
+    POST: Incoming customer service events (type 13=new conversation, type 14=new message)
     """
     import json
-    from .tiktok_utils import verify_webhook_signature, parse_webhook_timestamp
+    from .tiktok_utils import verify_webhook_signature, get_tiktok_shop_config
 
     # GET: Webhook verification
     if request.method == 'GET':
         challenge = request.GET.get('challenge', '')
-        # Return challenge for verification
         return HttpResponse(challenge, content_type='text/plain')
 
     # POST: Incoming events
     elif request.method == 'POST':
-        # Verify webhook signature
-        signature = request.headers.get('X-Tiktok-Signature', '')
-        if signature and not verify_webhook_signature(request.body, signature):
-            logger.warning("TikTok webhook signature verification failed")
+        config = get_tiktok_shop_config()
+
+        # Verify webhook signature (TTSPC uses Authorization header)
+        signature = request.headers.get('Authorization', '')
+        payload_str = request.body.decode('utf-8') if request.body else ''
+        if signature and not verify_webhook_signature(
+            config['app_key'], config['app_secret'], payload_str, signature
+        ):
+            logger.warning("TikTok Shop webhook signature verification failed")
             return JsonResponse({'error': 'Invalid signature'}, status=403)
 
         try:
             data = json.loads(request.body)
         except json.JSONDecodeError:
-            logger.error("TikTok webhook: Invalid JSON payload")
+            logger.error("TikTok Shop webhook: Invalid JSON payload")
             return JsonResponse({'error': 'Invalid JSON'}, status=400)
 
-        # Process events
-        events = data.get('events', [])
-        for event in events:
-            event_type = event.get('type', '')
+        # TikTok Shop webhook format: {type, shop_id, timestamp, data: {...}}
+        event_type = data.get('type')
+        shop_id = str(data.get('shop_id', ''))
 
-            if event_type == 'message.create':
-                process_tiktok_message_event(event)
-            elif event_type == 'message.read':
-                process_tiktok_read_receipt(event)
-            else:
-                logger.debug(f"Unhandled TikTok event type: {event_type}")
+        if event_type == 14:
+            # New message
+            process_tiktok_message_event(data, shop_id)
+        elif event_type == 13:
+            # New conversation
+            logger.info(f"TikTok Shop new conversation event for shop {shop_id}")
+        else:
+            logger.debug(f"Unhandled TikTok Shop event type: {event_type}")
 
         return JsonResponse({'status': 'received'})
 
 
-def process_tiktok_message_event(event):
-    """Process incoming TikTok message event"""
-    from .tiktok_utils import parse_webhook_timestamp
+def process_tiktok_message_event(webhook_data, shop_id):
+    """
+    Process incoming TikTok Shop message event (type 14).
 
-    # Extract recipient (business account)
-    to_user_id = event.get('to_user_id') or event.get('recipient', {}).get('open_id')
-    if not to_user_id:
-        logger.warning("TikTok message event missing recipient info")
+    Webhook data format:
+    {type: 14, shop_id, timestamp, tts_notification_id, data: {
+        message_id, index, conversation_id, type, content (JSON string),
+        create_time, is_visible, sender: {im_user_id, role}
+    }}
+    """
+    if not shop_id:
+        logger.warning("TikTok Shop message event missing shop_id")
         return
 
-    # Find tenant by creator account
-    tenant_schema = find_tenant_by_tiktok_open_id(to_user_id)
+    # Find tenant by shop_id
+    tenant_schema = find_tenant_by_tiktok_shop_id(shop_id)
     if not tenant_schema:
-        logger.warning(f"TikTok message for unknown account: {to_user_id}")
-        # TODO: Could log orphaned messages like Facebook
+        logger.warning(f"TikTok Shop message for unknown shop: {shop_id}")
         return
 
     with schema_context(tenant_schema):
         try:
-            account = TikTokCreatorAccount.objects.get(open_id=to_user_id, is_active=True)
-        except TikTokCreatorAccount.DoesNotExist:
-            logger.error(f"TikTok account not found: {to_user_id}")
+            account = TikTokShopAccount.objects.get(shop_id=shop_id, is_active=True)
+        except TikTokShopAccount.DoesNotExist:
+            logger.error(f"TikTok Shop account not found for shop_id: {shop_id}")
             return
 
-        message = event.get('message', {})
-        message_id = message.get('message_id') or event.get('message_id')
+        msg_data = webhook_data.get('data', {})
+        message_id = msg_data.get('message_id')
 
         if not message_id:
-            logger.warning("TikTok message event missing message_id")
+            logger.warning("TikTok Shop message event missing message_id")
             return
 
         # Check for duplicate
@@ -8879,25 +8897,52 @@ def process_tiktok_message_event(event):
             return
 
         # Extract sender info
-        from_user_id = event.get('from_user_id') or event.get('sender', {}).get('open_id')
-        sender_info = event.get('sender', {})
+        sender = msg_data.get('sender', {})
+        sender_role = sender.get('role', '')
+        sender_im_user_id = sender.get('im_user_id', '')
+
+        # Parse content (JSON string)
+        import json
+        content_str = msg_data.get('content', '{}')
+        try:
+            content = json.loads(content_str) if isinstance(content_str, str) else content_str
+        except (json.JSONDecodeError, TypeError):
+            content = {}
+
+        message_text = content.get('content', '') or content.get('text', '')
+        media_url = content.get('url', '') or content.get('media_url', '')
+
+        # Map sender role to is_from_creator
+        is_from_creator = sender_role in ('CUSTOMER_SERVICE', 'SHOP')
+
+        # Parse timestamp
+        create_time = msg_data.get('create_time', webhook_data.get('timestamp', 0))
+        try:
+            ts = int(create_time)
+            if ts > 10000000000:
+                ts = ts / 1000
+            timestamp = datetime.fromtimestamp(ts)
+        except (ValueError, TypeError, OSError):
+            timestamp = timezone.now()
+
+        conversation_id = msg_data.get('conversation_id', '')
 
         # Create message record
         msg_obj = TikTokMessage.objects.create(
-            creator_account=account,
+            shop_account=account,
             message_id=message_id,
-            conversation_id=from_user_id,  # Use sender's open_id as conversation ID
-            sender_id=from_user_id,
-            sender_username=sender_info.get('username', ''),
-            sender_display_name=sender_info.get('display_name', ''),
-            sender_avatar_url=sender_info.get('avatar_url'),
-            message_type=message.get('type', 'text'),
-            message_text=message.get('text', ''),
-            media_url=message.get('media_url'),
-            media_mime_type=message.get('media_mime_type', ''),
-            attachments=message.get('attachments', []),
-            timestamp=parse_webhook_timestamp(message.get('create_time') or event.get('timestamp')),
-            is_from_creator=False,
+            conversation_id=conversation_id,
+            index=msg_data.get('index', ''),
+            sender_id=sender_im_user_id,
+            sender_role=sender_role,
+            sender_im_user_id=sender_im_user_id,
+            buyer_user_id=msg_data.get('buyer_user_id', ''),
+            message_type=msg_data.get('type', 'TEXT'),
+            message_text=message_text,
+            media_url=media_url or None,
+            attachments=content.get('attachments', []),
+            timestamp=timestamp,
+            is_from_creator=is_from_creator,
         )
 
         # Send WebSocket notification
@@ -8907,8 +8952,7 @@ def process_tiktok_message_event(event):
             'platform': 'tiktok',
             'conversation_id': msg_obj.conversation_id,
             'sender_id': msg_obj.sender_id,
-            'sender_name': msg_obj.sender_display_name or msg_obj.sender_username,
-            'sender_username': msg_obj.sender_username,
+            'sender_name': msg_obj.sender_role,
             'message_text': msg_obj.message_text,
             'message_type': msg_obj.message_type,
             'media_url': msg_obj.media_url,
@@ -8916,9 +8960,8 @@ def process_tiktok_message_event(event):
             'timestamp': msg_obj.timestamp.isoformat(),
             'is_from_creator': msg_obj.is_from_creator,
             'account_id': account.open_id,
-            'chat_id': f'tt_{account.open_id}_{msg_obj.conversation_id}',
+            'chat_id': f'tt_{account.shop_id}_{msg_obj.conversation_id}',
         }
-        # Get assignment for notification filtering
         assigned_user_id = get_assignment_for_conversation(
             platform='tiktok',
             conversation_id=msg_obj.conversation_id,
@@ -8926,44 +8969,18 @@ def process_tiktok_message_event(event):
         )
         send_websocket_notification(tenant_schema, ws_message_data, msg_obj.conversation_id, assigned_user_id)
 
-        logger.info(f"TikTok message saved: {message_id}")
-
-
-def process_tiktok_read_receipt(event):
-    """Process TikTok message read receipt"""
-    to_user_id = event.get('to_user_id') or event.get('recipient', {}).get('open_id')
-    if not to_user_id:
-        return
-
-    tenant_schema = find_tenant_by_tiktok_open_id(to_user_id)
-    if not tenant_schema:
-        return
-
-    with schema_context(tenant_schema):
-        message_ids = event.get('message_ids', [])
-        if not message_ids:
-            message_id = event.get('message_id')
-            if message_id:
-                message_ids = [message_id]
-
-        TikTokMessage.objects.filter(
-            message_id__in=message_ids,
-            is_from_creator=True
-        ).update(
-            is_read=True,
-            read_at=timezone.now()
-        )
+        logger.info(f"TikTok Shop message saved: {message_id}")
 
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, CanViewSocialMessages])
 def tiktok_status(request):
     """
-    Get TikTok connection status.
+    Get TikTok Shop connection status.
     Returns whether connected, account details, and token expiration info.
     """
     try:
-        account = TikTokCreatorAccount.objects.filter(is_active=True).first()
+        account = TikTokShopAccount.objects.filter(is_active=True).first()
 
         if not account:
             return Response({
@@ -8977,15 +8994,15 @@ def tiktok_status(request):
 
         return Response({
             'connected': True,
-            'account': TikTokCreatorAccountSerializer(account).data,
+            'account': TikTokShopAccountSerializer(account).data,
             'token_expires_at': account.token_expires_at,
             'is_token_expired': is_expired
         })
 
     except Exception as e:
-        logger.error(f"Failed to get TikTok status: {e}")
+        logger.error(f"Failed to get TikTok Shop status: {e}")
         return Response({
-            'error': f'Failed to get TikTok status: {str(e)}'
+            'error': f'Failed to get TikTok Shop status: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -8993,23 +9010,16 @@ def tiktok_status(request):
 @permission_classes([IsAuthenticated, CanManageSocialConnections])
 def tiktok_disconnect(request):
     """
-    Disconnect TikTok account.
-    Deactivates the account and optionally revokes the token.
+    Disconnect TikTok Shop account.
+    Deactivates the account.
     """
-    from .tiktok_utils import revoke_access_token
-
     try:
-        account = TikTokCreatorAccount.objects.filter(is_active=True).first()
+        account = TikTokShopAccount.objects.filter(is_active=True).first()
 
         if not account:
             return Response({
-                'error': 'No active TikTok connection found'
+                'error': 'No active TikTok Shop connection found'
             }, status=status.HTTP_404_NOT_FOUND)
-
-        # Try to revoke token (optional, don't fail if it doesn't work)
-        access_token = account.get_access_token()
-        if access_token:
-            revoke_access_token(access_token)
 
         # Deactivate account
         account.is_active = False
@@ -9017,17 +9027,17 @@ def tiktok_disconnect(request):
         account.deactivation_reason = 'manual'
         account.save(update_fields=['is_active', 'deactivated_at', 'deactivation_reason'])
 
-        logger.info(f"TikTok account disconnected: @{account.username}")
+        logger.info(f"TikTok Shop account disconnected: {account.seller_name}")
 
         return Response({
             'status': 'disconnected',
-            'message': 'TikTok account has been disconnected'
+            'message': 'TikTok Shop account has been disconnected'
         })
 
     except Exception as e:
-        logger.error(f"Failed to disconnect TikTok: {e}")
+        logger.error(f"Failed to disconnect TikTok Shop: {e}")
         return Response({
-            'error': f'Failed to disconnect TikTok: {str(e)}'
+            'error': f'Failed to disconnect TikTok Shop: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -9035,12 +9045,10 @@ def tiktok_disconnect(request):
 @permission_classes([IsAuthenticated, CanSendSocialMessages])
 def tiktok_send_message(request):
     """
-    Send a TikTok message.
-
-    Note: TikTok requires user to have messaged first (within 48 hours).
-    Max 10 consecutive messages per 48-hour window.
+    Send a TikTok Shop message via Customer Service API.
     """
     from .tiktok_utils import send_message, ensure_valid_token
+    import json as json_module
 
     serializer = TikTokSendMessageSerializer(data=request.data)
     if not serializer.is_valid():
@@ -9049,45 +9057,53 @@ def tiktok_send_message(request):
     data = serializer.validated_data
     conversation_id = data['conversation_id']
     message_text = data['message']
-    message_type = data.get('message_type', 'text')
-    media_url = data.get('media_url')
+    message_type = data.get('message_type', 'TEXT')
 
     try:
-        account = TikTokCreatorAccount.objects.filter(is_active=True).first()
+        account = TikTokShopAccount.objects.filter(is_active=True).first()
         if not account:
             return Response({
-                'error': 'No active TikTok connection found'
+                'error': 'No active TikTok Shop connection found'
             }, status=status.HTTP_404_NOT_FOUND)
+
+        if not account.shop_cipher:
+            return Response({
+                'error': 'Shop cipher not available. Please reconnect your account.'
+            }, status=status.HTTP_400_BAD_REQUEST)
 
         # Ensure we have a valid token
         access_token = ensure_valid_token(account)
         if not access_token:
             return Response({
-                'error': 'TikTok access token expired. Please reconnect your account.'
+                'error': 'TikTok Shop access token expired. Please reconnect your account.'
             }, status=status.HTTP_401_UNAUTHORIZED)
 
-        # Send message via TikTok API
+        # Build content JSON string
+        if message_type == 'TEXT':
+            content = json_module.dumps({"content": message_text})
+        else:
+            content = json_module.dumps({"content": message_text, "url": data.get('media_url', '')})
+
+        # Send message via TikTok Shop API
         result = send_message(
             access_token=access_token,
-            recipient_open_id=conversation_id,
-            message_type=message_type,
-            text=message_text if message_type == 'text' else None,
-            media_url=media_url if message_type != 'text' else None
+            shop_cipher=account.shop_cipher,
+            conversation_id=conversation_id,
+            msg_type=message_type,
+            content=content
         )
 
         # Create message record
         message_id = result.get('message_id', f'sent_{timezone.now().timestamp()}')
         msg_obj = TikTokMessage.objects.create(
-            creator_account=account,
+            shop_account=account,
             message_id=message_id,
             conversation_id=conversation_id,
             sender_id=account.open_id,
-            sender_username=account.username,
-            sender_display_name=account.display_name,
-            sender_avatar_url=account.avatar_url,
+            sender_role='CUSTOMER_SERVICE',
             message_type=message_type,
-            message_text=message_text if message_type == 'text' else '',
-            media_url=media_url,
+            message_text=message_text,
+            media_url=data.get('media_url'),
             timestamp=timezone.now(),
             is_from_creator=True,
         )
@@ -9098,21 +9114,21 @@ def tiktok_send_message(request):
         })
 
     except Exception as e:
-        logger.error(f"Failed to send TikTok message: {e}")
+        logger.error(f"Failed to send TikTok Shop message: {e}")
         return Response({
             'error': f'Failed to send message: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class TikTokMessageViewSet(viewsets.ReadOnlyModelViewSet):
-    """ViewSet for viewing TikTok messages"""
+    """ViewSet for viewing TikTok Shop messages"""
     serializer_class = TikTokMessageSerializer
     permission_classes = [IsAuthenticated, CanViewSocialMessages]
 
     def get_queryset(self):
         queryset = TikTokMessage.objects.filter(
             is_deleted=False
-        ).select_related('creator_account').order_by('-timestamp')
+        ).select_related('shop_account').order_by('-timestamp')
 
         # Filter by conversation_id for conversation view
         conversation_id = self.request.query_params.get('conversation_id')
@@ -9122,7 +9138,7 @@ class TikTokMessageViewSet(viewsets.ReadOnlyModelViewSet):
         # Filter by account
         account_id = self.request.query_params.get('account_id')
         if account_id:
-            queryset = queryset.filter(creator_account__open_id=account_id)
+            queryset = queryset.filter(shop_account__open_id=account_id)
 
         # Search in message text
         search = self.request.query_params.get('search')
@@ -9134,10 +9150,9 @@ class TikTokMessageViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=False, methods=['get'])
     def conversations(self, request):
         """
-        Get TikTok conversations (grouped by sender).
+        Get TikTok Shop conversations (grouped by conversation_id).
         Returns the latest message from each unique conversation.
         """
-        # Get distinct conversation_ids with their latest message
         conversations = TikTokMessage.objects.filter(
             is_deleted=False
         ).values('conversation_id').annotate(
@@ -9146,14 +9161,13 @@ class TikTokMessageViewSet(viewsets.ReadOnlyModelViewSet):
             unread_count=Count('id', filter=Q(is_read_by_staff=False, is_from_creator=False))
         ).order_by('-latest_timestamp')
 
-        # Get the actual latest message for each conversation
         result = []
-        for conv in conversations[:50]:  # Limit to 50 conversations
+        for conv in conversations[:50]:
             latest_msg = TikTokMessage.objects.filter(
                 conversation_id=conv['conversation_id'],
                 timestamp=conv['latest_timestamp'],
                 is_deleted=False
-            ).select_related('creator_account').first()
+            ).select_related('shop_account').first()
 
             if latest_msg:
                 msg_data = TikTokMessageSerializer(latest_msg).data

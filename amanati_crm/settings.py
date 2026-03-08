@@ -441,11 +441,11 @@ FACEBOOK_APP_VERSION = config('FACEBOOK_APP_VERSION', default='v23.0')
 OPENAI_API_KEY = config('OPENAI_API_KEY', default='')
 OPENAI_MODEL = config('OPENAI_MODEL', default='gpt-4o')
 
-# TikTok Integration Settings
-TIKTOK_CLIENT_ID = config('TIKTOK_CLIENT_ID', default='')
-TIKTOK_CLIENT_SECRET = config('TIKTOK_CLIENT_SECRET', default='')
-TIKTOK_REDIRECT_URI = config('TIKTOK_REDIRECT_URI', default='https://api.echodesk.ge/api/social/tiktok/oauth/callback/')
-TIKTOK_WEBHOOK_SECRET = config('TIKTOK_WEBHOOK_SECRET', default='')
+# TikTok Shop Partner Center Integration Settings
+TIKTOK_SHOP_APP_KEY = config('TIKTOK_SHOP_APP_KEY', default='')
+TIKTOK_SHOP_APP_SECRET = config('TIKTOK_SHOP_APP_SECRET', default='')
+TIKTOK_SHOP_SERVICE_ID = config('TIKTOK_SHOP_SERVICE_ID', default='')
+TIKTOK_SHOP_REDIRECT_URI = config('TIKTOK_SHOP_REDIRECT_URI', default='https://api.echodesk.ge/api/social/tiktok/oauth/callback/')
 
 # Social Integration Configuration
 SOCIAL_INTEGRATIONS = {
@@ -462,11 +462,11 @@ SOCIAL_INTEGRATIONS = {
         'public_profile',  # Basic profile information
         'email',  # Email address
     ],
-    # TikTok Settings
-    'TIKTOK_CLIENT_ID': TIKTOK_CLIENT_ID,
-    'TIKTOK_CLIENT_SECRET': TIKTOK_CLIENT_SECRET,
-    'TIKTOK_REDIRECT_URI': TIKTOK_REDIRECT_URI,
-    'TIKTOK_WEBHOOK_SECRET': TIKTOK_WEBHOOK_SECRET,
+    # TikTok Shop Settings
+    'TIKTOK_SHOP_APP_KEY': TIKTOK_SHOP_APP_KEY,
+    'TIKTOK_SHOP_APP_SECRET': TIKTOK_SHOP_APP_SECRET,
+    'TIKTOK_SHOP_SERVICE_ID': TIKTOK_SHOP_SERVICE_ID,
+    'TIKTOK_SHOP_REDIRECT_URI': TIKTOK_SHOP_REDIRECT_URI,
 }
 
 # ASGI Application for WebSocket support
