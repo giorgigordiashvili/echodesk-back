@@ -117,9 +117,13 @@ class AIContentService:
                 default_prompt = f"Marketing product photo for: {tenant_context['product']['name']}"
             else:
                 default_prompt = f"Marketing image for: {auto_settings.company_description[:100]}"
-            image_url = image_service.generate_image(
-                result.get('image_prompt', default_prompt)
-            )
+            try:
+                image_url = image_service.generate_image(
+                    result.get('image_prompt', default_prompt)
+                )
+            except Exception as e:
+                logger.warning(f"Failed to generate image: {e}")
+                image_url = None
 
         # Determine schedule
         now = timezone.now()
