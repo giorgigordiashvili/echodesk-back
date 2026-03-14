@@ -5,413 +5,145 @@ These endpoints allow external services (like DigitalOcean Functions)
 to trigger scheduled tasks via HTTP requests.
 
 Secured with CRON_SECRET_TOKEN environment variable.
+
+Tasks are dispatched asynchronously via Celery.
 """
 
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from django.conf import settings
-from django.core.management import call_command
-from io import StringIO
 import logging
 
 logger = logging.getLogger(__name__)
 
 
-@api_view(['GET', 'POST'])
-@permission_classes([AllowAny])
-def cron_recurring_payments(request):
-    """
-    HTTP endpoint to trigger recurring payment processing
-
-    Security: Requires CRON_SECRET_TOKEN in header or query param
-
-    Usage:
-    curl -X GET "https://api.echodesk.ge/api/cron/recurring-payments/" \
-         -H "X-Cron-Token: your-secret-token"
-
-    Or with query param:
-    https://api.echodesk.ge/api/cron/recurring-payments/?token=your-secret-token
-    """
-    # Verify token
+def _verify_cron_token(request):
+    """Verify cron token from header or query param. Returns error Response or None."""
     token = request.headers.get('X-Cron-Token') or request.GET.get('token')
     expected_token = getattr(settings, 'CRON_SECRET_TOKEN', None)
 
     if not expected_token:
         logger.error('CRON_SECRET_TOKEN not configured in settings')
-        return Response({
-            'error': 'Cron service not configured'
-        }, status=500)
+        return Response({'error': 'Cron service not configured'}, status=500)
 
     if not token or token != expected_token:
         logger.warning(f'Unauthorized cron access attempt from {request.META.get("REMOTE_ADDR")}')
-        return Response({
-            'error': 'Unauthorized'
-        }, status=401)
+        return Response({'error': 'Unauthorized'}, status=401)
 
-    # Run command
-    try:
-        output = StringIO()
-        call_command('process_recurring_payments', stdout=output)
+    return None
 
-        output_text = output.getvalue()
-        logger.info(f'Recurring payments cron executed successfully')
 
-        return Response({
-            'status': 'success',
-            'message': 'Recurring payments processed',
-            'output': output_text
-        })
-    except Exception as e:
-        logger.error(f'Recurring payments cron failed: {e}')
-        return Response({
-            'status': 'error',
-            'error': str(e)
-        }, status=500)
+@api_view(['GET', 'POST'])
+@permission_classes([AllowAny])
+def cron_recurring_payments(request):
+    """Trigger recurring payment processing via Celery."""
+    error = _verify_cron_token(request)
+    if error:
+        return error
+
+    from tenants.tasks import process_recurring_payments
+    result = process_recurring_payments.delay()
+    logger.info('Dispatched process_recurring_payments task')
+    return Response({'status': 'accepted', 'task_id': result.id})
 
 
 @api_view(['GET', 'POST'])
 @permission_classes([AllowAny])
 def cron_subscription_check(request):
-    """
-    HTTP endpoint to trigger subscription status check
+    """Trigger subscription status check via Celery."""
+    error = _verify_cron_token(request)
+    if error:
+        return error
 
-    Security: Requires CRON_SECRET_TOKEN in header or query param
-
-    Usage:
-    curl -X GET "https://api.echodesk.ge/api/cron/subscription-check/" \
-         -H "X-Cron-Token: your-secret-token"
-
-    Or with query param:
-    https://api.echodesk.ge/api/cron/subscription-check/?token=your-secret-token
-    """
-    # Verify token
-    token = request.headers.get('X-Cron-Token') or request.GET.get('token')
-    expected_token = getattr(settings, 'CRON_SECRET_TOKEN', None)
-
-    if not expected_token:
-        logger.error('CRON_SECRET_TOKEN not configured in settings')
-        return Response({
-            'error': 'Cron service not configured'
-        }, status=500)
-
-    if not token or token != expected_token:
-        logger.warning(f'Unauthorized cron access attempt from {request.META.get("REMOTE_ADDR")}')
-        return Response({
-            'error': 'Unauthorized'
-        }, status=401)
-
-    # Run command
-    try:
-        output = StringIO()
-        call_command('check_subscription_status', stdout=output)
-
-        output_text = output.getvalue()
-        logger.info(f'Subscription check cron executed successfully')
-
-        return Response({
-            'status': 'success',
-            'message': 'Subscription status checked',
-            'output': output_text
-        })
-    except Exception as e:
-        logger.error(f'Subscription check cron failed: {e}')
-        return Response({
-            'status': 'error',
-            'error': str(e)
-        }, status=500)
+    from tenants.tasks import check_subscription_status
+    result = check_subscription_status.delay()
+    logger.info('Dispatched check_subscription_status task')
+    return Response({'status': 'accepted', 'task_id': result.id})
 
 
 @api_view(['GET', 'POST'])
 @permission_classes([AllowAny])
 def cron_process_trial_expirations(request):
-    """
-    HTTP endpoint to process trial subscription expirations
+    """Trigger trial expiration processing via Celery."""
+    error = _verify_cron_token(request)
+    if error:
+        return error
 
-    Checks for trials ending today and charges saved cards automatically
-
-    Security: Requires CRON_SECRET_TOKEN in header or query param
-
-    Usage:
-    curl -X GET "https://api.echodesk.ge/api/cron/process-trial-expirations/" \
-         -H "X-Cron-Token: your-secret-token"
-    """
-    # Verify token
-    token = request.headers.get('X-Cron-Token') or request.GET.get('token')
-    expected_token = getattr(settings, 'CRON_SECRET_TOKEN', None)
-
-    if not expected_token:
-        logger.error('CRON_SECRET_TOKEN not configured in settings')
-        return Response({
-            'error': 'Cron service not configured'
-        }, status=500)
-
-    if not token or token != expected_token:
-        logger.warning(f'Unauthorized cron access attempt from {request.META.get("REMOTE_ADDR")}')
-        return Response({
-            'error': 'Unauthorized'
-        }, status=401)
-
-    # Run command
-    try:
-        output = StringIO()
-        call_command('process_trial_expirations', stdout=output)
-
-        output_text = output.getvalue()
-        logger.info(f'Trial expirations cron executed successfully')
-
-        return Response({
-            'status': 'success',
-            'message': 'Trial expirations processed',
-            'output': output_text
-        })
-    except Exception as e:
-        logger.error(f'Trial expirations cron failed: {e}')
-        return Response({
-            'status': 'error',
-            'error': str(e)
-        }, status=500)
+    from tenants.tasks import process_trial_expirations
+    result = process_trial_expirations.delay()
+    logger.info('Dispatched process_trial_expirations task')
+    return Response({'status': 'accepted', 'task_id': result.id})
 
 
 @api_view(['GET', 'POST'])
 @permission_classes([AllowAny])
 def cron_payment_retries(request):
-    """
-    HTTP endpoint to process payment retries
+    """Trigger payment retries via Celery."""
+    error = _verify_cron_token(request)
+    if error:
+        return error
 
-    Security: Requires CRON_SECRET_TOKEN in header or query param
-
-    Usage:
-    curl -X GET "https://api.echodesk.ge/api/cron/payment-retries/" \
-         -H "X-Cron-Token: your-secret-token"
-    """
-    # Verify token
-    token = request.headers.get('X-Cron-Token') or request.GET.get('token')
-    expected_token = getattr(settings, 'CRON_SECRET_TOKEN', None)
-
-    if not expected_token:
-        logger.error('CRON_SECRET_TOKEN not configured in settings')
-        return Response({
-            'error': 'Cron service not configured'
-        }, status=500)
-
-    if not token or token != expected_token:
-        logger.warning(f'Unauthorized cron access attempt from {request.META.get("REMOTE_ADDR")}')
-        return Response({
-            'error': 'Unauthorized'
-        }, status=401)
-
-    # Run command
-    try:
-        output = StringIO()
-        call_command('process_payment_retries', stdout=output)
-
-        output_text = output.getvalue()
-        logger.info(f'Payment retries cron executed successfully')
-
-        return Response({
-            'status': 'success',
-            'message': 'Payment retries processed',
-            'output': output_text
-        })
-    except Exception as e:
-        logger.error(f'Payment retries cron failed: {e}')
-        return Response({
-            'status': 'error',
-            'error': str(e)
-        }, status=500)
+    from tenants.tasks import process_payment_retries
+    result = process_payment_retries.delay()
+    logger.info('Dispatched process_payment_retries task')
+    return Response({'status': 'accepted', 'task_id': result.id})
 
 
 @api_view(['GET', 'POST'])
 @permission_classes([AllowAny])
 def cron_calculate_metrics(request):
-    """
-    HTTP endpoint to calculate platform metrics
+    """Trigger platform metrics calculation via Celery."""
+    error = _verify_cron_token(request)
+    if error:
+        return error
 
-    Security: Requires CRON_SECRET_TOKEN in header or query param
-
-    Usage:
-    curl -X GET "https://api.echodesk.ge/api/cron/calculate-metrics/" \
-         -H "X-Cron-Token: your-secret-token"
-    """
-    # Verify token
-    token = request.headers.get('X-Cron-Token') or request.GET.get('token')
-    expected_token = getattr(settings, 'CRON_SECRET_TOKEN', None)
-
-    if not expected_token:
-        logger.error('CRON_SECRET_TOKEN not configured in settings')
-        return Response({
-            'error': 'Cron service not configured'
-        }, status=500)
-
-    if not token or token != expected_token:
-        logger.warning(f'Unauthorized cron access attempt from {request.META.get("REMOTE_ADDR")}')
-        return Response({
-            'error': 'Unauthorized'
-        }, status=401)
-
-    # Run command
-    try:
-        output = StringIO()
-        call_command('calculate_platform_metrics', stdout=output)
-
-        output_text = output.getvalue()
-        logger.info(f'Platform metrics cron executed successfully')
-
-        return Response({
-            'status': 'success',
-            'message': 'Platform metrics calculated',
-            'output': output_text
-        })
-    except Exception as e:
-        logger.error(f'Platform metrics cron failed: {e}')
-        return Response({
-            'status': 'error',
-            'error': str(e)
-        }, status=500)
+    from tenants.tasks import calculate_platform_metrics
+    result = calculate_platform_metrics.delay()
+    logger.info('Dispatched calculate_platform_metrics task')
+    return Response({'status': 'accepted', 'task_id': result.id})
 
 
 @api_view(['GET', 'POST'])
 @permission_classes([AllowAny])
 def cron_email_sync(request):
-    """
-    HTTP endpoint to sync emails for all tenants with email connections
+    """Trigger email sync for all tenants via Celery."""
+    error = _verify_cron_token(request)
+    if error:
+        return error
 
-    Security: Requires CRON_SECRET_TOKEN in header or query param
-
-    Usage:
-    curl -X GET "https://api.echodesk.ge/api/cron/email-sync/" \
-         -H "X-Cron-Token: your-secret-token"
-    """
-    from tenant_schemas.utils import schema_context
-    from tenants.models import Tenant
-
-    # Verify token
-    token = request.headers.get('X-Cron-Token') or request.GET.get('token')
-    expected_token = getattr(settings, 'CRON_SECRET_TOKEN', None)
-
-    if not expected_token:
-        logger.error('CRON_SECRET_TOKEN not configured in settings')
-        return Response({
-            'error': 'Cron service not configured'
-        }, status=500)
-
-    if not token or token != expected_token:
-        logger.warning(f'Unauthorized cron access attempt from {request.META.get("REMOTE_ADDR")}')
-        return Response({
-            'error': 'Unauthorized'
-        }, status=401)
-
-    # Sync emails for all tenants
-    try:
-        from social_integrations.models import EmailConnection
-        from social_integrations.email_utils import sync_imap_messages
-
-        results = []
-        tenants = Tenant.objects.exclude(schema_name='public')
-
-        for tenant in tenants:
-            try:
-                with schema_context(tenant.schema_name):
-                    connections = EmailConnection.objects.filter(is_active=True)
-                    for connection in connections:
-                        try:
-                            count = sync_imap_messages(connection)
-                            results.append({
-                                'tenant': tenant.schema_name,
-                                'email': connection.email_address,
-                                'synced': count,
-                                'status': 'success'
-                            })
-                            logger.info(f"Email sync for {tenant.schema_name}/{connection.email_address}: {count} new messages")
-                        except Exception as e:
-                            results.append({
-                                'tenant': tenant.schema_name,
-                                'email': connection.email_address,
-                                'error': str(e),
-                                'status': 'error'
-                            })
-                            logger.error(f"Email sync failed for {tenant.schema_name}/{connection.email_address}: {e}")
-            except Exception as e:
-                logger.error(f"Email sync failed for tenant {tenant.schema_name}: {e}")
-
-        logger.info(f'Email sync cron completed: {len(results)} connections processed')
-
-        return Response({
-            'status': 'success',
-            'message': 'Email sync completed',
-            'results': results
-        })
-    except Exception as e:
-        logger.error(f'Email sync cron failed: {e}')
-        return Response({
-            'status': 'error',
-            'error': str(e)
-        }, status=500)
+    from social_integrations.tasks import sync_all_tenant_emails
+    result = sync_all_tenant_emails.delay()
+    logger.info('Dispatched sync_all_tenant_emails task')
+    return Response({'status': 'accepted', 'task_id': result.id})
 
 
 @api_view(['GET', 'POST'])
 @permission_classes([AllowAny])
 def cron_generate_daily_posts(request):
-    """
-    HTTP endpoint to trigger daily AI post generation.
-    Should be called hourly — the command checks posting times internally.
-    """
-    token = request.headers.get('X-Cron-Token') or request.GET.get('token')
-    expected_token = getattr(settings, 'CRON_SECRET_TOKEN', None)
+    """Trigger daily AI post generation via Celery."""
+    error = _verify_cron_token(request)
+    if error:
+        return error
 
-    if not expected_token:
-        return Response({'error': 'Cron service not configured'}, status=500)
-
-    if not token or token != expected_token:
-        logger.warning(f'Unauthorized cron access attempt from {request.META.get("REMOTE_ADDR")}')
-        return Response({'error': 'Unauthorized'}, status=401)
-
-    try:
-        output = StringIO()
-        call_command('generate_daily_posts', stdout=output)
-        output_text = output.getvalue()
-        logger.info('Generate daily posts cron executed successfully')
-        return Response({
-            'status': 'success',
-            'message': 'Daily post generation completed',
-            'output': output_text,
-        })
-    except Exception as e:
-        logger.error(f'Generate daily posts cron failed: {e}')
-        return Response({'status': 'error', 'error': str(e)}, status=500)
+    from social_integrations.tasks import generate_daily_posts
+    result = generate_daily_posts.delay()
+    logger.info('Dispatched generate_daily_posts task')
+    return Response({'status': 'accepted', 'task_id': result.id})
 
 
 @api_view(['GET', 'POST'])
 @permission_classes([AllowAny])
 def cron_publish_approved_posts(request):
-    """
-    HTTP endpoint to publish approved auto-posts.
-    Should be called every 15 minutes.
-    """
-    token = request.headers.get('X-Cron-Token') or request.GET.get('token')
-    expected_token = getattr(settings, 'CRON_SECRET_TOKEN', None)
+    """Trigger approved post publishing via Celery."""
+    error = _verify_cron_token(request)
+    if error:
+        return error
 
-    if not expected_token:
-        return Response({'error': 'Cron service not configured'}, status=500)
-
-    if not token or token != expected_token:
-        logger.warning(f'Unauthorized cron access attempt from {request.META.get("REMOTE_ADDR")}')
-        return Response({'error': 'Unauthorized'}, status=401)
-
-    try:
-        output = StringIO()
-        call_command('publish_approved_posts', stdout=output)
-        output_text = output.getvalue()
-        logger.info('Publish approved posts cron executed successfully')
-        return Response({
-            'status': 'success',
-            'message': 'Approved posts published',
-            'output': output_text,
-        })
-    except Exception as e:
-        logger.error(f'Publish approved posts cron failed: {e}')
-        return Response({'status': 'error', 'error': str(e)}, status=500)
+    from social_integrations.tasks import publish_approved_posts
+    result = publish_approved_posts.delay()
+    logger.info('Dispatched publish_approved_posts task')
+    return Response({'status': 'accepted', 'task_id': result.id})
 
 
 @api_view(['GET'])

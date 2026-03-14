@@ -518,6 +518,60 @@ CACHES = {
     }
 }
 
+# Celery Configuration (Redis DB 2)
+if redis_password:
+    celery_redis_url = f'rediss://:{redis_password}@{redis_host}:{redis_port}/2'
+else:
+    celery_redis_url = f'redis://{redis_host}:{redis_port}/2'
+
+CELERY_BROKER_URL = celery_redis_url
+CELERY_RESULT_BACKEND = celery_redis_url
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = 'UTC'
+CELERY_TASK_ACKS_LATE = True
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+CELERY_TASK_SOFT_TIME_LIMIT = 300
+CELERY_TASK_TIME_LIMIT = 600
+
+from celery.schedules import crontab
+
+CELERY_BEAT_SCHEDULE = {
+    'process-recurring-payments': {
+        'task': 'tenants.tasks.process_recurring_payments',
+        'schedule': crontab(minute=0, hour=2),
+    },
+    'check-subscription-status': {
+        'task': 'tenants.tasks.check_subscription_status',
+        'schedule': crontab(minute=0, hour=3),
+    },
+    'process-trial-expirations': {
+        'task': 'tenants.tasks.process_trial_expirations',
+        'schedule': crontab(minute=0, hour=9),
+    },
+    'process-payment-retries': {
+        'task': 'tenants.tasks.process_payment_retries',
+        'schedule': crontab(minute=0),  # every hour
+    },
+    'calculate-platform-metrics': {
+        'task': 'tenants.tasks.calculate_platform_metrics',
+        'schedule': crontab(minute=30, hour=0),
+    },
+    'sync-all-tenant-emails': {
+        'task': 'social_integrations.tasks.sync_all_tenant_emails',
+        'schedule': 300.0,  # every 5 minutes
+    },
+    'generate-daily-posts': {
+        'task': 'social_integrations.tasks.generate_daily_posts',
+        'schedule': crontab(minute=0),  # every hour
+    },
+    'publish-approved-posts': {
+        'task': 'social_integrations.tasks.publish_approved_posts',
+        'schedule': 300.0,  # every 5 minutes
+    },
+}
+
 # Bank of Georgia (BOG) Payment Gateway Configuration
 # Documentation: https://api.bog.ge/docs/en/payments/introduction
 # Get credentials from BOG merchant portal

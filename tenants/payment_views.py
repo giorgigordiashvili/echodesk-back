@@ -28,7 +28,6 @@ from tenant_schemas.utils import schema_context
 from django.contrib.auth import get_user_model
 from django.db import transaction
 import logging
-import subprocess
 
 # Package model was removed (feature-based pricing now).
 # Stub class to prevent NameError in deprecated code paths.
@@ -39,7 +38,6 @@ class _DeprecatedPackage:
         def get(**kwargs):
             raise _DeprecatedPackage.DoesNotExist('Package-based pricing is deprecated')
 Package = _DeprecatedPackage
-import sys
 
 User = get_user_model()
 
@@ -86,30 +84,17 @@ def create_subscription_event(subscription, event_type, payment_order=None, paym
 
 def trigger_tenant_processing(schema_name):
     """
-    Trigger the tenant processing command in the background
+    Trigger the tenant processing command via Celery
 
-    This runs the process_pending_tenants command for a specific tenant
+    This dispatches the process_pending_tenants task asynchronously
     without blocking the webhook response.
     """
     try:
-        # Run the management command in the background
-        # Using subprocess.Popen to not wait for completion
-        subprocess.Popen(
-            [
-                sys.executable,  # Current Python interpreter
-                'manage.py',
-                'process_pending_tenants',
-                '--schema-name', schema_name
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            # Don't wait for the process to complete
-            close_fds=True
-        )
-        logger.info(f'Triggered background processing for tenant: {schema_name}')
+        from tenants.tasks import process_pending_tenant
+        process_pending_tenant.delay(schema_name)
+        logger.info(f'Dispatched process_pending_tenant task for: {schema_name}')
     except Exception as e:
-        logger.error(f'Failed to trigger tenant processing for {schema_name}: {e}')
-        # Don't fail the webhook if background trigger fails
+        logger.error(f'Failed to dispatch tenant processing for {schema_name}: {e}')
 
 
 @extend_schema(

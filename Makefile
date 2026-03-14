@@ -13,6 +13,9 @@ help:
 	@echo "  make format            - Auto-format code"
 	@echo "  make clean             - Remove test artifacts"
 	@echo "  make install-dev       - Install development dependencies"
+	@echo "  make celery-worker     - Run Celery worker (debug)"
+	@echo "  make celery-beat       - Run Celery beat (debug)"
+	@echo "  make celery-all        - Run Celery worker + beat (debug)"
 
 install-dev:
 	pip install -r requirements-dev.txt
@@ -79,5 +82,14 @@ shell:
 
 run:
 	python manage.py runserver
+
+celery-worker:
+	celery -A amanati_crm worker --loglevel=debug
+
+celery-beat:
+	celery -A amanati_crm beat --loglevel=debug
+
+celery-all:
+	celery -A amanati_crm worker --beat --loglevel=debug
 
 .DEFAULT_GOAL := help

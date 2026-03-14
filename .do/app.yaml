@@ -40,3 +40,86 @@ services:
   - key: DB_PORT
     scope: RUN_AND_BUILD_TIME
     type: SECRET
+workers:
+- name: celery-worker
+  source_dir: /
+  github:
+    repo: giorgigordiashvili/echodesk-back
+    branch: main
+    deploy_on_push: true
+  build_command: ./build_production.sh
+  run_command: celery -A amanati_crm worker --loglevel=info --concurrency=2
+  environment_slug: python
+  instance_count: 1
+  instance_size_slug: basic-xxs
+  envs:
+  - key: DEBUG
+    value: "False"
+  - key: SECRET_KEY
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+  - key: DB_NAME
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+  - key: DB_USER
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+  - key: DB_PASSWORD
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+  - key: DB_HOST
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+  - key: DB_PORT
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+  - key: REDIS_HOST
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+  - key: REDIS_PORT
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+  - key: REDIS_PASSWORD
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+- name: celery-beat
+  source_dir: /
+  github:
+    repo: giorgigordiashvili/echodesk-back
+    branch: main
+    deploy_on_push: true
+  build_command: ./build_production.sh
+  run_command: celery -A amanati_crm beat --loglevel=info
+  environment_slug: python
+  instance_count: 1
+  instance_size_slug: basic-xxs
+  envs:
+  - key: DEBUG
+    value: "False"
+  - key: SECRET_KEY
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+  - key: DB_NAME
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+  - key: DB_USER
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+  - key: DB_PASSWORD
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+  - key: DB_HOST
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+  - key: DB_PORT
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+  - key: REDIS_HOST
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+  - key: REDIS_PORT
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
+  - key: REDIS_PASSWORD
+    scope: RUN_AND_BUILD_TIME
+    type: SECRET
