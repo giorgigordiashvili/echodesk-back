@@ -520,7 +520,7 @@ CACHES = {
 
 # Celery Configuration (Redis DB 2)
 if redis_password:
-    celery_redis_url = f'rediss://:{redis_password}@{redis_host}:{redis_port}/2'
+    celery_redis_url = f'rediss://:{redis_password}@{redis_host}:{redis_port}/2?ssl_cert_reqs=CERT_NONE'
 else:
     celery_redis_url = f'redis://{redis_host}:{redis_port}/2'
 
