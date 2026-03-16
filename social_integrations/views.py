@@ -3799,6 +3799,74 @@ def unassign_chat(request):
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated, CanViewSocialMessages])
+def transfer_chat(request):
+    """Transfer a chat assignment to another user"""
+    platform = request.data.get('platform')
+    conversation_id = request.data.get('conversation_id')
+    account_id = request.data.get('account_id')
+    target_user_id = request.data.get('target_user_id')
+
+    if not all([platform, conversation_id, account_id, target_user_id]):
+        return Response(
+            {'error': 'platform, conversation_id, account_id, and target_user_id are required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # Validate target user exists and is active
+    from users.models import User
+    try:
+        target_user = User.objects.get(id=target_user_id, is_active=True)
+    except User.DoesNotExist:
+        return Response({'error': 'Target user not found or inactive'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Cannot transfer to yourself
+    if target_user == request.user:
+        return Response({'error': 'Cannot transfer chat to yourself'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        assignment = ChatAssignment.objects.get(
+            platform=platform,
+            conversation_id=conversation_id,
+            account_id=account_id
+        )
+    except ChatAssignment.DoesNotExist:
+        # If no assignment exists, create one for the target user
+        assignment = ChatAssignment.objects.create(
+            platform=platform,
+            conversation_id=conversation_id,
+            account_id=account_id,
+            assigned_user=target_user,
+            status='in_session',
+            session_started_at=timezone.now(),
+        )
+        logger.info(f"Chat transferred (new assignment): {assignment.full_conversation_id} to {target_user.email} by {request.user.email}")
+        return Response({
+            'message': f'Chat transferred to {target_user.get_full_name() or target_user.email}',
+            'assignment': ChatAssignmentSerializer(assignment).data,
+        })
+
+    # Transfer the assignment
+    previous_user = assignment.assigned_user
+    assignment.assigned_user = target_user
+    assignment.status = 'in_session'
+    if not assignment.session_started_at:
+        assignment.session_started_at = timezone.now()
+    assignment.save()
+
+    logger.info(
+        f"Chat transferred: {assignment.full_conversation_id} "
+        f"from {previous_user.email if previous_user else 'unassigned'} "
+        f"to {target_user.email} by {request.user.email}"
+    )
+
+    return Response({
+        'message': f'Chat transferred to {target_user.get_full_name() or target_user.email}',
+        'assignment': ChatAssignmentSerializer(assignment).data,
+    })
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, CanViewSocialMessages])
 def start_session(request):
     """Start a session for an assigned chat"""
     # Check if session management is enabled
