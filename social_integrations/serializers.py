@@ -334,6 +334,7 @@ class SocialIntegrationSettingsSerializer(serializers.ModelSerializer):
             'link_based_rating_enabled',
             'rating_request_message_template_ka',
             'rating_request_message_template_en',
+            'post_review_redirect_url',
             'notification_sound_facebook', 'notification_sound_instagram',
             'notification_sound_whatsapp', 'notification_sound_email',
             'notification_sound_team_chat', 'notification_sound_system',

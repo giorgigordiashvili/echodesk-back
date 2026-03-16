@@ -683,6 +683,13 @@ class SocialIntegrationSettings(models.Model):
         help_text="English template for rating request message. Use {link} as placeholder."
     )
 
+    post_review_redirect_url = models.URLField(
+        max_length=500,
+        blank=True,
+        default='',
+        help_text="URL to redirect customers to after they submit a review (e.g. your website)."
+    )
+
     # Notification sound settings (per platform)
     notification_sound_facebook = models.CharField(
         max_length=255,

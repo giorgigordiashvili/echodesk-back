@@ -4453,6 +4453,7 @@ def user_chat_sessions(request, user_id):
             'account_id': rating.account_id,
             'customer_name': customer_name or customer_identifier,
             'rating': rating.rating if rating.rating > 0 else None,
+            'comment': rating.comment or '',
             'session_started_at': rating.session_started_at.isoformat() if rating.session_started_at else None,
             'session_ended_at': rating.session_ended_at.isoformat() if rating.session_ended_at else None,
             'created_at': rating.created_at.isoformat(),
@@ -4649,9 +4650,19 @@ def submit_public_rating(request, token):
                 rating.assignment.delete()
                 logger.info(f"Assignment deleted after link-based rating for {rating.platform} conversation {rating.conversation_id}")
 
+            # Get redirect URL from settings
+            redirect_url = ''
+            try:
+                settings_obj = SocialIntegrationSettings.objects.first()
+                if settings_obj and settings_obj.post_review_redirect_url:
+                    redirect_url = settings_obj.post_review_redirect_url
+            except Exception:
+                pass
+
             return Response({
                 'success': True,
-                'message': 'Thank you for your feedback!'
+                'message': 'Thank you for your feedback!',
+                'redirect_url': redirect_url,
             })
 
     except Exception as e:
