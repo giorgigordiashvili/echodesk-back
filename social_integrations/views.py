@@ -4100,13 +4100,22 @@ def send_rating_request_instagram(conversation_id, account_id, message):
 
     try:
         account = InstagramAccountConnection.objects.get(instagram_account_id=account_id, is_active=True)
-        url = f"https://graph.facebook.com/v21.0/{account_id}/messages"
+        if not account.facebook_page:
+            logger.error(f"Instagram account {account_id} is not linked to a Facebook Page")
+            return None
+        # Instagram messages must be sent through the Facebook Page's Messenger Platform API
+        url = f"https://graph.facebook.com/v23.0/me/messages"
         payload = {
             "recipient": {"id": conversation_id},
-            "message": {"text": message}
+            "message": {"text": message},
+            "messaging_type": "RESPONSE"
         }
-        headers = {"Authorization": f"Bearer {account.access_token}"}
-        response = requests.post(url, json=payload, headers=headers)
+        headers = {"Content-Type": "application/json"}
+        params = {
+            "access_token": account.facebook_page.page_access_token,
+            "platform": "instagram"
+        }
+        response = requests.post(url, json=payload, headers=headers, params=params)
         if response.ok:
             message_id = response.json().get('message_id')
             timestamp = datetime.now()
