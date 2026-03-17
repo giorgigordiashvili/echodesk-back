@@ -6706,30 +6706,6 @@ def whatsapp_send_message(request):
                 'error': 'WhatsApp Business Account not found or inactive'
             }, status=status.HTTP_404_NOT_FOUND)
 
-        # Check 24-hour messaging window
-        last_user_message = WhatsAppMessage.objects.filter(
-            business_account=account,
-            from_number=to_number,
-            is_from_business=False
-        ).order_by('-timestamp').first()
-
-        if last_user_message:
-            time_since = timezone.now() - last_user_message.timestamp
-            hours_passed = time_since.total_seconds() / 3600
-            if hours_passed > 24:
-                return Response({
-                    'error': f'Cannot send message: 24-hour messaging window expired ({hours_passed:.1f} hours since last user message)',
-                    'error_code': 'window_expired',
-                    'hours_passed': round(hours_passed, 1),
-                    'details': 'WhatsApp only allows responses within 24 hours of the last message from the user. Use a message template instead.'
-                }, status=status.HTTP_400_BAD_REQUEST)
-        else:
-            return Response({
-                'error': 'Cannot send message: No conversation found with this user. The user must message you first.',
-                'error_code': 'no_conversation',
-                'details': 'WhatsApp requires the user to initiate the conversation before you can send free-form messages.'
-            }, status=status.HTTP_400_BAD_REQUEST)
-
         # Send message via WhatsApp Cloud API
         fb_api_version = getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('WHATSAPP_API_VERSION', 'v23.0')
         send_url = f"https://graph.facebook.com/{fb_api_version}/{account.phone_number_id}/messages"
