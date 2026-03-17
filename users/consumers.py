@@ -64,10 +64,16 @@ class NotificationConsumer(AsyncWebsocketConsumer):
     async def disconnect(self, close_code):
         # Leave the notifications group
         if hasattr(self, 'notifications_group_name'):
-            await self.channel_layer.group_discard(
-                self.notifications_group_name,
-                self.channel_name
-            )
+            try:
+                await self.channel_layer.group_discard(
+                    self.notifications_group_name,
+                    self.channel_name
+                )
+            except Exception as e:
+                # Redis/channel layer can already be gone if the socket dropped abruptly.
+                # Avoid bubbling disconnect cleanup errors to Sentry.
+                print(f"[NotificationWS] group_discard failed during disconnect: {e}")
+
             print(f"[NotificationWS] Disconnected user {self.user.id if not self.user.is_anonymous else 'anonymous'}")
 
     async def receive(self, text_data):
