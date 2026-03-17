@@ -6694,7 +6694,7 @@ def whatsapp_send_message(request):
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        to_number = serializer.validated_data['to_number']
+        to_number = serializer.validated_data['to_number'].lstrip('+')
         message_text = serializer.validated_data['message']
         waba_id = serializer.validated_data['waba_id']
 
@@ -6796,6 +6796,7 @@ def whatsapp_send_message(request):
                     'from_number': account.phone_number,
                     'to_number': to_number,
                     'contact_name': recipient_name,  # The user's name (for new conversations in frontend)
+                    'recipient_name': recipient_name,  # For frontend outgoing message display
                     'message_text': message_text,
                     'timestamp': timestamp.isoformat(),
                     'is_from_business': True,
