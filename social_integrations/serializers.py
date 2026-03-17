@@ -64,27 +64,43 @@ class FacebookMessageSerializer(serializers.ModelSerializer):
         if obj.reply_to and obj.reply_to.sender_name:
             return obj.reply_to.sender_name
 
+        # Use a per-serializer-list cache to avoid N+1 queries
+        # Cache key: (page_connection_id, conversation_id)
+        if not hasattr(self, '_recipient_name_cache'):
+            self._recipient_name_cache = {}
+
         # Otherwise, look at the conversation context passed via serializer context
         # The view typically passes the conversation_id (customer's sender_id)
         conversation_id = self.context.get('conversation_id') if self.context else None
+        cache_key = (obj.page_connection_id, conversation_id)
+
+        if cache_key in self._recipient_name_cache:
+            return self._recipient_name_cache[cache_key]
+
         if conversation_id:
             incoming_msg = FacebookMessage.objects.filter(
-                page_connection=obj.page_connection,
+                page_connection_id=obj.page_connection_id,
                 sender_id=conversation_id,
                 is_from_page=False
-            ).exclude(sender_name__isnull=True).exclude(sender_name='').first()
+            ).exclude(sender_name__isnull=True).exclude(sender_name='').values_list('sender_name', flat=True).first()
             if incoming_msg:
-                return incoming_msg.sender_name
+                self._recipient_name_cache[cache_key] = incoming_msg
+                return incoming_msg
 
         # Fallback: find any incoming message from the same page connection
         # This works when messages are fetched per-conversation
-        incoming_msg = FacebookMessage.objects.filter(
-            page_connection=obj.page_connection,
+        fallback_key = (obj.page_connection_id, None)
+        if fallback_key in self._recipient_name_cache:
+            return self._recipient_name_cache[fallback_key]
+
+        incoming_name = FacebookMessage.objects.filter(
+            page_connection_id=obj.page_connection_id,
             is_from_page=False
-        ).exclude(sender_name__isnull=True).exclude(sender_name='').first()
-        if incoming_msg:
-            return incoming_msg.sender_name
-        return None
+        ).exclude(sender_name__isnull=True).exclude(sender_name='').values_list('sender_name', flat=True).first()
+
+        self._recipient_name_cache[fallback_key] = incoming_name
+        self._recipient_name_cache[cache_key] = incoming_name
+        return incoming_name
 
 
 class FacebookSendMessageSerializer(serializers.Serializer):

@@ -560,7 +560,7 @@ class FacebookMessageViewSet(viewsets.ReadOnlyModelViewSet):
         base_queryset = FacebookMessage.objects.filter(
             page_connection__in=tenant_pages,
             is_deleted=False
-        ).select_related('page_connection', 'sent_by')
+        ).select_related('page_connection', 'sent_by', 'reply_to')
 
         # Apply page_id filter from query params (support both formats)
         page_id = self.request.query_params.get('page_id')
