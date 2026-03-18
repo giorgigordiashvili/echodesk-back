@@ -354,23 +354,27 @@ class TicketBoardConsumer(AsyncWebsocketConsumer):
     async def disconnect(self, close_code):
         # Remove user from presence tracking
         if hasattr(self, 'board_group_name'):
-            await self.remove_user_presence()
+            try:
+                await self.remove_user_presence()
 
-            # Notify other users that this user left
-            await self.channel_layer.group_send(
-                self.board_group_name,
-                {
-                    'type': 'user_left',
-                    'user_id': self.user.id if not self.user.is_anonymous else None,
-                    'user_name': self.user.get_full_name() or self.user.email if not self.user.is_anonymous else 'Anonymous'
-                }
-            )
+                # Notify other users that this user left
+                await self.channel_layer.group_send(
+                    self.board_group_name,
+                    {
+                        'type': 'user_left',
+                        'user_id': self.user.id if not self.user.is_anonymous else None,
+                        'user_name': self.user.get_full_name() or self.user.email if not self.user.is_anonymous else 'Anonymous'
+                    }
+                )
 
-            # Leave the board group
-            await self.channel_layer.group_discard(
-                self.board_group_name,
-                self.channel_name
-            )
+                # Leave the board group
+                await self.channel_layer.group_discard(
+                    self.board_group_name,
+                    self.channel_name
+                )
+            except (ConnectionError, ConnectionResetError, OSError) as e:
+                # Socket already gone — nothing to do.
+                print(f"[TicketBoardWS] disconnect cleanup failed (connection reset): {e}")
 
             print(f"[TicketBoardWS] Disconnected user {self.user.id if not self.user.is_anonymous else 'anonymous'}")
 
@@ -862,32 +866,36 @@ class TeamChatConsumer(AsyncWebsocketConsumer):
 
     async def disconnect(self, close_code):
         if hasattr(self, 'personal_group_name'):
-            # Update online status
-            await self.set_online_status(False)
+            try:
+                # Update online status
+                await self.set_online_status(False)
 
-            # Notify other users that this user is offline
-            if hasattr(self, 'tenant_group_name'):
-                await self.channel_layer.group_send(
-                    self.tenant_group_name,
-                    {
-                        'type': 'user_status_changed',
-                        'user_id': self.user.id,
-                        'is_online': False,
-                        'user_name': self.user.get_full_name() or self.user.email
-                    }
-                )
+                # Notify other users that this user is offline
+                if hasattr(self, 'tenant_group_name'):
+                    await self.channel_layer.group_send(
+                        self.tenant_group_name,
+                        {
+                            'type': 'user_status_changed',
+                            'user_id': self.user.id,
+                            'is_online': False,
+                            'user_name': self.user.get_full_name() or self.user.email
+                        }
+                    )
 
-            # Leave groups
-            await self.channel_layer.group_discard(
-                self.personal_group_name,
-                self.channel_name
-            )
-
-            if hasattr(self, 'tenant_group_name'):
+                # Leave groups
                 await self.channel_layer.group_discard(
-                    self.tenant_group_name,
+                    self.personal_group_name,
                     self.channel_name
                 )
+
+                if hasattr(self, 'tenant_group_name'):
+                    await self.channel_layer.group_discard(
+                        self.tenant_group_name,
+                        self.channel_name
+                    )
+            except (ConnectionError, ConnectionResetError, OSError) as e:
+                # Socket already gone — nothing to do.
+                print(f"[TeamChatWS] disconnect cleanup failed (connection reset): {e}")
 
             print(f"[TeamChatWS] Disconnected user {self.user.id if not self.user.is_anonymous else 'anonymous'}")
 
