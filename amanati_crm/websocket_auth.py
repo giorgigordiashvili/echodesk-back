@@ -119,7 +119,12 @@ class JWTAuthMiddleware(BaseMiddleware):
             if not tenant_schema:
                 print(f"[WebSocket Auth] Warning: No tenant schema found. Path: {scope.get('path')}, URL route: {scope.get('url_route')}")
 
-        return await super().__call__(scope, receive, send)
+        try:
+            return await super().__call__(scope, receive, send)
+        except (ConnectionError, ConnectionResetError, OSError):
+            # Expected when clients disconnect abruptly — the socket is already
+            # gone so there's nothing useful to do (or report to Sentry).
+            pass
 
 
 def JWTAuthMiddlewareStack(inner):
