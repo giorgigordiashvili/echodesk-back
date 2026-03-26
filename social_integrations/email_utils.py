@@ -169,6 +169,46 @@ def encode_imap_utf7(s: str) -> str:
     return ''.join(result)
 
 
+def _imap_authenticate(imap, username: str, password: str) -> None:
+    """
+    Authenticate an IMAP connection, falling back to AUTHENTICATE PLAIN when LOGIN fails.
+
+    Some IMAP servers (e.g. those using Dovecot) reject the LOGIN command with
+    "BAD LOGIN parse error" when the password contains special characters such as
+    spaces, parentheses, backslashes or double-quotes.  The IMAP AUTHENTICATE PLAIN
+    mechanism base64-encodes the credentials and therefore avoids all quoting issues.
+
+    We try LOGIN first (most compatible) and fall back to AUTHENTICATE PLAIN only
+    when we get the specific "LOGIN parse error" / "BAD" response, to avoid masking
+    genuine authentication failures (wrong password etc.).
+
+    Args:
+        imap: An IMAP4 or IMAP4_SSL instance that is already connected.
+        username: IMAP username.
+        password: Plain-text password.
+
+    Raises:
+        imaplib.IMAP4.error: on authentication failure (wrong credentials etc.)
+    """
+    try:
+        imap.login(username, password)
+    except imaplib.IMAP4.error as e:
+        err_str = str(e).lower()
+        # Only fall back for parse / literal errors, not wrong-password errors
+        if 'parse error' in err_str or ('bad' in err_str and 'login' in err_str):
+            logger.warning(
+                "IMAP LOGIN command failed with parse error (likely special chars in password); "
+                "retrying with AUTHENTICATE PLAIN: %s", e
+            )
+            # Build SASL PLAIN token: \x00username\x00password (all base64-encoded)
+            plain_token = base64.b64encode(
+                f'\x00{username}\x00{password}'.encode('utf-8')
+            ).decode('ascii')
+            imap.authenticate('PLAIN', lambda _: plain_token)
+        else:
+            raise
+
+
 def test_imap_connection(server: str, port: int, username: str, password: str, use_ssl: bool = True) -> Tuple[bool, Optional[str]]:
     """
     Test IMAP connection credentials.
@@ -183,7 +223,7 @@ def test_imap_connection(server: str, port: int, username: str, password: str, u
             imap = imaplib.IMAP4(server, port)
             imap.starttls()
 
-        imap.login(username, password)
+        _imap_authenticate(imap, username, password)
         imap.logout()
         return True, None
     except imaplib.IMAP4.error as e:
@@ -236,7 +276,7 @@ def get_imap_folders(connection) -> Dict:
             imap = imaplib.IMAP4(connection.imap_server, connection.imap_port)
             imap.starttls()
 
-        imap.login(connection.username, connection.get_password())
+        _imap_authenticate(imap, connection.username, connection.get_password())
         result, folder_list = imap.list()
         imap.logout()
 
@@ -985,7 +1025,7 @@ def _connect_imap(connection):
         imap = imaplib.IMAP4(connection.imap_server, connection.imap_port)
         imap.starttls()
 
-    imap.login(connection.username, connection.get_password())
+    _imap_authenticate(imap, connection.username, connection.get_password())
     return imap
 
 
@@ -1122,7 +1162,7 @@ def delete_emails_from_imap(connection, message_ids: List[str]) -> int:
             imap = imaplib.IMAP4(connection.imap_server, connection.imap_port)
             imap.starttls()
 
-        imap.login(connection.username, connection.get_password())
+        _imap_authenticate(imap, connection.username, connection.get_password())
 
         # Select folder (not readonly - we need to modify)
         result, data = imap.select(connection.sync_folder, readonly=False)
@@ -1189,7 +1229,7 @@ def move_email_to_folder(connection, message_id: str, source_folder: str, target
             imap = imaplib.IMAP4(connection.imap_server, connection.imap_port)
             imap.starttls()
 
-        imap.login(connection.username, connection.get_password())
+        _imap_authenticate(imap, connection.username, connection.get_password())
 
         # Select source folder
         result, data = imap.select(source_folder, readonly=False)
@@ -1253,7 +1293,7 @@ def get_available_folders(connection) -> List[Dict[str, Any]]:
             imap = imaplib.IMAP4(connection.imap_server, connection.imap_port)
             imap.starttls()
 
-        imap.login(connection.username, connection.get_password())
+        _imap_authenticate(imap, connection.username, connection.get_password())
 
         result, folders_data = imap.list()
         folders = []
@@ -1321,7 +1361,7 @@ def debug_email_sync(connection) -> Dict[str, Any]:
             imap = imaplib.IMAP4(connection.imap_server, connection.imap_port)
             imap.starttls()
 
-        imap.login(connection.username, connection.get_password())
+        _imap_authenticate(imap, connection.username, connection.get_password())
 
         # Get all folders
         result, folders_data = imap.list()
