@@ -6065,8 +6065,6 @@ class WhatsAppMessageViewSet(viewsets.ReadOnlyModelViewSet):
     filterset_fields = {
         'business_account__waba_id': ['exact'],
         'business_account__phone_number_id': ['exact'],
-        'from_number': ['exact'],
-        'to_number': ['exact'],
         'is_from_business': ['exact'],
         'is_read_by_staff': ['exact'],
     }
@@ -6119,18 +6117,19 @@ class WhatsAppMessageViewSet(viewsets.ReadOnlyModelViewSet):
                     (~Q(from_number__in=all_assigned) & ~Q(to_number__in=all_assigned))
                 )
 
-        # Check for initial_load parameter - returns unread messages + 10 most recent
-        initial_load = self.request.query_params.get('initial_load', '').lower() == 'true'
+        # Filter by from_number (bi-directional: both incoming and outgoing messages)
         from_number = self.request.query_params.get('from_number')
-
-        if initial_load and from_number:
-            # Filter to this conversation (both directions)
-            conv_queryset = base_queryset.filter(
+        if from_number:
+            base_queryset = base_queryset.filter(
                 Q(from_number=from_number) | Q(to_number=from_number)
             )
 
+        # Check for initial_load parameter - returns unread messages + 10 most recent
+        initial_load = self.request.query_params.get('initial_load', '').lower() == 'true'
+
+        if initial_load and from_number:
             # Count unread incoming messages
-            unread_count = conv_queryset.filter(
+            unread_count = base_queryset.filter(
                 is_from_business=False,
                 is_read_by_staff=False
             ).count()
@@ -6139,7 +6138,7 @@ class WhatsAppMessageViewSet(viewsets.ReadOnlyModelViewSet):
             limit = max(unread_count + 10, 10)
 
             # Return the most recent `limit` messages
-            recent_ids = list(conv_queryset.order_by('-timestamp').values_list('id', flat=True)[:limit])
+            recent_ids = list(base_queryset.order_by('-timestamp').values_list('id', flat=True)[:limit])
             return base_queryset.filter(id__in=recent_ids)
 
         return base_queryset
