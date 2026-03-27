@@ -9292,7 +9292,7 @@ def email_signature_view(request):
 class QuickReplyViewSet(viewsets.ModelViewSet):
     """ViewSet for managing quick reply templates"""
     serializer_class = QuickReplySerializer
-    permission_classes = [IsAuthenticated, IsStaffUser]
+    permission_classes = [IsAuthenticated, CanSendSocialMessages]
 
     def get_queryset(self):
         queryset = QuickReply.objects.all().order_by('position', '-use_count', 'title')
