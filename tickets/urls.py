@@ -7,6 +7,7 @@ from .views import (
     ItemListViewSet, ListItemViewSet, TicketFormViewSet, TicketFormSubmissionViewSet,
     TicketAttachmentViewSet
 )
+from .support_views import report_bug
 
 # Create router and register viewsets
 router = DefaultRouter()
@@ -35,6 +36,7 @@ urlpatterns = [
     path('api/tickets/<int:ticket_pk>/assignments/<int:pk>/', TicketAssignmentViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='ticket-assignments-detail'),
     path('api/tickets/<int:ticket_pk>/assignments/bulk_assign/', TicketAssignmentViewSet.as_view({'post': 'bulk_assign'}), name='ticket-assignments-bulk-assign'),
     path('api/tickets/<int:ticket_pk>/assignments/bulk_unassign/', TicketAssignmentViewSet.as_view({'delete': 'bulk_unassign'}), name='ticket-assignments-bulk-unassign'),
+    path('api/support/report-bug/', report_bug, name='report-bug'),
 ]
 
 # Example URLConf for including in main router:
