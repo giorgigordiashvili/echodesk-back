@@ -1772,10 +1772,38 @@ def facebook_webhook(request):
                                                 ).first()
 
                                                 if existing:
-                                                    # Update timestamp if message exists
+                                                    # Update timestamp and attachment info from echo
+                                                    update_fields = ['timestamp']
                                                     existing.timestamp = timestamp_dt
-                                                    existing.save(update_fields=['timestamp'])
-                                                    logger.info(f"✅ Updated echo message timestamp to {timestamp_dt}")
+
+                                                    # Echo includes attachment URLs that we don't have from send API
+                                                    raw_attachments = message_data.get('attachments', [])
+                                                    if raw_attachments:
+                                                        echo_attachments = []
+                                                        echo_att_type = ''
+                                                        echo_att_url = None
+                                                        for att in raw_attachments:
+                                                            att_type = att.get('type', 'file')
+                                                            att_url = att.get('payload', {}).get('url')
+                                                            echo_attachments.append({
+                                                                'type': att_type,
+                                                                'url': att_url,
+                                                            })
+                                                            if not echo_att_type:
+                                                                echo_att_type = att_type
+                                                                echo_att_url = att_url
+                                                        if echo_attachments:
+                                                            existing.attachments = echo_attachments
+                                                            update_fields.append('attachments')
+                                                        if echo_att_type:
+                                                            existing.attachment_type = echo_att_type
+                                                            update_fields.append('attachment_type')
+                                                        if echo_att_url:
+                                                            existing.attachment_url = echo_att_url
+                                                            update_fields.append('attachment_url')
+
+                                                    existing.save(update_fields=update_fields)
+                                                    logger.info(f"✅ Updated echo message: timestamp={timestamp_dt}, attachments={'yes' if 'attachments' in update_fields else 'no'}")
                                                 else:
                                                     # Create new message for echo (sent from Facebook directly)
                                                     message_text = message_data.get('text', '')
