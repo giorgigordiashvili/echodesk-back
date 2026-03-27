@@ -627,15 +627,37 @@ def send_email_smtp(connection, to_emails: List[str], cc_emails: List[str] = Non
     if body_html:
         final_body_html = wrap_html_email(body_html, signature_html_content)
 
-    # Create message
+    # Create message body
     if final_body_html and final_body_text:
-        msg = MIMEMultipart('alternative')
-        msg.attach(MIMEText(final_body_text, 'plain', 'utf-8'))
-        msg.attach(MIMEText(final_body_html, 'html', 'utf-8'))
+        body_part = MIMEMultipart('alternative')
+        body_part.attach(MIMEText(final_body_text, 'plain', 'utf-8'))
+        body_part.attach(MIMEText(final_body_html, 'html', 'utf-8'))
     elif final_body_html:
-        msg = MIMEText(final_body_html, 'html', 'utf-8')
+        body_part = MIMEText(final_body_html, 'html', 'utf-8')
     else:
-        msg = MIMEText(final_body_text or '', 'plain', 'utf-8')
+        body_part = MIMEText(final_body_text or '', 'plain', 'utf-8')
+
+    # Wrap in 'mixed' if there are attachments, otherwise use body directly
+    attachment_metadata = []
+    if attachments:
+        msg = MIMEMultipart('mixed')
+        msg.attach(body_part)
+        for att in attachments:
+            maintype, _, subtype = (att.get('content_type') or 'application/octet-stream').partition('/')
+            if not subtype:
+                subtype = 'octet-stream'
+            mime_att = MIMEBase(maintype, subtype)
+            mime_att.set_payload(att['content'])
+            encoders.encode_base64(mime_att)
+            mime_att.add_header('Content-Disposition', 'attachment', filename=att.get('filename', 'file'))
+            msg.attach(mime_att)
+            attachment_metadata.append({
+                'filename': att.get('filename', 'file'),
+                'content_type': att.get('content_type', 'application/octet-stream'),
+                'size': len(att.get('content', b'')),
+            })
+    else:
+        msg = body_part
 
     # Set headers
     msg['Message-ID'] = make_msgid()
@@ -698,7 +720,7 @@ def send_email_smtp(connection, to_emails: List[str], cc_emails: List[str] = Non
         folder='Sent',
         is_from_business=True,
         is_read=True,
-        attachments=[]
+        attachments=attachment_metadata,
     )
 
     return msg['Message-ID'], sent_message

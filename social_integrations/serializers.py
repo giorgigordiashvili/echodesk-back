@@ -89,7 +89,7 @@ class FacebookMessageSerializer(serializers.ModelSerializer):
 
 class FacebookSendMessageSerializer(serializers.Serializer):
     recipient_id = serializers.CharField(max_length=255, help_text="Facebook user ID to send message to")
-    message = serializers.CharField(help_text="Message text to send")
+    message = serializers.CharField(required=False, allow_blank=True, default='', help_text="Message text to send (optional when sending media)")
     page_id = serializers.CharField(max_length=255, help_text="Facebook page ID to send from")
     reply_to_message_id = serializers.CharField(max_length=255, required=False, allow_blank=True, help_text="Message ID to reply to (optional)")
 
@@ -220,7 +220,7 @@ class WhatsAppMessageSerializer(serializers.ModelSerializer):
 
 class WhatsAppSendMessageSerializer(serializers.Serializer):
     to_number = serializers.CharField(max_length=20, help_text="Recipient's phone number (E.164 format, e.g., +1234567890)")
-    message = serializers.CharField(help_text="Message text to send")
+    message = serializers.CharField(required=False, allow_blank=True, default='', help_text="Message text to send (optional when sending media)")
     waba_id = serializers.CharField(max_length=100, help_text="WhatsApp Business Account ID to send from")
 
     def validate_to_number(self, value):

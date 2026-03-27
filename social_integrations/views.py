@@ -1291,7 +1291,10 @@ def check_messaging_window(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated, CanSendSocialMessages])
 def facebook_send_message(request):
-    """Send a message to a Facebook user"""
+    """Send a message (text and/or media) to a Facebook user"""
+    from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+    request.parsers = [MultiPartParser(), FormParser(), JSONParser()]
+
     try:
         # Validate input data using serializer
         serializer = FacebookSendMessageSerializer(data=request.data)
@@ -1300,12 +1303,17 @@ def facebook_send_message(request):
                 'error': 'Invalid data',
                 'details': serializer.errors
             }, status=status.HTTP_400_BAD_REQUEST)
-        
+
         validated_data = serializer.validated_data
         recipient_id = validated_data['recipient_id']
-        message_text = validated_data['message']
+        message_text = validated_data.get('message', '')
         page_id = validated_data['page_id']
         reply_to_message_id = validated_data.get('reply_to_message_id', '').strip()
+        media_file = request.FILES.get('media')
+
+        # Validate: must have text or media
+        if not message_text and not media_file:
+            return Response({'error': 'Message text or media file is required'}, status=status.HTTP_400_BAD_REQUEST)
 
         # Get the page connection for this tenant
         try:
@@ -1342,42 +1350,86 @@ def facebook_send_message(request):
                 'details': 'Facebook requires the user to initiate the conversation before you can send messages.'
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # Send message using Facebook Graph API
         send_url = f"https://graph.facebook.com/v23.0/me/messages"
+        params = {'access_token': page_connection.page_access_token}
+        attachments_meta = []
 
-        message_data = {
-            'recipient': {'id': recipient_id},
-            'message': {'text': message_text},
-            'messaging_type': 'RESPONSE'  # Responding to user message
-        }
+        if media_file:
+            # Upload media as attachment via Facebook Send API
+            media_mime_type = media_file.content_type or 'application/octet-stream'
+            media_filename = media_file.name or 'file'
 
-        # Add reply_to if replying to a specific message
-        if reply_to_message_id:
-            message_data['reply_to'] = {'mid': reply_to_message_id}
-            logger.info(f"Replying to message: {reply_to_message_id}")
-        
-        headers = {
-            'Content-Type': 'application/json',
-        }
-        
-        params = {
-            'access_token': page_connection.page_access_token
-        }
+            # Determine attachment type
+            if media_mime_type.startswith('image/'):
+                attachment_type = 'image'
+            elif media_mime_type.startswith('video/'):
+                attachment_type = 'video'
+            elif media_mime_type.startswith('audio/'):
+                attachment_type = 'audio'
+            else:
+                attachment_type = 'file'
+
+            # If there's text AND media, send text first then media
+            if message_text:
+                text_payload = {
+                    'recipient': {'id': recipient_id},
+                    'message': {'text': message_text},
+                    'messaging_type': 'RESPONSE'
+                }
+                if reply_to_message_id:
+                    text_payload['reply_to'] = {'mid': reply_to_message_id}
+                requests.post(send_url, json=text_payload,
+                              headers={'Content-Type': 'application/json'}, params=params)
+
+            # Send media attachment using form data upload
+            message_payload = {
+                'recipient': '{"id":"' + recipient_id + '"}',
+                'message': '{"attachment":{"type":"' + attachment_type + '","payload":{"is_reusable":true}}}',
+                'messaging_type': 'RESPONSE',
+                'filedata': (media_filename, media_file, media_mime_type),
+            }
+
+            response = requests.post(
+                send_url,
+                files={'filedata': (media_filename, media_file, media_mime_type)},
+                data={
+                    'recipient': '{"id":"' + recipient_id + '"}',
+                    'message': '{"attachment":{"type":"' + attachment_type + '","payload":{"is_reusable":true}}}',
+                    'messaging_type': 'RESPONSE',
+                },
+                params=params
+            )
+
+            attachments_meta = [{
+                'mime_type': media_mime_type,
+                'filename': media_filename,
+                'type': attachment_type,
+            }]
+        else:
+            # Text-only message
+            message_data = {
+                'recipient': {'id': recipient_id},
+                'message': {'text': message_text},
+                'messaging_type': 'RESPONSE'
+            }
+            if reply_to_message_id:
+                message_data['reply_to'] = {'mid': reply_to_message_id}
+                logger.info(f"Replying to message: {reply_to_message_id}")
+
+            response = requests.post(
+                send_url,
+                json=message_data,
+                headers={'Content-Type': 'application/json'},
+                params=params
+            )
 
         logger.info(f"Sending message to {recipient_id} via {page_connection.page_name}")
 
-        response = requests.post(
-            send_url,
-            json=message_data,
-            headers=headers,
-            params=params
-        )
-        
         if response.status_code == 200:
             response_data = response.json()
             message_id = response_data.get('message_id')
-            
-            # Optionally save the sent message to our database
+
+            # Save the sent message to our database
             try:
                 from .consumers import send_new_message_notification
                 from django.db import connection
@@ -1390,10 +1442,10 @@ def facebook_send_message(request):
                     ).first()
 
                 timestamp = datetime.now()
-                fb_message = FacebookMessage.objects.create(
+                create_kwargs = dict(
                     page_connection=page_connection,
                     message_id=message_id or f"sent_{timestamp.timestamp()}",
-                    sender_id=recipient_id,  # Use recipient_id for conversation grouping (same as incoming messages)
+                    sender_id=recipient_id,
                     sender_name=page_connection.page_name,
                     message_text=message_text,
                     timestamp=timestamp,
@@ -1404,6 +1456,10 @@ def facebook_send_message(request):
                     is_echo=False,
                     sent_by=request.user,
                 )
+                if attachments_meta:
+                    create_kwargs['attachments'] = attachments_meta
+
+                fb_message = FacebookMessage.objects.create(**create_kwargs)
 
                 # Unarchive conversation if it was archived (move back to active when sending a message)
                 unarchived = ConversationArchive.objects.filter(
@@ -1437,21 +1493,22 @@ def facebook_send_message(request):
                 if previous_msg and previous_msg.sender_name:
                     recipient_name = previous_msg.sender_name
 
-                message_data = {
+                ws_message_data = {
                     'id': fb_message.id,
                     'message_id': fb_message.message_id,
                     'platform': 'facebook',
-                    'sender_id': page_id,  # The page is the sender when is_from_page=True
+                    'sender_id': page_id,
                     'sender_name': page_connection.page_name,
-                    'recipient_id': recipient_id,  # The user we're messaging
-                    'recipient_name': recipient_name,  # The user's name (for new conversations in frontend)
+                    'recipient_id': recipient_id,
+                    'recipient_name': recipient_name,
                     'message_text': message_text,
+                    'attachments': attachments_meta,
                     'timestamp': timestamp.isoformat(),
                     'is_from_page': True,
                     'page_id': page_id,
                     'sent_by': request.user.email if request.user else None,
                 }
-                async_to_sync(send_new_message_notification)(tenant_schema, recipient_id, message_data)
+                async_to_sync(send_new_message_notification)(tenant_schema, recipient_id, ws_message_data)
             except Exception as e:
                 logger.warning(f"Failed to save/broadcast sent message: {e}")
 
@@ -6767,15 +6824,23 @@ def whatsapp_media_proxy(request, media_id):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated, CanSendSocialMessages])
 def whatsapp_send_message(request):
-    """Send a WhatsApp message"""
+    """Send a WhatsApp message (text and/or media)"""
+    from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+    request.parsers = [MultiPartParser(), FormParser(), JSONParser()]
+
     try:
         serializer = WhatsAppSendMessageSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         to_number = serializer.validated_data['to_number'].lstrip('+')
-        message_text = serializer.validated_data['message']
+        message_text = serializer.validated_data.get('message', '')
         waba_id = serializer.validated_data['waba_id']
+        media_file = request.FILES.get('media')
+
+        # Validate: must have text or media
+        if not message_text and not media_file:
+            return Response({'error': 'Message text or media file is required'}, status=status.HTTP_400_BAD_REQUEST)
 
         # Get WhatsApp Business Account
         try:
@@ -6785,25 +6850,87 @@ def whatsapp_send_message(request):
                 'error': 'WhatsApp Business Account not found or inactive'
             }, status=status.HTTP_404_NOT_FOUND)
 
-        # Send message via WhatsApp Cloud API
         fb_api_version = getattr(settings, 'SOCIAL_INTEGRATIONS', {}).get('WHATSAPP_API_VERSION', 'v23.0')
-        send_url = f"https://graph.facebook.com/{fb_api_version}/{account.phone_number_id}/messages"
+        auth_headers = {'Authorization': f'Bearer {account.access_token}'}
 
-        message_payload = {
-            'messaging_product': 'whatsapp',
-            'to': to_number,
-            'type': 'text',
-            'text': {
-                'body': message_text
+        # Determine message type and payload
+        message_type = 'text'
+        media_id = None
+        media_mime_type = None
+        media_filename = None
+        attachments_meta = []
+
+        if media_file:
+            # Step 1: Upload media to Meta Cloud API
+            media_mime_type = media_file.content_type or 'application/octet-stream'
+            media_filename = media_file.name or 'file'
+
+            upload_url = f"https://graph.facebook.com/{fb_api_version}/{account.phone_number_id}/media"
+            upload_response = requests.post(
+                upload_url,
+                headers=auth_headers,
+                files={'file': (media_filename, media_file, media_mime_type)},
+                data={'messaging_product': 'whatsapp', 'type': media_mime_type},
+                timeout=60
+            )
+            upload_data = upload_response.json()
+
+            if upload_response.status_code != 200 or 'id' not in upload_data:
+                error_msg = upload_data.get('error', {}).get('message', 'Media upload failed')
+                logger.error(f"WhatsApp media upload failed: {error_msg}")
+                return Response({'error': f'Media upload failed: {error_msg}'}, status=status.HTTP_400_BAD_REQUEST)
+
+            media_id = upload_data['id']
+            logger.info(f"✅ Uploaded WhatsApp media: {media_id} ({media_mime_type})")
+
+            # Step 2: Determine message type from MIME
+            if media_mime_type.startswith('image/'):
+                message_type = 'image'
+            elif media_mime_type.startswith('video/'):
+                message_type = 'video'
+            elif media_mime_type.startswith('audio/'):
+                message_type = 'audio'
+            else:
+                message_type = 'document'
+
+            # Step 3: Build media message payload
+            media_object = {'id': media_id}
+            if message_text:
+                if message_type in ('image', 'video'):
+                    media_object['caption'] = message_text
+                elif message_type == 'document':
+                    media_object['caption'] = message_text
+                    media_object['filename'] = media_filename
+
+            if message_type == 'document' and 'filename' not in media_object:
+                media_object['filename'] = media_filename
+
+            message_payload = {
+                'messaging_product': 'whatsapp',
+                'to': to_number,
+                'type': message_type,
+                message_type: media_object
             }
-        }
 
-        headers = {
-            'Authorization': f'Bearer {account.access_token}',
-            'Content-Type': 'application/json'
-        }
+            attachments_meta = [{
+                'media_id': media_id,
+                'mime_type': media_mime_type,
+                'filename': media_filename,
+            }]
+        else:
+            # Text-only message
+            message_payload = {
+                'messaging_product': 'whatsapp',
+                'to': to_number,
+                'type': 'text',
+                'text': {'body': message_text}
+            }
 
-        logger.info(f"Sending WhatsApp message to {to_number} from {account.display_phone_number}")
+        # Send message via WhatsApp Cloud API
+        send_url = f"https://graph.facebook.com/{fb_api_version}/{account.phone_number_id}/messages"
+        headers = {**auth_headers, 'Content-Type': 'application/json'}
+
+        logger.info(f"Sending WhatsApp {message_type} message to {to_number} from {account.display_phone_number}")
         response = requests.post(send_url, json=message_payload, headers=headers)
         response_data = response.json()
 
@@ -6821,19 +6948,25 @@ def whatsapp_send_message(request):
             from django.db import connection
 
             timestamp = timezone.now()
-            wa_message = WhatsAppMessage.objects.create(
+            create_kwargs = dict(
                 business_account=account,
                 message_id=message_id,
                 from_number=account.phone_number,
                 to_number=to_number,
                 message_text=message_text,
-                message_type='text',
+                message_type=message_type,
                 timestamp=timestamp,
                 is_from_business=True,
                 status='sent',
                 sent_by=request.user,
             )
-            logger.info(f"✅ Saved sent WhatsApp message: {message_id}")
+            if media_mime_type:
+                create_kwargs['media_mime_type'] = media_mime_type
+            if attachments_meta:
+                create_kwargs['attachments'] = attachments_meta
+
+            wa_message = WhatsAppMessage.objects.create(**create_kwargs)
+            logger.info(f"✅ Saved sent WhatsApp message: {message_id} (type={message_type})")
 
             # Unarchive conversation if it was archived (move back to active when sending a message)
             unarchived = ConversationArchive.objects.filter(
@@ -6874,9 +7007,12 @@ def whatsapp_send_message(request):
                     'platform': 'whatsapp',
                     'from_number': account.phone_number,
                     'to_number': to_number,
-                    'contact_name': recipient_name,  # The user's name (for new conversations in frontend)
-                    'recipient_name': recipient_name,  # For frontend outgoing message display
+                    'contact_name': recipient_name,
+                    'recipient_name': recipient_name,
                     'message_text': message_text,
+                    'message_type': message_type,
+                    'media_mime_type': media_mime_type,
+                    'attachments': attachments_meta,
                     'timestamp': timestamp.isoformat(),
                     'is_from_business': True,
                     'waba_id': waba_id,
@@ -8082,8 +8218,10 @@ def email_disconnect(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated, CanSendSocialMessages])
 def email_send(request):
-    """Send an email message"""
+    """Send an email message (with optional file attachments)"""
+    from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
     from .email_utils import send_email_smtp
+    request.parsers = [MultiPartParser(), FormParser(), JSONParser()]
 
     serializer = EmailSendSerializer(data=request.data)
     if not serializer.is_valid():
@@ -8111,6 +8249,16 @@ def email_send(request):
                 connection=connection
             ).first()
 
+        # Build attachment list from uploaded files
+        attachment_files = request.FILES.getlist('attachments')
+        attachments = []
+        for f in attachment_files:
+            attachments.append({
+                'filename': f.name,
+                'content': f.read(),
+                'content_type': f.content_type or 'application/octet-stream',
+            })
+
         # Send the email
         result = send_email_smtp(
             connection=connection,
@@ -8120,7 +8268,8 @@ def email_send(request):
             body_html=data.get('body_html', ''),
             cc_emails=data.get('cc_emails', []),
             bcc_emails=data.get('bcc_emails', []),
-            reply_to_message_id=reply_to_message.message_id if reply_to_message else None
+            reply_to_message_id=reply_to_message.message_id if reply_to_message else None,
+            attachments=attachments,
         )
 
         # send_email_smtp returns (message_id, sent_message) tuple
