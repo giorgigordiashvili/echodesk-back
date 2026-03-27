@@ -3243,10 +3243,30 @@ def instagram_webhook(request):
                                             ).first()
 
                                             if existing:
-                                                # Update timestamp if message exists
+                                                # Update timestamp and attachment URLs from echo webhook
+                                                update_fields = ['timestamp']
                                                 existing.timestamp = timestamp_dt
-                                                existing.save(update_fields=['timestamp'])
-                                                logger.info(f"✅ Updated Instagram echo message timestamp to {timestamp_dt}")
+
+                                                # Echo webhook contains CDN URLs for attachments — update DB
+                                                raw_attachments = message_data.get('attachments', [])
+                                                if raw_attachments:
+                                                    attachments = []
+                                                    for att in raw_attachments:
+                                                        att_type = att.get('type', 'file')
+                                                        att_url = att.get('payload', {}).get('url')
+                                                        attachments.append({
+                                                            'type': att_type,
+                                                            'url': att_url,
+                                                        })
+                                                    existing.attachments = attachments
+                                                    update_fields.append('attachments')
+                                                    if not existing.attachment_url and attachments:
+                                                        existing.attachment_url = attachments[0].get('url')
+                                                        existing.attachment_type = attachments[0].get('type', '')
+                                                        update_fields.extend(['attachment_url', 'attachment_type'])
+
+                                                existing.save(update_fields=update_fields)
+                                                logger.info(f"✅ Updated Instagram echo message (timestamp + {len(raw_attachments)} attachments) for {message_id}")
                                             else:
                                                 # Create new message for echo (sent from Instagram directly)
                                                 message_text = message_data.get('text', '')
