@@ -5369,6 +5369,17 @@ def unread_messages_count(request):
     logger = logging.getLogger(__name__)
 
     try:
+        # Get accessible email connection IDs for this user
+        is_admin = request.user.is_superuser or request.user.is_staff
+        all_email_connections = EmailConnection.objects.filter(is_active=True).prefetch_related('user_assignments')
+        accessible_connection_ids = []
+        for conn in all_email_connections:
+            if not conn.user_assignments.exists():
+                # No assignments = everyone can access
+                accessible_connection_ids.append(conn.id)
+            elif is_admin or conn.user_assignments.filter(user=request.user).exists():
+                accessible_connection_ids.append(conn.id)
+
         # Check if chat assignment filtering is enabled
         settings_obj = SocialIntegrationSettings.objects.first()
         assignment_enabled = settings_obj and settings_obj.chat_assignment_enabled
@@ -5448,11 +5459,13 @@ def unread_messages_count(request):
             ).count()
 
             # Count unread Email messages - only mine or unassigned, only INBOX
+            # Also filter by accessible email connections
             email_unread = EmailMessage.objects.filter(
                 is_from_business=False,
                 is_read_by_staff=False,
                 is_deleted=False,
-                folder='INBOX'  # Only count INBOX messages for notifications
+                folder='INBOX',  # Only count INBOX messages for notifications
+                connection_id__in=accessible_connection_ids,
             ).filter(
                 Q(thread_id__in=my_email_assignments) |  # Assigned to me
                 ~Q(thread_id__in=all_email_assignments)  # Not assigned to anyone
@@ -5481,7 +5494,8 @@ def unread_messages_count(request):
                 is_from_business=False,
                 is_read_by_staff=False,
                 is_deleted=False,
-                folder='INBOX'  # Only count INBOX messages for notifications
+                folder='INBOX',  # Only count INBOX messages for notifications
+                connection_id__in=accessible_connection_ids,
             ).count()
 
         total_unread = facebook_unread + instagram_unread + whatsapp_unread + email_unread
