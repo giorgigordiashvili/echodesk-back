@@ -56,6 +56,9 @@ urlpatterns = [
     path('whatsapp/send-message/', views.whatsapp_send_message, name='whatsapp_send_message'),
     path('whatsapp/webhook/', views.whatsapp_webhook, name='whatsapp_webhook'),
 
+    # WhatsApp Media Proxy (avoids browser ORB/CORS blocking on Meta URLs)
+    path('whatsapp-media/<str:media_id>/', views.whatsapp_media_proxy, name='whatsapp_media_proxy'),
+
     # WhatsApp Template Management
     path('whatsapp/<str:waba_id>/templates/', views.whatsapp_list_templates, name='whatsapp_list_templates'),
     path('whatsapp/<str:waba_id>/templates/sync/', views.whatsapp_sync_templates, name='whatsapp_sync_templates'),

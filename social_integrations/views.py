@@ -6698,6 +6698,72 @@ def whatsapp_disconnect(request):
     description="Send a WhatsApp message",
     summary="Send WhatsApp Message"
 )
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, CanViewSocialMessages])
+def whatsapp_media_proxy(request, media_id):
+    """Proxy WhatsApp media through the backend to avoid browser ORB/CORS blocking.
+
+    WhatsApp Cloud API media URLs (lookaside.fbsbx.com) are temporary and blocked
+    by browsers. This endpoint fetches fresh URLs using the media_id and streams
+    the content back to the frontend.
+    """
+    logger = logging.getLogger(__name__)
+    waba_id = request.query_params.get('waba_id')
+    if not waba_id:
+        return Response({'error': 'waba_id required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        account = WhatsAppBusinessAccount.objects.get(waba_id=waba_id)
+    except WhatsAppBusinessAccount.DoesNotExist:
+        return Response({'error': 'Account not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if not account.access_token:
+        return Response({'error': 'No access token configured'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        # Step 1: Get fresh download URL from Meta Graph API
+        media_info_url = f"https://graph.facebook.com/v23.0/{media_id}"
+        media_response = requests.get(
+            media_info_url,
+            headers={'Authorization': f'Bearer {account.access_token}'},
+            timeout=10
+        )
+
+        if media_response.status_code != 200:
+            logger.error(f"Failed to get WhatsApp media info for {media_id}: {media_response.status_code}")
+            return Response({'error': 'Failed to get media info from Meta'}, status=status.HTTP_502_BAD_GATEWAY)
+
+        media_data = media_response.json()
+        download_url = media_data.get('url')
+        mime_type = media_data.get('mime_type', 'application/octet-stream')
+
+        if not download_url:
+            return Response({'error': 'No download URL returned by Meta'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Step 2: Download the actual media binary
+        download_response = requests.get(
+            download_url,
+            headers={'Authorization': f'Bearer {account.access_token}'},
+            timeout=30
+        )
+
+        if download_response.status_code != 200:
+            logger.error(f"Failed to download WhatsApp media {media_id}: {download_response.status_code}")
+            return Response({'error': 'Failed to download media'}, status=status.HTTP_502_BAD_GATEWAY)
+
+        # Step 3: Stream back to the client with caching headers
+        response = HttpResponse(download_response.content, content_type=mime_type)
+        response['Cache-Control'] = 'public, max-age=86400'  # Cache for 24 hours
+        response['Access-Control-Allow-Origin'] = '*'
+        return response
+
+    except requests.Timeout:
+        return Response({'error': 'Media download timed out'}, status=status.HTTP_504_GATEWAY_TIMEOUT)
+    except Exception as e:
+        logger.error(f"WhatsApp media proxy error for {media_id}: {e}")
+        return Response({'error': 'Internal error'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated, CanSendSocialMessages])
 def whatsapp_send_message(request):
