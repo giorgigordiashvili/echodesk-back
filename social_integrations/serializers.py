@@ -161,7 +161,7 @@ class InstagramMessageSerializer(serializers.ModelSerializer):
 
 class InstagramSendMessageSerializer(serializers.Serializer):
     recipient_id = serializers.CharField(max_length=255, help_text="Instagram user ID to send message to")
-    message = serializers.CharField(help_text="Message text to send")
+    message = serializers.CharField(required=False, allow_blank=True, default='', help_text="Message text to send (optional when sending media)")
     instagram_account_id = serializers.CharField(max_length=255, help_text="Instagram account ID to send from")
 
 

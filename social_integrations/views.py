@@ -2874,7 +2874,10 @@ def instagram_disconnect(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated, CanSendSocialMessages])
 def instagram_send_message(request):
-    """Send a message to an Instagram user"""
+    """Send a message (text and/or media) to an Instagram user"""
+    from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+    request.parsers = [MultiPartParser(), FormParser(), JSONParser()]
+
     try:
         # Validate input data using serializer
         serializer = InstagramSendMessageSerializer(data=request.data)
@@ -2886,8 +2889,13 @@ def instagram_send_message(request):
 
         validated_data = serializer.validated_data
         recipient_id = validated_data['recipient_id']
-        message_text = validated_data['message']
+        message_text = validated_data.get('message', '')
         instagram_account_id = validated_data['instagram_account_id']
+        media_file = request.FILES.get('media')
+
+        # Validate: must have text or media
+        if not message_text and not media_file:
+            return Response({'error': 'Message text or media file is required'}, status=status.HTTP_400_BAD_REQUEST)
 
         # Get the Instagram account connection for this tenant
         try:
@@ -2939,16 +2947,6 @@ def instagram_send_message(request):
         # https://developers.facebook.com/docs/messenger-platform/instagram/get-started
         send_url = f"https://graph.facebook.com/v23.0/me/messages"
 
-        message_data = {
-            'recipient': {'id': recipient_id},
-            'message': {'text': message_text},
-            'messaging_type': 'RESPONSE'  # Required for Instagram within 24hr window
-        }
-
-        headers = {
-            'Content-Type': 'application/json',
-        }
-
         # Use the Facebook Page's access token
         access_token = account_connection.facebook_page.page_access_token
 
@@ -2957,6 +2955,8 @@ def instagram_send_message(request):
             'platform': 'instagram'  # Specify Instagram platform
         }
 
+        attachments_meta = []
+
         print(f"🚀 Sending Instagram message:")
         print(f"   Instagram Account: @{account_connection.username} (ID: {instagram_account_id})")
         print(f"   Facebook Page ID: {page_id}")
@@ -2964,16 +2964,65 @@ def instagram_send_message(request):
         print(f"   Last message from user: {latest_message.timestamp}")
         print(f"   Time since last message: {hours_passed:.1f} hours (must be < 24)")
         print(f"   Message: {message_text}")
+        print(f"   Has media: {bool(media_file)}")
         print(f"   URL: {send_url}")
-        print(f"   Messaging Type: RESPONSE")
-        print(f"   Using Page access token: {access_token[:20]}...")
 
-        response = requests.post(
-            send_url,
-            json=message_data,
-            headers=headers,
-            params=params
-        )
+        if media_file:
+            # Upload media as attachment via Messenger Platform API (same as Facebook)
+            media_mime_type = media_file.content_type or 'application/octet-stream'
+            media_filename = media_file.name or 'file'
+
+            # Determine attachment type
+            if media_mime_type.startswith('image/'):
+                attachment_type = 'image'
+            elif media_mime_type.startswith('video/'):
+                attachment_type = 'video'
+            elif media_mime_type.startswith('audio/'):
+                attachment_type = 'audio'
+            else:
+                attachment_type = 'file'
+
+            # If there's text AND media, send text first then media
+            if message_text:
+                text_payload = {
+                    'recipient': {'id': recipient_id},
+                    'message': {'text': message_text},
+                    'messaging_type': 'RESPONSE'
+                }
+                requests.post(send_url, json=text_payload,
+                              headers={'Content-Type': 'application/json'}, params=params)
+
+            # Send media attachment using form data upload
+            response = requests.post(
+                send_url,
+                files={'filedata': (media_filename, media_file, media_mime_type)},
+                data={
+                    'recipient': '{"id":"' + recipient_id + '"}',
+                    'message': '{"attachment":{"type":"' + attachment_type + '","payload":{"is_reusable":true}}}',
+                    'messaging_type': 'RESPONSE',
+                },
+                params=params
+            )
+
+            attachments_meta = [{
+                'mime_type': media_mime_type,
+                'filename': media_filename,
+                'type': attachment_type,
+            }]
+        else:
+            # Text-only message
+            message_data = {
+                'recipient': {'id': recipient_id},
+                'message': {'text': message_text},
+                'messaging_type': 'RESPONSE'
+            }
+
+            response = requests.post(
+                send_url,
+                json=message_data,
+                headers={'Content-Type': 'application/json'},
+                params=params
+            )
 
         print(f"📤 Instagram API Response: {response.status_code} - {response.text}")
 
@@ -2987,7 +3036,7 @@ def instagram_send_message(request):
                 from django.db import connection
 
                 timestamp = datetime.now()
-                ig_message = InstagramMessage.objects.create(
+                create_kwargs = dict(
                     account_connection=account_connection,
                     message_id=message_id or f"sent_{timestamp.timestamp()}",
                     sender_id=recipient_id,  # Use recipient_id for conversation grouping (same as incoming messages)
@@ -2999,6 +3048,11 @@ def instagram_send_message(request):
                     is_echo=False,
                     sent_by=request.user,
                 )
+                if attachments_meta:
+                    create_kwargs['attachments'] = attachments_meta
+                    create_kwargs['attachment_type'] = attachments_meta[0].get('type', '')
+
+                ig_message = InstagramMessage.objects.create(**create_kwargs)
                 print(f"✅ Saved sent message to database")
 
                 # Unarchive conversation if it was archived (move back to active when sending a message)
@@ -3042,6 +3096,7 @@ def instagram_send_message(request):
                     'recipient_id': recipient_id,  # The user we're messaging
                     'recipient_name': recipient_name,  # The user's name (for new conversations in frontend)
                     'message_text': message_text,
+                    'attachments': attachments_meta,
                     'timestamp': timestamp.isoformat(),
                     'is_from_business': True,
                     'account_id': instagram_account_id,
