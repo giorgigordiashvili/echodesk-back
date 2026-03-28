@@ -1,11 +1,13 @@
 import logging
 import json
 from django.conf import settings
-from openai import OpenAI
+from openai import OpenAI, PermissionDeniedError
 
 from social_integrations.models import AutoPostSettings, AutoPostContent
 
 logger = logging.getLogger(__name__)
+
+FALLBACK_MODELS = ['gpt-4o-mini', 'gpt-3.5-turbo']
 
 
 LANGUAGE_NAMES = {
@@ -117,9 +119,32 @@ class AIContentService:
                 default_prompt = f"Marketing product photo for: {tenant_context['product']['name']}"
             else:
                 default_prompt = f"Marketing image for: {auto_settings.company_description[:100]}"
-            image_url = image_service.generate_image(
-                result.get('image_prompt', default_prompt)
-            )
+            try:
+                image_url = image_service.generate_image(
+                    result.get('image_prompt', default_prompt)
+                )
+            except Exception as e:
+                logger.warning(f"Failed to generate image: {e}")
+                image_url = None
+
+        # Fallback to page logo if no image
+        if not image_url:
+            try:
+                from social_integrations.models import FacebookPageConnection
+                page = FacebookPageConnection.objects.filter(is_active=True).first()
+                if page and page.page_access_token:
+                    import requests as http_requests
+                    resp = http_requests.get(
+                        f"https://graph.facebook.com/v23.0/{page.page_id}/picture",
+                        params={"redirect": "false", "type": "large", "access_token": page.page_access_token}
+                    )
+                    if resp.ok:
+                        pic_data = resp.json().get("data", {})
+                        if pic_data.get("url"):
+                            image_url = pic_data["url"]
+                            logger.info(f"Using page logo as fallback image")
+            except Exception as e:
+                logger.warning(f"Failed to get page logo fallback: {e}")
 
         # Determine schedule
         now = timezone.now()
@@ -184,35 +209,51 @@ Important:
 
 Respond ONLY with valid JSON, no markdown."""
 
-        try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "You are a social media marketing expert. Always respond with valid JSON only."},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.8,
-                max_tokens=1000,
-            )
+        models_to_try = [self.model] + [m for m in FALLBACK_MODELS if m != self.model]
+        messages = [
+            {"role": "system", "content": "You are a social media marketing expert. Always respond with valid JSON only."},
+            {"role": "user", "content": prompt},
+        ]
 
-            content = response.choices[0].message.content.strip()
-            # Strip markdown code fences if present
-            if content.startswith('```'):
-                content = content.split('\n', 1)[1] if '\n' in content else content[3:]
-                if content.endswith('```'):
-                    content = content[:-3]
-                content = content.strip()
+        last_error = None
+        for model in models_to_try:
+            try:
+                response = self.client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    temperature=0.8,
+                    max_tokens=1000,
+                )
 
-            result = json.loads(content)
-            return result
+                if model != self.model:
+                    logger.info(f"OpenAI: fell back from {self.model} to {model} successfully")
 
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse OpenAI response as JSON: {e}")
-            return {
-                'facebook_text': 'Check out our latest offerings!',
-                'instagram_text': 'Check out our latest offerings! #business #marketing',
-                'image_prompt': 'Modern business marketing image',
-            }
-        except Exception as e:
-            logger.error(f"OpenAI API error: {e}")
-            raise
+                content = response.choices[0].message.content.strip()
+                # Strip markdown code fences if present
+                if content.startswith('```'):
+                    content = content.split('\n', 1)[1] if '\n' in content else content[3:]
+                    if content.endswith('```'):
+                        content = content[:-3]
+                    content = content.strip()
+
+                result = json.loads(content)
+                return result
+
+            except PermissionDeniedError as e:
+                logger.warning(f"OpenAI model {model} not accessible: {e}. Trying fallback...")
+                last_error = e
+                continue
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse OpenAI response as JSON: {e}")
+                return {
+                    'facebook_text': 'Check out our latest offerings!',
+                    'instagram_text': 'Check out our latest offerings! #business #marketing',
+                    'image_prompt': 'Modern business marketing image',
+                }
+            except Exception as e:
+                logger.error(f"OpenAI API error: {e}")
+                raise
+
+        # All models failed with permission errors
+        logger.error(f"All OpenAI models failed with permission errors. Last error: {last_error}")
+        raise last_error
