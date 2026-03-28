@@ -171,6 +171,46 @@ def encode_imap_utf7(s: str) -> str:
     return ''.join(result)
 
 
+def _imap_authenticate(imap, username: str, password: str) -> None:
+    """
+    Authenticate an IMAP connection, falling back to AUTHENTICATE PLAIN when LOGIN fails.
+
+    Some IMAP servers (e.g. those using Dovecot) reject the LOGIN command with
+    "BAD LOGIN parse error" when the password contains special characters such as
+    spaces, parentheses, backslashes or double-quotes.  The IMAP AUTHENTICATE PLAIN
+    mechanism base64-encodes the credentials and therefore avoids all quoting issues.
+
+    We try LOGIN first (most compatible) and fall back to AUTHENTICATE PLAIN only
+    when we get the specific "LOGIN parse error" / "BAD" response, to avoid masking
+    genuine authentication failures (wrong password etc.).
+
+    Args:
+        imap: An IMAP4 or IMAP4_SSL instance that is already connected.
+        username: IMAP username.
+        password: Plain-text password.
+
+    Raises:
+        imaplib.IMAP4.error: on authentication failure (wrong credentials etc.)
+    """
+    try:
+        imap.login(username, password)
+    except imaplib.IMAP4.error as e:
+        err_str = str(e).lower()
+        # Only fall back for parse / literal errors, not wrong-password errors
+        if 'parse error' in err_str or ('bad' in err_str and 'login' in err_str):
+            logger.warning(
+                "IMAP LOGIN command failed with parse error (likely special chars in password); "
+                "retrying with AUTHENTICATE PLAIN: %s", e
+            )
+            # Build SASL PLAIN token: \x00username\x00password (all base64-encoded)
+            plain_token = base64.b64encode(
+                f'\x00{username}\x00{password}'.encode('utf-8')
+            ).decode('ascii')
+            imap.authenticate('PLAIN', lambda _: plain_token)
+        else:
+            raise
+
+
 def test_imap_connection(server: str, port: int, username: str, password: str, use_ssl: bool = True) -> Tuple[bool, Optional[str]]:
     """
     Test IMAP connection credentials.
@@ -185,7 +225,7 @@ def test_imap_connection(server: str, port: int, username: str, password: str, u
             imap = imaplib.IMAP4(server, port)
             imap.starttls()
 
-        imap.login(username, password)
+        _imap_authenticate(imap, username, password)
         imap.logout()
         return True, None
     except imaplib.IMAP4.error as e:
@@ -238,7 +278,7 @@ def get_imap_folders(connection) -> Dict:
             imap = imaplib.IMAP4(connection.imap_server, connection.imap_port)
             imap.starttls()
 
-        imap.login(connection.username, connection.get_password())
+        _imap_authenticate(imap, connection.username, connection.get_password())
         result, folder_list = imap.list()
         imap.logout()
 
@@ -993,10 +1033,34 @@ def _sync_folder(imap, connection, imap_folder_name: str, db_folder_name: str, m
     return new_count
 
 
+def _connect_imap(connection):
+    """
+    Create and authenticate an IMAP connection.
+
+    Args:
+        connection: EmailConnection model instance
+
+    Returns:
+        Authenticated IMAP connection object
+    """
+    if connection.imap_use_ssl:
+        imap = imaplib.IMAP4_SSL(connection.imap_server, connection.imap_port, timeout=30)
+    else:
+        imap = imaplib.IMAP4(connection.imap_server, connection.imap_port)
+        imap.starttls()
+
+    _imap_authenticate(imap, connection.username, connection.get_password())
+    return imap
+
+
 def sync_imap_messages(connection, max_messages: int = 500) -> int:
     """
     Sync messages from IMAP server for a given connection.
     Syncs both the configured folder (usually INBOX) and the Sent folder.
+
+    If the IMAP connection drops mid-sync (e.g. "connection already closed"),
+    the function will automatically reconnect and retry the failed folder
+    (up to 2 retries per folder).
 
     Args:
         connection: EmailConnection model instance
@@ -1007,13 +1071,7 @@ def sync_imap_messages(connection, max_messages: int = 500) -> int:
     """
     try:
         # Connect to IMAP
-        if connection.imap_use_ssl:
-            imap = imaplib.IMAP4_SSL(connection.imap_server, connection.imap_port, timeout=30)
-        else:
-            imap = imaplib.IMAP4(connection.imap_server, connection.imap_port)
-            imap.starttls()
-
-        imap.login(connection.username, connection.get_password())
+        imap = _connect_imap(connection)
 
         total_new_count = 0
 
@@ -1052,18 +1110,44 @@ def sync_imap_messages(connection, max_messages: int = 500) -> int:
             logger.info(f"[EMAIL_SYNC] sync_days_back setting: {connection.sync_days_back} (0=all history)")
             logger.info(f"[EMAIL_SYNC] ================================================")
 
-            # Sync each folder
+            # Sync each folder with automatic reconnection on connection drop
             for raw_folder_name, display_folder_name in folders_to_sync:
-                try:
-                    folder_count = _sync_folder(imap, connection, raw_folder_name, display_folder_name, max_messages)
-                    total_new_count += folder_count
-                    if folder_count > 0:
-                        logger.info(f"Synced {folder_count} emails from {display_folder_name}")
-                except Exception as e:
-                    logger.warning(f"Failed to sync folder {display_folder_name}: {e}")
-                    continue
+                max_retries = 2
+                for attempt in range(max_retries + 1):
+                    try:
+                        folder_count = _sync_folder(imap, connection, raw_folder_name, display_folder_name, max_messages)
+                        total_new_count += folder_count
+                        if folder_count > 0:
+                            logger.info(f"Synced {folder_count} emails from {display_folder_name}")
+                        break  # Success, move to next folder
+                    except (imaplib.IMAP4.abort, imaplib.IMAP4.error, OSError, ConnectionError, BrokenPipeError) as e:
+                        error_msg = str(e).lower()
+                        is_connection_error = any(keyword in error_msg for keyword in [
+                            'connection already closed', 'socket error', 'broken pipe',
+                            'connection reset', 'eof', 'timed out', 'bad file descriptor',
+                        ])
+                        if is_connection_error and attempt < max_retries:
+                            logger.warning(
+                                f"[EMAIL_SYNC] Connection dropped while syncing folder '{display_folder_name}' "
+                                f"(attempt {attempt + 1}/{max_retries + 1}): {e}. Reconnecting..."
+                            )
+                            try:
+                                imap = _connect_imap(connection)
+                                logger.info(f"[EMAIL_SYNC] Reconnected to IMAP for {connection.email_address}")
+                            except Exception as reconnect_err:
+                                logger.error(f"[EMAIL_SYNC] Failed to reconnect IMAP: {reconnect_err}")
+                                raise  # Give up if we can't reconnect
+                        else:
+                            logger.warning(f"Failed to sync folder {display_folder_name}: {e}")
+                            break  # Non-connection error or exhausted retries, skip folder
+                    except Exception as e:
+                        logger.warning(f"Failed to sync folder {display_folder_name}: {e}")
+                        break  # Unknown error, skip folder
 
-        imap.logout()
+        try:
+            imap.logout()
+        except Exception:
+            pass  # Connection may already be closed
 
         # Update connection status
         connection.last_sync_at = timezone.now()
@@ -1110,7 +1194,7 @@ def delete_emails_from_imap(connection, message_ids: List[str]) -> int:
             imap = imaplib.IMAP4(connection.imap_server, connection.imap_port)
             imap.starttls()
 
-        imap.login(connection.username, connection.get_password())
+        _imap_authenticate(imap, connection.username, connection.get_password())
 
         # Select folder (not readonly - we need to modify)
         result, data = imap.select(connection.sync_folder, readonly=False)
@@ -1177,7 +1261,7 @@ def move_email_to_folder(connection, message_id: str, source_folder: str, target
             imap = imaplib.IMAP4(connection.imap_server, connection.imap_port)
             imap.starttls()
 
-        imap.login(connection.username, connection.get_password())
+        _imap_authenticate(imap, connection.username, connection.get_password())
 
         # Select source folder
         result, data = imap.select(source_folder, readonly=False)
@@ -1241,7 +1325,7 @@ def get_available_folders(connection) -> List[Dict[str, Any]]:
             imap = imaplib.IMAP4(connection.imap_server, connection.imap_port)
             imap.starttls()
 
-        imap.login(connection.username, connection.get_password())
+        _imap_authenticate(imap, connection.username, connection.get_password())
 
         result, folders_data = imap.list()
         folders = []
@@ -1309,7 +1393,7 @@ def debug_email_sync(connection) -> Dict[str, Any]:
             imap = imaplib.IMAP4(connection.imap_server, connection.imap_port)
             imap.starttls()
 
-        imap.login(connection.username, connection.get_password())
+        _imap_authenticate(imap, connection.username, connection.get_password())
 
         # Get all folders
         result, folders_data = imap.list()

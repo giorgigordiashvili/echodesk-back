@@ -894,6 +894,10 @@ class TeamChatMessageViewSet(viewsets.ModelViewSet):
                     'conversation_id': conversation.id,
                 }
             )
+        except (ConnectionError, OSError) as e:
+            # Connection reset by peer (errno 104) and similar transient errors
+            # are expected when clients disconnect before receiving the message
+            logger.warning(f"WebSocket notification could not be delivered (client may have disconnected): {e}")
         except Exception as e:
             logger.error(f"Failed to send WebSocket notification: {e}")
 
