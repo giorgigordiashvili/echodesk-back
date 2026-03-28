@@ -13,6 +13,7 @@ import logging
 import requests
 from decimal import Decimal
 from typing import Optional, Dict, Any, List
+from urllib.parse import quote
 
 from django.conf import settings
 
@@ -73,8 +74,10 @@ class PaddlePaymentProvider(PaymentProvider):
             if response.status_code >= 400:
                 error_detail = response_data.get('error', {})
                 error_msg = error_detail.get('detail', response.text)
-                logger.error(f'Paddle API error: {response.status_code} {error_msg}')
-                raise ValueError(f'Paddle API error: {error_msg}')
+                error_code = error_detail.get('code', '')
+                field_errors = error_detail.get('errors', [])
+                logger.error(f'Paddle API error: {response.status_code} [{error_code}] {error_msg} | fields: {field_errors} | url: {url} | payload: {json.dumps(data) if data else "none"}')
+                raise ValueError(f'Paddle API error: {error_msg} (code={error_code}, fields={field_errors})')
 
             return response_data.get('data', response_data)
 
@@ -90,7 +93,8 @@ class PaddlePaymentProvider(PaymentProvider):
         Returns dict with 'id', 'email', 'name'.
         """
         # Search for existing customer
-        customers = self._request('GET', f'/customers?email={email}')
+        encoded_email = quote(email, safe='@.')
+        customers = self._request('GET', f'/customers?email={encoded_email}')
         if isinstance(customers, list) and len(customers) > 0:
             return customers[0]
 
