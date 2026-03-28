@@ -9,45 +9,24 @@ logger = logging.getLogger(__name__)
 
 
 def get_vapid_keys():
-    """Get VAPID keys from settings or generate new ones."""
+    """Get VAPID keys from settings.
+
+    Returns None if VAPID keys are not configured, so callers can skip
+    push notifications gracefully rather than generating ephemeral keys
+    that won't match existing browser subscriptions.
+    """
     private_key = getattr(settings, 'VAPID_PRIVATE_KEY', None)
     public_key = getattr(settings, 'VAPID_PUBLIC_KEY', None)
 
     if not private_key or not public_key:
-        # Generate new keys using cryptography directly (py_vapid has compatibility issues)
-        import base64
-        from cryptography.hazmat.primitives.asymmetric import ec
-        from cryptography.hazmat.backends import default_backend
-        from cryptography.hazmat.primitives import serialization
-
-        # Generate ECDSA key pair using P-256 curve
-        private_key_obj = ec.generate_private_key(ec.SECP256R1(), default_backend())
-
-        # Get private key in PEM format
-        private_pem = private_key_obj.private_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.PKCS8,
-            encryption_algorithm=serialization.NoEncryption()
-        ).decode('utf-8')
-
-        # Get public key in uncompressed format for VAPID
-        public_numbers = private_key_obj.public_key().public_numbers()
-        x_bytes = public_numbers.x.to_bytes(32, byteorder='big')
-        y_bytes = public_numbers.y.to_bytes(32, byteorder='big')
-        # Uncompressed point format: 0x04 + x + y, then base64url encode
-        public_key_bytes = b'\x04' + x_bytes + y_bytes
-        public_key_b64 = base64.urlsafe_b64encode(public_key_bytes).rstrip(b'=').decode('utf-8')
-
-        private_key = private_pem
-        public_key = public_key_b64
-
         logger.warning(
-            "VAPID keys not found in settings. Generated new keys. "
-            "Add these to your settings.py:\n"
-            f"VAPID_PRIVATE_KEY = '''{private_key}'''\n"
-            f"VAPID_PUBLIC_KEY = '{public_key}'\n"
-            f"VAPID_ADMIN_EMAIL = 'mailto:admin@echodesk.ge'"
+            "VAPID_PRIVATE_KEY and/or VAPID_PUBLIC_KEY are not set in settings. "
+            "Push notifications will be skipped until these are configured. "
+            "Generate keys with: python -c \"from py_vapid import Vapid; v = Vapid(); v.generate_keys(); "
+            "print('VAPID_PRIVATE_KEY =', repr(v.private_pem().decode())); "
+            "print('VAPID_PUBLIC_KEY =', repr(v.public_key))\""
         )
+        return None
 
     return {
         'private_key': private_key,
@@ -86,6 +65,9 @@ def send_push_notification(
 
     # Get VAPID keys
     vapid_keys = get_vapid_keys()
+    if vapid_keys is None:
+        logger.warning("VAPID keys not configured — skipping push notification")
+        return False
 
     # Prepare subscription info
     subscription_info = {
