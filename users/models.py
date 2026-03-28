@@ -52,11 +52,20 @@ class TenantGroup(models.Model):
         return self.name
 
     def get_feature_keys(self):
-        """Return a list of feature keys this group has access to"""
+        """Return a list of feature keys this group has access to.
+
+        Uses prefetched features when available to avoid N+1 queries.
+        """
+        # Use prefetched cache if available (avoids N+1 queries)
+        if 'features' in getattr(self, '_prefetched_objects_cache', {}):
+            return [f.key for f in self.features.all() if f.is_active]
         return list(self.features.filter(is_active=True).values_list('key', flat=True))
 
     def has_feature(self, feature_key):
         """Check if this group has access to a specific feature"""
+        # Use prefetched cache if available
+        if 'features' in getattr(self, '_prefetched_objects_cache', {}):
+            return any(f.key == feature_key and f.is_active for f in self.features.all())
         return self.features.filter(key=feature_key, is_active=True).exists()
 
 
