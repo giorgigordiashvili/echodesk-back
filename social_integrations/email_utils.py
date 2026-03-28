@@ -202,10 +202,10 @@ def _imap_authenticate(imap, username: str, password: str) -> None:
                 "IMAP LOGIN command failed with parse error (likely special chars in password); "
                 "retrying with AUTHENTICATE PLAIN: %s", e
             )
-            # Build SASL PLAIN token: \x00username\x00password (all base64-encoded)
-            plain_token = base64.b64encode(
-                f'\x00{username}\x00{password}'.encode('utf-8')
-            ).decode('ascii')
+            # Build SASL PLAIN token: \x00username\x00password
+            # imaplib.authenticate() base64-encodes the callback return value itself,
+            # so we must return raw bytes, NOT pre-encoded.
+            plain_token = f'\x00{username}\x00{password}'.encode('utf-8')
             imap.authenticate('PLAIN', lambda _: plain_token)
         else:
             raise

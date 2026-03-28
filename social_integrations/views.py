@@ -9652,7 +9652,7 @@ class QuickReplyViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, CanSendSocialMessages]
 
     def get_queryset(self):
-        queryset = QuickReply.objects.all().order_by('position', '-use_count', 'title')
+        queryset = QuickReply.objects.select_related('created_by').order_by('position', '-use_count', 'title')
 
         # Filter by platform
         platform = self.request.query_params.get('platform')
