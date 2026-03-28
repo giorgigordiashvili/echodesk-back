@@ -480,13 +480,17 @@ redis_port = config('REDIS_PORT', default=6379, cast=int)
 
 if redis_password:
     # Format: rediss:// (with double 's' for SSL) for DigitalOcean managed Redis
-    # ssl_cert_reqs=CERT_NONE required for managed Redis (self-signed certs)
-    redis_url = f'rediss://:{redis_password}@{redis_host}:{redis_port}/0?ssl_cert_reqs=CERT_NONE'
+    # channels_redis doesn't support ssl_cert_reqs in the URL, so we pass SSL
+    # config as a dict with ssl_cert_reqs=CERT_NONE for self-signed certs.
+    import ssl as _ssl
     CHANNEL_LAYERS = {
         'default': {
             'BACKEND': 'channels_redis.core.RedisChannelLayer',
             'CONFIG': {
-                "hosts": [redis_url],
+                "hosts": [{
+                    "address": f'rediss://:{redis_password}@{redis_host}:{redis_port}/0',
+                    "ssl_cert_reqs": _ssl.CERT_NONE,
+                }],
             },
         },
     }
