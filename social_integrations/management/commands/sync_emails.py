@@ -5,6 +5,7 @@ Run this via cron every 5 minutes:
 """
 import logging
 from django.core.management.base import BaseCommand
+from django.db import ProgrammingError
 from tenant_schemas.utils import schema_context
 from tenants.models import Tenant
 
@@ -56,9 +57,18 @@ class Command(BaseCommand):
         for tenant in tenants:
             with schema_context(tenant.schema_name):
                 try:
-                    connections = EmailConnection.objects.filter(is_active=True)
+                    try:
+                        connections = EmailConnection.objects.filter(is_active=True)
+                        connections_exist = connections.exists()
+                    except ProgrammingError as e:
+                        # Tenant schema may be missing migrations (e.g. new tenant not yet migrated)
+                        logger.warning(
+                            f'Skipping tenant {tenant.schema_name}: schema not ready ({e}). '
+                            f'Run: python manage.py migrate_schemas --schema={tenant.schema_name}'
+                        )
+                        continue
 
-                    if not connections.exists():
+                    if not connections_exist:
                         continue
 
                     for conn in connections:
