@@ -20,6 +20,11 @@ class NotificationViewSet(viewsets.ViewSet):
     def vapid_public_key(self, request):
         """Get VAPID public key for client-side subscription."""
         vapid_keys = get_vapid_keys()
+        if vapid_keys is None:
+            return Response(
+                {'error': 'Push notifications are not configured on this server.'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
         return Response({
             'public_key': vapid_keys['public_key']
         })

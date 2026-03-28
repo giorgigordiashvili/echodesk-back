@@ -480,8 +480,9 @@ redis_port = config('REDIS_PORT', default=6379, cast=int)
 
 if redis_password:
     # Format: rediss:// (with double 's' for SSL) for DigitalOcean managed Redis
-    # ssl_cert_reqs=CERT_NONE required for managed Redis (self-signed certs)
-    redis_url = f'rediss://:{redis_password}@{redis_host}:{redis_port}/0?ssl_cert_reqs=CERT_NONE'
+    # ssl_cert_reqs=none required for managed Redis (self-signed certs)
+    # Note: redis-py v5+ requires lowercase 'none', not 'CERT_NONE'
+    redis_url = f'rediss://:{redis_password}@{redis_host}:{redis_port}/0?ssl_cert_reqs=none'
     CHANNEL_LAYERS = {
         'default': {
             'BACKEND': 'channels_redis.core.RedisChannelLayer',
@@ -503,7 +504,7 @@ else:
 
 # Cache configuration using Redis (DB 1 to avoid collision with Channels on DB 0)
 if redis_password:
-    cache_redis_url = f'rediss://:{redis_password}@{redis_host}:{redis_port}/1?ssl_cert_reqs=CERT_NONE'
+    cache_redis_url = f'rediss://:{redis_password}@{redis_host}:{redis_port}/1?ssl_cert_reqs=none'
 else:
     cache_redis_url = f'redis://{redis_host}:{redis_port}/1'
 
