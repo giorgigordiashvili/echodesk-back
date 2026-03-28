@@ -46,15 +46,15 @@ class Command(BaseCommand):
         if schema_name:
             # Process specific tenant
             try:
-                tenant = Tenant.objects.get(schema_name=schema_name, deployment_status='deploying')
+                tenant = Tenant.objects.get(schema_name=schema_name, deployment_status__in=['deploying', 'failed'])
                 self.process_tenant(tenant)
             except Tenant.DoesNotExist:
                 self.stdout.write(self.style.ERROR(
                     f'Tenant {schema_name} not found or not in deploying status'
                 ))
         else:
-            # Process all pending tenants
-            pending_tenants = Tenant.objects.filter(deployment_status='deploying', is_active=True)
+            # Process all pending tenants (including previously failed ones)
+            pending_tenants = Tenant.objects.filter(deployment_status__in=['deploying', 'failed'], is_active=True)
 
             if not pending_tenants.exists():
                 self.stdout.write(self.style.SUCCESS('No pending tenants to process'))
@@ -67,7 +67,12 @@ class Command(BaseCommand):
 
     def process_tenant(self, tenant):
         """Process a single tenant: create schema, run migrations, setup user"""
-        self.stdout.write(f'Processing tenant: {tenant.schema_name}')
+        self.stdout.write(f'Processing tenant: {tenant.schema_name} (status: {tenant.deployment_status})')
+
+        # Reset failed status to deploying for retry
+        if tenant.deployment_status == 'failed':
+            tenant.deployment_status = 'deploying'
+            tenant.save(update_fields=['deployment_status'])
 
         try:
             # Step 1: Create schema
