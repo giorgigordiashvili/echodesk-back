@@ -487,6 +487,7 @@ class Notification(models.Model):
         ('ticket_updated', 'Ticket Updated'),
         ('sub_ticket_created', 'Sub-ticket Created'),
         ('ticket_due_soon', 'Ticket Due Soon'),
+        ('bug_report_update', 'Bug Report Update'),
     ]
 
     user = models.ForeignKey(

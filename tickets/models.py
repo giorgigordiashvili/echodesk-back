@@ -237,6 +237,7 @@ class Ticket(models.Model):
         blank=True,
         help_text='Due date for payment'
     )
+    metadata = models.JSONField(null=True, blank=True, help_text='Additional metadata')
 
     class Meta:
         ordering = ['column__position', 'position_in_column', '-created_at']

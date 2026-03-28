@@ -73,6 +73,11 @@ def report_bug(request):
                 column=column,
                 priority=priority,
                 created_by=system_user,
+                metadata={
+                    'bug_report': True,
+                    'reporter_email': reporter_email,
+                    'reporter_tenant': source_tenant,
+                },
             )
 
             for f in files:

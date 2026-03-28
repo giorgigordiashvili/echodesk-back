@@ -12,6 +12,7 @@ from .models import (
 import re
 from asgiref.sync import async_to_sync
 from django.db import connection
+from tenant_schemas.utils import schema_context
 
 User = get_user_model()
 
@@ -143,6 +144,68 @@ def get_users_from_mentions(mentions):
         if user:
             users.append(user)
     return users
+
+
+def _get_bug_report_status_key(column_name):
+    """
+    Map a column name to a bug-report status key.
+    Returns None if the column doesn't match a tracked status.
+    """
+    name = column_name.lower()
+    if 'selected' in name and 'dev' in name:
+        return 'received'
+    if name == 'in progress':
+        return 'in_progress'
+    if 'dev' in name and 'finished' in name:
+        return 'fixed'
+    return None
+
+
+def send_bug_report_notification(instance, metadata, status_key):
+    """
+    Send a cross-tenant notification to the original bug reporter.
+    Switches to the reporter's tenant to create the notification there.
+    """
+    reporter_tenant = metadata.get('reporter_tenant')
+    reporter_email = metadata.get('reporter_email')
+    if not reporter_tenant or not reporter_email:
+        return
+
+    status_titles = {
+        'received': 'Bug report received',
+        'in_progress': 'Bug fix in progress',
+        'fixed': 'Bug report fixed',
+    }
+    status_messages = {
+        'received': 'Your bug report has been received and is scheduled for development.',
+        'in_progress': 'We are currently working on fixing your reported bug.',
+        'fixed': 'Your reported bug has been fixed. Thank you for the report!',
+    }
+
+    title = status_titles.get(status_key, 'Bug report update')
+    message = status_messages.get(status_key, 'Your bug report status has been updated.')
+
+    try:
+        with schema_context(reporter_tenant):
+            reporter = User.objects.filter(email=reporter_email).first()
+            if not reporter:
+                print(f"[Signals] Bug report reporter {reporter_email} not found in tenant {reporter_tenant}")
+                return
+
+            create_notification(
+                user=reporter,
+                notification_type='bug_report_update',
+                title=title,
+                message=message,
+                ticket_id=None,
+                metadata={
+                    'status': status_key,
+                    'ticket_title': instance.title,
+                },
+            )
+            print(f"[Signals] Bug report notification ({status_key}) sent to {reporter_email} in {reporter_tenant}")
+    except Exception as e:
+        print(f"[Signals] Error sending bug report notification: {str(e)}")
 
 
 @receiver(post_save, sender=TicketAssignment)
@@ -304,6 +367,18 @@ def notify_on_ticket_status_change(sender, instance, created, **kwargs):
                     'new_status': new_column_name,
                 }
             )
+
+        # Cross-tenant bug report notification
+        ticket_metadata = getattr(instance, 'metadata', None) or {}
+        if (
+            ticket_metadata.get('bug_report')
+            and instance.column
+            and instance.column.board
+            and instance.column.board.name.lower() == 'echodesk'
+        ):
+            status_key = _get_bug_report_status_key(new_column_name)
+            if status_key:
+                send_bug_report_notification(instance, ticket_metadata, status_key)
 
         # Broadcast ticket movement to all users viewing the board
         if instance.column and instance.column.board_id:
