@@ -1836,23 +1836,34 @@ def facebook_webhook(request):
                                                             attachment_type = att_type
                                                             attachment_url = att_url
 
-                                                    echo_message = FacebookMessage.objects.create(
-                                                        page_connection=page_connection,
-                                                        message_id=message_id,
-                                                        sender_id=recipient_id,  # Use recipient_id for conversation grouping (same as direct send API)
-                                                        sender_name=page_connection.page_name,
-                                                        message_text=message_text,
-                                                        attachment_type=attachment_type,
-                                                        attachment_url=attachment_url,
-                                                        attachments=attachments,
-                                                        timestamp=timestamp_dt,
-                                                        is_from_page=True,
-                                                        is_delivered=True,
-                                                        source='facebook_app',  # Message sent from Facebook/Messenger app
-                                                        is_echo=True,
-                                                        sent_by=None,  # Not sent via EchoDesk
-                                                    )
-                                                    logger.info(f"✅ Created echo message from Facebook: {message_id} (recipient: {recipient_id})")
+                                                    try:
+                                                        echo_message = FacebookMessage.objects.create(
+                                                            page_connection=page_connection,
+                                                            message_id=message_id,
+                                                            sender_id=recipient_id,  # Use recipient_id for conversation grouping (same as direct send API)
+                                                            sender_name=page_connection.page_name,
+                                                            message_text=message_text,
+                                                            attachment_type=attachment_type,
+                                                            attachment_url=attachment_url,
+                                                            attachments=attachments,
+                                                            timestamp=timestamp_dt,
+                                                            is_from_page=True,
+                                                            is_delivered=True,
+                                                            source='facebook_app',  # Message sent from Facebook/Messenger app
+                                                            is_echo=True,
+                                                            sent_by=None,  # Not sent via EchoDesk
+                                                        )
+                                                        logger.info(f"✅ Created echo message from Facebook: {message_id} (recipient: {recipient_id})")
+                                                    except IntegrityError:
+                                                        # Race condition: duplicate webhook delivery — another request created
+                                                        # the same message_id between our filter check and this create.
+                                                        # Silently skip — the other request will handle downstream logic.
+                                                        echo_message = FacebookMessage.objects.filter(
+                                                            page_connection=page_connection,
+                                                            message_id=message_id
+                                                        ).first()
+                                                        logger.warning(f"⚠️ Echo message already exists (race condition), skipping: {message_id}")
+                                                        continue
 
                                                     # Unarchive conversation if it was archived (move back to active)
                                                     unarchived = ConversationArchive.objects.filter(
@@ -3306,24 +3317,35 @@ def instagram_webhook(request):
                                                         attachment_type = att_type
                                                         attachment_url = att_url
 
-                                                echo_message = InstagramMessage.objects.create(
-                                                    account_connection=account_connection,
-                                                    message_id=message_id,
-                                                    sender_id=recipient_id,  # Use recipient_id for conversation grouping (same as direct send API)
-                                                    sender_name=account_connection.username,
-                                                    sender_username=account_connection.username,
-                                                    message_text=message_text,
-                                                    attachment_type=attachment_type,
-                                                    attachment_url=attachment_url,
-                                                    attachments=attachments,
-                                                    timestamp=timestamp_dt,
-                                                    is_from_business=True,
-                                                    is_delivered=True,
-                                                    source='instagram_app',  # Message sent from Instagram app
-                                                    is_echo=True,
-                                                    sent_by=None,  # Not sent via EchoDesk
-                                                )
-                                                logger.info(f"✅ Created Instagram echo message: {message_id} (recipient: {recipient_id})")
+                                                try:
+                                                    echo_message = InstagramMessage.objects.create(
+                                                        account_connection=account_connection,
+                                                        message_id=message_id,
+                                                        sender_id=recipient_id,  # Use recipient_id for conversation grouping (same as direct send API)
+                                                        sender_name=account_connection.username,
+                                                        sender_username=account_connection.username,
+                                                        message_text=message_text,
+                                                        attachment_type=attachment_type,
+                                                        attachment_url=attachment_url,
+                                                        attachments=attachments,
+                                                        timestamp=timestamp_dt,
+                                                        is_from_business=True,
+                                                        is_delivered=True,
+                                                        source='instagram_app',  # Message sent from Instagram app
+                                                        is_echo=True,
+                                                        sent_by=None,  # Not sent via EchoDesk
+                                                    )
+                                                    logger.info(f"✅ Created Instagram echo message: {message_id} (recipient: {recipient_id})")
+                                                except IntegrityError:
+                                                    # Race condition: duplicate webhook delivery — another request created
+                                                    # the same message_id between our filter check and this create.
+                                                    # Silently skip — the other request will handle downstream logic.
+                                                    echo_message = InstagramMessage.objects.filter(
+                                                        account_connection=account_connection,
+                                                        message_id=message_id
+                                                    ).first()
+                                                    logger.warning(f"⚠️ Instagram echo message already exists (race condition), skipping: {message_id}")
+                                                    continue
 
                                                 # Look up recipient's name from previous incoming messages
                                                 recipient_name = None
