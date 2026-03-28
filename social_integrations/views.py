@@ -540,6 +540,13 @@ class FacebookMessageViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated, CanViewSocialMessages]
     pagination_class = SocialMessagePagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        # Shared mutable cache to avoid N+1 queries in get_recipient_name
+        if '_recipient_names_cache' not in context:
+            context['_recipient_names_cache'] = {}
+        return context
     filterset_fields = {
         'page_connection__page_id': ['exact'],
         'sender_id': ['exact'],
@@ -556,7 +563,7 @@ class FacebookMessageViewSet(viewsets.ReadOnlyModelViewSet):
         base_queryset = FacebookMessage.objects.filter(
             page_connection__in=tenant_pages,
             is_deleted=False
-        ).select_related('page_connection', 'sent_by')
+        ).select_related('page_connection', 'sent_by', 'reply_to')
 
         # Apply page_id filter from query params (support both formats)
         page_id = self.request.query_params.get('page_id')
@@ -2690,6 +2697,13 @@ class InstagramMessageViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = InstagramMessageSerializer
     permission_classes = [IsAuthenticated, CanViewSocialMessages]
     pagination_class = SocialMessagePagination
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        # Shared mutable cache to avoid N+1 queries in get_recipient_name
+        if '_ig_recipient_names_cache' not in context:
+            context['_ig_recipient_names_cache'] = {}
+        return context
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = {
         'account_connection__instagram_account_id': ['exact'],
