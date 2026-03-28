@@ -32,6 +32,7 @@ def report_bug(request):
         priority = 'medium'
 
     files = request.FILES.getlist('files')
+    page_url = request.data.get('url', '').strip()
 
     reporter_email = request.user.email
     reporter_name = request.user.first_name or request.user.email
@@ -44,6 +45,7 @@ def report_bug(request):
         f'<hr>'
         f'<p><strong>Reporter:</strong> {reporter_name} ({reporter_email})</p>'
         f'<p><strong>Tenant:</strong> {source_tenant}</p>'
+        f'<p><strong>Page URL:</strong> <a href="{page_url}">{page_url}</a></p>'
         f'<p><strong>Priority:</strong> {priority.capitalize()} — SLA: {sla}</p>'
     )
 
