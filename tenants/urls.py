@@ -14,6 +14,7 @@ from .payment_views import (
     get_saved_card, remove_saved_card, set_default_card, manual_payment, add_new_card, list_invoices,
     reactivate_subscription_payment, add_ecommerce_card
 )
+from .paddle_webhook_views import paddle_webhook
 from .cron_views import (
     cron_recurring_payments, cron_subscription_check, cron_health_check,
     cron_process_trial_expirations, cron_payment_retries, cron_calculate_metrics,
@@ -60,6 +61,7 @@ urlpatterns = [
     path('api/payments/create/', create_subscription_payment, name='create_subscription_payment'),
     path('api/payments/status/<str:payment_id>/', check_payment_status, name='check_payment_status'),
     path('api/payments/webhook/', bog_webhook, name='bog_webhook'),
+    path('api/payments/paddle-webhook/', paddle_webhook, name='paddle_webhook'),
     path('api/payments/cancel/', cancel_subscription, name='cancel_subscription'),
     path('api/payments/saved-card/', get_saved_card, name='get_saved_card'),
     path('api/payments/saved-card/', remove_saved_card, name='remove_saved_card'),

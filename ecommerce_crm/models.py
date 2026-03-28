@@ -988,6 +988,17 @@ class EcommerceSettings(models.Model):
         help_text="Tenant these settings belong to"
     )
 
+    # Payment provider for ecommerce orders
+    ecommerce_payment_provider = models.CharField(
+        max_length=20,
+        choices=[
+            ('bog', 'Bank of Georgia'),
+            ('paddle', 'Paddle'),
+        ],
+        default='bog',
+        help_text='Payment provider used for ecommerce orders'
+    )
+
     # BOG Payment Gateway Settings
     bog_client_id = models.CharField(
         max_length=255,

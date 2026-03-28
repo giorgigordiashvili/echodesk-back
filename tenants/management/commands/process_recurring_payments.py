@@ -41,12 +41,13 @@ class Command(BaseCommand):
             f'Starting recurring payment processing (dry_run={dry_run}, days_before={days_before})'
         ))
 
-        # Find subscriptions that need renewal
+        # Find subscriptions that need renewal (BOG-only — Paddle manages billing automatically)
         cutoff_date = timezone.now() + timedelta(days=days_before)
         subscriptions_to_renew = TenantSubscription.objects.filter(
             is_active=True,
             next_billing_date__lte=cutoff_date,
-            tenant__is_active=True
+            tenant__is_active=True,
+            tenant__payment_provider='bog',
         ).select_related('tenant')
 
         self.stdout.write(f'Found {subscriptions_to_renew.count()} subscriptions to process')

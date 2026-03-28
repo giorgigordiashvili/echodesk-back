@@ -34,6 +34,8 @@ def schedule_payment_retries(payment_order, original_attempt):
     - Retry 2: 3 days after failure
     - Retry 3: 7 days after failure
 
+    Only applies to BOG tenants — Paddle manages retries automatically.
+
     Args:
         payment_order: PaymentOrder instance that failed
         original_attempt: PaymentAttempt instance of the failed payment
@@ -41,6 +43,12 @@ def schedule_payment_retries(payment_order, original_attempt):
     Returns:
         List of created PaymentRetrySchedule instances
     """
+    # Skip retry scheduling for providers that manage billing automatically
+    tenant = payment_order.tenant
+    if tenant and getattr(tenant, 'payment_provider', 'bog') != 'bog':
+        logger.info(f'Skipping retry scheduling for {tenant.name}: provider={tenant.payment_provider} manages retries')
+        return []
+
     now = timezone.now()
     subscription = payment_order.tenant.subscription
 
@@ -130,7 +138,7 @@ def cancel_pending_retries(subscription, reason='Payment succeeded'):
 
 def execute_retry(retry_schedule):
     """
-    Execute a scheduled payment retry
+    Execute a scheduled payment retry (BOG only)
 
     Args:
         retry_schedule: PaymentRetrySchedule instance to execute
@@ -138,6 +146,14 @@ def execute_retry(retry_schedule):
     Returns:
         dict with 'success' bool and 'bog_order_id' or 'error' message
     """
+    # Skip execution for non-BOG tenants
+    tenant = retry_schedule.tenant
+    if getattr(tenant, 'payment_provider', 'bog') != 'bog':
+        retry_schedule.status = 'skipped'
+        retry_schedule.skip_reason = f'Provider {tenant.payment_provider} manages retries automatically'
+        retry_schedule.save()
+        return {'success': False, 'error': retry_schedule.skip_reason}
+
     from .bog_payment import bog_service
 
     # Mark as executing

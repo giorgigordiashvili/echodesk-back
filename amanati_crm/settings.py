@@ -607,6 +607,14 @@ TELEGRAM_CHAT_ID = config('TELEGRAM_CHAT_ID', default='')
 # TEST: Set TEST_BILLING_INTERVAL=true in .env to enable test mode
 TEST_BILLING_INTERVAL = config('TEST_BILLING_INTERVAL', default=False, cast=bool)
 
+# Paddle Billing Configuration
+# Docs: https://developer.paddle.com/api-reference/overview
+# Sandbox: sandbox-api.paddle.com / Production: api.paddle.com
+PADDLE_API_KEY = config('PADDLE_API_KEY', default='')
+PADDLE_WEBHOOK_SECRET = config('PADDLE_WEBHOOK_SECRET', default='')
+PADDLE_ENVIRONMENT = config('PADDLE_ENVIRONMENT', default='sandbox')  # 'sandbox' or 'production'
+PADDLE_CLIENT_TOKEN = config('PADDLE_CLIENT_TOKEN', default='')  # Frontend token for Paddle.js
+
 # SendGrid Email Configuration
 SENDGRID_API_KEY = config('SENDGRID_API_KEY', default='')
 SENDGRID_FROM_EMAIL = config('SENDGRID_FROM_EMAIL', default='noreply@email.echodesk.ge')

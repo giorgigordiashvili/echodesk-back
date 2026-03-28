@@ -825,6 +825,9 @@ def register_tenant_with_payment(request):
 
     try:
         import uuid
+        from decimal import Decimal
+        from .payment_providers import get_payment_provider
+
         with transaction.atomic():
             # Generate schema name
             domain_name = validated_data['domain']
@@ -861,6 +864,13 @@ def register_tenant_with_payment(request):
                 for feature in selected_features
             )
 
+            # Determine payment provider (from request or default to 'bog')
+            payment_provider_name = validated_data.get('payment_provider', request.data.get('payment_provider', 'bog'))
+            if payment_provider_name not in ('bog', 'paddle'):
+                payment_provider_name = 'bog'
+
+            provider = get_payment_provider(provider_name=payment_provider_name)
+
             # Generate unique order ID
             order_id = f"REG-{uuid.uuid4().hex[:12].upper()}"
 
@@ -874,23 +884,27 @@ def register_tenant_with_payment(request):
                 admin_last_name=validated_data['admin_last_name'],
                 preferred_language=validated_data.get('preferred_language', 'en'),
                 agent_count=agent_count,
-                order_id=order_id
+                order_id=order_id,
+                payment_provider=payment_provider_name,
             )
 
             # Add selected features
             if selected_features:
                 pending_registration.selected_features.set(selected_features)
 
+            # Determine currency based on provider
+            currency = 'USD' if payment_provider_name == 'paddle' else 'GEL'
+
             # Create payment order for first month subscription (without tenant)
             payment_order = PaymentOrder.objects.create(
                 order_id=order_id,
                 tenant=None,  # No tenant yet
-                package=None,  # Feature-based pricing (no package)
                 amount=subscription_amount,  # Charge first month upfront
-                currency='GEL',
+                currency=currency,
                 agent_count=agent_count,
                 status='pending',
                 is_trial_payment=False,
+                payment_provider=payment_provider_name,
                 metadata={
                     'registration': True,
                     'schema_name': schema_name,
@@ -898,43 +912,83 @@ def register_tenant_with_payment(request):
                     'admin_email': validated_data['admin_email'],
                     'subscription_amount': subscription_amount,
                     'is_custom': True,  # Feature-based pricing
-                    'feature_ids': list(selected_features.values_list('id', flat=True)) ,
-                    'agent_count': agent_count
+                    'feature_ids': list(selected_features.values_list('id', flat=True)),
+                    'agent_count': agent_count,
                 }
             )
 
-            # Create subscription payment with card saving using BOG subscription endpoint
-            payment_result = bog_service.create_subscription_payment_with_card_save(
-                package=None,  # Feature-based pricing (no package)
-                agent_count=agent_count,
+            # Determine callback URL based on provider
+            if payment_provider_name == 'paddle':
+                callback_url = f"https://api.echodesk.ge/api/payments/paddle-webhook/"
+            else:
+                callback_url = f"https://api.echodesk.ge/api/payments/webhook/"
+
+            # Build Paddle feature items if applicable
+            feature_items = None
+            if payment_provider_name == 'paddle':
+                from .models import PaddlePriceMapping
+                feature_items = []
+                for feature in selected_features:
+                    try:
+                        mapping = feature.paddle_price_mapping
+                        feature_items.append({
+                            'paddle_price_id': mapping.paddle_price_id,
+                            'quantity': agent_count,
+                        })
+                    except PaddlePriceMapping.DoesNotExist:
+                        pass
+                # If no mappings found, fall back to ad-hoc pricing
+                if not feature_items:
+                    feature_items = None
+
+            # Create subscription payment via the selected provider
+            payment_result = provider.create_subscription_payment(
+                amount=Decimal(str(subscription_amount)),
+                currency=currency,
+                external_order_id=order_id,
                 customer_email=validated_data['admin_email'],
                 customer_name=f"{validated_data['admin_first_name']} {validated_data['admin_last_name']}",
                 company_name=validated_data['company_name'],
                 return_url_success=f"https://echodesk.ge/registration/success",
                 return_url_fail=f"https://echodesk.ge/registration/failed",
-                callback_url=f"https://api.echodesk.ge/api/payments/webhook/",
-                external_order_id=order_id,
-                subscription_amount=subscription_amount  # Pass the calculated amount
+                callback_url=callback_url,
+                feature_items=feature_items,
+                metadata={
+                    'registration': True,
+                    'schema_name': schema_name,
+                },
             )
 
             # Update payment order with payment details
-            bog_order_id = payment_result.get('order_id')
-            card_saving_enabled = payment_result.get('card_saving_enabled', False)
-
-            payment_order.payment_url = payment_result['payment_url']
-            payment_order.bog_order_id = bog_order_id
-            payment_order.card_saved = card_saving_enabled
+            payment_order.provider_order_id = payment_result.provider_order_id
+            if payment_result.payment_url:
+                payment_order.payment_url = payment_result.payment_url
+            if payment_provider_name == 'bog':
+                payment_order.bog_order_id = payment_result.provider_order_id
+            payment_order.card_saved = payment_result.card_saving_enabled
             payment_order.save()
 
-            logger.info(f"Registration payment initiated for {schema_name}: {order_id}, features={len(selected_features)}, agents={agent_count}, amount={subscription_amount}")
+            logger.info(f"Registration payment initiated for {schema_name}: {order_id}, provider={payment_provider_name}, features={len(selected_features)}, agents={agent_count}, amount={subscription_amount}")
 
-            return Response({
-                'payment_url': payment_result['payment_url'],
+            # Build response based on provider type
+            response_data = {
                 'order_id': order_id,
                 'amount': subscription_amount,
-                'currency': 'GEL',
-                'message': 'Subscription payment initiated - card will be saved for automatic recurring billing'
-            }, status=status.HTTP_200_OK)
+                'currency': currency,
+                'payment_provider': payment_provider_name,
+                'requires_redirect': payment_result.requires_redirect,
+            }
+
+            if payment_result.requires_redirect and payment_result.payment_url:
+                # BOG: frontend should redirect to payment_url
+                response_data['payment_url'] = payment_result.payment_url
+                response_data['message'] = 'Subscription payment initiated - card will be saved for automatic recurring billing'
+            elif payment_result.checkout_data:
+                # Paddle: frontend should open Paddle.js overlay with checkout_data
+                response_data['checkout_data'] = payment_result.checkout_data
+                response_data['message'] = 'Paddle checkout session created'
+
+            return Response(response_data, status=status.HTTP_200_OK)
 
     except Exception as e:
         logger.error(f"Error initiating registration payment: {str(e)}")

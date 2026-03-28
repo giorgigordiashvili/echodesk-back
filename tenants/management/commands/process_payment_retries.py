@@ -33,10 +33,11 @@ class Command(BaseCommand):
         if dry_run:
             self.stdout.write(self.style.WARNING('DRY RUN MODE - No actual retries will be executed'))
 
-        # Find retries that are due
+        # Find retries that are due (BOG-only — Paddle manages billing automatically)
         pending_retries = PaymentRetrySchedule.objects.filter(
             status='pending',
-            scheduled_for__lte=now
+            scheduled_for__lte=now,
+            tenant__payment_provider='bog',
         ).select_related('subscription', 'tenant', 'payment_order', 'original_attempt').order_by('scheduled_for')
 
         retry_count = pending_retries.count()

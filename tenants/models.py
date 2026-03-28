@@ -17,6 +17,12 @@ from django.contrib.auth.models import Permission
 
 
 
+PAYMENT_PROVIDER_CHOICES = [
+    ('bog', 'Bank of Georgia'),
+    ('paddle', 'Paddle'),
+]
+
+
 class Tenant(TenantMixin):
     """
     Tenant model for multi-tenancy support.
@@ -26,10 +32,24 @@ class Tenant(TenantMixin):
     description = models.TextField(blank=True)
     created_on = models.DateTimeField(auto_now_add=True)
     is_active = models.BooleanField(default=True)
-    
+
     # Owner/admin contact information
     admin_email = models.EmailField()
     admin_name = models.CharField(max_length=100)
+
+    # Payment provider
+    payment_provider = models.CharField(
+        max_length=20,
+        choices=PAYMENT_PROVIDER_CHOICES,
+        default='bog',
+        help_text='Payment provider used for subscription billing'
+    )
+    paddle_customer_id = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        help_text='Paddle customer ID for this tenant'
+    )
     
     # Legacy plan field (kept for backward compatibility)
     plan = models.CharField(
@@ -169,6 +189,14 @@ class TenantSubscription(models.Model):
 
     # Saved card for recurring payments
     parent_order_id = models.CharField(max_length=100, blank=True, null=True, help_text='BOG order ID with saved card')
+
+    # Provider subscription ID (Paddle subscription_id, etc.)
+    provider_subscription_id = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        help_text='External provider subscription ID (e.g., Paddle sub_xxx)'
+    )
 
     # Payment health tracking
     payment_status = models.CharField(
@@ -414,6 +442,16 @@ class PaymentOrder(models.Model):
     """
     order_id = models.CharField(max_length=100, unique=True, db_index=True)
     bog_order_id = models.CharField(max_length=100, blank=True, null=True, help_text='BOG internal order ID for saved card charging')
+    provider_order_id = models.CharField(
+        max_length=100, blank=True, null=True,
+        help_text='Generic provider order/transaction ID (Paddle txn_xxx, etc.)'
+    )
+    payment_provider = models.CharField(
+        max_length=20,
+        choices=PAYMENT_PROVIDER_CHOICES,
+        default='bog',
+        help_text='Payment provider used for this order'
+    )
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, null=True, blank=True)
 
     amount = models.DecimalField(max_digits=10, decimal_places=2)
@@ -529,6 +567,14 @@ class PendingRegistration(models.Model):
     selected_features = models.ManyToManyField(Feature, blank=True, help_text='Selected features for feature-based pricing')
     agent_count = models.IntegerField(default=10, help_text='Number of agents (10-200 in increments of 10)')
     order_id = models.CharField(max_length=100, unique=True, db_index=True, blank=True, default='')
+
+    # Payment provider
+    payment_provider = models.CharField(
+        max_length=20,
+        choices=PAYMENT_PROVIDER_CHOICES,
+        default='bog',
+        help_text='Payment provider chosen during registration'
+    )
 
     # Status tracking
     is_processed = models.BooleanField(default=False)
@@ -872,6 +918,35 @@ class PlatformMetrics(models.Model):
         if total == 0:
             return 0
         return round((self.successful_payments / total) * 100, 2)
+
+
+class PaddlePriceMapping(models.Model):
+    """
+    Maps EchoDesk features to Paddle product/price IDs.
+    Used to build subscription line items when creating Paddle transactions.
+    """
+    feature = models.OneToOneField(
+        Feature,
+        on_delete=models.CASCADE,
+        related_name='paddle_price_mapping',
+        help_text='EchoDesk feature this mapping belongs to'
+    )
+    paddle_product_id = models.CharField(
+        max_length=100,
+        help_text='Paddle product ID (pro_xxx)'
+    )
+    paddle_price_id = models.CharField(
+        max_length=100,
+        help_text='Paddle recurring price ID (pri_xxx)'
+    )
+
+    class Meta:
+        db_table = 'tenants_paddle_price_mapping'
+        verbose_name = 'Paddle Price Mapping'
+        verbose_name_plural = 'Paddle Price Mappings'
+
+    def __str__(self):
+        return f"{self.feature.name} → {self.paddle_price_id}"
 
 
 class TenantDomain(models.Model):
