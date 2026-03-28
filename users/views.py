@@ -1,10 +1,11 @@
-from rest_framework import viewsets, status, permissions
+from rest_framework import viewsets, status, permissions, serializers as drf_serializers
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group, Permission
 from django.contrib.contenttypes.models import ContentType
-from django.db import transaction
+from django.db import transaction, IntegrityError
 from django.utils import timezone
 from django.conf import settings
 import secrets
@@ -59,69 +60,37 @@ class GroupViewSet(viewsets.ModelViewSet):
     
     def perform_create(self, serializer):
         # Check if user has permission to manage groups
-        if not self.request.user.has_permission('can_manage_groups') and not self.request.user.is_staff:
-            raise permissions.PermissionDenied("You don't have permission to manage groups")
+        if not self.request.user.has_permission('manage_groups') and not self.request.user.is_staff:
+            raise PermissionDenied("You don't have permission to manage groups")
         serializer.save()
     
     def perform_update(self, serializer):
         # Check if user has permission to manage groups
-        if not self.request.user.has_permission('can_manage_groups') and not self.request.user.is_staff:
-            raise permissions.PermissionDenied("You don't have permission to manage groups")
+        if not self.request.user.has_permission('manage_groups') and not self.request.user.is_staff:
+            raise PermissionDenied("You don't have permission to manage groups")
         serializer.save()
     
     def perform_destroy(self, instance):
         # Check if user has permission to manage groups
-        if not self.request.user.has_permission('can_manage_groups') and not self.request.user.is_staff:
-            raise permissions.PermissionDenied("You don't have permission to manage groups")
+        if not self.request.user.has_permission('manage_groups') and not self.request.user.is_staff:
+            raise PermissionDenied("You don't have permission to manage groups")
         instance.delete()
     
     @action(detail=True, methods=['post'])
     def add_users(self, request, pk=None):
-        """Add users to this group"""
-        if not request.user.has_permission('can_manage_groups') and not request.user.is_staff:
-            return Response(
-                {'error': 'You do not have permission to manage groups'},
-                status=status.HTTP_403_FORBIDDEN
-            )
-        
-        group = self.get_object()
-        user_ids = request.data.get('user_ids', [])
-        
-        if not user_ids:
-            return Response(
-                {'error': 'user_ids is required'}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        # Note: user.groups no longer exists (removed PermissionsMixin)
-        # Use TenantGroupViewSet for managing user group memberships instead
-        return Response({
-            'error': 'Django auth groups are deprecated. Use TenantGroup instead.'
-        }, status=status.HTTP_400_BAD_REQUEST)
-    
+        """Add users to this group — deprecated, use /api/tenant-groups/ instead."""
+        return Response(
+            {'error': 'Django auth groups are deprecated. Use /api/tenant-groups/ instead.'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
     @action(detail=True, methods=['post'])
     def remove_users(self, request, pk=None):
-        """Remove users from this group"""
-        if not request.user.has_permission('can_manage_groups') and not request.user.is_staff:
-            return Response(
-                {'error': 'You do not have permission to manage groups'},
-                status=status.HTTP_403_FORBIDDEN
-            )
-        
-        group = self.get_object()
-        user_ids = request.data.get('user_ids', [])
-        
-        if not user_ids:
-            return Response(
-                {'error': 'user_ids is required'}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        # Note: user.groups no longer exists (removed PermissionsMixin)
-        # Use TenantGroupViewSet for managing user group memberships instead
-        return Response({
-            'error': 'Django auth groups are deprecated. Use TenantGroup instead.'
-        }, status=status.HTTP_400_BAD_REQUEST)
+        """Remove users from this group — deprecated, use /api/tenant-groups/ instead."""
+        return Response(
+            {'error': 'Django auth groups are deprecated. Use /api/tenant-groups/ instead.'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
     
     @action(detail=False, methods=['get'])
     def available_permissions(self, request):
@@ -167,14 +136,14 @@ class UserViewSet(viewsets.ModelViewSet):
         # Filter by group if specified
         group_id = self.request.query_params.get('group', None)
         if group_id is not None:
-            queryset = queryset.filter(groups__id=group_id)
+            queryset = queryset.filter(tenant_groups__id=group_id)
 
         return queryset.distinct()
     
     def perform_create(self, serializer):
         # Check if user has permission to manage users
-        if not self.request.user.has_permission('can_manage_users') and not self.request.user.is_staff:
-            raise permissions.PermissionDenied("You don't have permission to manage users")
+        if not self.request.user.has_permission('manage_users') and not self.request.user.is_staff:
+            raise PermissionDenied("You don't have permission to manage users")
 
         # Generate temporary password (12 characters: letters, digits, special chars)
         alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
@@ -220,32 +189,38 @@ class UserViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         # Check if user has permission to manage users or is updating their own profile
         user_being_updated = self.get_object()
-        if (not self.request.user.has_permission('can_manage_users') and 
-            not self.request.user.is_staff and 
-            user_being_updated != self.request.user):
-            raise permissions.PermissionDenied("You don't have permission to manage users")
-        
+        is_privileged = (
+            self.request.user.has_permission('manage_users') or
+            self.request.user.is_staff
+        )
+        if not is_privileged and user_being_updated != self.request.user:
+            raise PermissionDenied("You don't have permission to manage users")
+
+        # If user is updating themselves and is not privileged, restrict to safe fields
+        if not is_privileged and user_being_updated == self.request.user:
+            safe_fields = {'first_name', 'last_name', 'phone_number', 'job_title'}
+            for field in list(serializer.validated_data.keys()):
+                if field not in safe_fields:
+                    serializer.validated_data.pop(field)
+
         serializer.save()
     
     def perform_destroy(self, instance):
         # Check if user has permission to manage users
-        if not self.request.user.has_permission('can_manage_users') and not self.request.user.is_staff:
-            raise permissions.PermissionDenied("You don't have permission to manage users")
+        if not self.request.user.has_permission('manage_users') and not self.request.user.is_staff:
+            raise PermissionDenied("You don't have permission to manage users")
         
         # Don't allow users to delete themselves
         if instance == self.request.user:
-            raise permissions.PermissionDenied("You cannot delete your own account")
+            raise PermissionDenied("You cannot delete your own account")
         
         instance.delete()
     
     @action(detail=False, methods=['post'])
     def bulk_action(self, request):
         """Perform bulk actions on users"""
-        if not request.user.has_permission('can_manage_users') and not request.user.is_staff:
-            return Response(
-                {'error': 'You do not have permission to manage users'},
-                status=status.HTTP_403_FORBIDDEN
-            )
+        if not request.user.has_permission('manage_users') and not request.user.is_staff:
+            raise PermissionDenied('You do not have permission to manage users')
         
         serializer = BulkUserActionSerializer(data=request.data)
         if serializer.is_valid():
@@ -255,44 +230,33 @@ class UserViewSet(viewsets.ModelViewSet):
             users = User.objects.filter(id__in=user_ids)
             
             if action_type == 'activate':
+                count = users.count()
                 users.update(is_active=True, status='active')
-                message = f'Activated {len(users)} users'
-            
+                message = f'Activated {count} users'
+
             elif action_type == 'deactivate':
+                count = users.count()
                 users.update(is_active=False, status='inactive')
-                message = f'Deactivated {len(users)} users'
-            
+                message = f'Deactivated {count} users'
+
             elif action_type == 'delete':
                 # Don't allow deletion of current user
                 users = users.exclude(id=request.user.id)
                 count = users.count()
                 users.delete()
                 message = f'Deleted {count} users'
-            
+
             elif action_type == 'change_role':
                 role = serializer.validated_data.get('role')
                 if role:
+                    count = users.count()
                     users.update(role=role)
-                    message = f'Changed role to {role} for {len(users)} users'
+                    message = f'Changed role to {role} for {count} users'
                 else:
                     return Response(
                         {'error': 'Role is required for change_role action'},
                         status=status.HTTP_400_BAD_REQUEST
                     )
-            
-            elif action_type == 'add_to_group':
-                # Note: user.groups no longer exists (removed PermissionsMixin)
-                return Response(
-                    {'error': 'Django auth groups are deprecated. Use TenantGroup instead.'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-            elif action_type == 'remove_from_group':
-                # Note: user.groups no longer exists (removed PermissionsMixin)
-                return Response(
-                    {'error': 'Django auth groups are deprecated. Use TenantGroup instead.'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
             
             return Response({'message': message})
         
@@ -305,12 +269,9 @@ class UserViewSet(viewsets.ModelViewSet):
 
         # Users can only change their own password unless they have manage_users permission
         if (user != request.user and
-            not request.user.has_permission('can_manage_users') and
+            not request.user.has_permission('manage_users') and
             not request.user.is_staff):
-            return Response(
-                {'error': 'You can only change your own password'},
-                status=status.HTTP_403_FORBIDDEN
-            )
+            raise PermissionDenied('You can only change your own password')
 
         serializer = PasswordChangeSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
@@ -324,11 +285,8 @@ class UserViewSet(viewsets.ModelViewSet):
     def send_new_password(self, request, pk=None):
         """Generate new password and email it to user"""
         # Check permission
-        if not request.user.has_permission('can_manage_users') and not request.user.is_staff:
-            return Response(
-                {'error': 'You do not have permission to manage users'},
-                status=status.HTTP_403_FORBIDDEN
-            )
+        if not request.user.has_permission('manage_users') and not request.user.is_staff:
+            raise PermissionDenied('You do not have permission to manage users')
 
         user = self.get_object()
 
@@ -389,29 +347,29 @@ class TenantGroupViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         # Check if user has permission to manage groups
         if not self.request.user.has_permission('manage_groups') and not self.request.user.is_staff:
-            raise permissions.PermissionDenied("You don't have permission to manage groups")
-        serializer.save()
-    
+            raise PermissionDenied("You don't have permission to manage groups")
+        try:
+            serializer.save()
+        except IntegrityError:
+            raise drf_serializers.ValidationError({'error': 'A group with this name already exists'})
+
     def perform_update(self, serializer):
         # Check if user has permission to manage groups
         if not self.request.user.has_permission('manage_groups') and not self.request.user.is_staff:
-            raise permissions.PermissionDenied("You don't have permission to manage groups")
+            raise PermissionDenied("You don't have permission to manage groups")
         serializer.save()
-    
+
     def perform_destroy(self, instance):
         # Check if user has permission to manage groups
         if not self.request.user.has_permission('manage_groups') and not self.request.user.is_staff:
-            raise permissions.PermissionDenied("You don't have permission to manage groups")
+            raise PermissionDenied("You don't have permission to manage groups")
         instance.delete()
-    
+
     @action(detail=True, methods=['post'])
     def add_users(self, request, pk=None):
         """Add users to this tenant group"""
         if not request.user.has_permission('manage_groups') and not request.user.is_staff:
-            return Response(
-                {'error': 'You do not have permission to manage groups'},
-                status=status.HTTP_403_FORBIDDEN
-            )
+            raise PermissionDenied('You do not have permission to manage groups')
         
         tenant_group = self.get_object()
         user_ids = request.data.get('user_ids', [])
@@ -435,10 +393,7 @@ class TenantGroupViewSet(viewsets.ModelViewSet):
     def remove_users(self, request, pk=None):
         """Remove users from this tenant group"""
         if not request.user.has_permission('manage_groups') and not request.user.is_staff:
-            return Response(
-                {'error': 'You do not have permission to manage groups'},
-                status=status.HTTP_403_FORBIDDEN
-            )
+            raise PermissionDenied('You do not have permission to manage groups')
         
         tenant_group = self.get_object()
         user_ids = request.data.get('user_ids', [])
@@ -663,24 +618,25 @@ class TeamChatConversationViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        # Find existing conversation between these two users
-        conversation = TeamChatConversation.objects.filter(
-            participants=request.user
-        ).filter(
-            participants=other_user
-        ).first()
+        # Find existing conversation between these two users (atomic to prevent race condition)
+        with transaction.atomic():
+            conversation = TeamChatConversation.objects.filter(
+                participants=request.user
+            ).filter(
+                participants=other_user
+            ).select_for_update().first()
 
-        if not conversation:
-            # Create new conversation
-            conversation = TeamChatConversation.objects.create()
-            conversation.participants.add(request.user, other_user)
-        else:
-            # If conversation exists but was hidden by this user, unhide it
-            # since user is explicitly choosing to start a chat again
-            HiddenTeamChatConversation.objects.filter(
-                user=request.user,
-                conversation=conversation
-            ).delete()
+            if not conversation:
+                # Create new conversation
+                conversation = TeamChatConversation.objects.create()
+                conversation.participants.add(request.user, other_user)
+            else:
+                # If conversation exists but was hidden by this user, unhide it
+                # since user is explicitly choosing to start a chat again
+                HiddenTeamChatConversation.objects.filter(
+                    user=request.user,
+                    conversation=conversation
+                ).delete()
 
         serializer = TeamChatConversationDetailSerializer(
             conversation,
@@ -712,10 +668,7 @@ class TeamChatConversationViewSet(viewsets.ModelViewSet):
 
         # Authorization check - only participants can clear history
         if not conversation.participants.filter(id=request.user.id).exists():
-            return Response(
-                {'error': 'Not authorized to clear this conversation'},
-                status=status.HTTP_403_FORBIDDEN
-            )
+            raise PermissionDenied('Not authorized to clear this conversation')
 
         # Delete all messages in the conversation
         deleted_count, _ = conversation.messages.all().delete()
@@ -735,10 +688,7 @@ class TeamChatConversationViewSet(viewsets.ModelViewSet):
 
         # Authorization check - only participants can hide
         if not conversation.participants.filter(id=request.user.id).exists():
-            return Response(
-                {'error': 'Not authorized to hide this conversation'},
-                status=status.HTTP_403_FORBIDDEN
-            )
+            raise PermissionDenied('Not authorized to hide this conversation')
 
         # Create or get the hidden record
         hidden, created = HiddenTeamChatConversation.objects.get_or_create(

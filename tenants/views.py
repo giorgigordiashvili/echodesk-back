@@ -1,7 +1,8 @@
 from rest_framework import viewsets, status, permissions
-from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.decorators import action, api_view, permission_classes, throttle_classes
 from rest_framework.response import Response
 from rest_framework.authtoken.models import Token
+from rest_framework.throttling import ScopedRateThrottle
 from django.shortcuts import render, redirect
 from django.http import JsonResponse
 from django.db import transaction
@@ -29,6 +30,10 @@ logger = logging.getLogger(__name__)
 User = get_user_model()
 
 
+class AuthRateThrottle(ScopedRateThrottle):
+    scope = 'auth'
+
+
 @extend_schema(
     operation_id='tenant_login',
     summary='Tenant Login',
@@ -53,6 +58,7 @@ User = get_user_model()
 )
 @api_view(['POST'])
 @permission_classes([])  # No authentication required for login
+@throttle_classes([AuthRateThrottle])
 def tenant_login(request):
     """
     Tenant-specific login endpoint for dashboard access
@@ -637,6 +643,7 @@ def update_tenant_profile(request):
 )
 @api_view(['POST'])
 @permission_classes([permissions.IsAuthenticated])
+@throttle_classes([AuthRateThrottle])
 def change_tenant_password(request):
     """
     Change password for current user in tenant
@@ -665,10 +672,14 @@ def change_tenant_password(request):
             status=status.HTTP_400_BAD_REQUEST
         )
     
-    # Validate new password (basic validation)
-    if len(new_password) < 8:
+    # Validate new password using Django's password validators
+    from django.contrib.auth.password_validation import validate_password
+    from django.core.exceptions import ValidationError
+    try:
+        validate_password(new_password, user=user)
+    except ValidationError as e:
         return Response(
-            {'error': 'New password must be at least 8 characters long'}, 
+            {'error': e.messages[0]},
             status=status.HTTP_400_BAD_REQUEST
         )
     
@@ -1483,6 +1494,7 @@ def remove_logo(request):
 )
 @api_view(['POST'])
 @permission_classes([])  # No authentication required
+@throttle_classes([AuthRateThrottle])
 def forced_password_change(request):
     """
     Endpoint for users to change their password on first login
@@ -1503,21 +1515,25 @@ def forced_password_change(request):
             status=status.HTTP_400_BAD_REQUEST
         )
 
-    # Password validation
-    if len(new_password) < 8:
-        return Response(
-            {'error': 'New password must be at least 8 characters long'},
-            status=status.HTTP_400_BAD_REQUEST
-        )
-
     try:
         # Get user from tenant schema
         user = User.objects.get(email=email)
 
+        # Validate new password using Django's password validators
+        from django.contrib.auth.password_validation import validate_password
+        from django.core.exceptions import ValidationError
+        try:
+            validate_password(new_password, user=user)
+        except ValidationError as e:
+            return Response(
+                {'error': e.messages[0]},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         # Verify current password
         if not user.check_password(current_password):
             return Response(
-                {'error': 'Current password is incorrect'},
+                {'error': 'Invalid credentials'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -1546,7 +1562,7 @@ def forced_password_change(request):
 
     except User.DoesNotExist:
         return Response(
-            {'error': 'User not found'},
+            {'error': 'Invalid credentials'},
             status=status.HTTP_400_BAD_REQUEST
         )
     except Exception as e:

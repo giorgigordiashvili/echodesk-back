@@ -336,6 +336,10 @@ class User(AbstractBaseUser):
             ('can_edit_boards', 'edit_boards'),
             ('can_delete_boards', 'delete_boards'),
             ('can_access_orders', 'access_orders'),
+            ('can_manage_social_connections', 'manage_social_connections'),
+            ('can_view_social_messages', 'view_social_messages'),
+            ('can_send_social_messages', 'send_social_messages'),
+            ('can_manage_social_settings', 'manage_social_settings'),
         ]
         
         for field_name, permission_name in permission_fields:

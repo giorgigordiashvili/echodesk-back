@@ -372,8 +372,6 @@ class BulkUserActionSerializer(serializers.Serializer):
         ('deactivate', 'Deactivate'),
         ('delete', 'Delete'),
         ('change_role', 'Change Role'),
-        ('add_to_group', 'Add to Group'),
-        ('remove_from_group', 'Remove from Group'),
     ])
     role = serializers.ChoiceField(choices=User.ROLE_CHOICES, required=False)
     group_id = serializers.IntegerField(required=False)
