@@ -3,6 +3,21 @@
 from django.db import migrations
 
 
+def remove_constraint_if_exists(apps, schema_editor):
+    """Remove constraint only if it exists — it may already be gone from earlier migrations."""
+    cursor = schema_editor.connection.cursor()
+    cursor.execute("""
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE constraint_name = 'checklist_item_belongs_to_ticket_or_sub_ticket'
+        AND table_name = 'tickets_checklistitem'
+    """)
+    if cursor.fetchone():
+        cursor.execute("""
+            ALTER TABLE tickets_checklistitem
+            DROP CONSTRAINT checklist_item_belongs_to_ticket_or_sub_ticket
+        """)
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -10,8 +25,15 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RemoveConstraint(
-            model_name='checklistitem',
-            name='checklist_item_belongs_to_ticket_or_sub_ticket',
+        migrations.SeparateDatabaseAndState(
+            state_operations=[
+                migrations.RemoveConstraint(
+                    model_name='checklistitem',
+                    name='checklist_item_belongs_to_ticket_or_sub_ticket',
+                ),
+            ],
+            database_operations=[
+                migrations.RunPython(remove_constraint_if_exists, migrations.RunPython.noop),
+            ],
         ),
     ]
