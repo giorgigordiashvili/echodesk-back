@@ -481,7 +481,7 @@ redis_port = config('REDIS_PORT', default=6379, cast=int)
 if redis_password:
     # Format: rediss:// (with double 's' for SSL) for DigitalOcean managed Redis
     # channels_redis doesn't support ssl_cert_reqs in the URL, so we pass SSL
-    # config as a dict with ssl_cert_reqs=CERT_NONE for self-signed certs.
+    # config as a dict with ssl.CERT_NONE for self-signed certs.
     import ssl as _ssl
     CHANNEL_LAYERS = {
         'default': {
@@ -507,7 +507,7 @@ else:
 
 # Cache configuration using Redis (DB 1 to avoid collision with Channels on DB 0)
 if redis_password:
-    cache_redis_url = f'rediss://:{redis_password}@{redis_host}:{redis_port}/1?ssl_cert_reqs=CERT_NONE'
+    cache_redis_url = f'rediss://:{redis_password}@{redis_host}:{redis_port}/1?ssl_cert_reqs=none'
 else:
     cache_redis_url = f'redis://{redis_host}:{redis_port}/1'
 
@@ -525,7 +525,7 @@ CACHES = {
 
 # Celery Configuration (Redis DB 2)
 if redis_password:
-    celery_redis_url = f'rediss://:{redis_password}@{redis_host}:{redis_port}/2?ssl_cert_reqs=CERT_NONE'
+    celery_redis_url = f'rediss://:{redis_password}@{redis_host}:{redis_port}/2?ssl_cert_reqs=none'
 else:
     celery_redis_url = f'redis://{redis_host}:{redis_port}/2'
 
