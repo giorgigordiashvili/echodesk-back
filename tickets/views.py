@@ -408,7 +408,7 @@ class TicketViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def my_tickets(self, request):
         """Get tickets created by the current user."""
-        queryset = self.queryset.filter(created_by=request.user)
+        queryset = self.get_queryset().filter(created_by=request.user)
         page = self.paginate_queryset(queryset)
         if page is not None:
             serializer = TicketListSerializer(page, many=True)
@@ -420,7 +420,7 @@ class TicketViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def assigned_to_me(self, request):
         """Get tickets assigned to the current user."""
-        queryset = self.queryset.filter(
+        queryset = self.get_queryset().filter(
             Q(assigned_to=request.user) |
             Q(assigned_users=request.user)
         )
@@ -758,6 +758,14 @@ class TicketAssignmentViewSet(viewsets.ModelViewSet):
     def bulk_assign(self, request, ticket_pk=None):
         """Bulk assign users to a ticket."""
         ticket = Ticket.objects.get(pk=ticket_pk)
+
+        # Permission check: only staff or ticket creator can bulk assign
+        if not (request.user.is_staff or ticket.created_by == request.user):
+            return Response(
+                {'error': 'Only staff or the ticket owner can manage assignments.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
         user_ids = request.data.get('user_ids', [])
         roles = request.data.get('roles', {})
         
@@ -782,6 +790,14 @@ class TicketAssignmentViewSet(viewsets.ModelViewSet):
     def bulk_unassign(self, request, ticket_pk=None):
         """Bulk remove user assignments from a ticket."""
         ticket = Ticket.objects.get(pk=ticket_pk)
+
+        # Permission check: only staff or ticket creator can bulk unassign
+        if not (request.user.is_staff or ticket.created_by == request.user):
+            return Response(
+                {'error': 'Only staff or the ticket owner can manage assignments.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
         user_ids = request.data.get('user_ids', [])
         
         deleted_count, _ = TicketAssignment.objects.filter(
@@ -840,7 +856,13 @@ class TicketTimeLogViewSet(viewsets.ReadOnlyModelViewSet):
         from django.utils import timezone
         
         # Get date range from query params (default to last 30 days)
-        days = int(request.query_params.get('days', 30))
+        try:
+            days = int(request.query_params.get('days', 30))
+        except (ValueError, TypeError):
+            return Response(
+                {'error': 'days must be a valid integer'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         start_date = timezone.now() - timedelta(days=days)
         
         # Base queryset for user's time logs
@@ -993,17 +1015,9 @@ class BoardViewSet(viewsets.ModelViewSet):
     def default(self, request):
         """Get the default board."""
         default_board = Board.objects.filter(is_default=True).first()
-        if not default_board:
-            # If no default exists, create one or use the first available
-            first_board = Board.objects.first()
-            if first_board:
-                first_board.is_default = True
-                first_board.save()
-                default_board = first_board
-        
         if default_board:
             return Response(BoardSerializer(default_board, context={'request': request}).data)
-        return Response({'error': 'No boards found'}, status=404)
+        return Response({'error': 'No default board found'}, status=status.HTTP_404_NOT_FOUND)
 
 
 class TicketPaymentViewSet(viewsets.ModelViewSet):
@@ -1047,10 +1061,11 @@ class TicketPaymentViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
+        from decimal import Decimal, InvalidOperation
         try:
             ticket = Ticket.objects.get(id=ticket_id)
-            amount = float(amount)
-        except (Ticket.DoesNotExist, ValueError):
+            amount = Decimal(str(amount))
+        except (Ticket.DoesNotExist, ValueError, InvalidOperation):
             return Response(
                 {'error': 'Invalid ticket or amount'}, 
                 status=status.HTTP_400_BAD_REQUEST
