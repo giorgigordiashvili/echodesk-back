@@ -2,7 +2,7 @@ from rest_framework import viewsets, permissions, filters, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
-from django.db.models import Q, F, Max, Count
+from django.db.models import Q, F, Max, Count, Prefetch
 from django.db import transaction
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse
@@ -72,6 +72,8 @@ class BoardPermission(permissions.BasePermission):
             return request.user.has_permission('edit_boards')
         elif view.action == 'destroy':
             return request.user.has_permission('delete_boards')
+        elif view.action == 'set_default':
+            return request.user.is_staff or request.user.is_superuser
         else:
             # Default to view permission for unknown actions
             return (request.user.has_permission('view_boards') or
@@ -642,13 +644,15 @@ class TicketCommentViewSet(viewsets.ModelViewSet):
         """Get comments for tickets the user has access to."""
         if self.request.user.is_staff:
             return TicketComment.objects.all().select_related('user', 'ticket')
-        
-        # Non-staff users can only see comments on their tickets
+
+        # Non-staff users can see comments on tickets they created, are assigned to, or whose group is assigned
+        user_groups = self.request.user.tenant_groups.filter(is_active=True)
         return TicketComment.objects.filter(
-            Q(ticket__created_by=self.request.user) | 
+            Q(ticket__created_by=self.request.user) |
             Q(ticket__assigned_to=self.request.user) |
-            Q(ticket__assigned_users=self.request.user)
-        ).select_related('user', 'ticket')
+            Q(ticket__assigned_users=self.request.user) |
+            Q(ticket__assigned_groups__in=user_groups)
+        ).select_related('user', 'ticket').distinct()
 
     def perform_create(self, serializer):
         """Set the user when creating a comment."""
@@ -710,6 +714,12 @@ class ChecklistItemViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        if new_position < 0:
+            return Response(
+                {'error': 'Position cannot be negative'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         with transaction.atomic():
             # Filter other items in the same ticket
             other_items = ChecklistItem.objects.filter(ticket=item.ticket)
@@ -750,14 +760,18 @@ class TicketAssignmentViewSet(viewsets.ModelViewSet):
     
     def perform_create(self, serializer):
         """Create a new ticket assignment."""
+        from django.shortcuts import get_object_or_404
         ticket_pk = self.kwargs.get('ticket_pk')
-        ticket = Ticket.objects.get(pk=ticket_pk)
+        ticket = get_object_or_404(Ticket, pk=ticket_pk)
         serializer.save(ticket=ticket, assigned_by=self.request.user)
     
     @action(detail=False, methods=['post'])
     def bulk_assign(self, request, ticket_pk=None):
         """Bulk assign users to a ticket."""
-        ticket = Ticket.objects.get(pk=ticket_pk)
+        try:
+            ticket = Ticket.objects.get(pk=ticket_pk)
+        except Ticket.DoesNotExist:
+            return Response({'error': 'Ticket not found'}, status=status.HTTP_404_NOT_FOUND)
 
         # Permission check: only staff or ticket creator can bulk assign
         if not (request.user.is_staff or ticket.created_by == request.user):
@@ -768,28 +782,32 @@ class TicketAssignmentViewSet(viewsets.ModelViewSet):
 
         user_ids = request.data.get('user_ids', [])
         roles = request.data.get('roles', {})
-        
-        # Clear existing assignments if replace is True
-        if request.data.get('replace', False):
-            TicketAssignment.objects.filter(ticket=ticket).delete()
-        
-        assignments = []
-        for user_id in user_ids:
-            role = roles.get(str(user_id), 'collaborator')
-            assignment, created = TicketAssignment.objects.get_or_create(
-                ticket=ticket,
-                user_id=user_id,
-                defaults={'role': role, 'assigned_by': request.user}
-            )
-            assignments.append(assignment)
-        
+
+        with transaction.atomic():
+            # Clear existing assignments if replace is True
+            if request.data.get('replace', False):
+                TicketAssignment.objects.filter(ticket=ticket).delete()
+
+            assignments = []
+            for user_id in user_ids:
+                role = roles.get(str(user_id), 'collaborator')
+                assignment, created = TicketAssignment.objects.get_or_create(
+                    ticket=ticket,
+                    user_id=user_id,
+                    defaults={'role': role, 'assigned_by': request.user}
+                )
+                assignments.append(assignment)
+
         serializer = TicketAssignmentSerializer(assignments, many=True)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
     
     @action(detail=False, methods=['delete'])
     def bulk_unassign(self, request, ticket_pk=None):
         """Bulk remove user assignments from a ticket."""
-        ticket = Ticket.objects.get(pk=ticket_pk)
+        try:
+            ticket = Ticket.objects.get(pk=ticket_pk)
+        except Ticket.DoesNotExist:
+            return Response({'error': 'Ticket not found'}, status=status.HTTP_404_NOT_FOUND)
 
         # Permission check: only staff or ticket creator can bulk unassign
         if not (request.user.is_staff or ticket.created_by == request.user):
@@ -980,23 +998,24 @@ class BoardViewSet(viewsets.ModelViewSet):
     def kanban_board(self, request, pk=None):
         """Get kanban board data for a specific board."""
         board = self.get_object()
-        
-        # Get columns for this board
-        columns = TicketColumn.objects.filter(board=board).order_by('position')
-        
-        # Build response similar to existing kanban_board endpoint
+
+        # Get columns with prefetched tickets in a single query
+        columns = TicketColumn.objects.filter(board=board).order_by('position').prefetch_related(
+            Prefetch('tickets', queryset=Ticket.objects.order_by('position_in_column'))
+        )
+
+        # Build response
         columns_data = []
         tickets_by_column = {}
-        
+
         for column in columns:
             column_serializer = TicketColumnSerializer(column, context={'request': request})
             columns_data.append(column_serializer.data)
-            
-            # Get tickets for this column
-            tickets = Ticket.objects.filter(column=column).order_by('position_in_column')
-            tickets_serializer = TicketListSerializer(tickets, many=True, context={'request': request})
+
+            # Use prefetched tickets instead of a separate query per column
+            tickets_serializer = TicketListSerializer(column.tickets.all(), many=True, context={'request': request})
             tickets_by_column[column.id] = tickets_serializer.data
-        
+
         return Response({
             'board': BoardSerializer(board, context={'request': request}).data,
             'columns': columns_data,
@@ -1006,6 +1025,8 @@ class BoardViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def set_default(self, request, pk=None):
         """Set this board as the default board."""
+        if not (request.user.is_staff or request.user.is_superuser):
+            return Response({'error': 'Only staff can set default board'}, status=status.HTTP_403_FORBIDDEN)
         board = self.get_object()
         board.is_default = True
         board.save()
@@ -1084,8 +1105,8 @@ class TicketPaymentViewSet(viewsets.ModelViewSet):
             remaining_balance = ticket.add_payment(amount, request.user)
             
             # Get updated ticket data
-            updated_ticket = Ticket.objects.get(id=ticket_id)
-            ticket_serializer = TicketSerializer(updated_ticket, context={'request': request})
+            ticket.refresh_from_db()
+            ticket_serializer = TicketSerializer(ticket, context={'request': request})
             
             return Response({
                 'message': 'Payment processed successfully',
@@ -1270,10 +1291,16 @@ class ListItemViewSet(viewsets.ModelViewSet):
             new_position = int(new_position)
         except ValueError:
             return Response(
-                {'error': 'Position must be a number'}, 
+                {'error': 'Position must be a number'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
+        if new_position < 0:
+            return Response(
+                {'error': 'Position cannot be negative'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         with transaction.atomic():
             # Determine the siblings
             if item.parent:
@@ -1358,6 +1385,8 @@ class TicketFormViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def set_default(self, request, pk=None):
         """Set this form as the default form."""
+        if not (request.user.is_staff or request.user.is_superuser):
+            return Response({'error': 'Only staff can set default form'}, status=status.HTTP_403_FORBIDDEN)
         form = self.get_object()
         form.is_default = True
         form.save()

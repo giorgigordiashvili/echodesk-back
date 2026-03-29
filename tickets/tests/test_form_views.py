@@ -50,6 +50,13 @@ class TestTicketFormActions(TicketTestCase):
         form.refresh_from_db()
         self.assertTrue(form.is_default)
 
+    def test_non_staff_cannot_set_default_form(self):
+        admin = self.create_admin()
+        form = self.create_ticket_form(title='F', created_by=admin)
+        user = self.create_user(email='regular@test.com')
+        resp = self.api_post(f'/api/ticket-forms/{form.id}/set_default/', user=user)
+        self.assertEqual(resp.status_code, 403)
+
     def test_with_lists(self):
         admin = self.create_admin()
         form = self.create_ticket_form(title='WithLists', created_by=admin)

@@ -77,6 +77,19 @@ class TestCommentPermissions(TicketTestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(len(self.get_results(resp)), 0)
 
+    def test_group_member_sees_comments_on_group_ticket(self):
+        admin = self.create_admin()
+        user = self.create_user(email='groupmember@test.com')
+        group = self.create_tenant_group(name='Support')
+        user.tenant_groups.add(group)
+        board, col1, _, _ = self.setup_board_with_columns(admin=admin)
+        ticket = self.create_ticket(title='GroupTicket', column=col1, created_by=admin)
+        ticket.assigned_groups.add(group)
+        self.create_comment(ticket, admin, 'Group visible comment')
+        resp = self.api_get('/api/comments/', user=user)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(self.get_results(resp)), 1)
+
     def test_unauthenticated_denied(self):
         resp = self.api_get('/api/comments/')
         self.assertIn(resp.status_code, [401, 403])

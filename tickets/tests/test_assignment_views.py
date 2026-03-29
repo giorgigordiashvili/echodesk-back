@@ -111,6 +111,36 @@ class TestBulkAssignment(TicketTestCase):
         self.assertEqual(resp.status_code, 201)
         self.assertEqual(TicketAssignment.objects.filter(ticket=ticket, user=u1).count(), 1)
 
+    def test_create_assignment_nonexistent_ticket(self):
+        """POST to create assignment on nonexistent ticket returns 404."""
+        admin = self.create_admin()
+        target = self.create_user(email='target_ne@test.com')
+        resp = self.api_post(
+            '/api/tickets/99999/assignments/',
+            {'user': target.id, 'role': 'collaborator'}, user=admin
+        )
+        self.assertEqual(resp.status_code, 404)
+
+    def test_bulk_assign_nonexistent_ticket(self):
+        """POST to nonexistent ticket returns 404."""
+        admin = self.create_admin()
+        resp = self.api_post(
+            '/api/tickets/99999/assignments/bulk_assign/',
+            {'user_ids': [admin.id]}, user=admin
+        )
+        self.assertEqual(resp.status_code, 404)
+
+    def test_bulk_unassign_nonexistent_ticket(self):
+        """DELETE to nonexistent ticket returns 404."""
+        admin = self.create_admin()
+        client = self.authenticated_client(admin)
+        resp = client.delete(
+            '/api/tickets/99999/assignments/bulk_unassign/',
+            data={'user_ids': [admin.id]}, format='json',
+            HTTP_HOST='tenant.test.com'
+        )
+        self.assertEqual(resp.status_code, 404)
+
     def test_bulk_assign_permission_check(self):
         """Validates Bug 2 fix: non-staff/non-owner cannot bulk assign."""
         admin = self.create_admin()

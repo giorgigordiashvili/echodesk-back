@@ -95,6 +95,16 @@ class TestChecklistActions(TicketTestCase):
         }, user=admin)
         self.assertEqual(resp.status_code, 400)
 
+    def test_reorder_negative_position_rejected(self):
+        admin = self.create_admin()
+        board, col1, _, _ = self.setup_board_with_columns(admin=admin)
+        ticket = self.create_ticket(title='T', column=col1, created_by=admin)
+        item = self.create_checklist_item(ticket, 'X', created_by=admin)
+        resp = self.api_patch(f'/api/checklist-items/{item.id}/reorder/', {
+            'position': -1
+        }, user=admin)
+        self.assertEqual(resp.status_code, 400)
+
 
 class TestChecklistPermissions(TicketTestCase):
 

@@ -120,6 +120,13 @@ class TestBoardActions(TicketTestCase):
         board.refresh_from_db()
         self.assertTrue(board.is_default)
 
+    def test_non_staff_cannot_set_default(self):
+        admin = self.create_admin()
+        board = self.create_board(created_by=admin)
+        user = self.create_user(email='viewer@test.com', can_view_boards=True)
+        resp = self.api_post(f'/api/boards/{board.id}/set_default/', user=user)
+        self.assertEqual(resp.status_code, 403)
+
     def test_get_default_board(self):
         admin = self.create_admin()
         board = self.create_board(created_by=admin, is_default=True)
