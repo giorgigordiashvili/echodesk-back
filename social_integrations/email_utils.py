@@ -661,20 +661,60 @@ def send_email_smtp(connection, to_emails: List[str], cc_emails: List[str] = Non
         thread_id = compute_thread_id(msg['Message-ID'], '', '')
 
     # Send via SMTP
-    try:
-        if connection.smtp_use_ssl:
-            smtp = smtplib.SMTP_SSL(connection.smtp_server, connection.smtp_port, timeout=30)
+    # SMTP 530 "Connection refused" / "Authentication required" typically means
+    # the server requires TLS but it wasn't established, or the wrong SSL mode
+    # was used. We attempt the primary mode and, on 530, automatically retry
+    # with the alternative mode (STARTTLS ↔ SSL).
+    def _build_smtp_connection(use_ssl: bool, use_tls: bool):
+        """Create and return an authenticated SMTP connection."""
+        if use_ssl:
+            smtp_conn = smtplib.SMTP_SSL(connection.smtp_server, connection.smtp_port, timeout=30)
         else:
-            smtp = smtplib.SMTP(connection.smtp_server, connection.smtp_port, timeout=30)
-            if connection.smtp_use_tls:
-                smtp.starttls()
+            smtp_conn = smtplib.SMTP(connection.smtp_server, connection.smtp_port, timeout=30)
+            if use_tls:
+                smtp_conn.starttls()
+        smtp_conn.login(connection.username, connection.get_password())
+        return smtp_conn
 
-        smtp.login(connection.username, connection.get_password())
+    try:
+        smtp = _build_smtp_connection(connection.smtp_use_ssl, connection.smtp_use_tls)
+    except smtplib.SMTPResponseException as e:
+        # 530 = "5.7.0 Must issue a STARTTLS command first" or "Authentication Required"
+        # Retry with the alternative TLS mode
+        if e.smtp_code in (530, 538):
+            logger.warning(
+                f"SMTP {e.smtp_code} on primary TLS mode (ssl={connection.smtp_use_ssl}, "
+                f"tls={connection.smtp_use_tls}) for {connection.smtp_server}. "
+                f"Retrying with alternative TLS mode."
+            )
+            try:
+                smtp = _build_smtp_connection(
+                    not connection.smtp_use_ssl,
+                    not connection.smtp_use_tls if not connection.smtp_use_ssl else connection.smtp_use_tls,
+                )
+                # Persist the working TLS settings so future sends succeed without retry
+                connection.smtp_use_ssl = not connection.smtp_use_ssl
+                if not connection.smtp_use_ssl:
+                    connection.smtp_use_tls = not connection.smtp_use_tls
+                connection.save(update_fields=['smtp_use_ssl', 'smtp_use_tls'])
+                logger.info(
+                    f"SMTP fallback succeeded for {connection.smtp_server}. "
+                    f"Updated connection: ssl={connection.smtp_use_ssl}, tls={connection.smtp_use_tls}"
+                )
+            except Exception as retry_exc:
+                logger.error(f"Failed to send email after TLS fallback: {retry_exc}")
+                raise
+        else:
+            logger.error(f"Failed to send email: {e}")
+            raise
+    except Exception as e:
+        logger.error(f"Failed to send email: {e}")
+        raise
 
+    try:
         all_recipients = to_emails + cc_emails + bcc_emails
         smtp.sendmail(connection.email_address, all_recipients, msg.as_string())
         smtp.quit()
-
     except Exception as e:
         logger.error(f"Failed to send email: {e}")
         raise
