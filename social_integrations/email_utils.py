@@ -1114,58 +1114,87 @@ def delete_emails_from_imap(connection, message_ids: List[str]) -> int:
     if not message_ids:
         return 0
 
-    try:
-        # Connect to IMAP
-        if connection.imap_use_ssl:
-            imap = imaplib.IMAP4_SSL(connection.imap_server, connection.imap_port, timeout=30)
-        else:
-            imap = imaplib.IMAP4(connection.imap_server, connection.imap_port)
-            imap.starttls()
+    import time as _time
 
-        imap.login(connection.username, connection.get_password())
+    # Transient IMAP errors that are worth retrying
+    _TRANSIENT_IMAP_ERRORS = (
+        ConnectionResetError,
+        OSError,
+        imaplib.IMAP4.abort,
+    )
+    _MAX_RETRIES = 2
+    _RETRY_DELAY = 3  # seconds
 
-        # Select folder (not readonly - we need to modify)
-        result, data = imap.select(connection.sync_folder, readonly=False)
-        if result != 'OK':
-            raise Exception(f"Failed to select folder {connection.sync_folder}")
+    last_error = None
+    for attempt in range(_MAX_RETRIES + 1):
+        try:
+            # Connect to IMAP
+            if connection.imap_use_ssl:
+                imap = imaplib.IMAP4_SSL(connection.imap_server, connection.imap_port, timeout=30)
+            else:
+                imap = imaplib.IMAP4(connection.imap_server, connection.imap_port)
+                imap.starttls()
 
-        deleted_count = 0
+            imap.login(connection.username, connection.get_password())
 
-        for message_id in message_ids:
-            try:
-                # Search for message by Message-ID header
-                # Note: Message-ID includes angle brackets, search needs them
-                search_id = message_id if message_id.startswith('<') else f'<{message_id}>'
-                result, data = imap.search(None, f'HEADER Message-ID "{search_id}"')
+            # Select folder (not readonly - we need to modify)
+            result, data = imap.select(connection.sync_folder, readonly=False)
+            if result != 'OK':
+                raise Exception(f"Failed to select folder {connection.sync_folder}")
 
-                if result != 'OK' or not data[0]:
-                    # Try without angle brackets
-                    clean_id = message_id.strip('<>')
-                    result, data = imap.search(None, f'HEADER Message-ID "{clean_id}"')
+            deleted_count = 0
 
-                if result == 'OK' and data[0]:
-                    msg_nums = data[0].split()
-                    for msg_num in msg_nums:
-                        # Mark as deleted
-                        imap.store(msg_num, '+FLAGS', '\\Deleted')
-                        deleted_count += 1
+            for message_id in message_ids:
+                try:
+                    # Search for message by Message-ID header
+                    # Note: Message-ID includes angle brackets, search needs them
+                    search_id = message_id if message_id.startswith('<') else f'<{message_id}>'
+                    result, data = imap.search(None, f'HEADER Message-ID "{search_id}"')
 
-            except Exception as e:
-                logger.warning(f"Failed to delete email {message_id}: {e}")
+                    if result != 'OK' or not data[0]:
+                        # Try without angle brackets
+                        clean_id = message_id.strip('<>')
+                        result, data = imap.search(None, f'HEADER Message-ID "{clean_id}"')
+
+                    if result == 'OK' and data[0]:
+                        msg_nums = data[0].split()
+                        for msg_num in msg_nums:
+                            # Mark as deleted
+                            imap.store(msg_num, '+FLAGS', '\\Deleted')
+                            deleted_count += 1
+
+                except Exception as e:
+                    logger.warning(f"Failed to delete email {message_id}: {e}")
+                    continue
+
+            # Expunge to permanently remove deleted messages
+            imap.expunge()
+
+            imap.close()
+            imap.logout()
+
+            logger.info(f"Deleted {deleted_count} emails from IMAP for {connection.email_address}")
+            return deleted_count
+
+        except _TRANSIENT_IMAP_ERRORS as e:
+            last_error = e
+            if attempt < _MAX_RETRIES:
+                logger.warning(
+                    f"Transient IMAP connection error for {connection.email_address} "
+                    f"(attempt {attempt + 1}/{_MAX_RETRIES + 1}): {e} — retrying in {_RETRY_DELAY}s"
+                )
+                _time.sleep(_RETRY_DELAY)
                 continue
+            # All retries exhausted — log as warning since caller handles this gracefully
+            logger.warning(
+                f"IMAP delete failed for {connection.email_address} after {_MAX_RETRIES + 1} attempts: {e}"
+            )
+            raise
 
-        # Expunge to permanently remove deleted messages
-        imap.expunge()
-
-        imap.close()
-        imap.logout()
-
-        logger.info(f"Deleted {deleted_count} emails from IMAP for {connection.email_address}")
-        return deleted_count
-
-    except Exception as e:
-        logger.error(f"IMAP delete error for {connection.email_address}: {e}")
-        raise
+        except Exception as e:
+            # Non-transient error — log as warning (caller in views.py handles and continues with soft delete)
+            logger.warning(f"IMAP delete error for {connection.email_address}: {e}")
+            raise
 
 
 def move_email_to_folder(connection, message_id: str, source_folder: str, target_folder: str) -> bool:
