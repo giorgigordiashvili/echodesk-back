@@ -1094,8 +1094,19 @@ def sync_imap_messages(connection, max_messages: int = 500) -> int:
         return total_new_count
 
     except Exception as e:
+        error_str = str(e)
         logger.error(f"Email sync error for {connection.email_address}: {e}")
-        connection.last_sync_error = str(e)
+        connection.last_sync_error = error_str
+        # If it's an authentication failure, disable the connection to prevent
+        # repeated sync attempts that will always fail and spam error logs/Sentry.
+        auth_failure_keywords = ['authenticate failed', 'authentication failed', 'invalid credentials',
+                                  'login failed', 'bad credentials', '[auth]']
+        if any(kw in error_str.lower() for kw in auth_failure_keywords):
+            connection.is_active = False
+            logger.error(
+                f"[EMAIL_SYNC] Disabling EmailConnection for {connection.email_address} due to "
+                f"authentication failure. Please update credentials in the dashboard. Error: {e}"
+            )
         connection.save()
         raise
 
