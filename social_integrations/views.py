@@ -3291,6 +3291,19 @@ def instagram_webhook(request):
                                         else:
                                             error_data = profile_response.json() if profile_response.content else {}
                                             logger.error(f"❌ Failed to fetch Instagram profile for {sender_id}: status={profile_response.status_code}, error={error_data}")
+                                            # Auto-deactivate connection on OAuth token errors (e.g. password changed, session invalidated)
+                                            if profile_response.status_code == 400:
+                                                error_info = error_data.get('error', {})
+                                                error_code = error_info.get('code')
+                                                error_type = error_info.get('type', '')
+                                                OAUTH_ERROR_CODES = [190, 102, 10, 200, 2500]
+                                                if error_code in OAUTH_ERROR_CODES or 'OAuthException' in error_type:
+                                                    account_connection.is_active = False
+                                                    account_connection.save(update_fields=['is_active'])
+                                                    logger.warning(
+                                                        f"🔴 Auto-deactivated Instagram account @{account_connection.username} "
+                                                        f"(OAuthException code {error_code}: {error_info.get('message', '')})"
+                                                    )
 
                                     except Exception as e:
                                         logger.error(f"❌ Exception fetching Instagram profile for {sender_id}: {type(e).__name__}: {e}")
