@@ -21,7 +21,9 @@ class CanManageSocialConnections(permissions.BasePermission):
         if request.method in permissions.SAFE_METHODS:
             return request.user.has_feature('social_integrations')
 
-        # Write permissions require admin role or explicit permission
+        # Write permissions: feature check + admin role or explicit permission
+        if not request.user.has_feature('social_integrations'):
+            return False
         return (
             request.user.role == 'admin' or
             request.user.has_permission('manage_social_connections')
@@ -77,7 +79,9 @@ class CanManageSocialSettings(permissions.BasePermission):
         if request.method in permissions.SAFE_METHODS:
             return request.user.has_feature('social_integrations')
 
-        # Write permissions require admin role or explicit permission
+        # Write permissions: feature check + admin role or explicit permission
+        if not request.user.has_feature('social_integrations'):
+            return False
         return (
             request.user.role == 'admin' or
             request.user.has_permission('manage_social_settings')

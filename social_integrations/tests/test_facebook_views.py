@@ -1,0 +1,158 @@
+"""
+Tests for Facebook-related views.
+Covers connection status, disconnect, send message, and message viewset.
+"""
+from unittest.mock import patch, MagicMock
+from rest_framework import status
+from social_integrations.tests.conftest import SocialIntegrationTestCase
+
+
+class TestFacebookConnectionStatus(SocialIntegrationTestCase):
+
+    def setUp(self):
+        super().setUp()
+        self.admin = self.create_admin(email='fb-admin@test.com')
+        self.agent = self.create_user(email='fb-agent@test.com')
+        self.url = '/api/social/facebook/status/'
+
+    def test_returns_status_no_connections(self):
+        resp = self.api_get(self.url, user=self.agent)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+    def test_returns_connected_pages(self):
+        self.create_fb_connection(page_name='My Page')
+        resp = self.api_get(self.url, user=self.agent)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+    def test_unauthenticated_denied(self):
+        resp = self.client.get(self.url, HTTP_HOST='tenant.test.com')
+        self.assertEqual(resp.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_no_feature_denied(self):
+        """Fix 6 verification: connection status requires feature."""
+        with patch('users.models.User.has_feature', return_value=False):
+            resp = self.api_get(self.url, user=self.agent)
+            self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class TestFacebookDisconnect(SocialIntegrationTestCase):
+
+    def setUp(self):
+        super().setUp()
+        self.admin = self.create_admin(email='fb-disc-admin@test.com')
+        self.agent = self.create_user(email='fb-disc-agent@test.com')
+        self.url = '/api/social/facebook/disconnect/'
+
+    def test_admin_can_disconnect(self):
+        self.create_fb_connection(page_id='page_to_disc')
+        resp = self.api_post(self.url, {}, user=self.admin)
+        # Should not be 403
+        self.assertNotEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_agent_cannot_disconnect(self):
+        resp = self.api_post(self.url, {}, user=self.agent)
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class TestFacebookPageDisconnect(SocialIntegrationTestCase):
+
+    def setUp(self):
+        super().setUp()
+        self.admin = self.create_admin(email='fb-pd-admin@test.com')
+
+    def test_disconnect_specific_page(self):
+        conn = self.create_fb_connection(page_id='specific_page')
+        url = f'/api/social/facebook/pages/{conn.page_id}/disconnect/'
+        resp = self.api_post(url, {}, user=self.admin)
+        self.assertNotEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class TestFacebookSendMessage(SocialIntegrationTestCase):
+
+    def setUp(self):
+        super().setUp()
+        self.agent = self.create_user(email='fb-send@test.com')
+        self.url = '/api/social/facebook/send-message/'
+
+    def test_send_without_body_returns_400(self):
+        resp = self.api_post(self.url, {}, user=self.agent)
+        self.assertIn(resp.status_code, [status.HTTP_400_BAD_REQUEST, status.HTTP_404_NOT_FOUND])
+
+    @patch('social_integrations.views.requests.post')
+    def test_send_message_with_valid_data(self, mock_post):
+        mock_post.return_value = MagicMock(
+            status_code=200,
+            json=lambda: {'recipient_id': '123', 'message_id': 'mid_123'}
+        )
+        conn = self.create_fb_connection()
+        resp = self.api_post(self.url, {
+            'page_id': conn.page_id,
+            'recipient_id': 'recipient_1',
+            'message': 'Hello!',
+        }, user=self.agent)
+        # If connection found, should attempt to send
+        self.assertNotEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class TestFacebookMessageViewSet(SocialIntegrationTestCase):
+
+    def setUp(self):
+        super().setUp()
+        self.agent = self.create_user(email='fb-msgs@test.com')
+        self.url = '/api/social/facebook-messages/'
+
+    def test_list_messages(self):
+        conn = self.create_fb_connection()
+        self.create_fb_message(page_connection=conn)
+        resp = self.api_get(self.url, user=self.agent)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+    def test_list_empty(self):
+        resp = self.api_get(self.url, user=self.agent)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+    def test_unauthenticated_denied(self):
+        resp = self.client.get(self.url, HTTP_HOST='tenant.test.com')
+        self.assertEqual(resp.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+class TestFacebookPageViewSet(SocialIntegrationTestCase):
+
+    def setUp(self):
+        super().setUp()
+        self.admin = self.create_admin(email='fb-pages-admin@test.com')
+        self.agent = self.create_user(email='fb-pages-agent@test.com')
+        self.url = '/api/social/facebook-pages/'
+
+    def test_list_pages(self):
+        self.create_fb_connection()
+        resp = self.api_get(self.url, user=self.agent)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+    def test_list_returns_connected_pages(self):
+        self.create_fb_connection(page_name='Page A')
+        self.create_fb_connection(page_name='Page B')
+        resp = self.api_get(self.url, user=self.agent)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+    def test_retrieve_page(self):
+        conn = self.create_fb_connection()
+        resp = self.api_get(f'{self.url}{conn.id}/', user=self.agent)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+
+class TestClearPlatformHistory(SocialIntegrationTestCase):
+
+    def setUp(self):
+        super().setUp()
+        self.admin = self.create_admin(email='clear-admin@test.com')
+        self.agent = self.create_user(email='clear-agent@test.com')
+        self.url = '/api/social/clear-history/'
+
+    def test_admin_can_clear(self):
+        resp = self.api_post(self.url, {'platform': 'facebook'}, user=self.admin)
+        self.assertNotEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_agent_cannot_clear(self):
+        resp = self.api_post(self.url, {'platform': 'facebook'}, user=self.agent)
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)

@@ -1018,7 +1018,7 @@ def facebook_oauth_callback(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, CanViewSocialMessages])
 def facebook_connection_status(request):
     """Check Facebook connection status for current tenant"""
     try:
@@ -2794,7 +2794,7 @@ class InstagramMessageViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, CanViewSocialMessages])
 def instagram_connection_status(request):
     """Check Instagram connection status for current tenant"""
     try:
@@ -3640,7 +3640,7 @@ def instagram_webhook(request):
 # ============================================================================
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, IsStaffUser])
 def webhook_debug_logs(request):
     """
     Get recent webhook activity logs for debugging.
@@ -3753,7 +3753,7 @@ def webhook_test_receiver(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, IsStaffUser])
 def webhook_status(request):
     """
     Check webhook configuration and recent activity.
@@ -4543,7 +4543,7 @@ def process_potential_rating_response(message_text, platform, conversation_id, a
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, IsStaffUser])
 def rating_statistics(request):
     """
     Get rating statistics for all users.
@@ -4551,12 +4551,6 @@ def rating_statistics(request):
     Supports date filtering via start_date and end_date query params.
     Default: current month (1st to today)
     """
-    # Check if user is superadmin
-    if not request.user.is_staff:
-        return Response(
-            {'error': 'Only superadmins can view rating statistics'},
-            status=status.HTTP_403_FORBIDDEN
-        )
 
     # Parse date filters (default: this month)
     from datetime import date
@@ -4645,18 +4639,12 @@ def rating_statistics(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, IsStaffUser])
 def user_chat_sessions(request, user_id):
     """
     Get detailed chat sessions for a specific user.
     Superadmin only - allows investigating chat history.
     """
-    # Only superadmins can view this
-    if not request.user.is_staff:
-        return Response(
-            {'error': 'Only superadmins can view user chat sessions'},
-            status=status.HTTP_403_FORBIDDEN
-        )
 
     # Get date range from query params
     start_date_str = request.query_params.get('start_date')
@@ -5554,7 +5542,7 @@ def unified_conversations(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, CanViewSocialMessages])
 def unread_messages_count(request):
     """
     Get the total count of unread messages across all social platforms.
@@ -5716,7 +5704,7 @@ def unread_messages_count(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, CanViewSocialMessages])
 def mark_conversation_read(request):
     """
     Mark all messages in a conversation as read by staff.
@@ -5806,7 +5794,7 @@ def mark_conversation_read(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, CanViewSocialMessages])
 def mark_conversation_unread(request):
     """
     Mark a conversation as unread by staff.
@@ -6771,7 +6759,7 @@ def whatsapp_embedded_signup_callback(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, CanViewSocialMessages])
 def whatsapp_connection_status(request):
     """Check WhatsApp connection status for current tenant"""
     try:
@@ -8070,7 +8058,7 @@ def whatsapp_send_template_message(request):
 # =============================================================================
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, CanViewSocialMessages])
 def email_connection_status(request):
     """Check Email connection status for current tenant - returns connections user can access"""
     try:
@@ -8505,7 +8493,7 @@ def email_action(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, CanViewSocialMessages])
 def email_folders(request):
     """List available IMAP folders for the connected email(s)
 
@@ -10034,7 +10022,7 @@ class SocialClientCustomFieldViewSet(viewsets.ModelViewSet):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, CanViewSocialMessages])
 def mark_all_conversations_read(request):
     """
     Mark all unread messages across all conversations as read by staff.
@@ -10121,7 +10109,7 @@ def mark_all_conversations_read(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, CanViewSocialMessages])
 def archive_conversation(request):
     """
     Archive one or more conversations. Archived conversations are hidden
@@ -10231,7 +10219,7 @@ def archive_conversation(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, CanViewSocialMessages])
 def unarchive_conversation(request):
     """
     Unarchive (restore) one or more conversations back to the main list.
@@ -10304,7 +10292,7 @@ def unarchive_conversation(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, CanViewSocialMessages])
 def archive_all_conversations(request):
     """
     Archive all conversations (move everything to history).
@@ -10540,7 +10528,7 @@ def facebook_oauth_start_publishing(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, CanViewSocialMessages])
 def auto_post_publishing_status(request):
     """Check which connections have publishing permissions"""
     facebook_pages = FacebookPageConnection.objects.filter(is_active=True).values(
@@ -10566,7 +10554,7 @@ def auto_post_publishing_status(request):
 
 
 @api_view(['GET', 'PUT'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, CanManageSocialSettings])
 def auto_post_settings(request):
     """Get or update auto-post settings (singleton per tenant)"""
     settings_obj, _ = AutoPostSettings.objects.get_or_create(pk=1, defaults={})
@@ -10582,7 +10570,7 @@ def auto_post_settings(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, CanViewSocialMessages])
 def auto_post_list(request):
     """List auto-post contents with optional status filter"""
     queryset = AutoPostContent.objects.all().select_related('featured_product', 'approved_by', 'rejected_by')
@@ -10606,7 +10594,7 @@ def auto_post_list(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, CanViewSocialMessages])
 def auto_post_detail(request, pk):
     """Get auto-post content detail"""
     try:
@@ -10618,7 +10606,7 @@ def auto_post_detail(request, pk):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, CanManageSocialSettings])
 def auto_post_approve(request, pk):
     """Approve a draft post"""
     try:
@@ -10638,7 +10626,7 @@ def auto_post_approve(request, pk):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, CanManageSocialSettings])
 def auto_post_reject(request, pk):
     """Reject a draft post"""
     try:
@@ -10659,7 +10647,7 @@ def auto_post_reject(request, pk):
 
 
 @api_view(['PUT'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, CanManageSocialSettings])
 def auto_post_edit(request, pk):
     """Edit a draft post's text"""
     try:
@@ -10688,7 +10676,7 @@ def auto_post_edit(request, pk):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, CanManageSocialSettings])
 def auto_post_generate(request):
     """Manually trigger post generation"""
     from .services.ai_content_service import AIContentService
@@ -10707,7 +10695,7 @@ def auto_post_generate(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, CanManageSocialSettings])
 def auto_post_publish(request, pk):
     """Manually publish an approved post"""
     try:
