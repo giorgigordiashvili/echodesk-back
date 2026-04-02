@@ -203,11 +203,11 @@ class TicketColumnViewSet(viewsets.ModelViewSet):
         """Get all columns with their tickets for Kanban board view."""
         # Get board_id from query params, default to default board
         board_id = request.query_params.get('board_id')
-        
+
         if board_id:
             try:
                 board = Board.objects.get(id=board_id)
-                columns = TicketColumn.objects.filter(board=board).order_by('position')
+                columns_qs = TicketColumn.objects.filter(board=board)
             except Board.DoesNotExist:
                 return Response({'error': 'Board not found'}, status=404)
         else:
@@ -215,13 +215,38 @@ class TicketColumnViewSet(viewsets.ModelViewSet):
             default_board = Board.objects.filter(is_default=True).first()
             if not default_board:
                 default_board = Board.objects.first()
-            
+
             if default_board:
-                columns = TicketColumn.objects.filter(board=default_board).order_by('position')
+                columns_qs = TicketColumn.objects.filter(board=default_board)
             else:
                 # Fallback to columns without board (legacy support)
-                columns = TicketColumn.objects.filter(board__isnull=True).order_by('position')
-        
+                columns_qs = TicketColumn.objects.filter(board__isnull=True)
+
+        # Prefetch all ticket relations to avoid N+1 queries
+        ticket_qs = (
+            Ticket.objects
+            .order_by('position_in_column', '-created_at')
+            .select_related('created_by', 'assigned_to', 'column')
+            .prefetch_related(
+                'assigned_users',
+                'assigned_groups',
+                'tags',
+                Prefetch(
+                    'ticketassignment_set',
+                    queryset=TicketAssignment.objects.select_related('user', 'assigned_by'),
+                ),
+            )
+            .annotate(comments_count=Count('comments'))
+        )
+
+        columns = (
+            columns_qs
+            .order_by('position')
+            .select_related('created_by')
+            .annotate(tickets_count=Count('tickets'))
+            .prefetch_related(Prefetch('tickets', queryset=ticket_qs))
+        )
+
         board_data = {
             'columns': columns
         }
@@ -999,9 +1024,31 @@ class BoardViewSet(viewsets.ModelViewSet):
         """Get kanban board data for a specific board."""
         board = self.get_object()
 
+        # Build optimized ticket queryset with all relations prefetched
+        ticket_qs = (
+            Ticket.objects
+            .order_by('position_in_column')
+            .select_related('created_by', 'assigned_to', 'column')
+            .prefetch_related(
+                'assigned_users',
+                'assigned_groups',
+                'tags',
+                Prefetch(
+                    'ticketassignment_set',
+                    queryset=TicketAssignment.objects.select_related('user', 'assigned_by'),
+                ),
+            )
+            .annotate(comments_count=Count('comments'))
+        )
+
         # Get columns with prefetched tickets in a single query
-        columns = TicketColumn.objects.filter(board=board).order_by('position').prefetch_related(
-            Prefetch('tickets', queryset=Ticket.objects.order_by('position_in_column'))
+        columns = (
+            TicketColumn.objects
+            .filter(board=board)
+            .order_by('position')
+            .select_related('created_by')
+            .annotate(tickets_count=Count('tickets'))
+            .prefetch_related(Prefetch('tickets', queryset=ticket_qs))
         )
 
         # Build response

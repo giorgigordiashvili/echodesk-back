@@ -528,14 +528,15 @@ class KanbanBoardSerializer(serializers.Serializer):
     tickets_by_column = serializers.SerializerMethodField()
     
     def get_tickets_by_column(self, obj):
-        """Get tickets organized by column."""
+        """Get tickets organized by column using prefetched data."""
         columns = obj.get('columns', [])
         tickets_data = {}
-        
+
         for column in columns:
-            tickets = Ticket.objects.filter(column=column).order_by('position_in_column', '-created_at')
+            # Use prefetched tickets (set by Prefetch in the view) instead of a separate query per column
+            tickets = column.tickets.all()
             tickets_data[column.id] = TicketListSerializer(tickets, many=True, context=self.context).data
-        
+
         return tickets_data
 
 
