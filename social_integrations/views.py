@@ -3265,6 +3265,7 @@ def instagram_webhook(request):
 
                                 # Try to fetch the sender's Instagram username, name, and profile picture
                                 if sender_id != instagram_account_id:  # Don't fetch profile for business account itself
+                                    oauth_token_invalid = False
                                     try:
                                         # Use Instagram Graph API to get user info
                                         profile_url = f"https://graph.facebook.com/v23.0/{sender_id}"
@@ -3290,13 +3291,31 @@ def instagram_webhook(request):
                                                 sender_profile_pic = None
                                         else:
                                             error_data = profile_response.json() if profile_response.content else {}
-                                            logger.error(f"❌ Failed to fetch Instagram profile for {sender_id}: status={profile_response.status_code}, error={error_data}")
+                                            # Auto-deactivate connection on OAuth token errors (e.g. password changed, session invalidated)
+                                            if profile_response.status_code in (400, 401):
+                                                error_info = error_data.get('error', {})
+                                                error_code = error_info.get('code')
+                                                error_type = error_info.get('type', '')
+                                                OAUTH_ERROR_CODES = [190, 102, 10, 200, 2500]
+                                                if error_code in OAUTH_ERROR_CODES or 'OAuthException' in error_type:
+                                                    oauth_token_invalid = True
+                                                    account_connection.is_active = False
+                                                    account_connection.save(update_fields=['is_active'])
+                                                    # Log as warning (not error) — this is a known/handled OAuth expiry
+                                                    logger.warning(
+                                                        f"🔴 Auto-deactivated Instagram account @{account_connection.username} "
+                                                        f"due to invalid token (OAuthException code {error_code}: "
+                                                        f"{error_info.get('message', '')})"
+                                                    )
+                                            if not oauth_token_invalid:
+                                                logger.warning(f"⚠️ Failed to fetch Instagram profile for {sender_id}: status={profile_response.status_code}, error={error_data}")
 
                                     except Exception as e:
-                                        logger.error(f"❌ Exception fetching Instagram profile for {sender_id}: {type(e).__name__}: {e}")
+                                        logger.warning(f"⚠️ Exception fetching Instagram profile for {sender_id}: {type(e).__name__}: {e}")
 
                                     # Try fetching profile picture separately (like Facebook) if not available from profile
-                                    if not sender_profile_pic:
+                                    # Skip if token is already known to be invalid
+                                    if not sender_profile_pic and not oauth_token_invalid:
                                         try:
                                             # Try the Facebook-style picture endpoint
                                             pic_url = f"https://graph.facebook.com/v23.0/{sender_id}/picture"
