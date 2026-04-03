@@ -3486,7 +3486,7 @@ def instagram_webhook(request):
                                                 sender_profile_pic = None
                                         else:
                                             error_data = profile_response.json() if profile_response.content else {}
-                                            logger.error(f"❌ Failed to fetch Instagram profile for {sender_id}: status={profile_response.status_code}, error={error_data}")
+                                            logger.warning(f"⚠️ Failed to fetch Instagram profile for {sender_id}: status={profile_response.status_code}, error={error_data}")
 
                                     except Exception as e:
                                         logger.error(f"❌ Exception fetching Instagram profile for {sender_id}: {type(e).__name__}: {e}")
