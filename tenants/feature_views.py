@@ -411,8 +411,7 @@ def remove_feature_from_subscription(request):
     # Remove feature from subscription
     subscription.selected_features.remove(feature)
 
-    # Update monthly cost
-    subscription.monthly_cost = max(Decimal('0'), subscription.monthly_cost - monthly_feature_cost)
+    # monthly_cost is a computed property, no need to set it
     subscription.save()
 
     return Response({
@@ -483,9 +482,8 @@ def update_agent_count(request):
     cost_difference = new_monthly_cost - old_monthly_cost
     prorated_difference = (Decimal(days_remaining) / Decimal(30)) * cost_difference
 
-    # Update subscription
+    # Update subscription (monthly_cost is a computed property)
     subscription.agent_count = new_agent_count
-    subscription.monthly_cost = new_monthly_cost
     subscription.save()
 
     return Response({
