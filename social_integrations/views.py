@@ -1337,29 +1337,21 @@ def facebook_send_message(request):
                 'error': 'Page not found or not connected to this tenant'
             }, status=status.HTTP_404_NOT_FOUND)
 
-        # Check 24-hour messaging window
+        # Verify a conversation exists (user must have messaged first)
         last_user_message = FacebookMessage.objects.filter(
             page_connection=page_connection,
             sender_id=recipient_id,
             is_from_page=False
         ).order_by('-timestamp').first()
 
-        if last_user_message:
-            time_since = datetime.now(last_user_message.timestamp.tzinfo) - last_user_message.timestamp
-            hours_passed = time_since.total_seconds() / 3600
-            if hours_passed > 24:
-                return Response({
-                    'error': f'Cannot send message: 24-hour messaging window expired ({hours_passed:.1f} hours since last user message)',
-                    'error_code': 'window_expired',
-                    'hours_passed': round(hours_passed, 1),
-                    'details': 'Facebook only allows responses within 24 hours of the last message from the user.'
-                }, status=status.HTTP_400_BAD_REQUEST)
-        else:
+        if not last_user_message:
             return Response({
                 'error': 'Cannot send message: No conversation found with this user. The user must message you first.',
                 'error_code': 'no_conversation',
                 'details': 'Facebook requires the user to initiate the conversation before you can send messages.'
             }, status=status.HTTP_400_BAD_REQUEST)
+        # Note: 24-hour window enforcement is handled by Facebook's API.
+        # If the window is expired, Facebook will return an error which we surface to the user.
 
         send_url = f"https://graph.facebook.com/v23.0/me/messages"
         params = {'access_token': page_connection.page_access_token}
@@ -2959,17 +2951,8 @@ def instagram_send_message(request):
                 'error': 'Cannot send message: No conversation found with this user. The user must message you first on Instagram.',
                 'details': 'Instagram requires the user to initiate the conversation before you can send messages.'
             }, status=status.HTTP_400_BAD_REQUEST)
-
-        # Check 24-hour window
-        latest_message = recent_messages.first()
-        time_since_message = datetime.now(latest_message.timestamp.tzinfo) - latest_message.timestamp
-        hours_passed = time_since_message.total_seconds() / 3600
-
-        if hours_passed > 24:
-            return Response({
-                'error': f'Cannot send message: 24-hour response window expired ({hours_passed:.1f} hours ago)',
-                'details': 'Instagram only allows responses within 24 hours of the last message from the user.'
-            }, status=status.HTTP_400_BAD_REQUEST)
+        # Note: 24-hour window enforcement is handled by Instagram's API.
+        # If the window is expired, the API will return an error which we surface to the user.
 
         # Instagram messaging through Messenger Platform API
         # Use Page ID in URL and specify platform=instagram in params
