@@ -4086,13 +4086,19 @@ def end_session(request):
             platform=platform,
             conversation_id=conversation_id,
             account_id=account_id,
-            assigned_user=request.user,
             status='in_session'
         )
     except ChatAssignment.DoesNotExist:
         return Response(
             {'error': 'Active session not found'},
             status=status.HTTP_404_NOT_FOUND
+        )
+
+    # Only assigned user or admin/staff can end session
+    if assignment.assigned_user != request.user and not request.user.is_staff and not request.user.is_superuser:
+        return Response(
+            {'error': 'You cannot end this session'},
+            status=status.HTTP_403_FORBIDDEN
         )
 
     # Mark assignment as completed and unassign user
