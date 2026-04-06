@@ -1527,48 +1527,10 @@ def facebook_send_message(request):
             error_code = error_info.get('code')
             error_type = error_info.get('type', '')
 
-            # Auto-deactivate page on authentication/permission errors
-            OAUTH_ERROR_CODES = [
-                190,  # OAuthException - Access token expired/invalid
-                102,  # API Session - Session expired
-                10,   # API Permission Denied
-                200,  # Permissions Error
-                2500, # Permissions Error - deprecated API
-            ]
-
-            if error_code in OAUTH_ERROR_CODES or 'OAuthException' in error_type:
-                # Automatically deactivate the page
-                from django.utils import timezone
-
-                now = timezone.now()
-
-                # Determine specific deactivation reason
-                if error_code == 190:
-                    deactivation_reason = 'token_expired'
-                elif error_code in [10, 200]:
-                    deactivation_reason = 'permission_revoked'
-                else:
-                    deactivation_reason = 'oauth_error'
-
-                page_connection.is_active = False
-                page_connection.deactivated_at = now
-                page_connection.deactivation_reason = deactivation_reason
-                page_connection.deactivation_error_code = str(error_code) if error_code else None
-                page_connection.updated_at = now
-                page_connection.save()
-
-                logger.warning(
-                    f"🔴 Auto-deactivated Facebook page '{page_connection.page_name}' "
-                    f"(reason: {deactivation_reason}, error {error_code}: {error_message})"
-                )
-
-                return Response({
-                    'error': f'Facebook authentication error: {error_message}',
-                    'facebook_error': error_data,
-                    'page_deactivated': True,
-                    'reason': 'Token expired or permissions revoked. Please reconnect your Facebook page.',
-                    'error_code': error_code
-                }, status=status.HTTP_401_UNAUTHORIZED)
+            logger.warning(
+                f"⚠️ Facebook API error for page '{page_connection.page_name}': "
+                f"code={error_code}, type={error_type}, message={error_message}"
+            )
 
             return Response({
                 'error': f'Failed to send message: {error_message}',
