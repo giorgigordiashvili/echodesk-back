@@ -3,7 +3,8 @@ from django.contrib.auth import get_user_model
 from .models import (
     Ticket, Tag, TicketComment, TicketColumn, ChecklistItem,
     TicketAssignment, TicketTimeLog, Board, TicketPayment,
-    ItemList, ListItem, TicketForm, TicketFormSubmission, TicketAttachment, TicketHistory
+    ItemList, ListItem, TicketForm, TicketFormSubmission, TicketAttachment, TicketHistory,
+    BoardTelegramConnection
 )
 from users.models import TenantGroup, Department
 
@@ -881,3 +882,40 @@ class TicketHistorySerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'ticket', 'action', 'field_name', 'old_value',
                            'new_value', 'description', 'user', 'created_at']
+
+
+class BoardTelegramConnectionSerializer(serializers.ModelSerializer):
+    """Serializer for BoardTelegramConnection model."""
+    bot_token_raw = serializers.CharField(write_only=True, required=False)
+    has_token = serializers.SerializerMethodField()
+    created_by = UserMinimalSerializer(read_only=True)
+
+    class Meta:
+        model = BoardTelegramConnection
+        fields = [
+            'id', 'board', 'chat_id', 'is_active',
+            'bot_token_raw', 'has_token',
+            'created_by', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'board', 'created_by', 'created_at', 'updated_at']
+
+    def get_has_token(self, obj):
+        return bool(obj.bot_token)
+
+    def create(self, validated_data):
+        raw_token = validated_data.pop('bot_token_raw', None)
+        if not raw_token:
+            raise serializers.ValidationError({'bot_token_raw': 'Bot token is required.'})
+        instance = BoardTelegramConnection(**validated_data)
+        instance.set_bot_token(raw_token)
+        instance.save()
+        return instance
+
+    def update(self, instance, validated_data):
+        raw_token = validated_data.pop('bot_token_raw', None)
+        if raw_token:
+            instance.set_bot_token(raw_token)
+        instance.chat_id = validated_data.get('chat_id', instance.chat_id)
+        instance.is_active = validated_data.get('is_active', instance.is_active)
+        instance.save()
+        return instance

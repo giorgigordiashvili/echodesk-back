@@ -341,12 +341,69 @@ def track_ticket_status_change(sender, instance, **kwargs):
             pass
 
 
+def _send_new_ticket_telegram_notification(ticket):
+    """Send Telegram notification when a new ticket is created on a board with a connection."""
+    from .models import BoardTelegramConnection
+    from .telegram_utils import send_board_telegram_message
+
+    try:
+        if not ticket.column or not ticket.column.board:
+            return
+
+        board = ticket.column.board
+        try:
+            conn = board.telegram_connection
+        except BoardTelegramConnection.DoesNotExist:
+            return
+
+        if not conn.is_active:
+            return
+
+        bot_token = conn.get_bot_token()
+        if not bot_token:
+            return
+
+        # Priority emoji mapping
+        priority_emojis = {
+            'critical': '🔴',
+            'high': '🟠',
+            'medium': '🟡',
+            'low': '🟢',
+        }
+        priority = getattr(ticket, 'priority', None) or 'medium'
+        priority_emoji = priority_emojis.get(priority, '⚪')
+
+        creator_name = 'Unknown'
+        if ticket.created_by:
+            name = f'{ticket.created_by.first_name} {ticket.created_by.last_name}'.strip()
+            creator_name = name or ticket.created_by.email
+
+        schema_name = connection.schema_name
+        ticket_url = f'https://{schema_name}.echodesk.ge/tickets/{ticket.id}'
+
+        message = (
+            f"📋 <b>New Ticket Created</b>\n\n"
+            f"<b>Title:</b> {ticket.title}\n"
+            f"{priority_emoji} <b>Priority:</b> {priority.capitalize()}\n"
+            f"👤 <b>Created by:</b> {creator_name}\n"
+            f"📌 <b>Board:</b> {board.name}\n"
+            f"📊 <b>Column:</b> {ticket.column.name}\n\n"
+            f"🔗 <a href=\"{ticket_url}\">View Ticket</a>"
+        )
+
+        send_board_telegram_message(bot_token, conn.chat_id, message)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("Failed to send Telegram notification for new ticket")
+
+
 @receiver(post_save, sender=Ticket)
 def notify_on_ticket_status_change(sender, instance, created, **kwargs):
     """
     Notify assigned users when ticket status (column) changes.
     """
     if created:
+        _send_new_ticket_telegram_notification(instance)
         return
 
     # Check if column was changed (set in pre_save)

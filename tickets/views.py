@@ -10,7 +10,8 @@ from drf_spectacular.openapi import OpenApiTypes
 from .models import (
     Ticket, Tag, TicketComment, TicketColumn, ChecklistItem,
     TicketAssignment, TicketTimeLog, Board, TicketPayment,
-    ItemList, ListItem, TicketForm, TicketFormSubmission, TicketAttachment
+    ItemList, ListItem, TicketForm, TicketFormSubmission, TicketAttachment,
+    BoardTelegramConnection
 )
 from .serializers import (
     TicketSerializer, TicketListSerializer, TagSerializer,
@@ -21,7 +22,8 @@ from .serializers import (
     TimeTrackingSummarySerializer, BoardSerializer, TicketPaymentSerializer,
     ItemListSerializer, ItemListMinimalSerializer, ListItemSerializer, ListItemMinimalSerializer,
     TicketFormSerializer, TicketFormMinimalSerializer, TicketFormSubmissionSerializer,
-    TicketAttachmentSerializer, TicketHistorySerializer
+    TicketAttachmentSerializer, TicketHistorySerializer,
+    BoardTelegramConnectionSerializer
 )
 
 
@@ -1086,6 +1088,79 @@ class BoardViewSet(viewsets.ModelViewSet):
         if default_board:
             return Response(BoardSerializer(default_board, context={'request': request}).data)
         return Response({'error': 'No default board found'}, status=status.HTTP_404_NOT_FOUND)
+
+    @action(detail=True, methods=['get', 'post', 'put', 'delete'], url_path='telegram-connection')
+    def telegram_connection(self, request, pk=None):
+        """Manage Telegram bot connection for a board."""
+        board = self.get_object()
+
+        if request.method == 'GET':
+            try:
+                conn = board.telegram_connection
+                return Response(BoardTelegramConnectionSerializer(conn).data)
+            except BoardTelegramConnection.DoesNotExist:
+                return Response({'detail': 'No Telegram connection configured.'}, status=status.HTTP_404_NOT_FOUND)
+
+        elif request.method == 'POST':
+            if hasattr(board, 'telegram_connection'):
+                try:
+                    board.telegram_connection
+                    return Response({'detail': 'Connection already exists. Use PUT to update.'}, status=status.HTTP_400_BAD_REQUEST)
+                except BoardTelegramConnection.DoesNotExist:
+                    pass
+            serializer = BoardTelegramConnectionSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            serializer.save(board=board, created_by=request.user)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+        elif request.method == 'PUT':
+            try:
+                conn = board.telegram_connection
+            except BoardTelegramConnection.DoesNotExist:
+                return Response({'detail': 'No connection to update.'}, status=status.HTTP_404_NOT_FOUND)
+            serializer = BoardTelegramConnectionSerializer(conn, data=request.data, partial=True)
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            return Response(serializer.data)
+
+        elif request.method == 'DELETE':
+            try:
+                conn = board.telegram_connection
+                conn.delete()
+                return Response(status=status.HTTP_204_NO_CONTENT)
+            except BoardTelegramConnection.DoesNotExist:
+                return Response({'detail': 'No connection to delete.'}, status=status.HTTP_404_NOT_FOUND)
+
+    @action(detail=True, methods=['post'], url_path='telegram-connection/test')
+    def telegram_connection_test(self, request, pk=None):
+        """Test Telegram bot connection by sending a test message."""
+        from .telegram_utils import send_board_telegram_message
+
+        board = self.get_object()
+        bot_token_raw = request.data.get('bot_token_raw')
+        chat_id = request.data.get('chat_id')
+
+        # Use provided values or fall back to saved connection
+        if not bot_token_raw or not chat_id:
+            try:
+                conn = board.telegram_connection
+                bot_token_raw = bot_token_raw or conn.get_bot_token()
+                chat_id = chat_id or conn.chat_id
+            except BoardTelegramConnection.DoesNotExist:
+                return Response(
+                    {'detail': 'Provide bot_token_raw and chat_id, or save a connection first.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+        if not bot_token_raw or not chat_id:
+            return Response({'detail': 'bot_token_raw and chat_id are required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        message = f"✅ <b>Telegram Bot Connected!</b>\n\nNotifications for board <b>{board.name}</b> are now active."
+        success = send_board_telegram_message(bot_token_raw, chat_id, message)
+
+        if success:
+            return Response({'status': 'ok', 'message': 'Test message sent successfully.'})
+        return Response({'status': 'error', 'message': 'Failed to send test message. Check your bot token and chat ID.'}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class TicketPaymentViewSet(viewsets.ModelViewSet):

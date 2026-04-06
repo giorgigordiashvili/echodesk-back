@@ -1056,3 +1056,51 @@ class TicketHistory(models.Model):
 
     def __str__(self):
         return f'{self.ticket.title} - {self.action} - {self.created_at}'
+
+
+class BoardTelegramConnection(models.Model):
+    """Stores Telegram bot connection details for a board."""
+    board = models.OneToOneField(
+        Board,
+        on_delete=models.CASCADE,
+        related_name='telegram_connection',
+        help_text='Board this Telegram connection belongs to'
+    )
+    bot_token = models.TextField(
+        help_text='Encrypted Telegram bot token - DO NOT store plain text'
+    )
+    chat_id = models.CharField(
+        max_length=100,
+        help_text='Telegram chat ID to send notifications to'
+    )
+    is_active = models.BooleanField(default=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='telegram_connections'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Board Telegram Connection'
+        verbose_name_plural = 'Board Telegram Connections'
+
+    def __str__(self):
+        return f'Telegram connection for {self.board.name}'
+
+    def set_bot_token(self, raw_token):
+        """Encrypt and store the bot token using Django's Signer"""
+        from django.core.signing import Signer
+        signer = Signer()
+        self.bot_token = signer.sign(raw_token)
+
+    def get_bot_token(self):
+        """Decrypt and return the bot token"""
+        from django.core.signing import Signer, BadSignature
+        signer = Signer()
+        try:
+            return signer.unsign(self.bot_token)
+        except BadSignature:
+            return None
