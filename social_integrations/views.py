@@ -3301,9 +3301,9 @@ def instagram_webhook(request):
                                                     oauth_token_invalid = True
                                                     account_connection.is_active = False
                                                     account_connection.save(update_fields=['is_active'])
-                                                    # Log as warning (not error) — this is a known/handled OAuth expiry
-                                                    logger.warning(
-                                                        f"🔴 Auto-deactivated Instagram account @{account_connection.username} "
+                                                    # Log as info (not warning/error) — this is a known/handled OAuth expiry
+                                                    logger.info(
+                                                        f"ℹ️ Auto-deactivated Instagram account @{account_connection.username} "
                                                         f"due to invalid token (OAuthException code {error_code}: "
                                                         f"{error_info.get('message', '')})"
                                                     )
