@@ -8,6 +8,7 @@ from .models import (
     Ticket,
     TicketComment,
     TicketAssignment,
+    TicketAttachment,
 )
 import re
 from asgiref.sync import async_to_sync
@@ -395,6 +396,46 @@ def _send_new_ticket_telegram_notification(ticket):
     except Exception:
         import logging
         logging.getLogger(__name__).exception("Failed to send Telegram notification for new ticket")
+
+
+@receiver(post_save, sender=TicketAttachment)
+def send_attachment_to_telegram(sender, instance, created, **kwargs):
+    """Send ticket attachments to Telegram when they are uploaded."""
+    if not created:
+        return
+
+    from .models import BoardTelegramConnection
+    from .telegram_utils import send_board_telegram_document, send_board_telegram_photo
+
+    try:
+        ticket = instance.ticket
+        if not ticket.column or not ticket.column.board:
+            return
+
+        board = ticket.column.board
+        try:
+            conn = board.telegram_connection
+        except BoardTelegramConnection.DoesNotExist:
+            return
+
+        if not conn.is_active:
+            return
+
+        bot_token = conn.get_bot_token()
+        if not bot_token:
+            return
+
+        file_url = instance.file.url
+        caption = f"📎 <b>{instance.filename}</b>\nTicket: {ticket.title}"
+
+        content_type = instance.content_type or ''
+        if content_type.startswith('image/'):
+            send_board_telegram_photo(bot_token, conn.chat_id, file_url, caption=caption)
+        else:
+            send_board_telegram_document(bot_token, conn.chat_id, file_url, caption=caption)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("Failed to send Telegram attachment notification")
 
 
 @receiver(post_save, sender=Ticket)
