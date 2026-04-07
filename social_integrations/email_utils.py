@@ -7,6 +7,7 @@ import email
 import hashlib
 import logging
 import base64
+import ssl
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
@@ -22,6 +23,24 @@ from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 
 logger = logging.getLogger(__name__)
+
+
+def _is_transient_imap_error(exc: Exception) -> bool:
+    """Return True for common transient network/SSL IMAP failures."""
+    message = str(exc).lower()
+
+    if isinstance(exc, (ssl.SSLError, TimeoutError, ConnectionResetError, BrokenPipeError)):
+        return True
+
+    transient_markers = (
+        'unexpected eof while reading',
+        'connection reset by peer',
+        'timed out',
+        'connection aborted',
+        'connection closed',
+        'eof occurred in violation of protocol',
+    )
+    return any(marker in message for marker in transient_markers)
 
 
 def decode_imap_utf7(s: str) -> str:
@@ -258,7 +277,10 @@ def get_imap_folders(connection) -> Dict:
 
         return {'success': True, 'folders': folders}
     except Exception as e:
-        logger.error(f"Failed to get IMAP folders: {e}")
+        if _is_transient_imap_error(e):
+            logger.warning(f"Transient IMAP error while getting folders: {e}")
+        else:
+            logger.error(f"Failed to get IMAP folders: {e}")
         return {'success': False, 'folders': [], 'error': str(e)}
 
 
@@ -1282,7 +1304,10 @@ def get_available_folders(connection) -> List[Dict[str, Any]]:
         return folders
 
     except Exception as e:
-        logger.error(f"Error getting folders: {e}")
+        if _is_transient_imap_error(e):
+            logger.warning(f"Transient IMAP error while listing folders: {e}")
+        else:
+            logger.error(f"Error getting folders: {e}")
         return []
 
 
