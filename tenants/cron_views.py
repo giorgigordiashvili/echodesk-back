@@ -6,13 +6,15 @@ to trigger scheduled tasks via HTTP requests.
 
 Secured with CRON_SECRET_TOKEN environment variable.
 
-Tasks are dispatched asynchronously via Celery.
+Tasks run synchronously via Django management commands.
 """
 
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from django.conf import settings
+from django.core.management import call_command
+from io import StringIO
 import logging
 
 logger = logging.getLogger(__name__)
@@ -34,116 +36,77 @@ def _verify_cron_token(request):
     return None
 
 
-@api_view(['GET', 'POST'])
-@permission_classes([AllowAny])
-def cron_recurring_payments(request):
-    """Trigger recurring payment processing via Celery."""
+def _run_command(request, command_name, app_label=None):
+    """Run a management command and return the output as a Response."""
     error = _verify_cron_token(request)
     if error:
         return error
 
-    from tenants.tasks import process_recurring_payments
-    result = process_recurring_payments.delay()
-    logger.info('Dispatched process_recurring_payments task')
-    return Response({'status': 'accepted', 'task_id': result.id})
+    out = StringIO()
+    try:
+        call_command(command_name, stdout=out)
+        output = out.getvalue()
+        logger.info(f'Completed {command_name}: {output[:200]}')
+        return Response({'status': 'success', 'output': output})
+    except Exception as e:
+        logger.exception(f'Failed to run {command_name}')
+        return Response({'status': 'error', 'error': str(e)}, status=500)
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([AllowAny])
+def cron_recurring_payments(request):
+    """Trigger recurring payment processing."""
+    return _run_command(request, 'process_recurring_payments')
 
 
 @api_view(['GET', 'POST'])
 @permission_classes([AllowAny])
 def cron_subscription_check(request):
-    """Trigger subscription status check via Celery."""
-    error = _verify_cron_token(request)
-    if error:
-        return error
-
-    from tenants.tasks import check_subscription_status
-    result = check_subscription_status.delay()
-    logger.info('Dispatched check_subscription_status task')
-    return Response({'status': 'accepted', 'task_id': result.id})
+    """Trigger subscription status check."""
+    return _run_command(request, 'check_subscription_status')
 
 
 @api_view(['GET', 'POST'])
 @permission_classes([AllowAny])
 def cron_process_trial_expirations(request):
-    """Trigger trial expiration processing via Celery."""
-    error = _verify_cron_token(request)
-    if error:
-        return error
-
-    from tenants.tasks import process_trial_expirations
-    result = process_trial_expirations.delay()
-    logger.info('Dispatched process_trial_expirations task')
-    return Response({'status': 'accepted', 'task_id': result.id})
+    """Trigger trial expiration processing."""
+    return _run_command(request, 'process_trial_expirations')
 
 
 @api_view(['GET', 'POST'])
 @permission_classes([AllowAny])
 def cron_payment_retries(request):
-    """Trigger payment retries via Celery."""
-    error = _verify_cron_token(request)
-    if error:
-        return error
-
-    from tenants.tasks import process_payment_retries
-    result = process_payment_retries.delay()
-    logger.info('Dispatched process_payment_retries task')
-    return Response({'status': 'accepted', 'task_id': result.id})
+    """Trigger payment retries."""
+    return _run_command(request, 'process_payment_retries')
 
 
 @api_view(['GET', 'POST'])
 @permission_classes([AllowAny])
 def cron_calculate_metrics(request):
-    """Trigger platform metrics calculation via Celery."""
-    error = _verify_cron_token(request)
-    if error:
-        return error
-
-    from tenants.tasks import calculate_platform_metrics
-    result = calculate_platform_metrics.delay()
-    logger.info('Dispatched calculate_platform_metrics task')
-    return Response({'status': 'accepted', 'task_id': result.id})
+    """Trigger platform metrics calculation."""
+    return _run_command(request, 'calculate_metrics')
 
 
 @api_view(['GET', 'POST'])
 @permission_classes([AllowAny])
 def cron_email_sync(request):
-    """Trigger email sync for all tenants via Celery."""
-    error = _verify_cron_token(request)
-    if error:
-        return error
-
-    from social_integrations.tasks import sync_all_tenant_emails
-    result = sync_all_tenant_emails.delay()
-    logger.info('Dispatched sync_all_tenant_emails task')
-    return Response({'status': 'accepted', 'task_id': result.id})
+    """Trigger email sync for all tenants."""
+    return _run_command(request, 'sync_emails')
 
 
 @api_view(['GET', 'POST'])
 @permission_classes([AllowAny])
 def cron_generate_daily_posts(request):
-    """Trigger daily AI post generation via Celery."""
-    error = _verify_cron_token(request)
-    if error:
-        return error
-
-    from social_integrations.tasks import generate_daily_posts
-    result = generate_daily_posts.delay()
-    logger.info('Dispatched generate_daily_posts task')
-    return Response({'status': 'accepted', 'task_id': result.id})
+    """Trigger daily AI post generation."""
+    return _run_command(request, 'generate_daily_posts')
 
 
 @api_view(['GET', 'POST'])
 @permission_classes([AllowAny])
 def cron_publish_approved_posts(request):
-    """Trigger approved post publishing via Celery."""
-    error = _verify_cron_token(request)
-    if error:
-        return error
-
-    from social_integrations.tasks import publish_approved_posts
-    result = publish_approved_posts.delay()
-    logger.info('Dispatched publish_approved_posts task')
-    return Response({'status': 'accepted', 'task_id': result.id})
+    """Trigger approved post publishing."""
+    return _run_command(request, 'publish_approved_posts')
 
 
 @api_view(['GET'])
