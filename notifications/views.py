@@ -1,3 +1,5 @@
+import logging
+
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -11,6 +13,8 @@ from .serializers import (
 )
 from .utils import get_vapid_keys, send_notification_to_user
 
+logger = logging.getLogger(__name__)
+
 
 class NotificationViewSet(viewsets.ViewSet):
     """ViewSet for managing push notifications."""
@@ -19,10 +23,17 @@ class NotificationViewSet(viewsets.ViewSet):
     @action(detail=False, methods=['get'], url_path='vapid-public-key')
     def vapid_public_key(self, request):
         """Get VAPID public key for client-side subscription."""
-        vapid_keys = get_vapid_keys()
-        return Response({
-            'public_key': vapid_keys['public_key']
-        })
+        vapid_keys = get_vapid_keys() or {}
+        public_key = vapid_keys.get('public_key')
+
+        if not public_key:
+            logger.error('VAPID public key is unavailable')
+            return Response(
+                {'error': 'Push notifications are temporarily unavailable'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        return Response({'public_key': public_key})
 
     @action(detail=False, methods=['post'])
     def subscribe(self, request):
