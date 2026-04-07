@@ -17,6 +17,9 @@ packages:
       # TEST MODE: Change to "*/2 * * * *" for every 2 minutes
       - name: recurring-payments
         runtime: python:3.11
+        limits:
+          memory: 512
+          timeout: 30000
         triggers:
           - name: daily-recurring-payments
             sourceType: scheduler
@@ -28,6 +31,9 @@ packages:
       # Subscription status check - monitors and suspends overdue accounts
       - name: subscription-check
         runtime: python:3.11
+        limits:
+          memory: 512
+          timeout: 30000
         triggers:
           - name: daily-subscription-check
             sourceType: scheduler
@@ -38,6 +44,9 @@ packages:
       # Trial expiration processing - charges saved cards when trials end
       - name: trial-expirations
         runtime: python:3.11
+        limits:
+          memory: 512
+          timeout: 30000
         triggers:
           - name: daily-trial-expirations
             sourceType: scheduler

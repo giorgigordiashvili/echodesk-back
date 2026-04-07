@@ -8,7 +8,8 @@ echo "Building subscription-check function..."
 # Create virtual environment
 virtualenv --without-pip virtualenv
 
-# Install dependencies
-pip3 install -r requirements.txt --target virtualenv/lib/python3.9/site-packages
+# Install only requests (the only dependency needed)
+pip3 install -r requirements.txt --target virtualenv/lib/python3.11/site-packages --no-deps
+pip3 install certifi charset-normalizer idna urllib3 --target virtualenv/lib/python3.11/site-packages --no-deps
 
 echo "Build complete!"
