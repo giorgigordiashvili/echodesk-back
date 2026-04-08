@@ -983,9 +983,18 @@ def bog_webhook(request):
                         subscription = TenantSubscription.objects.select_for_update().get(id=subscription_id)
 
                         # Update subscription dates for next billing cycle
+                        # Advance from previous next_billing_date to preserve the cycle,
+                        # rather than from now() which shifts the cycle on late payments.
+                        billing_interval = timedelta(days=30)
+                        if getattr(settings, 'TEST_BILLING_INTERVAL', False):
+                            billing_interval = timedelta(minutes=2)
+                        anchor = subscription.next_billing_date or timezone.now()
+                        # If anchor is in the past, advance it until it's in the future
+                        while anchor <= timezone.now():
+                            anchor += billing_interval
                         subscription.last_billed_at = timezone.now()
-                        subscription.expires_at = get_next_billing_date()
-                        subscription.next_billing_date = get_next_billing_date()
+                        subscription.expires_at = anchor
+                        subscription.next_billing_date = anchor
                         subscription.failed_payment_count = 0  # Reset failed count on successful payment
                         subscription.save()
 

@@ -200,8 +200,15 @@ def _handle_transaction_completed(event_data):
         )
 
         # Update subscription billing dates
+        # Advance from previous next_billing_date to preserve the cycle
+        billing_interval = timedelta(days=30)
+        if getattr(settings, 'TEST_BILLING_INTERVAL', False):
+            billing_interval = timedelta(minutes=2)
+        anchor = subscription.next_billing_date or timezone.now()
+        while anchor <= timezone.now():
+            anchor += billing_interval
         subscription.last_billed_at = timezone.now()
-        subscription.next_billing_date = _get_next_billing_date()
+        subscription.next_billing_date = anchor
         subscription.mark_payment_succeeded()
 
         # Log event
