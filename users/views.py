@@ -164,10 +164,10 @@ class UserViewSet(viewsets.ModelViewSet):
         if status_filter is not None:
             queryset = queryset.filter(status=status_filter)
 
-        # Filter by group if specified
+        # Filter by tenant group if specified
         group_id = self.request.query_params.get('group', None)
         if group_id is not None:
-            queryset = queryset.filter(groups__id=group_id)
+            queryset = queryset.filter(tenant_groups__id=group_id)
 
         return queryset.distinct()
     

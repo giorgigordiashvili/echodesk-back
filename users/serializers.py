@@ -176,7 +176,7 @@ class UserSerializer(serializers.ModelSerializer):
     all_permissions = serializers.SerializerMethodField()
     feature_keys = serializers.SerializerMethodField()
     is_booking_staff = serializers.SerializerMethodField()
-    groups = GroupSerializer(many=True, read_only=True)
+    groups = serializers.SerializerMethodField()
     tenant_groups = TenantGroupSerializer(many=True, read_only=True)
     department = DepartmentSerializer(read_only=True)
     department_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
@@ -209,6 +209,10 @@ class UserSerializer(serializers.ModelSerializer):
             'groups', 'group_ids', 'tenant_groups', 'tenant_group_ids', 'user_permission_ids'
         ]
         read_only_fields = ['id', 'date_joined', 'last_login', 'feature_keys', 'is_booking_staff']
+
+    def get_groups(self, obj):
+        """Django auth groups are deprecated for User; keep API compatibility."""
+        return []
 
     def get_permissions(self, obj):
         """Get user's direct permissions"""
@@ -253,16 +257,16 @@ class UserSerializer(serializers.ModelSerializer):
         instance.save()
         
         if group_ids is not None:
-            groups = Group.objects.filter(id__in=group_ids)
-            instance.groups.set(groups)
+            # Django auth groups were removed from User model; keep request compatibility.
+            pass
         
         if tenant_group_ids is not None:
             tenant_groups = TenantGroup.objects.filter(id__in=tenant_group_ids)
             instance.tenant_groups.set(tenant_groups)
         
         if user_permission_ids is not None:
-            permissions = Permission.objects.filter(id__in=user_permission_ids)
-            instance.user_permissions.set(permissions)
+            # Direct Django user_permissions were removed from User model; ignore for compatibility.
+            pass
         
         return instance
 
@@ -350,16 +354,16 @@ class UserUpdateSerializer(serializers.ModelSerializer):
         instance.save()
         
         if group_ids is not None:
-            groups = Group.objects.filter(id__in=group_ids)
-            instance.groups.set(groups)
+            # Django auth groups were removed from User model; keep request compatibility.
+            pass
         
         if tenant_group_ids is not None:
             tenant_groups = TenantGroup.objects.filter(id__in=tenant_group_ids)
             instance.tenant_groups.set(tenant_groups)
         
         if user_permission_ids is not None:
-            permissions = Permission.objects.filter(id__in=user_permission_ids)
-            instance.user_permissions.set(permissions)
+            # Direct Django user_permissions were removed from User model; ignore for compatibility.
+            pass
         
         return instance
 
