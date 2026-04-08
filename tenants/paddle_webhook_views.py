@@ -74,6 +74,14 @@ def _generate_invoice(payment_order, tenant, agent_count, description=None):
             },
         )
         logger.info(f'Invoice {invoice.invoice_number} generated for Paddle payment {payment_order.order_id}')
+
+        # Dispatch async PDF generation + email delivery
+        try:
+            from tenants.tasks import generate_tenant_invoice_pdf
+            generate_tenant_invoice_pdf.delay(invoice.id)
+        except Exception as pdf_exc:
+            logger.error(f'Failed to dispatch PDF task for invoice {invoice.invoice_number}: {pdf_exc}')
+
         return invoice
     except Exception as e:
         logger.error(f'Error generating invoice for Paddle payment {payment_order.order_id}: {e}')

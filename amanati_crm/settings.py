@@ -560,22 +560,9 @@ CELERY_TASK_TIME_LIMIT = 600
 from celery.schedules import crontab
 
 CELERY_BEAT_SCHEDULE = {
-    'process-recurring-payments': {
-        'task': 'tenants.tasks.process_recurring_payments',
-        'schedule': crontab(minute=0, hour=2),
-    },
-    'check-subscription-status': {
-        'task': 'tenants.tasks.check_subscription_status',
-        'schedule': crontab(minute=0, hour=3),
-    },
-    'process-trial-expirations': {
-        'task': 'tenants.tasks.process_trial_expirations',
-        'schedule': crontab(minute=0, hour=9),
-    },
-    'process-payment-retries': {
-        'task': 'tenants.tasks.process_payment_retries',
-        'schedule': crontab(minute=0),  # every hour
-    },
+    # Payment tasks (process_recurring_payments, check_subscription_status,
+    # process_trial_expirations, process_payment_retries) removed —
+    # handled by DO Functions to prevent double-charging.
     'calculate-platform-metrics': {
         'task': 'tenants.tasks.calculate_platform_metrics',
         'schedule': crontab(minute=30, hour=0),

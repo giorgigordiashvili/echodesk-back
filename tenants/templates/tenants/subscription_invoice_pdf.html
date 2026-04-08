@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Invoice {{ invoice.invoice_number }}</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 2cm;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'DejaVu Sans', Arial, sans-serif;
+            font-size: 10pt;
+            line-height: 1.6;
+            color: #333;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 3px solid #4F46E5;
+        }
+
+        .company-info h1 {
+            font-size: 24pt;
+            color: #4F46E5;
+            margin-bottom: 10px;
+        }
+
+        .company-info p {
+            margin: 3px 0;
+            font-size: 9pt;
+            color: #666;
+        }
+
+        .invoice-info {
+            text-align: right;
+        }
+
+        .invoice-info h2 {
+            font-size: 28pt;
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .invoice-info p {
+            margin: 3px 0;
+            font-size: 9pt;
+        }
+
+        .status {
+            display: inline-block;
+            padding: 5px 15px;
+            border-radius: 4px;
+            font-weight: bold;
+            text-transform: uppercase;
+            font-size: 8pt;
+            margin-top: 10px;
+            background-color: #D1FAE5;
+            color: #065F46;
+        }
+
+        .parties {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 30px;
+        }
+
+        .party {
+            width: 48%;
+        }
+
+        .party h3 {
+            font-size: 11pt;
+            color: #666;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .party-details {
+            background-color: #F9FAFB;
+            padding: 15px;
+            border-radius: 4px;
+        }
+
+        .party-details p {
+            margin: 3px 0;
+            font-size: 9pt;
+        }
+
+        .party-details .name {
+            font-weight: bold;
+            font-size: 11pt;
+            margin-bottom: 5px;
+            color: #111;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+
+        thead {
+            background-color: #4F46E5;
+            color: white;
+        }
+
+        thead th {
+            padding: 12px 8px;
+            text-align: left;
+            font-size: 9pt;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        thead th.right {
+            text-align: right;
+        }
+
+        tbody tr {
+            border-bottom: 1px solid #E5E7EB;
+        }
+
+        tbody tr:last-child {
+            border-bottom: 2px solid #4F46E5;
+        }
+
+        tbody td {
+            padding: 10px 8px;
+            font-size: 9pt;
+        }
+
+        tbody td.right {
+            text-align: right;
+        }
+
+        tbody td.detail {
+            color: #666;
+            font-size: 8pt;
+        }
+
+        .totals {
+            float: right;
+            width: 300px;
+            margin-top: 20px;
+        }
+
+        .totals table {
+            margin: 0;
+        }
+
+        .totals tbody tr {
+            border: none;
+        }
+
+        .totals td {
+            padding: 8px;
+        }
+
+        .totals td:first-child {
+            text-align: right;
+            font-weight: 600;
+            color: #666;
+        }
+
+        .totals td:last-child {
+            text-align: right;
+            font-weight: bold;
+        }
+
+        .totals .total-row {
+            background-color: #4F46E5;
+            color: white;
+        }
+
+        .totals .total-row td {
+            font-size: 12pt;
+            padding: 12px 8px;
+        }
+
+        .notes {
+            clear: both;
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #E5E7EB;
+        }
+
+        .notes h3 {
+            font-size: 10pt;
+            color: #666;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+        }
+
+        .notes p {
+            font-size: 9pt;
+            color: #444;
+            line-height: 1.5;
+        }
+
+        .footer {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            text-align: center;
+            font-size: 8pt;
+            color: #999;
+            padding: 20px;
+            border-top: 1px solid #E5E7EB;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="company-info">
+            <h1>EchoDesk</h1>
+            <p>Customer Support Platform</p>
+            <p>support@echodesk.ge</p>
+        </div>
+        <div class="invoice-info">
+            <h2>INVOICE</h2>
+            <p><strong>Invoice #:</strong> {{ invoice.invoice_number }}</p>
+            <p><strong>Date:</strong> {{ invoice.invoice_date|date:"M d, Y" }}</p>
+            {% if invoice.paid_date %}
+            <p><strong>Paid:</strong> {{ invoice.paid_date|date:"M d, Y" }}</p>
+            {% endif %}
+            <span class="status">PAID</span>
+        </div>
+    </div>
+
+    <div class="parties">
+        <div class="party">
+            <h3>Bill To</h3>
+            <div class="party-details">
+                <p class="name">{{ tenant.name }}</p>
+                <p>{{ tenant.admin_email }}</p>
+                {% if tenant.admin_name %}
+                <p>{{ tenant.admin_name }}</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="party">
+            <h3>Payment Details</h3>
+            <div class="party-details">
+                <p><strong>Provider:</strong> {{ provider_display }}</p>
+                <p><strong>Currency:</strong> {{ invoice.currency }}</p>
+                {% if invoice.metadata.order_id %}
+                <p><strong>Order ID:</strong> {{ invoice.metadata.order_id }}</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 5%;">#</th>
+                <th style="width: 55%;">Description</th>
+                <th class="right" style="width: 15%;">Qty</th>
+                <th class="right" style="width: 25%;">Amount</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>1</td>
+                <td>
+                    <strong>{{ invoice.description }}</strong>
+                    {% if features %}
+                    <div class="detail">Features: {{ features }}</div>
+                    {% endif %}
+                </td>
+                <td class="right">{{ invoice.agent_count }} agent{{ invoice.agent_count|pluralize }}</td>
+                <td class="right">{{ invoice.amount }} {{ invoice.currency }}</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="totals">
+        <table>
+            <tbody>
+                <tr class="total-row">
+                    <td>TOTAL:</td>
+                    <td>{{ invoice.amount }} {{ invoice.currency }}</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="notes">
+        <h3>Notes</h3>
+        <p>Thank you for your subscription to EchoDesk. This invoice was automatically generated upon successful payment.</p>
+    </div>
+
+    <div class="footer">
+        <p>Invoice generated by EchoDesk | support@echodesk.ge</p>
+    </div>
+</body>
+</html>
