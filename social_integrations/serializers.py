@@ -988,27 +988,20 @@ class SocialClientSerializer(serializers.ModelSerializer):
         return None
 
     def get_custom_fields(self, obj):
-        """Return custom fields as a dict {field_name: value}"""
-        values = obj.custom_field_values.select_related('field').all()
+        """Return custom fields as a dict {field_name: value} (uses prefetched data)"""
+        values = obj.custom_field_values.all()  # Uses prefetch cache including __field
         return {v.field.name: v.value for v in values}
 
     def get_booking_stats(self, obj):
-        """Return booking statistics for booking-enabled clients"""
+        """Return booking statistics for booking-enabled clients (uses annotated counts)"""
         if not obj.is_booking_enabled:
             return None
 
-        from django.utils import timezone
-        today = timezone.now().date()
-
-        # Import here to avoid circular import
         try:
-            total = obj.bookings.count()
-            completed = obj.bookings.filter(status='completed').count()
-            upcoming = obj.bookings.filter(date__gte=today, status__in=['pending', 'confirmed']).count()
             return {
-                'total': total,
-                'completed': completed,
-                'upcoming': upcoming
+                'total': getattr(obj, '_booking_count', 0),
+                'completed': getattr(obj, '_booking_completed', 0),
+                'upcoming': getattr(obj, '_booking_upcoming', 0),
             }
         except Exception:
             return None
@@ -1047,11 +1040,11 @@ class SocialClientListSerializer(serializers.ModelSerializer):
         return list(set(sa.platform for sa in obj.social_accounts.all()))
 
     def get_booking_count(self, obj):
-        """Return total booking count for booking-enabled clients"""
+        """Return total booking count for booking-enabled clients (uses annotated count)"""
         if not obj.is_booking_enabled:
             return None
         try:
-            return obj.bookings.count()
+            return getattr(obj, '_booking_count', 0)
         except Exception:
             return None
 

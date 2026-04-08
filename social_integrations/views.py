@@ -2656,7 +2656,7 @@ class InstagramAccountConnectionViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, CanManageSocialConnections]
 
     def get_queryset(self):
-        return InstagramAccountConnection.objects.all()  # Tenant schema provides isolation
+        return InstagramAccountConnection.objects.select_related('facebook_page').all()
 
     def perform_create(self, serializer):
         serializer.save()  # No user assignment needed in multi-tenant setup
@@ -5008,6 +5008,15 @@ def unified_conversations(request):
     def is_assigned_to_user(platform, account_id, conversation_id):
         return (platform, account_id, conversation_id) in user_assignments
 
+    # Pre-load all active assignments for hide_assigned visibility check
+    # Maps (platform, account_id, conversation_id) -> assigned_user_id
+    _active_assignment_map = {}
+    if hide_assigned and not is_admin:
+        for a in ChatAssignment.objects.filter(
+            status__in=['active', 'in_session']
+        ).values_list('platform', 'account_id', 'conversation_id', 'assigned_user_id'):
+            _active_assignment_map[(a[0], a[1], a[2])] = a[3]
+
     # Helper to check if conversation should be visible based on assignment and archive status
     def is_conversation_visible(platform, account_id, conversation_id):
         # Check archive status first
@@ -5027,20 +5036,14 @@ def unified_conversations(request):
         if not hide_assigned or is_admin:
             return True
 
-        # Get active assignments
-        active_assignments = ChatAssignment.objects.filter(
-            platform=platform,
-            account_id=account_id,
-            status__in=['active', 'in_session']
-        )
+        # Check pre-loaded assignment map
+        key = (platform, account_id, conversation_id)
+        assigned_user_id = _active_assignment_map.get(key)
 
-        # Check if this conversation is assigned
-        assignment = active_assignments.filter(conversation_id=conversation_id).first()
-
-        if not assignment:
+        if assigned_user_id is None:
             return True  # Not assigned, visible to all
 
-        return assignment.assigned_user == request.user  # Only visible if assigned to current user
+        return assigned_user_id == request.user.id  # Only visible if assigned to current user
 
     # Load Facebook conversations (optimized - single DISTINCT ON query)
     if 'facebook' in enabled_platforms:
@@ -8744,51 +8747,90 @@ class EmailMessageViewSet(viewsets.ReadOnlyModelViewSet):
             unread_count=Count('id', filter=Q(is_read_by_staff=False, is_from_business=False))
         ).order_by('-latest_timestamp')
 
-        # Get the actual latest message for each thread
+        # Limit to 50 threads and collect thread IDs
+        threads_page = list(threads[:50])
+        thread_ids = [t['thread_id'] for t in threads_page]
+
+        # Build lookup dicts: {thread_id: timestamp} and {thread_id: counts}
+        thread_meta = {
+            t['thread_id']: {
+                'latest_timestamp': t['latest_timestamp'],
+                'message_count': t['message_count'],
+                'unread_count': t['unread_count'],
+            }
+            for t in threads_page
+        }
+
+        # Batch query: fetch latest message per thread (by timestamp match)
+        latest_msgs = EmailMessage.objects.filter(
+            thread_id__in=thread_ids,
+            is_deleted=False,
+        ).select_related('connection').order_by('thread_id', '-timestamp')
+
+        # Build {thread_id: latest_msg} — pick first per thread_id
+        latest_by_thread = {}
+        for msg in latest_msgs:
+            if msg.thread_id not in latest_by_thread:
+                latest_by_thread[msg.thread_id] = msg
+
+        # Batch query: fetch first customer message per thread
+        customer_msgs = EmailMessage.objects.filter(
+            thread_id__in=thread_ids,
+            is_from_business=False,
+            is_deleted=False,
+        ).order_by('thread_id', 'timestamp')
+
+        customer_by_thread = {}
+        for msg in customer_msgs:
+            if msg.thread_id not in customer_by_thread:
+                customer_by_thread[msg.thread_id] = msg
+
+        # Batch query: fetch first business message per thread (fallback for customer info)
+        threads_needing_business = [tid for tid in thread_ids if tid not in customer_by_thread]
+        business_by_thread = {}
+        if threads_needing_business:
+            business_msgs = EmailMessage.objects.filter(
+                thread_id__in=threads_needing_business,
+                is_from_business=True,
+                is_deleted=False,
+            ).order_by('thread_id', 'timestamp')
+
+            for msg in business_msgs:
+                if msg.thread_id not in business_by_thread:
+                    business_by_thread[msg.thread_id] = msg
+
+        # Build result using the pre-fetched data
         result = []
-        for thread in threads[:50]:  # Limit to 50 threads
-            latest_msg = EmailMessage.objects.filter(
-                thread_id=thread['thread_id'],
-                timestamp=thread['latest_timestamp'],
-                is_deleted=False
-            ).select_related('connection').first()
+        for thread_id in thread_ids:
+            latest_msg = latest_by_thread.get(thread_id)
+            if not latest_msg:
+                continue
 
-            if latest_msg:
-                msg_data = EmailMessageSerializer(latest_msg).data
-                msg_data['message_count'] = thread['message_count']
-                msg_data['unread_count'] = thread['unread_count']
+            meta = thread_meta[thread_id]
+            msg_data = EmailMessageSerializer(latest_msg).data
+            msg_data['message_count'] = meta['message_count']
+            msg_data['unread_count'] = meta['unread_count']
 
-                # Find customer email (the external party, not the business)
-                # First, try to find a message from customer (is_from_business=False)
-                customer_msg = EmailMessage.objects.filter(
-                    thread_id=thread['thread_id'],
-                    is_from_business=False,
-                    is_deleted=False
-                ).first()
-
-                if customer_msg:
-                    msg_data['customer_email'] = customer_msg.from_email
-                    msg_data['customer_name'] = customer_msg.from_name or customer_msg.from_email
-                else:
-                    # All messages are from business, get recipient from our sent messages
-                    business_msg = EmailMessage.objects.filter(
-                        thread_id=thread['thread_id'],
-                        is_from_business=True,
-                        is_deleted=False
-                    ).first()
-                    if business_msg and business_msg.to_emails:
-                        first_recipient = business_msg.to_emails[0]
-                        if isinstance(first_recipient, dict):
-                            msg_data['customer_email'] = first_recipient.get('email', '')
-                            msg_data['customer_name'] = first_recipient.get('name') or first_recipient.get('email', '')
-                        else:
-                            msg_data['customer_email'] = first_recipient
-                            msg_data['customer_name'] = first_recipient
+            # Find customer email (the external party, not the business)
+            customer_msg = customer_by_thread.get(thread_id)
+            if customer_msg:
+                msg_data['customer_email'] = customer_msg.from_email
+                msg_data['customer_name'] = customer_msg.from_name or customer_msg.from_email
+            else:
+                business_msg = business_by_thread.get(thread_id)
+                if business_msg and business_msg.to_emails:
+                    first_recipient = business_msg.to_emails[0]
+                    if isinstance(first_recipient, dict):
+                        msg_data['customer_email'] = first_recipient.get('email', '')
+                        msg_data['customer_name'] = first_recipient.get('name') or first_recipient.get('email', '')
                     else:
-                        msg_data['customer_email'] = ''
-                        msg_data['customer_name'] = 'Unknown'
+                        msg_data['customer_email'] = first_recipient
+                        msg_data['customer_name'] = first_recipient
+                else:
+                    msg_data['customer_email'] = ''
+                    msg_data['customer_name'] = 'Unknown'
 
-                result.append(msg_data)
+            result.append(msg_data)
 
         return Response(result)
 
@@ -8843,7 +8885,7 @@ class EmailDraftViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         return EmailDraft.objects.filter(
             created_by=self.request.user
-        ).select_related('connection', 'reply_to_message').order_by('-updated_at')
+        ).select_related('connection', 'reply_to_message', 'created_by').order_by('-updated_at')
 
     def perform_create(self, serializer):
         # Get the active email connection
@@ -9537,14 +9579,24 @@ class TikTokMessageViewSet(viewsets.ReadOnlyModelViewSet):
             unread_count=Count('id', filter=Q(is_read_by_staff=False, is_from_creator=False))
         ).order_by('-latest_timestamp')
 
-        result = []
-        for conv in conversations[:50]:
-            latest_msg = TikTokMessage.objects.filter(
-                conversation_id=conv['conversation_id'],
-                timestamp=conv['latest_timestamp'],
-                is_deleted=False
-            ).select_related('shop_account').first()
+        # Limit to 50 conversations and batch-fetch latest messages
+        conversations_page = list(conversations[:50])
+        conv_ids = [c['conversation_id'] for c in conversations_page]
 
+        # Batch query: fetch all messages for these conversations, pick latest per conv
+        all_msgs = TikTokMessage.objects.filter(
+            conversation_id__in=conv_ids,
+            is_deleted=False,
+        ).select_related('shop_account').order_by('conversation_id', '-timestamp')
+
+        latest_by_conv = {}
+        for msg in all_msgs:
+            if msg.conversation_id not in latest_by_conv:
+                latest_by_conv[msg.conversation_id] = msg
+
+        result = []
+        for conv in conversations_page:
+            latest_msg = latest_by_conv.get(conv['conversation_id'])
             if latest_msg:
                 msg_data = TikTokMessageSerializer(latest_msg).data
                 msg_data['message_count'] = conv['message_count']
@@ -9711,10 +9763,27 @@ class SocialClientViewSet(viewsets.ModelViewSet):
         return SocialClientSerializer
 
     def get_queryset(self):
-        queryset = SocialClient.objects.prefetch_related(
+        queryset = SocialClient.objects.select_related(
+            'created_by',
+        ).prefetch_related(
             'social_accounts',
             'custom_field_values',
-            'custom_field_values__field'
+            'custom_field_values__field',
+        ).annotate(
+            _booking_count=Count('bookings', distinct=True),
+            _booking_completed=Count(
+                'bookings',
+                filter=Q(bookings__status='completed'),
+                distinct=True,
+            ),
+            _booking_upcoming=Count(
+                'bookings',
+                filter=Q(
+                    bookings__date__gte=timezone.now().date(),
+                    bookings__status__in=['pending', 'confirmed'],
+                ),
+                distinct=True,
+            ),
         ).all()
 
         # Search filter
@@ -9939,7 +10008,7 @@ class SocialClientCustomFieldViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        queryset = SocialClientCustomField.objects.all()
+        queryset = SocialClientCustomField.objects.select_related('created_by').all()
 
         # Filter by active status
         is_active = self.request.query_params.get('is_active')
