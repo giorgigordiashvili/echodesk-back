@@ -797,14 +797,12 @@ class InvoiceMaterialViewSet(viewsets.ReadOnlyModelViewSet):
     search_fields = ['label', 'custom_data']
 
     def list(self, request, *args, **kwargs):
-        """List materials from invoice materials ItemList"""
-        # Filter by invoice materials list
-        list_title = request.query_params.get('list_title', 'Invoice Materials')
+        """List materials from configured materials ItemList in InvoiceSettings"""
+        settings, _ = InvoiceSettings.objects.get_or_create()
 
-        try:
-            item_list = ItemList.objects.get(title=list_title, is_active=True)
-            queryset = self.get_queryset().filter(item_list=item_list)
-        except ItemList.DoesNotExist:
+        if settings.materials_itemlist:
+            queryset = self.get_queryset().filter(item_list=settings.materials_itemlist)
+        else:
             queryset = self.get_queryset().none()
 
         # Apply search

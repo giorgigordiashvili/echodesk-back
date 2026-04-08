@@ -91,8 +91,20 @@ class InvoiceSettings(models.Model):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
+        related_name='invoice_settings_client',
         verbose_name=_("Client Item List"),
         help_text=_("The item list to use for invoice clients (if using ItemList instead of ecommerce clients)")
+    )
+
+    # Materials/Products List Configuration
+    materials_itemlist = models.ForeignKey(
+        'tickets.ItemList',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='invoice_settings_materials',
+        verbose_name=_("Materials Item List"),
+        help_text=_("The item list to use for invoice line items / materials")
     )
 
     # Email Settings
