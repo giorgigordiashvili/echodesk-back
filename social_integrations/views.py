@@ -7461,6 +7461,7 @@ def whatsapp_webhook(request):
                         'is_from_business': message_obj.is_from_business,
                         'platform': 'whatsapp',
                         'account_id': account.waba_id,
+                        'waba_id': account.waba_id,
                         'chat_id': f'wa_{account.waba_id}_{from_number}',
                     }
                     # Get assignment for notification filtering
