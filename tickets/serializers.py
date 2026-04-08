@@ -296,11 +296,11 @@ class TicketSerializer(serializers.ModelSerializer):
         allow_empty=True
     )
     comments = TicketCommentSerializer(many=True, read_only=True)
-    comments_count = serializers.SerializerMethodField()
+    comments_count = serializers.IntegerField(read_only=True)  # From annotation
     # Add new fields for rich content
     checklist_items = ChecklistItemSerializer(many=True, read_only=True)
-    checklist_items_count = serializers.SerializerMethodField()
-    completed_checklist_items_count = serializers.SerializerMethodField()
+    checklist_items_count = serializers.IntegerField(read_only=True)  # From annotation
+    completed_checklist_items_count = serializers.IntegerField(read_only=True)  # From annotation
     status = serializers.ReadOnlyField()  # Dynamic status from column
     is_closed = serializers.ReadOnlyField()  # Dynamic closed status from column
     
@@ -333,28 +333,16 @@ class TicketSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'created_by', 'status', 'is_closed']
 
-    def get_comments_count(self, obj):
-        """Get the number of comments for this ticket."""
-        return obj.comments.count()
-
-    def get_checklist_items_count(self, obj):
-        """Get the number of checklist items for this ticket."""
-        return obj.checklist_items.count()
-
-    def get_completed_checklist_items_count(self, obj):
-        """Get the number of completed checklist items."""
-        return obj.checklist_items.filter(is_checked=True).count()
-
     def get_form_submissions(self, obj):
-        """Get all form submissions for this ticket."""
-        submissions = obj.form_submissions.all().order_by('submitted_at')
-        if submissions.exists():
+        """Get all form submissions for this ticket (uses prefetched data)."""
+        submissions = obj.form_submissions.all()  # Uses prefetch, already ordered
+        if submissions:
             return TicketFormSubmissionSerializer(submissions, many=True, context=self.context).data
         return []
 
     def get_attachments(self, obj):
-        """Get all attachments for this ticket."""
-        attachments = obj.attachments.all().order_by('-uploaded_at')
+        """Get all attachments for this ticket (uses prefetched data)."""
+        attachments = obj.attachments.all()  # Uses prefetch, already ordered
         return TicketAttachmentSerializer(attachments, many=True, context=self.context).data
 
     def create(self, validated_data):

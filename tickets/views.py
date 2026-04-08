@@ -330,13 +330,50 @@ class TicketViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         """
         Filter queryset based on user permissions and query parameters.
-        Annotate with comments_count to avoid N+1 queries.
+        Annotate with counts to avoid N+1 queries.
         """
         queryset = Ticket.objects.annotate(
-            comments_count=Count('comments')
+            comments_count=Count('comments', distinct=True),
+            checklist_items_count=Count('checklist_items', distinct=True),
+            completed_checklist_items_count=Count(
+                'checklist_items',
+                filter=Q(checklist_items__is_checked=True),
+                distinct=True,
+            ),
         ).select_related(
-            'created_by', 'assigned_to', 'column'
-        ).prefetch_related('tags', 'assigned_groups', 'assigned_users', 'ticketassignment_set')
+            'created_by', 'assigned_to', 'column', 'column__board',
+            'assigned_department',
+        ).prefetch_related(
+            'tags',
+            'assigned_groups',
+            'assigned_users',
+            Prefetch(
+                'ticketassignment_set',
+                queryset=TicketAssignment.objects.select_related('user', 'assigned_by'),
+            ),
+            Prefetch(
+                'comments',
+                queryset=TicketComment.objects.select_related('user').order_by('created_at'),
+            ),
+            Prefetch(
+                'checklist_items',
+                queryset=ChecklistItem.objects.select_related('created_by'),
+            ),
+            Prefetch(
+                'attachments',
+                queryset=TicketAttachment.objects.select_related('uploaded_by').order_by('-uploaded_at'),
+            ),
+            Prefetch(
+                'payments',
+                queryset=TicketPayment.objects.select_related('processed_by'),
+            ),
+            Prefetch(
+                'form_submissions',
+                queryset=TicketFormSubmission.objects.select_related(
+                    'submitted_by', 'form',
+                ).prefetch_related('selected_items').order_by('submitted_at'),
+            ),
+        )
 
         # Non-staff users can only see their tickets or tickets on boards they have access to
         if not self.request.user.is_staff:
