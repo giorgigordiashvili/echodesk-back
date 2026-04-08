@@ -312,11 +312,13 @@ class InvoiceViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # TODO: Generate PDF here
-        # invoice.generate_pdf()
-
         invoice.status = 'sent'
         invoice.save()
+
+        # Generate PDF asynchronously via Celery
+        from .tasks import generate_invoice_pdf
+        schema_name = request.tenant.schema_name
+        generate_invoice_pdf.delay(schema_name, invoice.id)
 
         serializer = self.get_serializer(invoice)
         return Response(serializer.data)
@@ -332,15 +334,39 @@ class InvoiceViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # TODO: Implement email sending
-        # send_invoice_email.delay(invoice.id)
+        # Validate required fields
+        recipient_email = request.data.get('recipient_email')
+        if not recipient_email:
+            return Response(
+                {'error': 'recipient_email is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        cc_emails = request.data.get('cc_emails', [])
+        if isinstance(cc_emails, str):
+            cc_emails = [e.strip() for e in cc_emails.split(',') if e.strip()]
+
+        subject = request.data.get('subject', '')
+        message = request.data.get('message', '')
+        attach_pdf = request.data.get('attach_pdf', True)
+
+        # Dispatch Celery task
+        from .tasks import send_invoice_email
+        schema_name = request.tenant.schema_name
+        send_invoice_email.delay(
+            schema_name,
+            invoice.id,
+            recipient_email,
+            cc_emails=cc_emails,
+            subject=subject,
+            message=message,
+            attach_pdf=attach_pdf,
+        )
 
         invoice.sent_date = timezone.now()
-        if invoice.status == 'draft':
-            invoice.status = 'sent'
         invoice.save()
 
-        return Response({'message': 'Invoice sent successfully'})
+        return Response({'message': 'Invoice email queued for delivery'})
 
     @action(detail=True, methods=['get'])
     def pdf(self, request, pk=None):
@@ -383,13 +409,156 @@ class InvoiceViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'])
     def excel(self, request, pk=None):
         """Export invoice to Excel"""
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+        from io import BytesIO
+
         invoice = self.get_object()
 
-        # TODO: Implement Excel export
-        return Response(
-            {'message': 'Excel export not yet implemented'},
-            status=status.HTTP_501_NOT_IMPLEMENTED
+        try:
+            inv_settings = InvoiceSettings.objects.first()
+        except InvoiceSettings.DoesNotExist:
+            inv_settings = None
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = f"Invoice {invoice.invoice_number}"
+
+        # Styles
+        bold = Font(bold=True)
+        header_font = Font(bold=True, size=14)
+        subheader_font = Font(bold=True, size=11)
+        thin_border = Border(
+            left=Side(style='thin'),
+            right=Side(style='thin'),
+            top=Side(style='thin'),
+            bottom=Side(style='thin'),
         )
+        header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+        header_text = Font(bold=True, color="FFFFFF")
+
+        row = 1
+
+        # Company info
+        company_name = inv_settings.company_name if inv_settings else ''
+        if company_name:
+            ws.cell(row=row, column=1, value=company_name).font = header_font
+            row += 1
+        if inv_settings and inv_settings.address:
+            ws.cell(row=row, column=1, value=inv_settings.address)
+            row += 1
+        if inv_settings and inv_settings.phone:
+            ws.cell(row=row, column=1, value=f"Phone: {inv_settings.phone}")
+            row += 1
+        if inv_settings and inv_settings.email:
+            ws.cell(row=row, column=1, value=f"Email: {inv_settings.email}")
+            row += 1
+        row += 1
+
+        # Invoice metadata
+        ws.cell(row=row, column=1, value="Invoice Number:").font = bold
+        ws.cell(row=row, column=2, value=invoice.invoice_number)
+        row += 1
+        ws.cell(row=row, column=1, value="Status:").font = bold
+        ws.cell(row=row, column=2, value=invoice.get_status_display())
+        row += 1
+        ws.cell(row=row, column=1, value="Issue Date:").font = bold
+        ws.cell(row=row, column=2, value=str(invoice.issue_date))
+        row += 1
+        ws.cell(row=row, column=1, value="Due Date:").font = bold
+        ws.cell(row=row, column=2, value=str(invoice.due_date))
+        row += 1
+        ws.cell(row=row, column=1, value="Currency:").font = bold
+        ws.cell(row=row, column=2, value=invoice.currency)
+        row += 1
+
+        # Client info
+        client_name = invoice.client_name
+        if not client_name:
+            if invoice.client_itemlist_item:
+                client_name = invoice.client_itemlist_item.label
+            elif invoice.client:
+                client_name = f"{invoice.client.first_name} {invoice.client.last_name}".strip()
+        ws.cell(row=row, column=1, value="Client:").font = bold
+        ws.cell(row=row, column=2, value=client_name or '')
+        row += 2
+
+        # Line items table header
+        ws.cell(row=row, column=1, value="Line Items").font = subheader_font
+        row += 1
+
+        table_headers = ["#", "Description", "Qty", "Unit", "Unit Price", "Tax %", "Discount %", "Total"]
+        for col_idx, header in enumerate(table_headers, 1):
+            cell = ws.cell(row=row, column=col_idx, value=header)
+            cell.font = header_text
+            cell.fill = header_fill
+            cell.border = thin_border
+            cell.alignment = Alignment(horizontal='center')
+        row += 1
+
+        # Line items
+        line_items = invoice.line_items.all().order_by('position')
+        for idx, item in enumerate(line_items, 1):
+            ws.cell(row=row, column=1, value=idx).border = thin_border
+            ws.cell(row=row, column=2, value=item.description).border = thin_border
+            ws.cell(row=row, column=3, value=float(item.quantity)).border = thin_border
+            ws.cell(row=row, column=4, value=item.unit).border = thin_border
+            ws.cell(row=row, column=5, value=float(item.unit_price)).border = thin_border
+            ws.cell(row=row, column=6, value=float(item.tax_rate)).border = thin_border
+            ws.cell(row=row, column=7, value=float(item.discount_percent)).border = thin_border
+            ws.cell(row=row, column=8, value=float(item.line_total)).border = thin_border
+
+            # Right-align number columns
+            for col in [3, 5, 6, 7, 8]:
+                ws.cell(row=row, column=col).alignment = Alignment(horizontal='right')
+            row += 1
+
+        row += 1
+
+        # Totals
+        ws.cell(row=row, column=7, value="Subtotal:").font = bold
+        ws.cell(row=row, column=8, value=float(invoice.subtotal)).font = bold
+        row += 1
+        ws.cell(row=row, column=7, value="Tax:").font = bold
+        ws.cell(row=row, column=8, value=float(invoice.tax_amount)).font = bold
+        row += 1
+        if invoice.discount_amount:
+            ws.cell(row=row, column=7, value="Discount:").font = bold
+            ws.cell(row=row, column=8, value=float(-invoice.discount_amount)).font = bold
+            row += 1
+        ws.cell(row=row, column=7, value="Total:").font = Font(bold=True, size=12)
+        ws.cell(row=row, column=8, value=float(invoice.total)).font = Font(bold=True, size=12)
+        row += 2
+
+        # Notes
+        if invoice.notes:
+            ws.cell(row=row, column=1, value="Notes:").font = bold
+            row += 1
+            ws.cell(row=row, column=1, value=invoice.notes)
+            row += 2
+
+        # Terms
+        if invoice.terms_and_conditions:
+            ws.cell(row=row, column=1, value="Terms & Conditions:").font = bold
+            row += 1
+            ws.cell(row=row, column=1, value=invoice.terms_and_conditions)
+
+        # Auto-fit column widths
+        col_widths = [5, 40, 8, 8, 12, 8, 10, 12]
+        for i, width in enumerate(col_widths, 1):
+            ws.column_dimensions[chr(64 + i)].width = width
+
+        # Write to response
+        buffer = BytesIO()
+        wb.save(buffer)
+        buffer.seek(0)
+
+        response = HttpResponse(
+            buffer.getvalue(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        response['Content-Disposition'] = f'attachment; filename="{invoice.invoice_number}.xlsx"'
+        return response
 
     @action(detail=True, methods=['post'])
     def mark_paid(self, request, pk=None):
@@ -602,16 +771,17 @@ class ClientViewSet(viewsets.ReadOnlyModelViewSet):
 
         if settings.client_itemlist:
             # Return items from the selected ItemList
-            # Use select_related to avoid N+1 queries
             queryset = ListItem.objects.filter(
                 item_list=settings.client_itemlist,
                 is_active=True
             ).select_related('item_list')
+            self.search_fields = ['label']
             logger.info(f"[ClientViewSet] Returning ListItem queryset, count={queryset.count()}")
             return queryset
         else:
             # Fallback to EcommerceClient for backward compatibility
             queryset = EcommerceClient.objects.filter(is_active=True)
+            self.search_fields = ['first_name', 'last_name', 'email']
             logger.info(f"[ClientViewSet] Returning EcommerceClient queryset, count={queryset.count()}")
             return queryset
 
