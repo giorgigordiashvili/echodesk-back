@@ -43,6 +43,8 @@ services:
   - key: NEW_RELIC_LICENSE_KEY
     scope: RUN_TIME
     type: SECRET
+  - key: NEW_RELIC_CONFIG_FILE
+    value: "newrelic.ini"
 workers:
 - name: celery-worker
   source_dir: /
