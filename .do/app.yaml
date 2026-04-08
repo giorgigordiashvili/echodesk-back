@@ -7,7 +7,7 @@ services:
     branch: main
     deploy_on_push: true
   build_command: ./build_production.sh
-  run_command: gunicorn --worker-tmp-dir /dev/shm --bind 0.0.0.0:8080 amanati_crm.wsgi:application
+  run_command: NEW_RELIC_CONFIG_FILE=newrelic.ini newrelic-admin run-program gunicorn --worker-tmp-dir /dev/shm --bind 0.0.0.0:8080 amanati_crm.wsgi:application
   environment_slug: python
   instance_count: 1
   instance_size_slug: basic-xxs
@@ -39,6 +39,9 @@ services:
     type: SECRET
   - key: DB_PORT
     scope: RUN_AND_BUILD_TIME
+    type: SECRET
+  - key: NEW_RELIC_LICENSE_KEY
+    scope: RUN_TIME
     type: SECRET
 workers:
 - name: celery-worker
