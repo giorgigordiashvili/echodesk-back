@@ -48,7 +48,7 @@ services:
   - key: NEW_RELIC_LOG
     value: "stderr"
   - key: NEW_RELIC_LOG_LEVEL
-    value: "debug"
+    value: "info"
   - key: NEW_RELIC_APP_NAME
     value: "EchoDesk Backend"
   - key: NEW_RELIC_HOST
