@@ -3,6 +3,7 @@ Django settings for amanati_crm project.
 """
 
 import os
+import logging
 from pathlib import Path
 from decouple import config
 import sentry_sdk
@@ -112,6 +113,10 @@ TENANT_APPS = [
 
 INSTALLED_APPS = list(SHARED_APPS) + [app for app in TENANT_APPS if app not in SHARED_APPS]
 
+# N+1 query detection (only in DEBUG mode)
+if DEBUG:
+    INSTALLED_APPS += ['nplusone.ext.django']
+
 # Tenant model
 TENANT_MODEL = "tenants.Tenant"
 
@@ -132,6 +137,12 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
+
+# N+1 query detection (only in DEBUG mode)
+if DEBUG:
+    MIDDLEWARE.insert(2, 'nplusone.ext.django.NPlusOneMiddleware')
+    NPLUSONE_RAISE = False  # Log warnings instead of raising exceptions
+    NPLUSONE_LOGGER = logging.getLogger('nplusone')
 
 ROOT_URLCONF = 'amanati_crm.urls'
 

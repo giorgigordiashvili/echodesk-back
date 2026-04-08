@@ -34,7 +34,6 @@ openai>=1.30.0
 
 # Monitoring
 sentry-sdk[django]>=2.0.0
-newrelic>=9.0.0
 
 # Testing (for CI/CD)
 coverage>=7.2.0

@@ -39,19 +39,7 @@ services:
   - key: DB_PORT
     scope: RUN_AND_BUILD_TIME
     type: SECRET
-  - key: NEW_RELIC_LICENSE_KEY
-    scope: RUN_TIME
-    type: SECRET
-  - key: NEW_RELIC_CONFIG_FILE
-    value: "newrelic.ini"
-  - key: NEW_RELIC_LOG
-    value: "stderr"
-  - key: NEW_RELIC_LOG_LEVEL
-    value: "info"
-  - key: NEW_RELIC_APP_NAME
-    value: "EchoDesk Backend"
-  - key: NEW_RELIC_HOST
-    value: "collector.eu01.nr-data.net"
+
 workers:
 - name: celery-worker
   source_dir: /
