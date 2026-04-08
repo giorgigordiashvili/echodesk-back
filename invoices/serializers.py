@@ -185,7 +185,7 @@ class InvoiceDetailSerializer(serializers.ModelSerializer):
                 'first_name': client.first_name,
                 'last_name': client.last_name,
                 'email': client.email,
-                'phone': client.phone,
+                'phone': client.phone_number,
                 'full_name': f"{client.first_name} {client.last_name}".strip() or client.email
             }
         else:
