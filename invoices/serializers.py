@@ -137,8 +137,8 @@ class InvoiceListSerializer(serializers.ModelSerializer):
         return obj.is_overdue()
 
     def get_line_items_count(self, obj):
-        """Get number of line items"""
-        return obj.line_items.count()
+        """Get number of line items (uses annotated count)"""
+        return getattr(obj, 'line_items_count', obj.line_items.count())
 
 
 class InvoiceDetailSerializer(serializers.ModelSerializer):

@@ -529,7 +529,7 @@ class CartListSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'updated_at']
 
     def get_items_count(self, obj):
-        return obj.items.count()
+        return getattr(obj, '_items_count', obj.items.count())
 
 
 class CartSerializer(serializers.ModelSerializer):

@@ -30,7 +30,7 @@ class DepartmentSerializer(serializers.ModelSerializer):
         read_only_fields = ['created_at', 'updated_at']
     
     def get_employee_count(self, obj):
-        return obj.employees.count()
+        return getattr(obj, '_employee_count', obj.employees.count())
 
 
 class GroupSerializer(serializers.ModelSerializer):
@@ -49,7 +49,7 @@ class GroupSerializer(serializers.ModelSerializer):
         fields = ['id', 'name', 'permissions', 'permission_ids', 'user_count']
     
     def get_user_count(self, obj):
-        return obj.user_set.count()
+        return getattr(obj, '_user_count', obj.user_set.count())
     
     def create(self, validated_data):
         permission_ids = validated_data.pop('permission_ids', [])
@@ -120,7 +120,7 @@ class TenantGroupSerializer(serializers.ModelSerializer):
         read_only_fields = ['created_at', 'updated_at', 'member_count', 'feature_keys']
 
     def get_member_count(self, obj):
-        return obj.members.count()
+        return getattr(obj, '_member_count', obj.members.count())
 
     def get_feature_keys(self, obj):
         """Return list of feature keys for easy checking"""

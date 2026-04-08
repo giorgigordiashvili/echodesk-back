@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiParameter, inline_serializer
 from django_filters.rest_framework import DjangoFilterBackend, FilterSet, CharFilter, NumberFilter, BooleanFilter
-from django.db.models import Q, F
+from django.db.models import Q, F, Count
 from django.core.cache import cache
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import never_cache
@@ -511,7 +511,8 @@ class EcommerceClientViewSet(NoCacheMixin, viewsets.ModelViewSet):
         if self.action != 'list':
             queryset = queryset.prefetch_related(
                 'addresses',
-                'favorites__product'
+                'favorites__product__attribute_values__attribute',
+                'favorites__product__images',
             )
         return queryset
 
@@ -1242,7 +1243,8 @@ class FavoriteProductViewSet(NoCacheMixin, viewsets.ModelViewSet):
             'client',
             'product'
         ).prefetch_related(
-            'product__images'
+            'product__images',
+            'product__attribute_values__attribute',
         )
 
     def get_serializer_class(self):
@@ -1381,11 +1383,16 @@ class CartViewSet(NoCacheMixin, viewsets.ModelViewSet):
             'client',
             'delivery_address'
         )
-        # Only prefetch items for detail views
-        if self.action != 'list':
+        if self.action == 'list':
+            queryset = queryset.annotate(
+                _items_count=Count('items'),
+            )
+        else:
             queryset = queryset.prefetch_related(
                 'items__product__images',
-                'items__variant'
+                'items__product__attribute_values__attribute',
+                'items__variant',
+                'items__variant__attribute_values__attribute',
             )
         return queryset
 
@@ -1478,11 +1485,14 @@ class CartItemViewSet(NoCacheMixin, viewsets.ModelViewSet):
     filterset_fields = ['cart', 'product']
 
     def get_queryset(self):
-        """Optimize queryset with select_related"""
+        """Optimize queryset with select_related and prefetch_related"""
         return super().get_queryset().select_related(
             'cart',
             'product',
             'variant'
+        ).prefetch_related(
+            'product__attribute_values__attribute',
+            'variant__attribute_values__attribute',
         )
 
     def get_serializer_class(self):

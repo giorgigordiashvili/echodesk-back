@@ -6,6 +6,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group, Permission
 from django.contrib.contenttypes.models import ContentType
 from django.db import transaction, IntegrityError
+from django.db.models import Count
 from django.utils import timezone
 from django.conf import settings
 import secrets
@@ -32,24 +33,26 @@ class DepartmentViewSet(viewsets.ModelViewSet):
     queryset = Department.objects.all()
     serializer_class = DepartmentSerializer
     permission_classes = [permissions.IsAuthenticated]
-    
+
     def get_queryset(self):
         # Only show active departments by default, unless explicitly requested
         if self.request.query_params.get('include_inactive') == 'true':
-            return Department.objects.all()
-        return Department.objects.filter(is_active=True)
+            qs = Department.objects.all()
+        else:
+            qs = Department.objects.filter(is_active=True)
+        return qs.annotate(_employee_count=Count('employees'))
 
 
 class PermissionViewSet(viewsets.ReadOnlyModelViewSet):
     """ViewSet for viewing Django permissions"""
-    queryset = Permission.objects.all().order_by('content_type__app_label', 'content_type__model', 'codename')
+    queryset = Permission.objects.select_related('content_type').order_by('content_type__app_label', 'content_type__model', 'codename')
     serializer_class = PermissionSerializer
     permission_classes = [permissions.IsAuthenticated]
 
 
 class GroupViewSet(viewsets.ModelViewSet):
     """ViewSet for managing Django Groups with permissions"""
-    queryset = Group.objects.all()
+    queryset = Group.objects.prefetch_related('permissions__content_type').all()
     serializer_class = GroupSerializer
     permission_classes = [permissions.IsAuthenticated]
     
@@ -121,7 +124,7 @@ class UserViewSet(viewsets.ModelViewSet):
         return UserSerializer
     
     def get_queryset(self):
-        queryset = User.objects.prefetch_related('tenant_groups', 'tenant_groups__features').all()
+        queryset = User.objects.select_related('department').prefetch_related('tenant_groups', 'tenant_groups__features', 'groups__permissions__content_type').all()
 
         # Filter by role if specified
         role = self.request.query_params.get('role', None)
@@ -335,7 +338,7 @@ class UserViewSet(viewsets.ModelViewSet):
 
 class TenantGroupViewSet(viewsets.ModelViewSet):
     """ViewSet for managing TenantGroups with custom permissions"""
-    queryset = TenantGroup.objects.prefetch_related('members', 'features').all()
+    queryset = TenantGroup.objects.prefetch_related('members', 'features').annotate(_member_count=Count('members')).all()
     serializer_class = TenantGroupSerializer
     permission_classes = [permissions.IsAuthenticated]
 
@@ -417,7 +420,9 @@ class TenantGroupViewSet(viewsets.ModelViewSet):
     def members(self, request, pk=None):
         """Get all members of this tenant group"""
         tenant_group = self.get_object()
-        members = tenant_group.members.all()
+        members = tenant_group.members.select_related('department').prefetch_related(
+            'tenant_groups', 'tenant_groups__features', 'groups__permissions__content_type',
+        ).all()
 
         # Use the UserSerializer to return user data
         from .serializers import UserSerializer
@@ -512,7 +517,7 @@ class NotificationViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         """Only show notifications for the current user"""
-        return Notification.objects.filter(user=self.request.user)
+        return Notification.objects.select_related('user').filter(user=self.request.user)
 
     @action(detail=False, methods=['get'])
     def unread_count(self, request):
@@ -597,7 +602,8 @@ class TeamChatConversationViewSet(viewsets.ModelViewSet):
         ).exclude(
             id__in=hidden_conversation_ids
         ).prefetch_related(
-            'participants', 'messages', 'messages__sender'
+            'participants', 'participants__online_status',
+            'messages', 'messages__sender', 'messages__sender__online_status'
         ).annotate(
             latest_message_time=Max('messages__created_at')
         ).order_by('-latest_message_time', '-updated_at')
@@ -732,7 +738,7 @@ class TeamChatMessageViewSet(viewsets.ModelViewSet):
         """Only show messages from conversations the user is part of"""
         return TeamChatMessage.objects.filter(
             conversation__participants=self.request.user
-        ).select_related('sender', 'conversation')
+        ).select_related('sender', 'sender__online_status', 'conversation')
 
     def create(self, request, *args, **kwargs):
         """Create a new message"""

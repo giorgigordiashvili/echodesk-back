@@ -2,7 +2,7 @@ from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import api_view, permission_classes, action
 from rest_framework.response import Response
 from django.utils import timezone
-from django.db.models import Q, Count, Sum, Avg
+from django.db.models import Q, Count, Sum, Avg, Prefetch
 from datetime import datetime, timedelta, date
 from drf_spectacular.utils import extend_schema, extend_schema_view
 from .models import (
@@ -24,6 +24,21 @@ from .payment_service import get_booking_payment_service
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def _optimized_booking_qs(qs=None):
+    """Apply common select_related/prefetch_related for BookingListSerializer."""
+    if qs is None:
+        qs = Booking.objects.all()
+    return qs.select_related(
+        'client', 'service', 'service__category', 'staff', 'staff__user',
+    ).prefetch_related(
+        Prefetch(
+            'service__staff_members',
+            queryset=BookingStaff.objects.select_related('user').prefetch_related('services'),
+        ),
+        'staff__services',
+    )
 
 
 # ============================================================================
@@ -75,7 +90,7 @@ def dashboard_stats(request):
             'completed': today_bookings.filter(status='completed').count(),
             'status_breakdown': list(status_counts),
             'bookings': BookingListSerializer(
-                today_bookings.order_by('start_time'),
+                _optimized_booking_qs(today_bookings).order_by('start_time'),
                 many=True
             ).data
         },
@@ -117,13 +132,16 @@ def staff_schedule(request):
         queryset = queryset.filter(staff_id=staff_id)
 
     # Get staff availability
-    staff_list = BookingStaff.objects.filter(is_active_for_bookings=True)
+    staff_list = BookingStaff.objects.select_related('user').prefetch_related('services').filter(is_active_for_bookings=True)
     if staff_id:
         staff_list = staff_list.filter(id=staff_id)
 
+    # Pre-optimize the booking queryset
+    optimized_qs = _optimized_booking_qs(queryset)
+
     schedule = []
     for staff_member in staff_list:
-        staff_bookings = queryset.filter(staff=staff_member).order_by('start_time')
+        staff_bookings = optimized_qs.filter(staff=staff_member).order_by('start_time')
 
         # Get availability
         from .utils import get_staff_availability
@@ -179,7 +197,9 @@ class AdminServiceCategoryViewSet(viewsets.ModelViewSet):
 )
 class AdminServiceViewSet(viewsets.ModelViewSet):
     """Admin service management"""
-    queryset = Service.objects.all()
+    queryset = Service.objects.select_related('category').prefetch_related(
+        Prefetch('staff_members', queryset=BookingStaff.objects.select_related('user').prefetch_related('services')),
+    ).all()
     permission_classes = [permissions.IsAuthenticated, HasBookingManagementFeature]
     feature_required = 'booking_management'
     filterset_fields = ['category', 'status', 'booking_type']
@@ -306,7 +326,9 @@ class AdminBookingStaffViewSet(viewsets.ModelViewSet):
         staff = self.get_object()
         date_str = request.query_params.get('date')
 
-        queryset = Booking.objects.filter(staff=staff).exclude(status='cancelled')
+        queryset = _optimized_booking_qs(
+            Booking.objects.filter(staff=staff).exclude(status='cancelled')
+        )
 
         if date_str:
             try:
@@ -402,9 +424,7 @@ class AdminBookingViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         """Get all bookings with filters"""
-        queryset = Booking.objects.all().select_related(
-            'client', 'service', 'staff'
-        ).order_by('-date', '-start_time')
+        queryset = _optimized_booking_qs().order_by('-date', '-start_time')
 
         # Date range filter
         date_from = self.request.query_params.get('date_from')
@@ -597,7 +617,15 @@ class AdminBookingViewSet(viewsets.ModelViewSet):
 )
 class AdminRecurringBookingViewSet(viewsets.ModelViewSet):
     """Admin recurring booking management"""
-    queryset = RecurringBooking.objects.all()
+    queryset = RecurringBooking.objects.select_related(
+        'client', 'service', 'service__category', 'staff', 'staff__user',
+    ).prefetch_related(
+        Prefetch(
+            'service__staff_members',
+            queryset=BookingStaff.objects.select_related('user').prefetch_related('services'),
+        ),
+        'staff__services',
+    ).all()
     serializer_class = RecurringBookingSerializer
     permission_classes = [permissions.IsAuthenticated, HasBookingManagementFeature]
     feature_required = 'booking_management'
@@ -652,7 +680,9 @@ class AdminBookingClientViewSet(viewsets.ReadOnlyModelViewSet):
     def bookings(self, request, pk=None):
         """Get client's booking history"""
         client = self.get_object()
-        bookings = Booking.objects.filter(client=client).order_by('-date', '-start_time')
+        bookings = _optimized_booking_qs(
+            Booking.objects.filter(client=client)
+        ).order_by('-date', '-start_time')
         return Response(BookingListSerializer(bookings, many=True).data)
 
     @action(detail=True, methods=['get'])
@@ -660,22 +690,28 @@ class AdminBookingClientViewSet(viewsets.ReadOnlyModelViewSet):
         """Get client statistics"""
         client = self.get_object()
 
-        total_bookings = Booking.objects.filter(client=client).count()
-        completed_bookings = Booking.objects.filter(client=client, status='completed').count()
-        cancelled_bookings = Booking.objects.filter(client=client, status='cancelled').count()
-        total_spent = Booking.objects.filter(
-            client=client,
-            payment_status__in=['fully_paid', 'deposit_paid']
-        ).aggregate(total=Sum('paid_amount'))['total'] or 0
+        stats = Booking.objects.filter(client=client).aggregate(
+            total_bookings=Count('id'),
+            completed_bookings=Count('id', filter=Q(status='completed')),
+            cancelled_bookings=Count('id', filter=Q(status='cancelled')),
+            total_spent=Sum('paid_amount', filter=Q(payment_status__in=['fully_paid', 'deposit_paid'])),
+        )
+        total_bookings = stats['total_bookings']
+
+        last_booking = None
+        if total_bookings > 0:
+            last = _optimized_booking_qs(
+                Booking.objects.filter(client=client)
+            ).order_by('-date', '-start_time').first()
+            if last:
+                last_booking = BookingListSerializer(last).data
 
         return Response({
             'total_bookings': total_bookings,
-            'completed_bookings': completed_bookings,
-            'cancelled_bookings': cancelled_bookings,
-            'total_spent': float(total_spent),
-            'last_booking': BookingListSerializer(
-                Booking.objects.filter(client=client).order_by('-date', '-start_time').first()
-            ).data if total_bookings > 0 else None
+            'completed_bookings': stats['completed_bookings'],
+            'cancelled_bookings': stats['cancelled_bookings'],
+            'total_spent': float(stats['total_spent'] or 0),
+            'last_booking': last_booking,
         })
 
 

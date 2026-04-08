@@ -194,6 +194,9 @@ class BookingStaffSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'average_rating', 'total_ratings']
 
     def get_services_count(self, obj):
+        # Use prefetch cache if available to avoid extra COUNT query
+        if hasattr(obj, '_prefetched_objects_cache') and 'services' in obj._prefetched_objects_cache:
+            return len(obj._prefetched_objects_cache['services'])
         return obj.services.count()
 
 

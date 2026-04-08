@@ -3,7 +3,7 @@ from rest_framework.decorators import api_view, permission_classes, action
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.utils import timezone
-from django.db.models import Q
+from django.db.models import Q, Prefetch
 from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter
 from .models import (
     Service, ServiceCategory, BookingStaff,
@@ -200,7 +200,9 @@ class ClientServiceCategoryViewSet(viewsets.ReadOnlyModelViewSet):
 )
 class ClientServiceViewSet(viewsets.ReadOnlyModelViewSet):
     """View services (public read-only)"""
-    queryset = Service.objects.filter(status='active').select_related('category')
+    queryset = Service.objects.filter(status='active').select_related('category').prefetch_related(
+        Prefetch('staff_members', queryset=BookingStaff.objects.select_related('user').prefetch_related('services')),
+    )
     serializer_class = ServiceListSerializer
     permission_classes = [permissions.AllowAny]
     filterset_fields = ['category', 'booking_type']
@@ -276,7 +278,15 @@ class ClientBookingViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         """Get only client's own bookings"""
-        return Booking.objects.filter(client=self.request.user).select_related('client', 'service', 'staff').order_by('-date', '-start_time')
+        return Booking.objects.filter(client=self.request.user).select_related(
+            'client', 'service', 'service__category', 'staff', 'staff__user',
+        ).prefetch_related(
+            Prefetch(
+                'service__staff_members',
+                queryset=BookingStaff.objects.select_related('user').prefetch_related('services'),
+            ),
+            'staff__services',
+        ).order_by('-date', '-start_time')
 
     def get_serializer_class(self):
         if self.action == 'retrieve':

@@ -10,7 +10,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
 from django.http import FileResponse, HttpResponse
-from django.db.models import Q, Sum
+from django.db.models import Q, Sum, Count, Prefetch
 from datetime import datetime, timedelta
 
 from .models import (
@@ -41,7 +41,7 @@ class InvoiceSettingsViewSet(viewsets.ModelViewSet):
     """
     API endpoint for invoice settings management
     """
-    queryset = InvoiceSettings.objects.all()
+    queryset = InvoiceSettings.objects.select_related('client_itemlist').all()
     serializer_class = InvoiceSettingsSerializer
     permission_classes = [IsAuthenticated, CanManageInvoices]
     http_method_names = ['get', 'post', 'put', 'patch']
@@ -198,13 +198,28 @@ class InvoiceViewSet(viewsets.ModelViewSet):
     """
     API endpoint for invoice management
     """
-    queryset = Invoice.objects.all()
     permission_classes = [IsAuthenticated, CanManageInvoices]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['status', 'client', 'currency']
     search_fields = ['invoice_number', 'client__first_name', 'client__last_name', 'client__email']
     ordering_fields = ['created_at', 'issue_date', 'due_date', 'total']
     ordering = ['-created_at']
+
+    def get_queryset(self):
+        return Invoice.objects.select_related(
+            'client', 'client_itemlist_item', 'created_by', 'template',
+        ).prefetch_related(
+            Prefetch(
+                'line_items',
+                queryset=InvoiceLineItem.objects.select_related('product', 'list_item'),
+            ),
+            Prefetch(
+                'payments',
+                queryset=InvoicePayment.objects.select_related('recorded_by'),
+            ),
+        ).annotate(
+            line_items_count=Count('line_items', distinct=True),
+        )
 
     def get_serializer_class(self):
         """Return appropriate serializer based on action"""
@@ -472,7 +487,7 @@ class InvoiceLineItemViewSet(viewsets.ModelViewSet):
     """
     API endpoint for invoice line items
     """
-    queryset = InvoiceLineItem.objects.all()
+    queryset = InvoiceLineItem.objects.select_related('product', 'list_item').all()
     serializer_class = InvoiceLineItemSerializer
     permission_classes = [IsAuthenticated, CanManageInvoices]
 
@@ -504,7 +519,7 @@ class InvoicePaymentViewSet(viewsets.ModelViewSet):
     """
     API endpoint for invoice payments
     """
-    queryset = InvoicePayment.objects.all()
+    queryset = InvoicePayment.objects.select_related('recorded_by').all()
     serializer_class = InvoicePaymentSerializer
     permission_classes = [IsAuthenticated, CanManageInvoices]
 
@@ -532,7 +547,7 @@ class InvoiceTemplateViewSet(viewsets.ModelViewSet):
     """
     API endpoint for invoice templates
     """
-    queryset = InvoiceTemplate.objects.filter(is_active=True)
+    queryset = InvoiceTemplate.objects.select_related('created_by').filter(is_active=True)
     serializer_class = InvoiceTemplateSerializer
     permission_classes = [IsAuthenticated, CanManageInvoices]
     filter_backends = [filters.SearchFilter]
