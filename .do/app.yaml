@@ -45,6 +45,14 @@ services:
     type: SECRET
   - key: NEW_RELIC_CONFIG_FILE
     value: "newrelic.ini"
+  - key: NEW_RELIC_LOG
+    value: "stderr"
+  - key: NEW_RELIC_LOG_LEVEL
+    value: "debug"
+  - key: NEW_RELIC_APP_NAME
+    value: "EchoDesk Backend"
+  - key: NEW_RELIC_HOST
+    value: "collector.eu01.nr-data.net"
 workers:
 - name: celery-worker
   source_dir: /
