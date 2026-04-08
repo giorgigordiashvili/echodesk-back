@@ -46,7 +46,7 @@ class Command(BaseCommand):
             tenant__is_active=True
         ).exclude(
             tenant__schema_name__in=self.EXEMPT_TENANTS
-        ).select_related('tenant', 'package')
+        ).select_related('tenant').prefetch_related('selected_features')
 
         for subscription in expiring_soon:
             self.stdout.write(f'📧 Reminder: {subscription.tenant.schema_name} expires in 7 days')
@@ -60,7 +60,7 @@ class Command(BaseCommand):
             tenant__is_active=True
         ).exclude(
             tenant__schema_name__in=self.EXEMPT_TENANTS
-        ).select_related('tenant', 'package')
+        ).select_related('tenant').prefetch_related('selected_features')
 
         for subscription in expiring_urgent:
             self.stdout.write(self.style.WARNING(
@@ -77,7 +77,7 @@ class Command(BaseCommand):
             tenant__is_active=True
         ).exclude(
             tenant__schema_name__in=self.EXEMPT_TENANTS
-        ).select_related('tenant', 'package')
+        ).select_related('tenant').prefetch_related('selected_features')
 
         for subscription in in_grace_period:
             days_overdue = (now - subscription.expires_at).days
@@ -130,6 +130,25 @@ class Command(BaseCommand):
             f'{suspended_count} suspended, {in_grace_period.count()} in grace'
         )
 
+    def _describe_subscription(self, subscription):
+        """Return a safe human-readable subscription description."""
+        try:
+            # Legacy installs may still have package relation
+            package = getattr(subscription, 'package', None)
+            if package:
+                return package.display_name
+        except Exception:
+            pass
+
+        features = list(subscription.selected_features.values_list('name', flat=True))
+        if features:
+            preview = ', '.join(features[:3])
+            if len(features) > 3:
+                preview += f' +{len(features) - 3} more'
+            return f"{subscription.agent_count} agents ({preview})"
+
+        return f"{subscription.agent_count} agents"
+
     def _send_expiration_reminder(self, subscription, days):
         """Send reminder email about upcoming expiration"""
         tenant = subscription.tenant
@@ -137,7 +156,7 @@ class Command(BaseCommand):
         message = f"""
 Hello {tenant.admin_name},
 
-Your EchoDesk subscription ({subscription.package.display_name}) will expire in {days} days.
+Your EchoDesk subscription ({self._describe_subscription(subscription)}) will expire in {days} days.
 
 Expiration Date: {subscription.expires_at.strftime('%Y-%m-%d')}
 
