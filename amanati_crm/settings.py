@@ -7,6 +7,29 @@ from pathlib import Path
 from decouple import config
 import sentry_sdk
 
+
+def _should_ignore_newrelic_event(event):
+    """Filter noisy New Relic agent misconfiguration errors from Sentry."""
+    logger = (event.get('logger') or '').lower()
+    message = (event.get('message') or '').lower()
+
+    if not logger.startswith('newrelic.'):
+        return False
+
+    ignored_message_parts = (
+        'incorrect license key has been supplied by the agent',
+        'registration of the application',
+        'report this problem to new relic support',
+    )
+    return any(part in message for part in ignored_message_parts)
+
+
+def _sentry_before_send(event, hint):
+    if _should_ignore_newrelic_event(event):
+        return None
+    return event
+
+
 # Initialize Sentry for error tracking and performance monitoring
 SENTRY_DSN = config('SENTRY_DSN', default='')
 sentry_sdk.init(
@@ -18,6 +41,7 @@ sentry_sdk.init(
     profile_lifecycle="trace",
     # Environment tag
     environment=config('SENTRY_ENVIRONMENT', default='production'),
+    before_send=_sentry_before_send,
 )
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
