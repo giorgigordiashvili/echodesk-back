@@ -21,6 +21,12 @@ class SipConfiguration(models.Model):
         default="stun:stun.l.google.com:19302",
         help_text="STUN server for NAT traversal"
     )
+    websocket_path = models.CharField(
+        max_length=255,
+        blank=True,
+        default="/ws",
+        help_text="WebSocket path on the SIP server (e.g., /ws)"
+    )
     turn_server = models.CharField(max_length=255, blank=True, help_text="TURN server")
     turn_username = models.CharField(max_length=100, blank=True)
     turn_password = models.CharField(max_length=255, blank=True)

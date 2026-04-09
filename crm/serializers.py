@@ -5,16 +5,19 @@ from .models import CallLog, Client, SipConfiguration, CallEvent, CallRecording
 
 class SipConfigurationSerializer(serializers.ModelSerializer):
     """Serializer for SIP configuration management"""
-    
+
     class Meta:
         model = SipConfiguration
         fields = [
-            'id', 'name', 'sip_server', 'sip_port', 'username', 
-            'realm', 'proxy', 'stun_server', 'turn_server', 
-            'turn_username', 'is_active', 'is_default', 
+            'id', 'name', 'sip_server', 'sip_port', 'username', 'password',
+            'realm', 'proxy', 'websocket_path', 'stun_server', 'turn_server',
+            'turn_username', 'turn_password', 'is_active', 'is_default',
             'max_concurrent_calls', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
+        extra_kwargs = {
+            'password': {'write_only': False},
+        }
     
     def create(self, validated_data):
         validated_data['created_by'] = self.context['request'].user
@@ -31,12 +34,12 @@ class SipConfigurationListSerializer(serializers.ModelSerializer):
 
 class SipConfigurationDetailSerializer(serializers.ModelSerializer):
     """Detailed serializer including sensitive fields for configuration"""
-    
+
     class Meta:
         model = SipConfiguration
         fields = [
             'id', 'name', 'sip_server', 'sip_port', 'username', 'password',
-            'realm', 'proxy', 'stun_server', 'turn_server', 
+            'realm', 'proxy', 'websocket_path', 'stun_server', 'turn_server',
             'turn_username', 'turn_password', 'is_active', 'is_default',
             'max_concurrent_calls'
         ]
