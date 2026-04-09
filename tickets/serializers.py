@@ -643,7 +643,9 @@ class ItemListMinimalSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
     def get_items_count(self, obj):
-        """Get the number of items in this list."""
+        """Get the number of active items in this list."""
+        if hasattr(obj, '_active_items_count'):
+            return obj._active_items_count
         return obj.items.filter(is_active=True).count()
 
 
@@ -694,6 +696,8 @@ class TicketFormMinimalSerializer(serializers.ModelSerializer):
 
     def get_submissions_count(self, obj):
         """Get the number of submissions for this form."""
+        if hasattr(obj, '_submissions_count'):
+            return obj._submissions_count
         return obj.submissions.count()
 
 
@@ -726,10 +730,14 @@ class TicketFormSerializer(serializers.ModelSerializer):
 
     def get_child_forms_count(self, obj):
         """Get the number of child forms."""
+        if hasattr(obj, '_child_forms_count'):
+            return obj._child_forms_count
         return obj.child_forms.count()
 
     def get_submissions_count(self, obj):
         """Get the number of submissions for this form."""
+        if hasattr(obj, '_submissions_count'):
+            return obj._submissions_count
         return obj.submissions.count()
 
     def create(self, validated_data):

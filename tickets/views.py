@@ -687,7 +687,7 @@ class TagViewSet(viewsets.ModelViewSet):
     ViewSet for managing tags.
     All authenticated users can create, view, update, and delete tags.
     """
-    queryset = Tag.objects.all()
+    queryset = Tag.objects.select_related('created_by').all()
     serializer_class = TagSerializer
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
@@ -1025,7 +1025,7 @@ class BoardViewSet(viewsets.ModelViewSet):
         if user.is_superuser or user.is_staff:
             return Board.objects.annotate(
                 columns_count=Count('columns', distinct=True)
-            ).select_related('created_by').prefetch_related('board_users', 'board_groups', 'columns')
+            ).select_related('created_by').prefetch_related('board_users', 'board_groups', 'order_users', 'columns')
 
         # Get user's groups
         user_groups = user.tenant_groups.filter(is_active=True)
@@ -1052,7 +1052,7 @@ class BoardViewSet(viewsets.ModelViewSet):
         return boards_with_counts.filter(
             Q(order_user_attached | board_user_attached | group_attached) |  # User has explicit access
             Q(user_count=0, group_count=0)  # OR board is unrestricted
-        ).select_related('created_by').prefetch_related('board_users', 'board_groups', 'columns').distinct()
+        ).select_related('created_by').prefetch_related('board_users', 'board_groups', 'order_users', 'columns').distinct()
     
     def perform_create(self, serializer):
         """Set the created_by field when creating a board."""
@@ -1213,20 +1213,20 @@ class TicketPaymentViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         """Filter payments based on user permissions."""
-        queryset = super().get_queryset()
-        
+        queryset = super().get_queryset().select_related('processed_by')
+
         # If user has ticket permissions or is superuser, return all
-        if (self.request.user.is_superuser or 
+        if (self.request.user.is_superuser or
             self.request.user.has_permission('view_tickets')):
             return queryset
-        
+
         # Otherwise, filter to tickets the user can access
         accessible_tickets = Ticket.objects.filter(
             Q(created_by=self.request.user) |
             Q(assigned_to=self.request.user) |
             Q(assigned_users=self.request.user)
         ).distinct()
-        
+
         return queryset.filter(ticket__in=accessible_tickets)
 
     @action(detail=False, methods=['post'])
@@ -1325,7 +1325,7 @@ class TicketPaymentViewSet(viewsets.ModelViewSet):
 
 class ItemListViewSet(viewsets.ModelViewSet):
     """ViewSet for managing item lists."""
-    queryset = ItemList.objects.prefetch_related('items', 'items__children').all()
+    queryset = ItemList.objects.select_related('created_by').prefetch_related('items', 'items__children').all()
     serializer_class = ItemListSerializer
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
@@ -1334,13 +1334,16 @@ class ItemListViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         """Filter lists based on user permissions."""
-        queryset = super().get_queryset()
-        
+        from django.db.models import Count, Q as DQ
+        queryset = super().get_queryset().annotate(
+            _active_items_count=Count('items', filter=DQ(items__is_active=True))
+        )
+
         # Filter by is_active if specified
         is_active = self.request.query_params.get('is_active')
         if is_active is not None:
             queryset = queryset.filter(is_active=is_active.lower() == 'true')
-        
+
         return queryset
 
     def get_serializer_class(self):
@@ -1499,7 +1502,7 @@ class TicketFormViewSet(viewsets.ModelViewSet):
     """ViewSet for managing ticket forms."""
     queryset = TicketForm.objects.all().select_related(
         'created_by', 'parent_form'
-    ).prefetch_related('item_lists', 'child_forms')
+    ).prefetch_related('item_lists', 'child_forms', 'submissions')
     serializer_class = TicketFormSerializer
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
@@ -1508,7 +1511,11 @@ class TicketFormViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         """Filter forms based on user permissions."""
-        queryset = super().get_queryset()
+        from django.db.models import Count
+        queryset = super().get_queryset().annotate(
+            _submissions_count=Count('submissions', distinct=True),
+            _child_forms_count=Count('child_forms', distinct=True),
+        )
 
         # Filter by is_active if specified
         is_active = self.request.query_params.get('is_active')
@@ -1561,7 +1568,7 @@ class TicketFormViewSet(viewsets.ModelViewSet):
 
 class TicketFormSubmissionViewSet(viewsets.ModelViewSet):
     """ViewSet for managing ticket form submissions."""
-    queryset = TicketFormSubmission.objects.select_related('form', 'ticket', 'submitted_by').all()
+    queryset = TicketFormSubmission.objects.select_related('form', 'ticket', 'submitted_by').prefetch_related('selected_items').all()
     serializer_class = TicketFormSubmissionSerializer
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]

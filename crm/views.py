@@ -124,10 +124,10 @@ class CallLogViewSet(viewsets.ModelViewSet):
         # Use select_related to avoid N+1 queries when serializer accesses client and sip_configuration
         if hasattr(self.request, 'tenant'):
             # Filter by tenant through the handled_by user's association with tenant tables
-            return CallLog.objects.select_related('client', 'sip_configuration', 'handled_by').all()
+            return CallLog.objects.select_related('client', 'sip_configuration', 'handled_by', 'recording').prefetch_related('events').all()
         else:
             # Fallback for public schema or when tenant is not available
-            return CallLog.objects.select_related('client', 'sip_configuration', 'handled_by').all()
+            return CallLog.objects.select_related('client', 'sip_configuration', 'handled_by', 'recording').prefetch_related('events').all()
     
     def get_serializer_class(self):
         if self.action == 'create':

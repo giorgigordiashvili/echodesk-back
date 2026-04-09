@@ -27,7 +27,10 @@ class PublicHelpCategoryViewSet(viewsets.ReadOnlyModelViewSet):
     lookup_field = 'slug'
 
     def get_queryset(self):
-        queryset = HelpCategory.objects.filter(is_active=True)
+        from django.db.models import Count, Q
+        queryset = HelpCategory.objects.filter(is_active=True).annotate(
+            _article_count=Count('articles', filter=Q(articles__is_active=True))
+        ).prefetch_related('articles')
 
         # Filter by visibility
         for_public = self.request.query_params.get('for_public')
@@ -145,7 +148,7 @@ class HelpCategoryViewSet(viewsets.ModelViewSet):
     Admin ViewSet for managing help categories.
     Requires superuser authentication.
     """
-    queryset = HelpCategory.objects.all()
+    queryset = HelpCategory.objects.prefetch_related('articles').all()
     serializer_class = HelpCategoryAdminSerializer
     permission_classes = [IsAdminUser]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]

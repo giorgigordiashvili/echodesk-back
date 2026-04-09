@@ -78,7 +78,7 @@ class LeaveTypeViewSet(viewsets.ModelViewSet):
     ordering = ['sort_order', 'id']
 
     def get_queryset(self):
-        return LeaveType.objects.filter(tenant=self.request.tenant)
+        return LeaveType.objects.filter(tenant=self.request.tenant).select_related('created_by', 'updated_by')
 
     def get_serializer_class(self):
         if self.action == 'list':
@@ -454,7 +454,7 @@ class PublicHolidayViewSet(viewsets.ModelViewSet):
     ordering = ['date']
 
     def get_queryset(self):
-        queryset = PublicHoliday.objects.filter(tenant=self.request.tenant)
+        queryset = PublicHoliday.objects.filter(tenant=self.request.tenant).select_related('created_by')
 
         # Filter by year
         year = self.request.query_params.get('year')

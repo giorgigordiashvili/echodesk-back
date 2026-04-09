@@ -34,6 +34,8 @@ class HelpCategoryListSerializer(serializers.ModelSerializer):
         return obj.get_description(lang)
 
     def get_article_count(self, obj):
+        if hasattr(obj, '_article_count'):
+            return obj._article_count
         return obj.articles.filter(is_active=True).count()
 
 
@@ -66,6 +68,8 @@ class HelpCategoryDetailSerializer(serializers.ModelSerializer):
         return obj.get_description(self._get_language())
 
     def get_article_count(self, obj):
+        if hasattr(obj, '_article_count'):
+            return obj._article_count
         return obj.articles.filter(is_active=True).count()
 
     def get_articles(self, obj):

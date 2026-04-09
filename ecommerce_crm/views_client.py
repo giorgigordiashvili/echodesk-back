@@ -682,7 +682,7 @@ class ClientFavoriteViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         """Return only favorites belonging to the authenticated client"""
-        return FavoriteProduct.objects.filter(client=self.request.user).select_related('product', 'client')
+        return FavoriteProduct.objects.filter(client=self.request.user).select_related('product', 'client').prefetch_related('product__images')
 
     def get_serializer_class(self):
         if self.action == 'create':
@@ -737,7 +737,7 @@ class ClientCartViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         """Return only carts belonging to the authenticated client"""
-        return Cart.objects.filter(client=self.request.user).select_related('client').prefetch_related('items', 'items__product')
+        return Cart.objects.filter(client=self.request.user).select_related('client', 'delivery_address').prefetch_related('items', 'items__product', 'items__product__images', 'items__variant')
 
     @extend_schema(
         tags=['Ecommerce Client - Cart'],
@@ -824,7 +824,7 @@ class ClientOrderViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         """Return only orders belonging to the authenticated client"""
-        return Order.objects.filter(client=self.request.user).select_related('client').prefetch_related('items', 'items__product')
+        return Order.objects.filter(client=self.request.user).select_related('client', 'delivery_address').prefetch_related('items', 'items__product', 'items__variant')
 
     def get_serializer_class(self):
         if self.action == 'create':
