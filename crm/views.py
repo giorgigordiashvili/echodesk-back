@@ -1,6 +1,7 @@
-from rest_framework import viewsets, permissions, status
+from rest_framework import viewsets, permissions, status, filters
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
+from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
 from datetime import timedelta
 from drf_spectacular.utils import extend_schema, OpenApiParameter
@@ -113,12 +114,17 @@ class SipConfigurationViewSet(viewsets.ModelViewSet):
 class CallLogViewSet(viewsets.ModelViewSet):
     """
     ViewSet for managing call logs with SIP integration.
-    
+
     Handles both inbound and outbound calls, call status updates, and call history.
     """
     serializer_class = CallLogSerializer
     permission_classes = [permissions.IsAuthenticated]
-    
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['status', 'direction', 'call_type']
+    search_fields = ['caller_number', 'recipient_number', 'notes', 'client__name']
+    ordering_fields = ['started_at', 'duration', 'status']
+    ordering = ['-started_at']
+
     def get_queryset(self):
         # Return calls for users in current tenant - use request.tenant instead of user.tenant
         # Use select_related to avoid N+1 queries when serializer accesses client and sip_configuration
