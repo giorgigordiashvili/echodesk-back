@@ -958,23 +958,45 @@ class BoardViewSet(viewsets.ModelViewSet):
     def kanban_board(self, request, pk=None):
         """Get kanban board data for a specific board."""
         board = self.get_object()
-        
+
         # Get columns for this board
-        columns = TicketColumn.objects.filter(board=board).order_by('position')
-        
+        columns = list(TicketColumn.objects.filter(board=board).order_by('position'))
+        column_ids = [column.id for column in columns]
+
+        # Fetch all board tickets in one query and eagerly load related objects
+        tickets = (
+            Ticket.objects.filter(column_id__in=column_ids)
+            .select_related('column', 'created_by', 'assigned_to', 'assigned_department')
+            .prefetch_related(
+                'assigned_users',
+                'ticketassignment_set__user',
+                'assigned_groups',
+                'tags',
+                'comments',
+                'checklist_items',
+                'payments',
+                'form_submissions',
+                'attachments',
+            )
+            .order_by('column_id', 'position_in_column')
+        )
+
+        tickets_by_column_map = {column_id: [] for column_id in column_ids}
+        for ticket in tickets:
+            tickets_by_column_map.setdefault(ticket.column_id, []).append(ticket)
+
         # Build response similar to existing kanban_board endpoint
         columns_data = []
         tickets_by_column = {}
-        
+
         for column in columns:
             column_serializer = TicketColumnSerializer(column, context={'request': request})
             columns_data.append(column_serializer.data)
-            
-            # Get tickets for this column
-            tickets = Ticket.objects.filter(column=column).order_by('position_in_column')
-            tickets_serializer = TicketListSerializer(tickets, many=True, context={'request': request})
+
+            column_tickets = tickets_by_column_map.get(column.id, [])
+            tickets_serializer = TicketListSerializer(column_tickets, many=True, context={'request': request})
             tickets_by_column[column.id] = tickets_serializer.data
-        
+
         return Response({
             'board': BoardSerializer(board, context={'request': request}).data,
             'columns': columns_data,
