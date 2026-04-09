@@ -656,7 +656,15 @@ class TeamChatConversationViewSet(viewsets.ModelViewSet):
     def with_user(self, request, user_id=None):
         """Get or create a conversation with a specific user"""
         try:
-            other_user = User.objects.get(id=user_id)
+            user_id_int = int(user_id)
+        except (TypeError, ValueError):
+            return Response(
+                {'error': 'Invalid user id'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            other_user = User.objects.get(id=user_id_int)
         except User.DoesNotExist:
             return Response(
                 {'error': 'User not found'},
