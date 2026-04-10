@@ -1069,6 +1069,26 @@ def call_rating_webhook(request):
 @api_view(['POST'])
 @permission_classes([])
 @csrf_exempt
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def extension_status(request):
+    """Proxy to PBX status API — returns which extensions are online."""
+    import requests as http_requests
+    try:
+        sip_config = SipConfiguration.objects.filter(is_default=True, is_active=True).first()
+        if not sip_config:
+            return Response({'extensions': []})
+
+        pbx_host = sip_config.sip_server
+        resp = http_requests.get(f'http://{pbx_host}:8081/api/extensions/status', timeout=3)
+        return Response(resp.json())
+    except Exception:
+        return Response({'extensions': []})
+
+
+@api_view(['POST'])
+@permission_classes([])
+@csrf_exempt
 def call_recording_url_webhook(request):
     """Save recording URL to the most recent call from a caller number."""
     try:
