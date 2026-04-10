@@ -1093,10 +1093,30 @@ def sync_imap_messages(connection, max_messages: int = 500) -> int:
         logger.info(f"Synced {total_new_count} total new emails for {connection.email_address}")
         return total_new_count
 
+    except imaplib.IMAP4.error as e:
+        error_text = str(e)
+        normalized_error = error_text.lower()
+
+        # Authentication failures are usually invalid/expired credentials on the mailbox side.
+        # Keep the sync loop alive and store the error on the connection instead of escalating
+        # this as an unhandled app error.
+        if 'authenticate failed' in normalized_error or 'authentication failed' in normalized_error:
+            logger.warning(
+                f"Email sync auth failed for {connection.email_address}: {error_text}"
+            )
+            connection.last_sync_error = error_text
+            connection.save(update_fields=['last_sync_error'])
+            return 0
+
+        logger.error(f"Email sync error for {connection.email_address}: {e}")
+        connection.last_sync_error = error_text
+        connection.save(update_fields=['last_sync_error'])
+        raise
+
     except Exception as e:
         logger.error(f"Email sync error for {connection.email_address}: {e}")
         connection.last_sync_error = str(e)
-        connection.save()
+        connection.save(update_fields=['last_sync_error'])
         raise
 
 
