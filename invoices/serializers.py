@@ -413,9 +413,13 @@ class ClientSerializer(serializers.Serializer):
         if hasattr(obj, 'custom_data') and obj.custom_data:
             # ListItem - check custom_data
             return obj.custom_data.get('phone', '')
-        elif hasattr(obj, 'phone'):
-            # EcommerceClient
-            return obj.phone
+
+        # EcommerceClient stores phone in `phone_number` (legacy instances may still have `phone`)
+        if hasattr(obj, 'phone_number'):
+            return obj.phone_number or ''
+        if hasattr(obj, 'phone'):
+            return obj.phone or ''
+
         return ''
 
 
