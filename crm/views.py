@@ -204,6 +204,17 @@ class CallLogViewSet(viewsets.ModelViewSet):
             metadata=metadata or {},
             user=user or self.request.user
         )
+
+    @staticmethod
+    def _match_client(phone_number):
+        """Match a phone number to a CRM client by last 7 digits"""
+        if not phone_number:
+            return None
+        clean = phone_number.replace('+', '').replace(' ', '').replace('-', '')
+        last_digits = clean[-7:] if len(clean) >= 7 else clean
+        if not last_digits:
+            return None
+        return Client.objects.filter(phone__endswith=last_digits).first()
     
     @extend_schema(
         summary="Initiate an outbound call",
@@ -245,15 +256,30 @@ class CallLogViewSet(viewsets.ModelViewSet):
                         status=status.HTTP_400_BAD_REQUEST
                     )
             
+            # Get caller number from user's phone assignment
+            caller_number = ""
+            assignment = UserPhoneAssignment.objects.filter(
+                user=request.user, is_active=True, is_primary=True
+            ).first()
+            if assignment:
+                caller_number = assignment.phone_number
+            elif sip_config.phone_number:
+                caller_number = sip_config.phone_number
+
+            # Auto-match client by recipient phone number
+            recipient_num = serializer.validated_data['recipient_number']
+            client = self._match_client(recipient_num)
+
             # Create call log
             call_log = CallLog.objects.create(
-                caller_number="",  # Will be filled by SIP server
-                recipient_number=serializer.validated_data['recipient_number'],
+                caller_number=caller_number,
+                recipient_number=recipient_num,
                 direction='outbound',
                 call_type=serializer.validated_data.get('call_type', 'voice'),
                 status='initiated',
                 handled_by=request.user,
                 sip_configuration=sip_config,
+                client=client,
                 started_at=timezone.now()
             )
             
@@ -305,6 +331,9 @@ class CallLogViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
+        # Auto-match client by caller phone number
+        client = self._match_client(caller_number)
+
         # Create call log for incoming call
         call_log = CallLog.objects.create(
             caller_number=caller_number,
@@ -315,6 +344,7 @@ class CallLogViewSet(viewsets.ModelViewSet):
             handled_by=request.user,
             sip_configuration=sip_config,
             sip_call_id=sip_call_id,
+            client=client,
             started_at=timezone.now()
         )
         
