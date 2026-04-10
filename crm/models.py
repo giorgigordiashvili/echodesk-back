@@ -190,6 +190,18 @@ class CallLog(models.Model):
         help_text="Associated client (auto-detected by phone number)"
     )
     
+    # Transfer tracking
+    transferred_to = models.CharField(max_length=30, blank=True, help_text="Number/extension the call was transferred to")
+    transferred_to_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='received_transfers',
+        help_text="User the call was transferred to"
+    )
+    transferred_at = models.DateTimeField(null=True, blank=True)
+
     # Recording and quality
     recording_url = models.URLField(blank=True, help_text="Call recording file URL")
     call_quality_score = models.FloatField(null=True, blank=True, help_text="Call quality (0-5)")

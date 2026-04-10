@@ -88,20 +88,22 @@ class CallLogSerializer(serializers.ModelSerializer):
     """Enhanced serializer for CallLog model with SIP support"""
     
     handled_by_name = serializers.SerializerMethodField()
+    transferred_to_user_name = serializers.SerializerMethodField()
     duration_display = serializers.SerializerMethodField()
     client_name = serializers.CharField(source='client.name', read_only=True)
     sip_config_name = serializers.CharField(source='sip_configuration.name', read_only=True)
-    
+
     class Meta:
         model = CallLog
         fields = [
-            'id', 'call_id', 'caller_number', 'recipient_number', 
-            'direction', 'call_type', 'started_at', 'answered_at', 
-            'ended_at', 'duration', 'duration_display', 'status', 
-            'notes', 'sip_call_id', 'client', 'client_name', 
-            'handled_by', 'handled_by_name', 'sip_configuration', 
+            'id', 'call_id', 'caller_number', 'recipient_number',
+            'direction', 'call_type', 'started_at', 'answered_at',
+            'ended_at', 'duration', 'duration_display', 'status',
+            'notes', 'sip_call_id', 'client', 'client_name',
+            'handled_by', 'handled_by_name', 'sip_configuration',
             'sip_config_name', 'recording_url', 'call_quality_score',
-            'created_at', 'updated_at'
+            'transferred_to', 'transferred_to_user', 'transferred_to_user_name',
+            'transferred_at', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'call_id', 'created_at', 'updated_at', 'client']
 
@@ -110,6 +112,12 @@ class CallLogSerializer(serializers.ModelSerializer):
         """Get the name of the user who handled the call"""
         if obj.handled_by:
             return f"{obj.handled_by.first_name} {obj.handled_by.last_name}".strip()
+        return None
+
+    @extend_schema_field(serializers.CharField)
+    def get_transferred_to_user_name(self, obj):
+        if obj.transferred_to_user:
+            return f"{obj.transferred_to_user.first_name} {obj.transferred_to_user.last_name}".strip()
         return None
 
     @extend_schema_field(serializers.CharField)
