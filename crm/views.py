@@ -9,12 +9,13 @@ from drf_spectacular.types import OpenApiTypes
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 
-from .models import CallLog, Client, SipConfiguration, CallEvent, CallRecording
+from .models import CallLog, Client, SipConfiguration, CallEvent, CallRecording, UserPhoneAssignment
 from .serializers import (
     CallLogSerializer, ClientSerializer, SipConfigurationSerializer,
     SipConfigurationListSerializer, SipConfigurationDetailSerializer,
     CallLogCreateSerializer, CallInitiateSerializer, CallStatusUpdateSerializer,
-    CallLogDetailSerializer, CallEventSerializer, CallRecordingSerializer
+    CallLogDetailSerializer, CallEventSerializer, CallRecordingSerializer,
+    UserPhoneAssignmentSerializer, UserPhoneAssignmentDetailSerializer
 )
 
 
@@ -109,6 +110,48 @@ class SipConfigurationViewSet(viewsets.ModelViewSet):
             'server': sip_config.sip_server,
             'port': sip_config.sip_port
         })
+
+    @action(detail=False, methods=['get'])
+    def my_config(self, request):
+        """Get the current user's phone assignment with full SIP config.
+        Returns the user's primary active assignment, or falls back to the default SIP config."""
+        assignment = UserPhoneAssignment.objects.filter(
+            user=request.user, is_active=True, is_primary=True
+        ).select_related('sip_configuration').first()
+
+        if assignment:
+            return Response(UserPhoneAssignmentDetailSerializer(assignment).data)
+
+        # Fallback: return default config without assignment
+        default_config = SipConfiguration.objects.filter(is_default=True, is_active=True).first()
+        if default_config:
+            return Response({
+                'id': None,
+                'user': request.user.id,
+                'sip_configuration': SipConfigurationDetailSerializer(default_config).data,
+                'extension': default_config.username,
+                'extension_password': default_config.password,
+                'phone_number': default_config.phone_number or '',
+                'display_name': '',
+                'is_primary': True,
+                'is_active': True,
+            })
+
+        return Response({'detail': 'No SIP configuration found'}, status=status.HTTP_404_NOT_FOUND)
+
+
+class UserPhoneAssignmentViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing user phone number assignments."""
+    serializer_class = UserPhoneAssignmentSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return UserPhoneAssignment.objects.select_related('user', 'sip_configuration').all()
+
+    def get_serializer_class(self):
+        if self.action == 'retrieve':
+            return UserPhoneAssignmentDetailSerializer
+        return UserPhoneAssignmentSerializer
 
 
 class CallLogViewSet(viewsets.ModelViewSet):

@@ -1,18 +1,55 @@
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
-from .models import CallLog, Client, SipConfiguration, CallEvent, CallRecording
+from .models import CallLog, Client, SipConfiguration, CallEvent, CallRecording, UserPhoneAssignment
+
+
+class UserPhoneAssignmentSerializer(serializers.ModelSerializer):
+    """Serializer for user phone number assignments"""
+    user_name = serializers.SerializerMethodField()
+    user_email = serializers.SerializerMethodField()
+
+    class Meta:
+        model = UserPhoneAssignment
+        fields = [
+            'id', 'user', 'user_name', 'user_email', 'sip_configuration',
+            'extension', 'extension_password', 'phone_number', 'display_name',
+            'is_primary', 'is_active', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def get_user_name(self, obj):
+        return obj.user.get_full_name() or obj.user.email
+
+    def get_user_email(self, obj):
+        return obj.user.email
+
+
+class UserPhoneAssignmentDetailSerializer(serializers.ModelSerializer):
+    """Detailed serializer including the full SIP config for the user's assignment"""
+    sip_configuration = serializers.SerializerMethodField()
+
+    class Meta:
+        model = UserPhoneAssignment
+        fields = [
+            'id', 'user', 'sip_configuration', 'extension', 'extension_password',
+            'phone_number', 'display_name', 'is_primary', 'is_active'
+        ]
+
+    def get_sip_configuration(self, obj):
+        return SipConfigurationDetailSerializer(obj.sip_configuration).data
 
 
 class SipConfigurationSerializer(serializers.ModelSerializer):
     """Serializer for SIP configuration management"""
+    user_assignments = UserPhoneAssignmentSerializer(many=True, read_only=True)
 
     class Meta:
         model = SipConfiguration
         fields = [
             'id', 'name', 'sip_server', 'sip_port', 'username', 'password',
-            'realm', 'proxy', 'websocket_path', 'stun_server', 'turn_server',
+            'realm', 'proxy', 'phone_number', 'websocket_path', 'stun_server', 'turn_server',
             'turn_username', 'turn_password', 'is_active', 'is_default',
-            'max_concurrent_calls', 'created_at', 'updated_at'
+            'max_concurrent_calls', 'created_at', 'updated_at', 'user_assignments'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
         extra_kwargs = {
@@ -26,22 +63,24 @@ class SipConfigurationSerializer(serializers.ModelSerializer):
 
 class SipConfigurationListSerializer(serializers.ModelSerializer):
     """Simplified serializer for listing SIP configurations"""
-    
+    assignment_count = serializers.IntegerField(read_only=True, default=0)
+
     class Meta:
         model = SipConfiguration
-        fields = ['id', 'name', 'sip_server', 'is_active', 'is_default']
+        fields = ['id', 'name', 'sip_server', 'phone_number', 'is_active', 'is_default', 'assignment_count']
 
 
 class SipConfigurationDetailSerializer(serializers.ModelSerializer):
     """Detailed serializer including sensitive fields for configuration"""
+    user_assignments = UserPhoneAssignmentSerializer(many=True, read_only=True)
 
     class Meta:
         model = SipConfiguration
         fields = [
             'id', 'name', 'sip_server', 'sip_port', 'username', 'password',
-            'realm', 'proxy', 'websocket_path', 'stun_server', 'turn_server',
+            'realm', 'proxy', 'phone_number', 'websocket_path', 'stun_server', 'turn_server',
             'turn_username', 'turn_password', 'is_active', 'is_default',
-            'max_concurrent_calls'
+            'max_concurrent_calls', 'user_assignments'
         ]
 
 

@@ -13,7 +13,8 @@ class SipConfiguration(models.Model):
     password = models.CharField(max_length=255, help_text="SIP password")
     realm = models.CharField(max_length=255, blank=True, help_text="SIP realm/domain")
     proxy = models.CharField(max_length=255, blank=True, help_text="Outbound proxy")
-    
+    phone_number = models.CharField(max_length=30, blank=True, help_text="Trunk phone number (e.g., +995322421219)")
+
     # WebRTC/STUN/TURN settings
     stun_server = models.CharField(
         max_length=255, 
@@ -54,6 +55,48 @@ class SipConfiguration(models.Model):
         # Ensure only one default configuration per tenant
         if self.is_default:
             SipConfiguration.objects.filter(is_default=True).exclude(id=self.id).update(is_default=False)
+        super().save(*args, **kwargs)
+
+
+class UserPhoneAssignment(models.Model):
+    """Assigns a PBX extension + phone number to a specific user"""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='phone_assignments',
+        help_text="User assigned to this phone number"
+    )
+    sip_configuration = models.ForeignKey(
+        SipConfiguration,
+        on_delete=models.CASCADE,
+        related_name='user_assignments',
+        help_text="The SIP trunk/server this extension belongs to"
+    )
+    extension = models.CharField(max_length=20, help_text="PBX extension number (e.g., 100)")
+    extension_password = models.CharField(max_length=255, help_text="PBX extension password")
+    phone_number = models.CharField(max_length=30, help_text="Display phone number (e.g., +995322421219)")
+    display_name = models.CharField(max_length=100, blank=True, help_text="Caller ID display name")
+    is_primary = models.BooleanField(default=True, help_text="Primary number for this user")
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-is_primary', 'extension']
+        unique_together = [
+            ('sip_configuration', 'extension'),  # Each extension unique per SIP config
+        ]
+
+    def __str__(self):
+        return f"{self.user} - ext {self.extension} ({self.phone_number})"
+
+    def save(self, *args, **kwargs):
+        # Ensure only one primary per user
+        if self.is_primary:
+            UserPhoneAssignment.objects.filter(
+                user=self.user, is_primary=True
+            ).exclude(id=self.id).update(is_primary=False)
         super().save(*args, **kwargs)
 
 
