@@ -962,3 +962,75 @@ def recording_webhook(request):
             {'error': f'Error processing recording webhook: {str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+
+@api_view(['POST'])
+@permission_classes([])
+@csrf_exempt
+def call_rating_webhook(request):
+    """
+    Webhook endpoint for receiving call ratings from PBX.
+    Called by Asterisk after the customer rates the call (1-5).
+    """
+    try:
+        data = request.data
+        caller_number = data.get('caller_number', '').strip()
+        rating = data.get('rating')
+
+        if not caller_number or not rating:
+            return Response(
+                {'error': 'caller_number and rating are required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            rating = int(rating)
+            if rating < 1 or rating > 5:
+                raise ValueError
+        except (ValueError, TypeError):
+            return Response(
+                {'error': 'rating must be an integer between 1 and 5'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Find the most recent inbound call from this number
+        # Match by last 7 digits to handle format differences
+        clean_number = caller_number.replace('+', '').replace(' ', '')
+        last_digits = clean_number[-7:] if len(clean_number) >= 7 else clean_number
+
+        call_log = CallLog.objects.filter(
+            direction='inbound',
+            caller_number__endswith=last_digits
+        ).order_by('-started_at').first()
+
+        if not call_log:
+            return Response(
+                {'error': f'No recent inbound call found from {caller_number}'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        call_log.call_quality_score = float(rating)
+        call_log.save(update_fields=['call_quality_score'])
+
+        # Log the rating event
+        CallEvent.objects.create(
+            call_log=call_log,
+            event_type='rating',
+            metadata={
+                'rating': rating,
+                'caller_number': caller_number,
+                'source': 'pbx_callback',
+            }
+        )
+
+        return Response({
+            'message': f'Rating {rating}/5 saved for call {call_log.call_id}',
+            'call_id': str(call_log.call_id),
+            'rating': rating,
+        })
+
+    except Exception as e:
+        return Response(
+            {'error': f'Error processing rating: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
