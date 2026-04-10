@@ -207,14 +207,37 @@ class CallLogViewSet(viewsets.ModelViewSet):
 
     @staticmethod
     def _match_client(phone_number):
-        """Match a phone number to a CRM client by last 7 digits"""
+        """Match a phone number to a CRM client or social client by last 7 digits"""
         if not phone_number:
             return None
         clean = phone_number.replace('+', '').replace(' ', '').replace('-', '')
         last_digits = clean[-7:] if len(clean) >= 7 else clean
         if not last_digits:
             return None
-        return Client.objects.filter(phone__endswith=last_digits).first()
+
+        # Try CRM Client first
+        client = Client.objects.filter(phone__endswith=last_digits).first()
+        if client:
+            return client
+
+        # Try SocialClient (social_integrations app)
+        try:
+            from social_integrations.models import SocialClient
+            social_client = SocialClient.objects.filter(phone__endswith=last_digits).first()
+            if social_client:
+                # Create or find a CRM Client linked to this social client
+                crm_client, _ = Client.objects.get_or_create(
+                    phone=phone_number,
+                    defaults={
+                        'name': social_client.name or f"{social_client.first_name} {social_client.last_name}".strip(),
+                        'email': social_client.email or f"social_{social_client.id}@placeholder.local",
+                    }
+                )
+                return crm_client
+        except Exception:
+            pass
+
+        return None
     
     @extend_schema(
         summary="Initiate an outbound call",
