@@ -1066,9 +1066,6 @@ def call_rating_webhook(request):
         )
 
 
-@api_view(['POST'])
-@permission_classes([])
-@csrf_exempt
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated])
 def extension_status(request):
