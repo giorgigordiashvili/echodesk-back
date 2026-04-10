@@ -182,12 +182,21 @@ class CallLog(models.Model):
         related_name='handled_calls'
     )
     client = models.ForeignKey(
-        Client, 
-        on_delete=models.SET_NULL, 
-        null=True, 
+        Client,
+        on_delete=models.SET_NULL,
+        null=True,
         blank=True,
         related_name='calls',
-        help_text="Associated client (auto-detected by phone number)"
+        help_text="Legacy CRM client (deprecated)"
+    )
+    social_client = models.ForeignKey(
+        'social_integrations.Client',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='calls',
+        db_constraint=False,
+        help_text="Associated social client (auto-detected by phone number)"
     )
     
     # Transfer tracking

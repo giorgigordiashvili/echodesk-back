@@ -90,7 +90,7 @@ class CallLogSerializer(serializers.ModelSerializer):
     handled_by_name = serializers.SerializerMethodField()
     transferred_to_user_name = serializers.SerializerMethodField()
     duration_display = serializers.SerializerMethodField()
-    client_name = serializers.CharField(source='client.name', read_only=True)
+    client_name = serializers.SerializerMethodField()
     sip_config_name = serializers.CharField(source='sip_configuration.name', read_only=True)
 
     class Meta:
@@ -99,13 +99,22 @@ class CallLogSerializer(serializers.ModelSerializer):
             'id', 'call_id', 'caller_number', 'recipient_number',
             'direction', 'call_type', 'started_at', 'answered_at',
             'ended_at', 'duration', 'duration_display', 'status',
-            'notes', 'sip_call_id', 'client', 'client_name',
+            'notes', 'sip_call_id', 'client', 'social_client', 'client_name',
             'handled_by', 'handled_by_name', 'sip_configuration',
             'sip_config_name', 'recording_url', 'call_quality_score',
             'transferred_to', 'transferred_to_user', 'transferred_to_user_name',
             'transferred_at', 'created_at', 'updated_at'
         ]
-        read_only_fields = ['id', 'call_id', 'created_at', 'updated_at', 'client']
+        read_only_fields = ['id', 'call_id', 'created_at', 'updated_at', 'client', 'social_client']
+
+    @extend_schema_field(serializers.CharField)
+    def get_client_name(self, obj):
+        """Get client name from social_client first, then CRM client"""
+        if obj.social_client:
+            return obj.social_client.name
+        if obj.client:
+            return obj.client.name
+        return None
 
     @extend_schema_field(serializers.CharField)
     def get_handled_by_name(self, obj):
