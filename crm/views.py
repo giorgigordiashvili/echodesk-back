@@ -1064,3 +1064,53 @@ def call_rating_webhook(request):
             {'error': f'Error processing rating: {str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+
+@api_view(['POST'])
+@permission_classes([])
+@csrf_exempt
+def call_recording_url_webhook(request):
+    """Save recording URL to the most recent call from a caller number."""
+    try:
+        data = request.data
+        caller_number = data.get('caller_number', '').strip()
+        recording_url = data.get('recording_url', '').strip()
+
+        if not caller_number or not recording_url:
+            return Response(
+                {'error': 'caller_number and recording_url are required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        clean_number = caller_number.replace('+', '').replace(' ', '')
+        last_digits = clean_number[-7:] if len(clean_number) >= 7 else clean_number
+
+        call_log = CallLog.objects.filter(
+            caller_number__endswith=last_digits
+        ).order_by('-started_at').first()
+
+        if not call_log:
+            # Also check recipient number for outbound calls
+            call_log = CallLog.objects.filter(
+                recipient_number__endswith=last_digits
+            ).order_by('-started_at').first()
+
+        if not call_log:
+            return Response(
+                {'error': f'No call found for {caller_number}'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        call_log.recording_url = recording_url
+        call_log.save(update_fields=['recording_url'])
+
+        return Response({
+            'message': f'Recording URL saved for call {call_log.call_id}',
+            'call_id': str(call_log.call_id),
+        })
+
+    except Exception as e:
+        return Response(
+            {'error': f'Error: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
