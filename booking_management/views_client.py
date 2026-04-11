@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.utils import timezone
 from django.db.models import Q, Prefetch
+from django.views.decorators.csrf import csrf_exempt
 from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter
 from .models import (
     Service, ServiceCategory, BookingStaff,
@@ -32,6 +33,19 @@ from .payment_service import get_booking_payment_service
 @permission_classes([permissions.AllowAny])
 def client_register(request):
     """Register new booking client"""
+    # Password strength validation
+    password = request.data.get('password', '')
+    if len(password) < 8:
+        return Response(
+            {'password': ['Password must be at least 8 characters long.']},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    if not any(c.isdigit() for c in password):
+        return Response(
+            {'password': ['Password must contain at least one number.']},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
     serializer = BookingClientRegistrationSerializer(data=request.data)
 
     if serializer.is_valid():
@@ -142,6 +156,24 @@ def client_password_reset_confirm(request):
 
     except Client.DoesNotExist:
         return Response({'error': 'Invalid token'}, status=status.HTTP_400_BAD_REQUEST)
+
+
+# ============================================================================
+# PAYMENT WEBHOOK
+# ============================================================================
+
+@csrf_exempt
+@api_view(['POST'])
+@permission_classes([])
+def payment_webhook(request):
+    """BOG payment gateway webhook"""
+    from .payment_service import get_booking_payment_service
+    try:
+        payment_service = get_booking_payment_service()
+        booking = payment_service.process_webhook(request.data)
+        return Response({'status': 'ok'})
+    except Exception as e:
+        return Response({'error': str(e)}, status=400)
 
 
 # ============================================================================
@@ -267,7 +299,9 @@ class ClientBookingStaffViewSet(viewsets.ReadOnlyModelViewSet):
     create=extend_schema(tags=['Booking Client - Bookings']),
     update=extend_schema(tags=['Booking Client - Bookings']),
     partial_update=extend_schema(tags=['Booking Client - Bookings']),
-    cancel=extend_schema(tags=['Booking Client - Bookings'])
+    cancel=extend_schema(tags=['Booking Client - Bookings']),
+    reschedule=extend_schema(tags=['Booking Client - Bookings']),
+    rate=extend_schema(tags=['Booking Client - Bookings'])
 )
 class ClientBookingViewSet(viewsets.ModelViewSet):
     """Manage client's own bookings"""
@@ -377,6 +411,96 @@ class ClientBookingViewSet(viewsets.ModelViewSet):
 
         serializer = BookingDetailSerializer(booking)
         return Response(serializer.data)
+
+    @action(detail=True, methods=['post'])
+    def reschedule(self, request, pk=None):
+        """Client reschedules their own booking"""
+        booking = self.get_object()
+
+        if booking.client != request.user:
+            return Response({'error': 'Not authorized'}, status=status.HTTP_403_FORBIDDEN)
+
+        if booking.status not in ['pending', 'confirmed']:
+            return Response({'error': 'Cannot reschedule this booking'}, status=status.HTTP_400_BAD_REQUEST)
+
+        new_date_str = request.data.get('date')
+        new_time_str = request.data.get('start_time')
+
+        if not new_date_str or not new_time_str:
+            return Response(
+                {'error': 'date and start_time are required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            from datetime import datetime, timedelta
+            new_date = datetime.strptime(new_date_str, '%Y-%m-%d').date()
+            new_time = datetime.strptime(new_time_str, '%H:%M').time()
+        except ValueError:
+            return Response(
+                {'error': 'Invalid date or time format. Use YYYY-MM-DD and HH:MM'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Validate availability
+        from .utils import validate_booking_availability
+        is_available, error_msg = validate_booking_availability(
+            booking.service,
+            booking.staff,
+            new_date,
+            new_time
+        )
+
+        if not is_available:
+            return Response({'error': error_msg}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Update booking
+        booking.date = new_date
+        booking.start_time = new_time
+        end_dt = datetime.combine(new_date, new_time) + timedelta(minutes=booking.service.total_duration_minutes)
+        booking.end_time = end_dt.time()
+        booking.save(update_fields=['date', 'start_time', 'end_time'])
+
+        return Response(BookingDetailSerializer(booking).data)
+
+    @action(detail=True, methods=['post'])
+    def rate(self, request, pk=None):
+        """Client rates a completed booking"""
+        booking = self.get_object()
+
+        if booking.client != request.user:
+            return Response({'error': 'Not authorized'}, status=status.HTTP_403_FORBIDDEN)
+
+        if booking.status != 'completed':
+            return Response({'error': 'Can only rate completed bookings'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if booking.rating is not None:
+            return Response({'error': 'This booking has already been rated'}, status=status.HTTP_400_BAD_REQUEST)
+
+        rating = request.data.get('rating')
+        review_text = request.data.get('review', '')
+
+        if rating is None:
+            return Response({'error': 'Rating is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            rating = int(rating)
+        except (ValueError, TypeError):
+            return Response({'error': 'Rating must be an integer'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if rating < 1 or rating > 5:
+            return Response({'error': 'Rating must be between 1 and 5'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Save rating to booking
+        booking.rating = rating
+        booking.review = review_text
+        booking.save(update_fields=['rating', 'review'])
+
+        # Update staff average rating
+        if booking.staff:
+            booking.staff.update_rating(rating)
+
+        return Response(BookingDetailSerializer(booking).data)
 
 
 @extend_schema_view(

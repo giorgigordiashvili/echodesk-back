@@ -9,6 +9,7 @@ from .views_client import (
     client_password_reset_request,
     client_password_reset_confirm,
     client_profile,
+    payment_webhook,
     ClientServiceCategoryViewSet,
     ClientServiceViewSet,
     ClientBookingStaffViewSet,
@@ -76,6 +77,11 @@ urlpatterns = [
     path('clients/password-reset/request/', client_password_reset_request, name='client-password-reset-request'),
     path('clients/password-reset/confirm/', client_password_reset_confirm, name='client-password-reset-confirm'),
     path('clients/profile/', client_profile, name='client-profile'),
+
+    # ========================================================================
+    # PAYMENT WEBHOOK (public, called by BOG gateway)
+    # ========================================================================
+    path('payment-webhook/', payment_webhook, name='payment-webhook'),
 
     # ========================================================================
     # CLIENT-FACING ENDPOINTS (requires BookingClient JWT)

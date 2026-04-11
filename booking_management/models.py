@@ -335,6 +335,13 @@ class Booking(models.Model):
     client_notes = models.TextField(blank=True, help_text="Notes from client")
     staff_notes = models.TextField(blank=True, help_text="Internal notes from staff")
 
+    # Rating/Feedback
+    rating = models.IntegerField(blank=True, null=True, validators=[MinValueValidator(1), MaxValueValidator(5)], help_text="Client rating (1-5)")
+    review = models.TextField(blank=True, help_text="Client review text")
+
+    # Reminders
+    reminder_sent = models.BooleanField(default=False, help_text="Whether reminder was sent")
+
     # Cancellation
     cancelled_at = models.DateTimeField(blank=True, null=True)
     cancelled_by = models.CharField(max_length=50, blank=True, choices=[('client', 'Client'), ('staff', 'Staff'), ('admin', 'Admin')])
@@ -520,7 +527,7 @@ class BookingSettings(models.Model):
     allow_card_payment = models.BooleanField(default=True, help_text="Allow card payment via BOG")
 
     # BOG Payment Gateway credentials (encrypted)
-    bog_client_id = models.CharField(max_length=255, blank=True)
+    _bog_client_id_encrypted = models.BinaryField(blank=True, null=True)
     _bog_client_secret_encrypted = models.BinaryField(blank=True, null=True)
     bog_use_production = models.BooleanField(default=False, help_text="Use production BOG API (vs test)")
 
@@ -547,6 +554,26 @@ class BookingSettings(models.Model):
         return f"Booking Settings for {self.tenant.schema_name}"
 
     @property
+    def bog_client_id(self):
+        """Decrypt and return BOG client ID"""
+        if not self._bog_client_id_encrypted:
+            return ''
+        try:
+            fernet = Fernet(settings.ENCRYPTION_KEY.encode())
+            return fernet.decrypt(self._bog_client_id_encrypted).decode()
+        except Exception:
+            return ''
+
+    @bog_client_id.setter
+    def bog_client_id(self, value):
+        """Encrypt and store BOG client ID"""
+        if value:
+            fernet = Fernet(settings.ENCRYPTION_KEY.encode())
+            self._bog_client_id_encrypted = fernet.encrypt(value.encode())
+        else:
+            self._bog_client_id_encrypted = None
+
+    @property
     def bog_client_secret(self):
         """Decrypt and return BOG client secret"""
         if not self._bog_client_secret_encrypted:
@@ -567,8 +594,11 @@ class BookingSettings(models.Model):
             self._bog_client_secret_encrypted = None
 
     def save(self, *args, **kwargs):
-        # Ensure encrypted secret is set if client_secret was assigned
+        # Ensure encrypted values are set if assigned via deferred attributes
         if hasattr(self, '_client_secret_to_encrypt'):
             self.bog_client_secret = self._client_secret_to_encrypt
             delattr(self, '_client_secret_to_encrypt')
+        if hasattr(self, '_client_id_to_encrypt'):
+            self.bog_client_id = self._client_id_to_encrypt
+            delattr(self, '_client_id_to_encrypt')
         super().save(*args, **kwargs)

@@ -579,6 +579,19 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'social_integrations.tasks.publish_approved_posts',
         'schedule': 300.0,  # every 5 minutes
     },
+    # Booking management tasks
+    'create-recurring-bookings': {
+        'task': 'booking_management.tasks.create_recurring_bookings',
+        'schedule': crontab(hour=0, minute=0),  # Daily at midnight
+    },
+    'send-booking-reminders': {
+        'task': 'booking_management.tasks.send_booking_reminders',
+        'schedule': crontab(hour=9, minute=0),  # Daily at 9 AM
+    },
+    'cancel-unpaid-bookings': {
+        'task': 'booking_management.tasks.cancel_unpaid_bookings',
+        'schedule': crontab(minute=0, hour='*/6'),  # Every 6 hours
+    },
 }
 
 # Bank of Georgia (BOG) Payment Gateway Configuration

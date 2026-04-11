@@ -419,6 +419,7 @@ class BookingDetailSerializer(serializers.ModelSerializer):
             'id', 'booking_number', 'client', 'service', 'staff', 'date', 'start_time', 'end_time',
             'status', 'payment_status', 'total_amount', 'deposit_amount', 'paid_amount', 'remaining_amount',
             'bog_order_id', 'payment_url', 'client_notes', 'staff_notes',
+            'rating', 'review',
             'cancelled_at', 'cancelled_by', 'cancellation_reason',
             'created_at', 'updated_at', 'confirmed_at', 'completed_at'
         ]
@@ -444,6 +445,7 @@ class BookingCreateSerializer(serializers.ModelSerializer):
 
         # Import here to avoid circular imports
         from .utils import validate_booking_availability
+        from datetime import datetime, timedelta
 
         try:
             service = Service.objects.get(id=service_id)
@@ -456,6 +458,35 @@ class BookingCreateSerializer(serializers.ModelSerializer):
                 staff = BookingStaff.objects.get(id=staff_id)
             except BookingStaff.DoesNotExist:
                 raise serializers.ValidationError({"staff_id": "Staff not found"})
+
+        # Date range validation from BookingSettings
+        try:
+            from django.db import connection
+            from tenants.models import Tenant
+            tenant = Tenant.objects.get(schema_name=connection.schema_name)
+            booking_settings = BookingSettings.objects.filter(tenant=tenant).first()
+        except Exception:
+            booking_settings = None
+
+        min_hours = booking_settings.min_hours_before_booking if booking_settings else 2
+        max_days = booking_settings.max_days_advance_booking if booking_settings else 60
+
+        # Check minimum hours before booking
+        now = timezone.now()
+        booking_datetime = datetime.combine(date, start_time)
+        booking_datetime = timezone.make_aware(booking_datetime) if timezone.is_naive(booking_datetime) else booking_datetime
+        min_allowed_datetime = now + timedelta(hours=min_hours)
+        if booking_datetime < min_allowed_datetime:
+            raise serializers.ValidationError(
+                {"date": f"Bookings must be made at least {min_hours} hours in advance."}
+            )
+
+        # Check maximum days in advance
+        max_allowed_date = now.date() + timedelta(days=max_days)
+        if date > max_allowed_date:
+            raise serializers.ValidationError(
+                {"date": f"Bookings cannot be made more than {max_days} days in advance."}
+            )
 
         # Validate availability
         is_available, error_message = validate_booking_availability(service, staff, date, start_time)
@@ -599,25 +630,39 @@ class RecurringBookingCreateSerializer(serializers.ModelSerializer):
 
 class BookingSettingsSerializer(serializers.ModelSerializer):
     """Serializer for BookingSettings"""
+    bog_client_id = serializers.CharField(write_only=True, required=False, allow_blank=True)
     bog_client_secret = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    has_bog_client_id = serializers.SerializerMethodField()
+    has_bog_client_secret = serializers.SerializerMethodField()
 
     class Meta:
         model = BookingSettings
         fields = [
             'id', 'payment_method', 'bank_name', 'bank_iban', 'bank_account_holder',
             'require_deposit', 'allow_cash_payment', 'allow_card_payment',
-            'bog_client_id', 'bog_client_secret', 'bog_use_production',
+            'bog_client_id', 'bog_client_secret', 'has_bog_client_id', 'has_bog_client_secret',
+            'bog_use_production',
             'cancellation_hours_before', 'refund_policy',
             'auto_confirm_on_deposit', 'auto_confirm_on_full_payment',
             'min_hours_before_booking', 'max_days_advance_booking'
         ]
         read_only_fields = ['id']
 
+    def get_has_bog_client_id(self, obj):
+        return bool(obj.bog_client_id)
+
+    def get_has_bog_client_secret(self, obj):
+        return bool(obj.bog_client_secret)
+
     def update(self, instance, validated_data):
+        bog_client_id = validated_data.pop('bog_client_id', None)
         bog_client_secret = validated_data.pop('bog_client_secret', None)
 
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
+
+        if bog_client_id is not None:
+            instance.bog_client_id = bog_client_id
 
         if bog_client_secret is not None:
             instance.bog_client_secret = bog_client_secret
