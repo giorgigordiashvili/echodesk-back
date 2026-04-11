@@ -476,7 +476,7 @@ class BookingCreateSerializer(serializers.ModelSerializer):
         # Calculate end time
         from datetime import datetime, timedelta
         start_datetime = datetime.combine(validated_data['date'], validated_data['start_time'])
-        end_datetime = start_datetime + timedelta(minutes=service.duration_minutes)
+        end_datetime = start_datetime + timedelta(minutes=service.total_duration_minutes)
         validated_data['end_time'] = end_datetime.time()
 
         # Set pricing

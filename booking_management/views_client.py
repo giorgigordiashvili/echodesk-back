@@ -296,24 +296,35 @@ class ClientBookingViewSet(viewsets.ModelViewSet):
         return BookingListSerializer
 
     def perform_create(self, serializer):
-        """Create booking and generate payment"""
-        booking = serializer.save(client=self.request.user)
+        """Create booking atomically and generate payment"""
+        from django.db import transaction
+        import logging
+        logger = logging.getLogger(__name__)
 
-        # Generate payment URL
+        with transaction.atomic():
+            # Re-validate slot availability inside the transaction to prevent double-booking
+            service = serializer.validated_data.get('service')
+            staff = serializer.validated_data.get('staff')
+            start_time = serializer.validated_data.get('start_time')
+            date = serializer.validated_data.get('date')
+
+            if service and start_time and date:
+                from .utils import is_slot_booked
+                if staff and is_slot_booked(staff, date, start_time, service.total_duration_minutes):
+                    from rest_framework.exceptions import ValidationError
+                    raise ValidationError({'error': 'This time slot was just booked. Please select another time.'})
+
+            booking = serializer.save(client=self.request.user)
+
+        # Generate payment URL (outside transaction — external API call)
         try:
             payment_service = get_booking_payment_service()
             callback_url = self.request.build_absolute_uri('/api/bookings/payment-webhook/')
-            payment_result = payment_service.create_booking_payment(booking, callback_url)
-
-            # Return booking with payment_url
-            return booking
-
+            payment_service.create_booking_payment(booking, callback_url)
         except Exception as e:
-            # If payment creation fails, still return booking
-            # but client won't have payment_url
-            import logging
-            logging.error(f"Failed to create payment for booking {booking.booking_number}: {str(e)}")
-            return booking
+            logger.error(f"Failed to create payment for booking {booking.booking_number}: {e}")
+
+        return booking
 
     def create(self, request, *args, **kwargs):
         """Override create to return payment info"""
@@ -336,13 +347,12 @@ class ClientBookingViewSet(viewsets.ModelViewSet):
         if booking.client != request.user:
             return Response({'error': 'Not authorized'}, status=status.HTTP_403_FORBIDDEN)
 
-        # Get settings
+        # Get settings using tenant from request
         from .models import BookingSettings
         try:
-            settings = BookingSettings.objects.get(tenant=booking.service.id)  # TODO: Fix tenant reference
-        except:
-            # Use default settings if not found
-            from .models import Tenant
+            settings = BookingSettings.objects.get(tenant=request.tenant)
+        except (BookingSettings.DoesNotExist, AttributeError):
+            from tenants.models import Tenant
             from django.db import connection
             tenant = Tenant.objects.get(schema_name=connection.schema_name)
             settings, _ = BookingSettings.objects.get_or_create(tenant=tenant)

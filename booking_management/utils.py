@@ -135,17 +135,28 @@ def generate_available_slots(service, date, staff=None, language='en'):
 
                     current_time = add_minutes_to_time(current_time, slot_interval)
 
-    # Remove duplicates (same time with different staff)
-    # For client view, group by time
-    seen_times = set()
-    unique_slots = []
+    # Group slots by time — include all available staff for each time
+    from collections import defaultdict
+    time_groups = defaultdict(list)
     for slot in available_slots:
         time_key = slot['start_time']
-        if time_key not in seen_times:
-            seen_times.add(time_key)
-            unique_slots.append(slot)
+        time_groups[time_key].append({
+            'staff_id': slot['staff_id'],
+            'staff_name': slot['staff_name'],
+        })
 
-    return sorted(unique_slots, key=lambda x: x['start_time'])
+    grouped_slots = []
+    for time_key in sorted(time_groups.keys()):
+        staff_list = time_groups[time_key]
+        grouped_slots.append({
+            'start_time': time_key,
+            'end_time': available_slots[0]['end_time'] if available_slots else '',
+            'staff_id': staff_list[0]['staff_id'],  # Primary staff
+            'staff_name': staff_list[0]['staff_name'],
+            'available_staff': staff_list,  # All available staff at this time
+        })
+
+    return grouped_slots
 
 
 def get_staff_availability(staff, date):

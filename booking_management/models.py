@@ -475,13 +475,16 @@ class RecurringBooking(models.Model):
         elif self.frequency == 'biweekly':
             return self.next_booking_date + timezone.timedelta(days=14)
         elif self.frequency == 'monthly':
-            # Add one month
+            # Add one month, handling month-end edge cases (e.g., Jan 31 → Feb 28)
+            import calendar
             next_month = self.next_booking_date.month + 1
             next_year = self.next_booking_date.year
             if next_month > 12:
                 next_month = 1
                 next_year += 1
-            return self.next_booking_date.replace(month=next_month, year=next_year)
+            max_day = calendar.monthrange(next_year, next_month)[1]
+            next_day = min(self.next_booking_date.day, max_day)
+            return self.next_booking_date.replace(year=next_year, month=next_month, day=next_day)
         return self.next_booking_date
 
 

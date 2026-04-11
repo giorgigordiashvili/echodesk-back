@@ -63,13 +63,19 @@ def dashboard_stats(request):
         date__lt=week_end
     ).exclude(status='cancelled')
 
-    # Revenue stats
+    # Revenue stats (exclude refunded and cancelled bookings)
     total_revenue = Booking.objects.filter(
         payment_status__in=['fully_paid', 'deposit_paid']
+    ).exclude(
+        status='cancelled'
+    ).exclude(
+        payment_status__in=['refunded', 'partially_refunded']
     ).aggregate(total=Sum('paid_amount'))['total'] or 0
 
     week_revenue = week_bookings.filter(
         payment_status__in=['fully_paid', 'deposit_paid']
+    ).exclude(
+        payment_status__in=['refunded', 'partially_refunded']
     ).aggregate(total=Sum('paid_amount'))['total'] or 0
 
     # Status breakdown
@@ -451,12 +457,20 @@ class AdminBookingViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def confirm(self, request, pk=None):
-        """Confirm booking"""
+        """Confirm booking — requires deposit or full payment unless force=true"""
         booking = self.get_object()
 
         if booking.status != 'pending':
             return Response(
                 {'error': f'Cannot confirm booking with status: {booking.status}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Check payment unless admin forces confirmation
+        force = request.data.get('force', False)
+        if not force and booking.payment_status not in ['deposit_paid', 'fully_paid']:
+            return Response(
+                {'error': 'Cannot confirm booking without payment. Use force=true to override.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -579,9 +593,11 @@ class AdminBookingViewSet(viewsets.ModelViewSet):
             return Response({'error': error_msg}, status=status.HTTP_400_BAD_REQUEST)
 
         # Update booking
+        from datetime import datetime, timedelta
         booking.date = new_date
         booking.start_time = new_time
-        booking.end_time = booking.service.get_end_time(new_time)
+        end_dt = datetime.combine(new_date, new_time) + timedelta(minutes=booking.service.total_duration_minutes)
+        booking.end_time = end_dt.time()
         booking.save(update_fields=['date', 'start_time', 'end_time'])
 
         # TODO: Send notification to client about reschedule
