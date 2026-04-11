@@ -312,6 +312,9 @@ class PbxSettingsSerializer(serializers.ModelSerializer):
     sound_voicemail_prompt_url = serializers.SerializerMethodField()
     sound_thank_you_url = serializers.SerializerMethodField()
     sound_transfer_hold_url = serializers.SerializerMethodField()
+    sound_review_prompt_url = serializers.SerializerMethodField()
+    sound_review_invalid_url = serializers.SerializerMethodField()
+    sound_review_thanks_url = serializers.SerializerMethodField()
 
     class Meta:
         model = PbxSettings
@@ -321,8 +324,10 @@ class PbxSettingsSerializer(serializers.ModelSerializer):
             'after_hours_action', 'forward_number', 'voicemail_enabled',
             'sound_greeting', 'sound_after_hours', 'sound_queue_hold',
             'sound_voicemail_prompt', 'sound_thank_you', 'sound_transfer_hold',
+            'sound_review_prompt', 'sound_review_invalid', 'sound_review_thanks',
             'sound_greeting_url', 'sound_after_hours_url', 'sound_queue_hold_url',
             'sound_voicemail_prompt_url', 'sound_thank_you_url', 'sound_transfer_hold_url',
+            'sound_review_prompt_url', 'sound_review_invalid_url', 'sound_review_thanks_url',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'sip_configuration', 'created_at', 'updated_at']
@@ -333,6 +338,9 @@ class PbxSettingsSerializer(serializers.ModelSerializer):
             'sound_voicemail_prompt': {'write_only': True, 'required': False},
             'sound_thank_you': {'write_only': True, 'required': False},
             'sound_transfer_hold': {'write_only': True, 'required': False},
+            'sound_review_prompt': {'write_only': True, 'required': False},
+            'sound_review_invalid': {'write_only': True, 'required': False},
+            'sound_review_thanks': {'write_only': True, 'required': False},
         }
 
     def _get_url(self, obj, field_name):
@@ -358,3 +366,12 @@ class PbxSettingsSerializer(serializers.ModelSerializer):
 
     def get_sound_transfer_hold_url(self, obj):
         return self._get_url(obj, 'sound_transfer_hold')
+
+    def get_sound_review_prompt_url(self, obj):
+        return self._get_url(obj, 'sound_review_prompt')
+
+    def get_sound_review_invalid_url(self, obj):
+        return self._get_url(obj, 'sound_review_invalid')
+
+    def get_sound_review_thanks_url(self, obj):
+        return self._get_url(obj, 'sound_review_thanks')

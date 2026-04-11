@@ -1197,6 +1197,7 @@ def pbx_settings_upload_sound(request, sip_config_id):
     valid_types = [
         'greeting', 'after_hours', 'queue_hold',
         'voicemail_prompt', 'thank_you', 'transfer_hold',
+        'review_prompt', 'review_invalid', 'review_thanks',
     ]
     if sound_type not in valid_types:
         return Response(
@@ -1240,6 +1241,7 @@ def pbx_settings_remove_sound(request, sip_config_id):
     valid_types = [
         'greeting', 'after_hours', 'queue_hold',
         'voicemail_prompt', 'thank_you', 'transfer_hold',
+        'review_prompt', 'review_invalid', 'review_thanks',
     ]
     if sound_type not in valid_types:
         return Response({'error': 'Invalid sound_type'}, status=status.HTTP_400_BAD_REQUEST)

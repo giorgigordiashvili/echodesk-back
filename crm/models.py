@@ -398,6 +398,18 @@ class PbxSettings(models.Model):
         upload_to=SanitizedUploadTo('pbx_sounds', date_based=False),
         blank=True, null=True, help_text="Transfer hold music"
     )
+    sound_review_prompt = models.FileField(
+        upload_to=SanitizedUploadTo('pbx_sounds', date_based=False),
+        blank=True, null=True, help_text="Post-call review prompt (rate 1-5)"
+    )
+    sound_review_invalid = models.FileField(
+        upload_to=SanitizedUploadTo('pbx_sounds', date_based=False),
+        blank=True, null=True, help_text="Invalid review input prompt"
+    )
+    sound_review_thanks = models.FileField(
+        upload_to=SanitizedUploadTo('pbx_sounds', date_based=False),
+        blank=True, null=True, help_text="Review thank you message"
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -439,6 +451,7 @@ class PbxSettings(models.Model):
         for field_name in [
             'sound_greeting', 'sound_after_hours', 'sound_queue_hold',
             'sound_voicemail_prompt', 'sound_thank_you', 'sound_transfer_hold',
+            'sound_review_prompt', 'sound_review_invalid', 'sound_review_thanks',
         ]:
             field_file = getattr(self, field_name)
             if field_file and field_file.name:
