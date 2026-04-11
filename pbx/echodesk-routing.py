@@ -69,7 +69,7 @@ def query_echodesk_api(did):
     api_url = os.environ.get('ECHODESK_API_URL', 'https://api.echodesk.ge')
     secret = os.environ.get('PBX_SHARED_SECRET', '')
 
-    url = f'{api_url}/api/crm/api/pbx/call-routing/'
+    url = f'{api_url}/api/pbx/call-routing/'
     headers = {}
     if secret:
         headers['Authorization'] = f'Bearer {secret}'
