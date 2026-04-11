@@ -356,6 +356,12 @@ class PbxSettings(models.Model):
         max_length=50, default='Asia/Tbilisi', help_text="Business timezone"
     )
 
+    # Holidays (override working hours as closed)
+    holidays = models.JSONField(
+        default=list, blank=True,
+        help_text='List of holiday objects: [{"date": "2026-01-01", "name": "New Year"}, ...]'
+    )
+
     # After-hours behaviour
     after_hours_action = models.CharField(
         max_length=20, choices=AFTER_HOURS_ACTIONS, default='announcement'
@@ -404,7 +410,7 @@ class PbxSettings(models.Model):
         return f"PBX Settings for {self.sip_configuration.name}"
 
     def is_working_hours_now(self):
-        """Check if current time falls within working hours."""
+        """Check if current time falls within working hours (holidays override as closed)."""
         if not self.working_hours_enabled or not self.working_hours_schedule:
             return True  # No restriction = always open
         from zoneinfo import ZoneInfo
@@ -414,6 +420,14 @@ class PbxSettings(models.Model):
         except Exception:
             return True
         local_dt = tz.now().astimezone(biz_tz)
+
+        # Check holidays first — if today is a holiday, it's closed
+        today_str = local_dt.strftime('%Y-%m-%d')
+        if self.holidays:
+            holiday_dates = [h.get('date') if isinstance(h, dict) else h for h in self.holidays]
+            if today_str in holiday_dates:
+                return False
+
         day_name = local_dt.strftime('%A').lower()
         current_hour = local_dt.hour
         day_hours = self.working_hours_schedule.get(day_name, [])

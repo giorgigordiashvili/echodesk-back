@@ -317,7 +317,7 @@ class PbxSettingsSerializer(serializers.ModelSerializer):
         model = PbxSettings
         fields = [
             'id', 'sip_configuration',
-            'working_hours_enabled', 'working_hours_schedule', 'timezone',
+            'working_hours_enabled', 'working_hours_schedule', 'timezone', 'holidays',
             'after_hours_action', 'forward_number', 'voicemail_enabled',
             'sound_greeting', 'sound_after_hours', 'sound_queue_hold',
             'sound_voicemail_prompt', 'sound_thank_you', 'sound_transfer_hold',
