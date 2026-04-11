@@ -1293,9 +1293,14 @@ def call_routing(request):
     for tenant in tenants:
         try:
             with schema_context(tenant.schema_name):
+                # Try matching by phone number first, then fall back to default config
                 sip_config = SipConfiguration.objects.filter(
                     phone_number__endswith=clean_did[-7:]
                 ).first()
+                if not sip_config:
+                    sip_config = SipConfiguration.objects.filter(is_default=True).first()
+                if not sip_config:
+                    sip_config = SipConfiguration.objects.first()
                 if not sip_config:
                     continue
 
