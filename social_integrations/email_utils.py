@@ -257,8 +257,13 @@ def get_imap_folders(connection) -> Dict:
                     folders.append(decode_imap_utf7(folder_name))
 
         return {'success': True, 'folders': folders}
+    except imaplib.IMAP4.error as e:
+        # Invalid credentials/OAuth tokens are common user-level failures.
+        # Keep this at warning level to avoid noisy Sentry alerts.
+        logger.warning(f"Failed to authenticate while getting IMAP folders: {e}")
+        return {'success': False, 'folders': [], 'error': 'IMAP authentication failed'}
     except Exception as e:
-        logger.error(f"Failed to get IMAP folders: {e}")
+        logger.error(f"Failed to get IMAP folders: {e}", exc_info=True)
         return {'success': False, 'folders': [], 'error': str(e)}
 
 
