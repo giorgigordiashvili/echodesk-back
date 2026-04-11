@@ -1,6 +1,6 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import CallLogViewSet, ClientViewSet, SipConfigurationViewSet, sip_webhook, recording_webhook
+from .views import CallLogViewSet, ClientViewSet, SipConfigurationViewSet, sip_webhook, recording_webhook, extension_status
 
 router = DefaultRouter()
 router.register(r'call-logs', CallLogViewSet, basename='call-logs')
@@ -11,4 +11,5 @@ urlpatterns = [
     path('api/', include(router.urls)),
     path('api/webhooks/sip/', sip_webhook, name='sip-webhook'),
     path('api/webhooks/recording/', recording_webhook, name='recording-webhook'),
+    path('api/extensions/status/', extension_status, name='extension-status'),
 ]
