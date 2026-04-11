@@ -1157,107 +1157,101 @@ def call_recording_url_webhook(request):
 # ============================================================================
 
 
-class PbxSettingsViewSet(viewsets.GenericViewSet):
-    """Manage PBX working hours and sounds for a SIP configuration."""
-    serializer_class = PbxSettingsSerializer
-    permission_classes = [permissions.IsAuthenticated]
+def _get_pbx_settings(sip_config_id):
+    sip_config = SipConfiguration.objects.get(id=sip_config_id)
+    settings_obj, _ = PbxSettings.objects.get_or_create(sip_configuration=sip_config)
+    return settings_obj
 
-    def _get_settings(self, sip_config_id):
-        sip_config = SipConfiguration.objects.get(id=sip_config_id)
-        settings_obj, _ = PbxSettings.objects.get_or_create(sip_configuration=sip_config)
-        return settings_obj
 
-    @action(detail=False, methods=['get'], url_path='(?P<sip_config_id>[0-9]+)')
-    def retrieve_settings(self, request, sip_config_id=None):
-        """Get PBX settings for a SIP configuration."""
-        try:
-            settings_obj = self._get_settings(sip_config_id)
-            return Response(PbxSettingsSerializer(settings_obj).data)
-        except SipConfiguration.DoesNotExist:
-            return Response({'error': 'SIP configuration not found'}, status=status.HTTP_404_NOT_FOUND)
+@api_view(['GET', 'PATCH'])
+@permission_classes([permissions.IsAuthenticated])
+def pbx_settings_detail(request, sip_config_id):
+    """Get or update PBX settings for a SIP configuration."""
+    try:
+        settings_obj = _get_pbx_settings(sip_config_id)
+    except SipConfiguration.DoesNotExist:
+        return Response({'error': 'SIP configuration not found'}, status=status.HTTP_404_NOT_FOUND)
 
-    @action(detail=False, methods=['patch'], url_path='(?P<sip_config_id>[0-9]+)/update')
-    def update_settings(self, request, sip_config_id=None):
-        """Update PBX settings (working hours, after-hours action, etc.)."""
-        try:
-            settings_obj = self._get_settings(sip_config_id)
-            serializer = PbxSettingsSerializer(settings_obj, data=request.data, partial=True)
-            serializer.is_valid(raise_exception=True)
-            serializer.save()
-            return Response(serializer.data)
-        except SipConfiguration.DoesNotExist:
-            return Response({'error': 'SIP configuration not found'}, status=status.HTTP_404_NOT_FOUND)
-
-    @action(detail=False, methods=['post'], url_path='(?P<sip_config_id>[0-9]+)/upload-sound')
-    def upload_sound(self, request, sip_config_id=None):
-        """Upload a sound file for a specific sound type."""
-        try:
-            settings_obj = self._get_settings(sip_config_id)
-        except SipConfiguration.DoesNotExist:
-            return Response({'error': 'SIP configuration not found'}, status=status.HTTP_404_NOT_FOUND)
-
-        sound_type = request.data.get('sound_type')
-        file = request.FILES.get('file')
-
-        valid_types = [
-            'greeting', 'after_hours', 'queue_hold',
-            'voicemail_prompt', 'thank_you', 'transfer_hold',
-        ]
-        if sound_type not in valid_types:
-            return Response(
-                {'error': f'Invalid sound_type. Must be one of: {", ".join(valid_types)}'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        if not file:
-            return Response({'error': 'No file provided'}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Validate file type
-        allowed_extensions = ('.wav', '.mp3', '.ogg')
-        if not file.name.lower().endswith(allowed_extensions):
-            return Response(
-                {'error': f'File must be {", ".join(allowed_extensions)}'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # 10MB limit
-        if file.size > 10 * 1024 * 1024:
-            return Response({'error': 'File size must be under 10MB'}, status=status.HTTP_400_BAD_REQUEST)
-
-        field_name = f'sound_{sound_type}'
-        # Delete old file if exists
-        old_file = getattr(settings_obj, field_name)
-        if old_file and old_file.name:
-            old_file.delete(save=False)
-
-        setattr(settings_obj, field_name, file)
-        settings_obj.save(update_fields=[field_name, 'updated_at'])
-
+    if request.method == 'GET':
         return Response(PbxSettingsSerializer(settings_obj).data)
 
-    @action(detail=False, methods=['post'], url_path='(?P<sip_config_id>[0-9]+)/remove-sound')
-    def remove_sound(self, request, sip_config_id=None):
-        """Remove a custom sound (revert to default)."""
-        try:
-            settings_obj = self._get_settings(sip_config_id)
-        except SipConfiguration.DoesNotExist:
-            return Response({'error': 'SIP configuration not found'}, status=status.HTTP_404_NOT_FOUND)
+    # PATCH
+    serializer = PbxSettingsSerializer(settings_obj, data=request.data, partial=True)
+    serializer.is_valid(raise_exception=True)
+    serializer.save()
+    return Response(serializer.data)
 
-        sound_type = request.data.get('sound_type')
-        valid_types = [
-            'greeting', 'after_hours', 'queue_hold',
-            'voicemail_prompt', 'thank_you', 'transfer_hold',
-        ]
-        if sound_type not in valid_types:
-            return Response({'error': 'Invalid sound_type'}, status=status.HTTP_400_BAD_REQUEST)
 
-        field_name = f'sound_{sound_type}'
-        old_file = getattr(settings_obj, field_name)
-        if old_file and old_file.name:
-            old_file.delete(save=False)
-        setattr(settings_obj, field_name, None)
-        settings_obj.save(update_fields=[field_name, 'updated_at'])
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def pbx_settings_upload_sound(request, sip_config_id):
+    """Upload a sound file for a specific sound type."""
+    try:
+        settings_obj = _get_pbx_settings(sip_config_id)
+    except SipConfiguration.DoesNotExist:
+        return Response({'error': 'SIP configuration not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        return Response(PbxSettingsSerializer(settings_obj).data)
+    sound_type = request.data.get('sound_type')
+    file = request.FILES.get('file')
+
+    valid_types = [
+        'greeting', 'after_hours', 'queue_hold',
+        'voicemail_prompt', 'thank_you', 'transfer_hold',
+    ]
+    if sound_type not in valid_types:
+        return Response(
+            {'error': f'Invalid sound_type. Must be one of: {", ".join(valid_types)}'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if not file:
+        return Response({'error': 'No file provided'}, status=status.HTTP_400_BAD_REQUEST)
+
+    allowed_extensions = ('.wav', '.mp3', '.ogg')
+    if not file.name.lower().endswith(allowed_extensions):
+        return Response(
+            {'error': f'File must be {", ".join(allowed_extensions)}'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if file.size > 10 * 1024 * 1024:
+        return Response({'error': 'File size must be under 10MB'}, status=status.HTTP_400_BAD_REQUEST)
+
+    field_name = f'sound_{sound_type}'
+    old_file = getattr(settings_obj, field_name)
+    if old_file and old_file.name:
+        old_file.delete(save=False)
+
+    setattr(settings_obj, field_name, file)
+    settings_obj.save(update_fields=[field_name, 'updated_at'])
+
+    return Response(PbxSettingsSerializer(settings_obj).data)
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def pbx_settings_remove_sound(request, sip_config_id):
+    """Remove a custom sound (revert to default)."""
+    try:
+        settings_obj = _get_pbx_settings(sip_config_id)
+    except SipConfiguration.DoesNotExist:
+        return Response({'error': 'SIP configuration not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    sound_type = request.data.get('sound_type')
+    valid_types = [
+        'greeting', 'after_hours', 'queue_hold',
+        'voicemail_prompt', 'thank_you', 'transfer_hold',
+    ]
+    if sound_type not in valid_types:
+        return Response({'error': 'Invalid sound_type'}, status=status.HTTP_400_BAD_REQUEST)
+
+    field_name = f'sound_{sound_type}'
+    old_file = getattr(settings_obj, field_name)
+    if old_file and old_file.name:
+        old_file.delete(save=False)
+    setattr(settings_obj, field_name, None)
+    settings_obj.save(update_fields=[field_name, 'updated_at'])
+
+    return Response(PbxSettingsSerializer(settings_obj).data)
 
 
 # ============================================================================
