@@ -8123,10 +8123,15 @@ def email_folders(request):
                     'folders': result['folders']
                 })
             else:
+                error_detail = result.get('error', 'Unknown error')
+                response_status = status.HTTP_500_INTERNAL_SERVER_ERROR
+                if error_detail == 'IMAP authentication failed':
+                    response_status = status.HTTP_400_BAD_REQUEST
+
                 return Response({
                     'error': 'Failed to get folders',
-                    'details': result.get('error', 'Unknown error')
-                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                    'details': error_detail
+                }, status=response_status)
         else:
             # Get folders for all active connections
             connections = EmailConnection.objects.filter(is_active=True)
