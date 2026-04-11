@@ -2,6 +2,8 @@ from django.db import models
 from django.conf import settings
 import uuid
 
+from amanati_crm.file_utils import SanitizedUploadTo
+
 
 class SipConfiguration(models.Model):
     """SIP configuration for tenant-specific calling"""
@@ -327,3 +329,106 @@ class CallRecording(models.Model):
     
     def __str__(self):
         return f"Recording for {self.call_log.call_id} ({self.status})"
+
+
+class PbxSettings(models.Model):
+    """PBX working hours and sound management per SIP configuration."""
+
+    AFTER_HOURS_ACTIONS = [
+        ('announcement', 'Play announcement'),
+        ('voicemail', 'Voicemail'),
+        ('forward', 'Forward to number'),
+    ]
+
+    sip_configuration = models.OneToOneField(
+        SipConfiguration, on_delete=models.CASCADE, related_name='pbx_settings'
+    )
+
+    # Working hours
+    working_hours_enabled = models.BooleanField(
+        default=False, help_text="Enforce working hours for incoming calls"
+    )
+    working_hours_schedule = models.JSONField(
+        default=dict, blank=True,
+        help_text='Hours when business is OPEN. Format: {"monday": [9,10,...,17], ...}'
+    )
+    timezone = models.CharField(
+        max_length=50, default='Asia/Tbilisi', help_text="Business timezone"
+    )
+
+    # After-hours behaviour
+    after_hours_action = models.CharField(
+        max_length=20, choices=AFTER_HOURS_ACTIONS, default='announcement'
+    )
+    forward_number = models.CharField(
+        max_length=30, blank=True, default='', help_text="Forward-to number"
+    )
+    voicemail_enabled = models.BooleanField(
+        default=False, help_text="Enable voicemail recording after hours"
+    )
+
+    # Sound files (uploaded to DO Spaces)
+    sound_greeting = models.FileField(
+        upload_to=SanitizedUploadTo('pbx_sounds', date_based=False),
+        blank=True, null=True, help_text="Welcome greeting during working hours"
+    )
+    sound_after_hours = models.FileField(
+        upload_to=SanitizedUploadTo('pbx_sounds', date_based=False),
+        blank=True, null=True, help_text="After-hours announcement"
+    )
+    sound_queue_hold = models.FileField(
+        upload_to=SanitizedUploadTo('pbx_sounds', date_based=False),
+        blank=True, null=True, help_text="Queue hold music"
+    )
+    sound_voicemail_prompt = models.FileField(
+        upload_to=SanitizedUploadTo('pbx_sounds', date_based=False),
+        blank=True, null=True, help_text="Voicemail prompt"
+    )
+    sound_thank_you = models.FileField(
+        upload_to=SanitizedUploadTo('pbx_sounds', date_based=False),
+        blank=True, null=True, help_text="Post-rating thank you"
+    )
+    sound_transfer_hold = models.FileField(
+        upload_to=SanitizedUploadTo('pbx_sounds', date_based=False),
+        blank=True, null=True, help_text="Transfer hold music"
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "PBX Settings"
+        verbose_name_plural = "PBX Settings"
+
+    def __str__(self):
+        return f"PBX Settings for {self.sip_configuration.name}"
+
+    def is_working_hours_now(self):
+        """Check if current time falls within working hours."""
+        if not self.working_hours_enabled or not self.working_hours_schedule:
+            return True  # No restriction = always open
+        from zoneinfo import ZoneInfo
+        from django.utils import timezone as tz
+        try:
+            biz_tz = ZoneInfo(self.timezone)
+        except Exception:
+            return True
+        local_dt = tz.now().astimezone(biz_tz)
+        day_name = local_dt.strftime('%A').lower()
+        current_hour = local_dt.hour
+        day_hours = self.working_hours_schedule.get(day_name, [])
+        return current_hour in day_hours
+
+    def get_sound_urls(self):
+        """Return dict of sound type → public URL (or None)."""
+        urls = {}
+        for field_name in [
+            'sound_greeting', 'sound_after_hours', 'sound_queue_hold',
+            'sound_voicemail_prompt', 'sound_thank_you', 'sound_transfer_hold',
+        ]:
+            field_file = getattr(self, field_name)
+            if field_file and field_file.name:
+                urls[field_name.replace('sound_', '')] = field_file.url
+            else:
+                urls[field_name.replace('sound_', '')] = None
+        return urls

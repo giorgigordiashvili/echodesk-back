@@ -9,13 +9,14 @@ from drf_spectacular.types import OpenApiTypes
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 
-from .models import CallLog, Client, SipConfiguration, CallEvent, CallRecording, UserPhoneAssignment
+from .models import CallLog, Client, SipConfiguration, CallEvent, CallRecording, UserPhoneAssignment, PbxSettings
 from .serializers import (
     CallLogSerializer, ClientSerializer, SipConfigurationSerializer,
     SipConfigurationListSerializer, SipConfigurationDetailSerializer,
     CallLogCreateSerializer, CallInitiateSerializer, CallStatusUpdateSerializer,
     CallLogDetailSerializer, CallEventSerializer, CallRecordingSerializer,
-    UserPhoneAssignmentSerializer, UserPhoneAssignmentDetailSerializer
+    UserPhoneAssignmentSerializer, UserPhoneAssignmentDetailSerializer,
+    PbxSettingsSerializer,
 )
 
 
@@ -1149,3 +1150,194 @@ def call_recording_url_webhook(request):
             {'error': f'Error: {str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+
+# ============================================================================
+# PBX SETTINGS (Working Hours + Sound Management)
+# ============================================================================
+
+
+class PbxSettingsViewSet(viewsets.GenericViewSet):
+    """Manage PBX working hours and sounds for a SIP configuration."""
+    serializer_class = PbxSettingsSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def _get_settings(self, sip_config_id):
+        sip_config = SipConfiguration.objects.get(id=sip_config_id)
+        settings_obj, _ = PbxSettings.objects.get_or_create(sip_configuration=sip_config)
+        return settings_obj
+
+    @action(detail=False, methods=['get'], url_path='(?P<sip_config_id>[0-9]+)')
+    def retrieve_settings(self, request, sip_config_id=None):
+        """Get PBX settings for a SIP configuration."""
+        try:
+            settings_obj = self._get_settings(sip_config_id)
+            return Response(PbxSettingsSerializer(settings_obj).data)
+        except SipConfiguration.DoesNotExist:
+            return Response({'error': 'SIP configuration not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    @action(detail=False, methods=['patch'], url_path='(?P<sip_config_id>[0-9]+)/update')
+    def update_settings(self, request, sip_config_id=None):
+        """Update PBX settings (working hours, after-hours action, etc.)."""
+        try:
+            settings_obj = self._get_settings(sip_config_id)
+            serializer = PbxSettingsSerializer(settings_obj, data=request.data, partial=True)
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            return Response(serializer.data)
+        except SipConfiguration.DoesNotExist:
+            return Response({'error': 'SIP configuration not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    @action(detail=False, methods=['post'], url_path='(?P<sip_config_id>[0-9]+)/upload-sound')
+    def upload_sound(self, request, sip_config_id=None):
+        """Upload a sound file for a specific sound type."""
+        try:
+            settings_obj = self._get_settings(sip_config_id)
+        except SipConfiguration.DoesNotExist:
+            return Response({'error': 'SIP configuration not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        sound_type = request.data.get('sound_type')
+        file = request.FILES.get('file')
+
+        valid_types = [
+            'greeting', 'after_hours', 'queue_hold',
+            'voicemail_prompt', 'thank_you', 'transfer_hold',
+        ]
+        if sound_type not in valid_types:
+            return Response(
+                {'error': f'Invalid sound_type. Must be one of: {", ".join(valid_types)}'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not file:
+            return Response({'error': 'No file provided'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Validate file type
+        allowed_extensions = ('.wav', '.mp3', '.ogg')
+        if not file.name.lower().endswith(allowed_extensions):
+            return Response(
+                {'error': f'File must be {", ".join(allowed_extensions)}'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # 10MB limit
+        if file.size > 10 * 1024 * 1024:
+            return Response({'error': 'File size must be under 10MB'}, status=status.HTTP_400_BAD_REQUEST)
+
+        field_name = f'sound_{sound_type}'
+        # Delete old file if exists
+        old_file = getattr(settings_obj, field_name)
+        if old_file and old_file.name:
+            old_file.delete(save=False)
+
+        setattr(settings_obj, field_name, file)
+        settings_obj.save(update_fields=[field_name, 'updated_at'])
+
+        return Response(PbxSettingsSerializer(settings_obj).data)
+
+    @action(detail=False, methods=['post'], url_path='(?P<sip_config_id>[0-9]+)/remove-sound')
+    def remove_sound(self, request, sip_config_id=None):
+        """Remove a custom sound (revert to default)."""
+        try:
+            settings_obj = self._get_settings(sip_config_id)
+        except SipConfiguration.DoesNotExist:
+            return Response({'error': 'SIP configuration not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        sound_type = request.data.get('sound_type')
+        valid_types = [
+            'greeting', 'after_hours', 'queue_hold',
+            'voicemail_prompt', 'thank_you', 'transfer_hold',
+        ]
+        if sound_type not in valid_types:
+            return Response({'error': 'Invalid sound_type'}, status=status.HTTP_400_BAD_REQUEST)
+
+        field_name = f'sound_{sound_type}'
+        old_file = getattr(settings_obj, field_name)
+        if old_file and old_file.name:
+            old_file.delete(save=False)
+        setattr(settings_obj, field_name, None)
+        settings_obj.save(update_fields=[field_name, 'updated_at'])
+
+        return Response(PbxSettingsSerializer(settings_obj).data)
+
+
+# ============================================================================
+# PBX CALL ROUTING API (called by Asterisk AGI)
+# ============================================================================
+
+
+@csrf_exempt
+@api_view(['GET'])
+@permission_classes([])
+def call_routing(request):
+    """
+    Lightweight endpoint for Asterisk to query on each incoming call.
+    Returns working hours status, routing action, and sound URLs.
+
+    Query params:
+        did: The DID/phone number that was called (e.g., +995322421219)
+
+    Auth: Bearer token via PBX_SHARED_SECRET env var.
+    """
+    from django.conf import settings as django_settings
+    from tenant_schemas.utils import schema_context
+    from tenants.models import Tenant
+
+    # Authenticate via shared secret
+    auth_header = request.META.get('HTTP_AUTHORIZATION', '')
+    expected_token = getattr(django_settings, 'PBX_SHARED_SECRET', '')
+    if expected_token and not auth_header.endswith(expected_token):
+        return Response({'error': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    did = request.GET.get('did', '').strip()
+    if not did:
+        return Response({'error': 'did parameter required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    clean_did = did.replace('+', '').replace(' ', '').replace('-', '')
+
+    # Search across all tenants for the SIP configuration with this phone number
+    tenants = Tenant.objects.exclude(schema_name='public')
+    for tenant in tenants:
+        try:
+            with schema_context(tenant.schema_name):
+                sip_config = SipConfiguration.objects.filter(
+                    phone_number__endswith=clean_did[-7:]
+                ).first()
+                if not sip_config:
+                    continue
+
+                pbx_settings, _ = PbxSettings.objects.get_or_create(
+                    sip_configuration=sip_config
+                )
+
+                is_working = pbx_settings.is_working_hours_now()
+                sound_urls = pbx_settings.get_sound_urls()
+
+                # Get active extensions
+                extensions = list(
+                    UserPhoneAssignment.objects.filter(
+                        sip_configuration=sip_config, is_active=True
+                    ).values_list('extension', flat=True)
+                )
+
+                response_data = {
+                    'is_working_hours': is_working,
+                    'action': 'queue' if is_working else 'after_hours',
+                    'sounds': sound_urls,
+                    'extensions': extensions,
+                    'voicemail_enabled': pbx_settings.voicemail_enabled,
+                    'after_hours_action': pbx_settings.after_hours_action,
+                    'forward_number': pbx_settings.forward_number if pbx_settings.after_hours_action == 'forward' else None,
+                }
+                return Response(response_data)
+        except Exception:
+            continue
+
+    # DID not found in any tenant — default to open
+    return Response({
+        'is_working_hours': True,
+        'action': 'queue',
+        'sounds': {},
+        'extensions': [],
+        'voicemail_enabled': False,
+        'after_hours_action': 'announcement',
+    })

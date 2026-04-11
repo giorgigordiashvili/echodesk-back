@@ -619,6 +619,9 @@ BOG_API_BASE_URL = config('BOG_API_BASE_URL', default='https://api.bog.ge/paymen
 # Cron Job Security Token (for scheduled task HTTP endpoints)
 CRON_SECRET_TOKEN = config('CRON_SECRET_TOKEN', default='')
 
+# PBX shared secret (Asterisk AGI authentication)
+PBX_SHARED_SECRET = config('PBX_SHARED_SECRET', default='')
+
 # Telegram Bot Configuration (for subscription notifications)
 TELEGRAM_BOT_TOKEN = config('TELEGRAM_BOT_TOKEN', default='')
 TELEGRAM_CHAT_ID = config('TELEGRAM_CHAT_ID', default='')

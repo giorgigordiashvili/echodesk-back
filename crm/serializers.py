@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
-from .models import CallLog, Client, SipConfiguration, CallEvent, CallRecording, UserPhoneAssignment
+from .models import CallLog, Client, SipConfiguration, CallEvent, CallRecording, UserPhoneAssignment, PbxSettings
 
 
 class UserPhoneAssignmentSerializer(serializers.ModelSerializer):
@@ -260,22 +260,22 @@ class CallRecordingSerializer(serializers.ModelSerializer):
 
 class CallLogDetailSerializer(serializers.ModelSerializer):
     """Detailed serializer for CallLog with events and recording"""
-    
+
     handled_by_name = serializers.SerializerMethodField()
     duration_display = serializers.SerializerMethodField()
     client_name = serializers.CharField(source='client.name', read_only=True)
     sip_config_name = serializers.CharField(source='sip_configuration.name', read_only=True)
     events = CallEventSerializer(many=True, read_only=True)
     recording = CallRecordingSerializer(read_only=True)
-    
+
     class Meta:
         model = CallLog
         fields = [
-            'id', 'call_id', 'caller_number', 'recipient_number', 
-            'direction', 'call_type', 'started_at', 'answered_at', 
-            'ended_at', 'duration', 'duration_display', 'status', 
-            'notes', 'sip_call_id', 'client', 'client_name', 
-            'handled_by', 'handled_by_name', 'sip_configuration', 
+            'id', 'call_id', 'caller_number', 'recipient_number',
+            'direction', 'call_type', 'started_at', 'answered_at',
+            'ended_at', 'duration', 'duration_display', 'status',
+            'notes', 'sip_call_id', 'client', 'client_name',
+            'handled_by', 'handled_by_name', 'sip_configuration',
             'sip_config_name', 'recording_url', 'call_quality_score',
             'created_at', 'updated_at', 'events', 'recording'
         ]
@@ -301,3 +301,60 @@ class CallLogDetailSerializer(serializers.ModelSerializer):
             else:
                 return f"{minutes}:{seconds:02d}"
         return None
+
+
+class PbxSettingsSerializer(serializers.ModelSerializer):
+    """Serializer for PBX working hours and sound management."""
+
+    sound_greeting_url = serializers.SerializerMethodField()
+    sound_after_hours_url = serializers.SerializerMethodField()
+    sound_queue_hold_url = serializers.SerializerMethodField()
+    sound_voicemail_prompt_url = serializers.SerializerMethodField()
+    sound_thank_you_url = serializers.SerializerMethodField()
+    sound_transfer_hold_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PbxSettings
+        fields = [
+            'id', 'sip_configuration',
+            'working_hours_enabled', 'working_hours_schedule', 'timezone',
+            'after_hours_action', 'forward_number', 'voicemail_enabled',
+            'sound_greeting', 'sound_after_hours', 'sound_queue_hold',
+            'sound_voicemail_prompt', 'sound_thank_you', 'sound_transfer_hold',
+            'sound_greeting_url', 'sound_after_hours_url', 'sound_queue_hold_url',
+            'sound_voicemail_prompt_url', 'sound_thank_you_url', 'sound_transfer_hold_url',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'sip_configuration', 'created_at', 'updated_at']
+        extra_kwargs = {
+            'sound_greeting': {'write_only': True, 'required': False},
+            'sound_after_hours': {'write_only': True, 'required': False},
+            'sound_queue_hold': {'write_only': True, 'required': False},
+            'sound_voicemail_prompt': {'write_only': True, 'required': False},
+            'sound_thank_you': {'write_only': True, 'required': False},
+            'sound_transfer_hold': {'write_only': True, 'required': False},
+        }
+
+    def _get_url(self, obj, field_name):
+        f = getattr(obj, field_name)
+        if f and f.name:
+            return f.url
+        return None
+
+    def get_sound_greeting_url(self, obj):
+        return self._get_url(obj, 'sound_greeting')
+
+    def get_sound_after_hours_url(self, obj):
+        return self._get_url(obj, 'sound_after_hours')
+
+    def get_sound_queue_hold_url(self, obj):
+        return self._get_url(obj, 'sound_queue_hold')
+
+    def get_sound_voicemail_prompt_url(self, obj):
+        return self._get_url(obj, 'sound_voicemail_prompt')
+
+    def get_sound_thank_you_url(self, obj):
+        return self._get_url(obj, 'sound_thank_you')
+
+    def get_sound_transfer_hold_url(self, obj):
+        return self._get_url(obj, 'sound_transfer_hold')
