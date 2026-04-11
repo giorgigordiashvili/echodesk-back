@@ -913,3 +913,26 @@ def recording_webhook(request):
             {'error': f'Error processing recording webhook: {str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def extension_status(request):
+    """Proxy PBX extension online/offline statuses."""
+    import requests as http_requests
+
+    try:
+        sip_config = SipConfiguration.objects.filter(is_default=True, is_active=True).first()
+        if not sip_config:
+            return Response({'extensions': []})
+
+        pbx_host = sip_config.sip_server
+        response = http_requests.get(f'http://{pbx_host}:8081/api/extensions/status', timeout=3)
+        response.raise_for_status()
+
+        payload = response.json()
+        if isinstance(payload, dict):
+            return Response(payload)
+        return Response({'extensions': payload})
+    except Exception:
+        return Response({'extensions': []})
