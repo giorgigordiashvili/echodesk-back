@@ -1,7 +1,11 @@
+import logging
 from datetime import datetime, timedelta, date
 from decimal import Decimal
+from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
+
+logger = logging.getLogger(__name__)
 
 
 def calculate_working_days(start_date, end_date, tenant, exclude_public_holidays=True):
@@ -23,9 +27,11 @@ def calculate_working_days(start_date, end_date, tenant, exclude_public_holidays
 
     # Get weekend days from settings (default: Saturday=5, Sunday=6)
     try:
-        leave_settings = tenant.leave_settings
+        from .models import LeaveSettings
+        leave_settings = LeaveSettings.objects.get(tenant=tenant)
         weekend_days = leave_settings.weekend_days if leave_settings.weekend_days else [5, 6]
-    except:
+    except Exception as e:
+        logger.debug(f"No leave settings for tenant, using default weekends: {e}")
         weekend_days = [5, 6]  # Default to Sat/Sun
 
     # Get public holidays in date range
@@ -112,43 +118,44 @@ def check_leave_balance(user, leave_type, days, year, tenant):
 
 def update_leave_balance(leave_request, action='approve'):
     """
-    Update leave balance after approval, rejection, or cancellation
+    Update leave balance after approval, rejection, or cancellation.
+    Uses select_for_update to prevent race conditions.
 
     Args:
         leave_request: LeaveRequest object
-        action: 'approve', 'reject', or 'cancel'
+        action: 'pending', 'approve', 'reject', 'cancel', or 'cancel_approved'
     """
     from .models import LeaveBalance
 
     year = leave_request.start_date.year
 
-    # Get or create balance
-    balance, created = LeaveBalance.objects.get_or_create(
-        tenant=leave_request.tenant,
-        user=leave_request.employee,
-        leave_type=leave_request.leave_type,
-        year=year,
-        defaults={
-            'allocated_days': leave_request.leave_type.default_days_per_year
-        }
-    )
+    with transaction.atomic():
+        # Get or create balance with row lock
+        balance, created = LeaveBalance.objects.select_for_update().get_or_create(
+            tenant=leave_request.tenant,
+            user=leave_request.employee,
+            leave_type=leave_request.leave_type,
+            year=year,
+            defaults={
+                'allocated_days': leave_request.leave_type.default_days_per_year
+            }
+        )
 
-    if action == 'approve':
-        # Move from pending to used
-        balance.pending_days = max(Decimal('0'), balance.pending_days - leave_request.total_days)
-        balance.used_days += leave_request.total_days
-    elif action in ['reject', 'cancel']:
-        # Remove from pending
-        balance.pending_days = max(Decimal('0'), balance.pending_days - leave_request.total_days)
-    elif action == 'pending':
-        # Add to pending
-        balance.pending_days += leave_request.total_days
-    elif action == 'unapprove':
-        # Move from used back to pending (if leave was unapproved)
-        balance.used_days = max(Decimal('0'), balance.used_days - leave_request.total_days)
-        balance.pending_days += leave_request.total_days
+        if action == 'pending':
+            # New request submitted — add to pending
+            balance.pending_days += leave_request.total_days
+        elif action == 'approve':
+            # Move from pending to used
+            balance.pending_days = max(Decimal('0'), balance.pending_days - leave_request.total_days)
+            balance.used_days += leave_request.total_days
+        elif action in ['reject', 'cancel']:
+            # Remove from pending (request was pending, not yet approved)
+            balance.pending_days = max(Decimal('0'), balance.pending_days - leave_request.total_days)
+        elif action == 'cancel_approved':
+            # Cancel an already-approved leave — return used days
+            balance.used_days = max(Decimal('0'), balance.used_days - leave_request.total_days)
 
-    balance.save()
+        balance.save()
 
 
 def check_overlapping_leaves(employee, start_date, end_date, tenant, exclude_request_id=None):

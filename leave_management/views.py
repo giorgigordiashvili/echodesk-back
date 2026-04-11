@@ -304,41 +304,53 @@ class AdminLeaveRequestViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated, HasLeaveManagementFeature, CanApproveLeave])
     def approve(self, request, pk=None):
         """Approve a leave request"""
+        from .utils import get_next_approver_role
+        from django.db import transaction
+
         leave_request = self.get_object()
+
+        if leave_request.status not in ['pending', 'manager_approved', 'hr_approved']:
+            return Response(
+                {'error': 'Only pending or partially approved requests can be approved'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         serializer = LeaveApprovalSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-
         comments = serializer.validated_data.get('comments', '')
 
-        # Determine approval level based on current status
-        if leave_request.status == 'pending':
-            leave_request.manager_approver = request.user
-            leave_request.manager_approved_at = timezone.now()
-            leave_request.manager_comments = comments
-            leave_request.status = 'manager_approved'
-        elif leave_request.status == 'manager_approved':
-            leave_request.hr_approver = request.user
-            leave_request.hr_approved_at = timezone.now()
-            leave_request.hr_comments = comments
-            leave_request.status = 'hr_approved'
-        elif leave_request.status == 'hr_approved':
-            leave_request.final_approver = request.user
-            leave_request.final_approved_at = timezone.now()
-            leave_request.status = 'approved'
-
-        # Check if this is final approval
-        from .utils import get_next_approver_role
+        # Determine next required role BEFORE changing status
         next_role = get_next_approver_role(leave_request)
 
-        if not next_role:
-            leave_request.status = 'approved'
-            leave_request.final_approver = request.user
-            leave_request.final_approved_at = timezone.now()
-            # Update balance from pending to used
-            update_leave_balance(leave_request, action='approve')
+        with transaction.atomic():
+            # Apply approval based on current status
+            if leave_request.status == 'pending':
+                leave_request.manager_approver = request.user
+                leave_request.manager_approved_at = timezone.now()
+                leave_request.manager_comments = comments
+                leave_request.status = 'manager_approved'
+            elif leave_request.status == 'manager_approved':
+                leave_request.hr_approver = request.user
+                leave_request.hr_approved_at = timezone.now()
+                leave_request.hr_comments = comments
+                leave_request.status = 'hr_approved'
+            elif leave_request.status == 'hr_approved':
+                leave_request.final_approver = request.user
+                leave_request.final_approved_at = timezone.now()
+                leave_request.status = 'approved'
 
-        leave_request.save()
+            # Check if there are more approval steps needed
+            next_role_after = get_next_approver_role(leave_request)
+
+            if not next_role_after:
+                # Final approval — set status to approved and update balance
+                leave_request.status = 'approved'
+                if not leave_request.final_approver:
+                    leave_request.final_approver = request.user
+                    leave_request.final_approved_at = timezone.now()
+                update_leave_balance(leave_request, action='approve')
+
+            leave_request.save()
 
         return Response({
             'success': True,
@@ -365,14 +377,16 @@ class AdminLeaveRequestViewSet(viewsets.ModelViewSet):
         serializer = LeaveApprovalSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        leave_request.status = 'rejected'
-        leave_request.rejected_by = request.user
-        leave_request.rejected_at = timezone.now()
-        leave_request.rejection_reason = serializer.validated_data.get('comments', '')
-        leave_request.save()
+        from django.db import transaction
+        with transaction.atomic():
+            leave_request.status = 'rejected'
+            leave_request.rejected_by = request.user
+            leave_request.rejected_at = timezone.now()
+            leave_request.rejection_reason = serializer.validated_data.get('comments', '')
+            leave_request.save()
 
-        # Remove from pending balance
-        update_leave_balance(leave_request, action='reject')
+            # Remove from pending balance
+            update_leave_balance(leave_request, action='reject')
 
         return Response({
             'success': True,
@@ -400,18 +414,20 @@ class AdminLeaveRequestViewSet(viewsets.ModelViewSet):
 
         was_approved = leave_request.status == 'approved'
 
-        leave_request.status = 'cancelled'
-        leave_request.cancelled_at = timezone.now()
-        leave_request.cancellation_reason = serializer.validated_data.get('reason', '')
-        leave_request.save()
+        from django.db import transaction
+        with transaction.atomic():
+            leave_request.status = 'cancelled'
+            leave_request.cancelled_at = timezone.now()
+            leave_request.cancellation_reason = serializer.validated_data.get('reason', '')
+            leave_request.save()
 
-        # Update balance
-        if was_approved:
-            # Return used days back
-            update_leave_balance(leave_request, action='cancel')
-        else:
-            # Remove from pending
-            update_leave_balance(leave_request, action='cancel')
+            # Update balance based on previous status
+            if was_approved:
+                # Return used days back
+                update_leave_balance(leave_request, action='cancel_approved')
+            else:
+                # Remove from pending
+                update_leave_balance(leave_request, action='cancel')
 
         return Response({
             'success': True,
