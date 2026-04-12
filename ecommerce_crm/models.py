@@ -989,14 +989,24 @@ class EcommerceSettings(models.Model):
     )
 
     # Payment provider for ecommerce orders
+    PAYMENT_PROVIDER_CHOICES = [
+        ('bog', 'Bank of Georgia'),
+        ('tbc', 'TBC Bank'),
+        ('flitt', 'Flitt'),
+        ('paddle', 'Paddle'),
+    ]
     ecommerce_payment_provider = models.CharField(
         max_length=20,
-        choices=[
-            ('bog', 'Bank of Georgia'),
-            ('paddle', 'Paddle'),
-        ],
+        choices=PAYMENT_PROVIDER_CHOICES,
         default='bog',
         help_text='Payment provider used for ecommerce orders'
+    )
+
+    # Active payment providers (JSON list)
+    active_payment_providers = models.JSONField(
+        default=list,
+        blank=True,
+        help_text='Active provider keys: ["bog","tbc","flitt","paddle","cash"]'
     )
 
     # BOG Payment Gateway Settings
@@ -1019,6 +1029,42 @@ class EcommerceSettings(models.Model):
         max_length=500,
         blank=True,
         help_text="URL to redirect after failed payment (e.g., https://yourstore.com/payment/fail)"
+    )
+
+    # TBC Bank Payment Gateway Settings
+    tbc_client_id = models.CharField(
+        max_length=255,
+        blank=True,
+        default='',
+        help_text="TBC Bank Client ID"
+    )
+    tbc_client_secret_encrypted = models.BinaryField(
+        blank=True,
+        null=True,
+        help_text="Encrypted TBC Bank Client Secret"
+    )
+    tbc_api_key = models.CharField(
+        max_length=255,
+        blank=True,
+        default='',
+        help_text="TBC Bank API Key"
+    )
+    tbc_use_production = models.BooleanField(
+        default=False,
+        help_text="Use TBC production environment (unchecked = sandbox)"
+    )
+
+    # Flitt (formerly Fondy) Payment Gateway Settings
+    flitt_merchant_id = models.CharField(
+        max_length=255,
+        blank=True,
+        default='',
+        help_text="Flitt Merchant ID"
+    )
+    flitt_password_encrypted = models.BinaryField(
+        blank=True,
+        null=True,
+        help_text="Encrypted Flitt Merchant Password"
     )
 
     # Payment settings
@@ -1188,6 +1234,62 @@ class EcommerceSettings(models.Model):
     def has_bog_credentials(self) -> bool:
         """Check if BOG credentials are configured"""
         return bool(self.bog_client_id and self.bog_client_secret_encrypted)
+
+    # --- TBC Bank encryption helpers ---
+
+    def set_tbc_secret(self, secret: str):
+        """Encrypt and store TBC Bank client secret"""
+        from cryptography.fernet import Fernet
+        from django.conf import settings
+
+        key = settings.SECRET_KEY[:32].encode().ljust(32, b'0')
+        fernet = Fernet(base64.urlsafe_b64encode(key))
+        self.tbc_client_secret_encrypted = fernet.encrypt(secret.encode())
+
+    def get_tbc_secret(self) -> str:
+        """Decrypt and return TBC Bank client secret"""
+        if not self.tbc_client_secret_encrypted:
+            return ''
+
+        from cryptography.fernet import Fernet
+        from django.conf import settings
+
+        key = settings.SECRET_KEY[:32].encode().ljust(32, b'0')
+        fernet = Fernet(base64.urlsafe_b64encode(key))
+        return fernet.decrypt(bytes(self.tbc_client_secret_encrypted)).decode()
+
+    @property
+    def has_tbc_credentials(self) -> bool:
+        """Check if TBC Bank credentials are configured"""
+        return bool(self.tbc_client_id and self.tbc_client_secret_encrypted and self.tbc_api_key)
+
+    # --- Flitt encryption helpers ---
+
+    def set_flitt_password(self, password: str):
+        """Encrypt and store Flitt merchant password"""
+        from cryptography.fernet import Fernet
+        from django.conf import settings
+
+        key = settings.SECRET_KEY[:32].encode().ljust(32, b'0')
+        fernet = Fernet(base64.urlsafe_b64encode(key))
+        self.flitt_password_encrypted = fernet.encrypt(password.encode())
+
+    def get_flitt_password(self) -> str:
+        """Decrypt and return Flitt merchant password"""
+        if not self.flitt_password_encrypted:
+            return ''
+
+        from cryptography.fernet import Fernet
+        from django.conf import settings
+
+        key = settings.SECRET_KEY[:32].encode().ljust(32, b'0')
+        fernet = Fernet(base64.urlsafe_b64encode(key))
+        return fernet.decrypt(bytes(self.flitt_password_encrypted)).decode()
+
+    @property
+    def has_flitt_credentials(self) -> bool:
+        """Check if Flitt credentials are configured"""
+        return bool(self.flitt_merchant_id and self.flitt_password_encrypted)
 
 
 class PasswordResetToken(models.Model):

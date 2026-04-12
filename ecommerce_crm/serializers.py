@@ -612,18 +612,47 @@ class OrderSerializer(serializers.ModelSerializer):
 
 class EcommerceSettingsSerializer(serializers.ModelSerializer):
     """Serializer for ecommerce settings"""
+    # BOG secret (write-only)
     bog_client_secret = serializers.CharField(
         write_only=True,
         required=False,
         allow_blank=True,
         help_text="BOG client secret (write-only, will be encrypted)"
     )
+    has_bog_credentials = serializers.BooleanField(read_only=True)
+
+    # TBC secret (write-only)
+    tbc_client_secret = serializers.CharField(
+        write_only=True,
+        required=False,
+        allow_blank=True,
+        help_text="TBC Bank client secret (write-only, will be encrypted)"
+    )
+    has_tbc_credentials = serializers.BooleanField(read_only=True)
+
+    # Flitt password (write-only)
+    flitt_password = serializers.CharField(
+        write_only=True,
+        required=False,
+        allow_blank=True,
+        help_text="Flitt merchant password (write-only, will be encrypted)"
+    )
+    has_flitt_credentials = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = EcommerceSettings
         fields = [
-            'id', 'tenant', 'bog_client_id', 'bog_client_secret',
+            'id', 'tenant',
+            'ecommerce_payment_provider', 'active_payment_providers',
+            # BOG fields
+            'bog_client_id', 'bog_client_secret', 'has_bog_credentials',
             'bog_return_url_success', 'bog_return_url_fail',
+            # TBC fields
+            'tbc_client_id', 'tbc_client_secret', 'tbc_api_key', 'tbc_use_production',
+            'has_tbc_credentials',
+            # Flitt fields
+            'flitt_merchant_id', 'flitt_password', 'has_flitt_credentials',
+            # Payment settings
             'enable_cash_on_delivery', 'enable_card_payment',
             'store_name', 'store_email', 'store_phone',
             'ecommerce_frontend_url', 'deployment_status', 'vercel_project_id', 'custom_domain',
@@ -634,24 +663,57 @@ class EcommerceSettingsSerializer(serializers.ModelSerializer):
             'theme_border_radius', 'theme_card_color', 'theme_card_foreground_color',
             'created_at', 'updated_at'
         ]
-        read_only_fields = ['id', 'tenant', 'ecommerce_frontend_url', 'deployment_status', 'vercel_project_id', 'custom_domain', 'created_at', 'updated_at']
+        read_only_fields = [
+            'id', 'tenant', 'ecommerce_frontend_url', 'deployment_status',
+            'vercel_project_id', 'custom_domain',
+            'has_bog_credentials', 'has_tbc_credentials', 'has_flitt_credentials',
+            'created_at', 'updated_at',
+        ]
 
     def create(self, validated_data):
-        # Handle encrypted secret
+        # Handle encrypted secrets
         bog_secret = validated_data.pop('bog_client_secret', None)
+        tbc_secret = validated_data.pop('tbc_client_secret', None)
+        flitt_password = validated_data.pop('flitt_password', None)
+
         instance = super().create(validated_data)
+
+        needs_save = False
         if bog_secret:
             instance.set_bog_secret(bog_secret)
+            needs_save = True
+        if tbc_secret:
+            instance.set_tbc_secret(tbc_secret)
+            needs_save = True
+        if flitt_password:
+            instance.set_flitt_password(flitt_password)
+            needs_save = True
+        if needs_save:
             instance.save()
+
         return instance
 
     def update(self, instance, validated_data):
-        # Handle encrypted secret
+        # Handle encrypted secrets
         bog_secret = validated_data.pop('bog_client_secret', None)
+        tbc_secret = validated_data.pop('tbc_client_secret', None)
+        flitt_password = validated_data.pop('flitt_password', None)
+
         instance = super().update(instance, validated_data)
+
+        needs_save = False
         if bog_secret:
             instance.set_bog_secret(bog_secret)
+            needs_save = True
+        if tbc_secret:
+            instance.set_tbc_secret(tbc_secret)
+            needs_save = True
+        if flitt_password:
+            instance.set_flitt_password(flitt_password)
+            needs_save = True
+        if needs_save:
             instance.save()
+
         return instance
 
     def validate(self, attrs):

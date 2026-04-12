@@ -23,7 +23,9 @@ from .views import (
     request_password_reset,
     confirm_password_reset,
     get_current_client,
-    ecommerce_payment_webhook
+    ecommerce_payment_webhook,
+    tbc_payment_webhook,
+    flitt_payment_webhook,
 )
 from .views_client import (
     ClientProfileViewSet,
@@ -87,8 +89,10 @@ urlpatterns = [
     path('clients/me/', get_current_client, name='current-client'),
     path('clients/password-reset/request/', request_password_reset, name='password-reset-request'),
     path('clients/password-reset/confirm/', confirm_password_reset, name='password-reset-confirm'),
-    # Payment webhook (public access - called by BOG)
+    # Payment webhooks (public access - called by payment providers)
     path('payment-webhook/', ecommerce_payment_webhook, name='payment-webhook'),
+    path('payment-webhook/tbc/', tbc_payment_webhook, name='tbc-payment-webhook'),
+    path('payment-webhook/flitt/', flitt_payment_webhook, name='flitt-payment-webhook'),
     # Client-facing card management endpoints (requires client JWT)
     path('client/cards/add/', add_client_card, name='client-add-card'),
     path('client/cards/', list_client_cards, name='client-list-cards'),

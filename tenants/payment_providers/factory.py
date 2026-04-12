@@ -10,6 +10,8 @@ from typing import Optional
 from .base import PaymentProvider
 from .bog import BOGPaymentProvider
 from .paddle import PaddlePaymentProvider
+from .tbc import TBCPaymentProvider
+from .flitt import FlittPaymentProvider
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +26,10 @@ def _get_provider_instance(provider_name: str) -> PaymentProvider:
             _providers[provider_name] = BOGPaymentProvider()
         elif provider_name == 'paddle':
             _providers[provider_name] = PaddlePaymentProvider()
+        elif provider_name == 'tbc':
+            _providers[provider_name] = TBCPaymentProvider()
+        elif provider_name == 'flitt':
+            _providers[provider_name] = FlittPaymentProvider()
         else:
             raise ValueError(f"Unknown payment provider: {provider_name}")
     return _providers[provider_name]

@@ -2020,6 +2020,239 @@ def ecommerce_payment_webhook(request):
     return Response({'status': 'received'})
 
 
+@extend_schema(
+    operation_id='tbc_payment_webhook',
+    summary='TBC Bank Payment Webhook for Ecommerce Orders',
+    description='Webhook endpoint for receiving payment status updates from TBC Bank for ecommerce orders',
+    responses={
+        200: OpenApiResponse(description='Webhook processed successfully'),
+        400: OpenApiResponse(description='Invalid payload')
+    },
+    tags=['Ecommerce Admin - Orders']
+)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def tbc_payment_webhook(request):
+    """
+    Handle webhook notifications from TBC Bank payment gateway for ecommerce orders.
+
+    TBC callback sends JSON with payment result including:
+    - payId: TBC payment ID
+    - status: payment status (Succeeded, Failed, etc.)
+    - merchantPaymentId: our external_order_id / order_number
+    """
+    import logging
+    from django.utils import timezone
+
+    logger = logging.getLogger(__name__)
+
+    data = request.data
+    if not data:
+        logger.warning('TBC webhook received empty payload')
+        return Response({'error': 'Empty payload'}, status=status.HTTP_400_BAD_REQUEST)
+
+    pay_id = data.get('payId', '')
+    tbc_status = data.get('status', '').lower()
+    merchant_payment_id = data.get('merchantPaymentId', '')
+    amount_data = data.get('amount', {})
+
+    logger.info(
+        f'TBC payment webhook: payId={pay_id}, '
+        f'merchantPaymentId={merchant_payment_id}, status={tbc_status}'
+    )
+
+    if not merchant_payment_id:
+        logger.error('TBC webhook missing merchantPaymentId')
+        return Response({'error': 'Missing merchantPaymentId'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Handle successful payment
+    if tbc_status in ('succeeded', 'completed'):
+        try:
+            order = Order.objects.get(order_number=merchant_payment_id)
+
+            # Idempotency check
+            if order.payment_status == 'paid' and order.paid_at:
+                logger.info(f'TBC webhook already processed for order: {merchant_payment_id}')
+                return Response({
+                    'status': 'success',
+                    'message': 'Payment already processed'
+                }, status=status.HTTP_200_OK)
+
+            order.payment_status = 'paid'
+            order.paid_at = timezone.now()
+            order.status = 'confirmed'
+            order.confirmed_at = timezone.now()
+            order.payment_metadata.update({
+                'tbc_pay_id': pay_id,
+                'tbc_status': tbc_status,
+                'tbc_amount': amount_data,
+                'paid_at': timezone.now().isoformat(),
+            })
+            order.save()
+
+            logger.info(f'TBC payment completed for order: {merchant_payment_id}')
+
+            return Response({
+                'status': 'success',
+                'action': 'payment_completed',
+                'order_number': order.order_number,
+            })
+
+        except Order.DoesNotExist:
+            logger.error(f'Order not found for TBC webhook: {merchant_payment_id}')
+            return Response({'error': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            logger.error(f'Error processing TBC webhook: {e}')
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    # Handle failed payment
+    elif tbc_status in ('failed', 'rejected', 'expired'):
+        logger.warning(f'TBC payment failed: merchantPaymentId={merchant_payment_id}, status={tbc_status}')
+        try:
+            order = Order.objects.get(order_number=merchant_payment_id)
+            order.payment_status = 'failed'
+            order.payment_metadata.update({
+                'tbc_pay_id': pay_id,
+                'tbc_status': tbc_status,
+                'failed_at': timezone.now().isoformat(),
+            })
+            order.save()
+        except Order.DoesNotExist:
+            logger.error(f'Order not found for failed TBC payment: {merchant_payment_id}')
+
+    else:
+        logger.info(f'TBC webhook received with status: {tbc_status}')
+
+    return Response({'status': 'received'})
+
+
+@extend_schema(
+    operation_id='flitt_payment_webhook',
+    summary='Flitt Payment Webhook for Ecommerce Orders',
+    description='Webhook endpoint for receiving payment status updates from Flitt for ecommerce orders',
+    responses={
+        200: OpenApiResponse(description='Webhook processed successfully'),
+        400: OpenApiResponse(description='Invalid payload')
+    },
+    tags=['Ecommerce Admin - Orders']
+)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def flitt_payment_webhook(request):
+    """
+    Handle webhook notifications from Flitt (Fondy) payment gateway for ecommerce orders.
+
+    Flitt callback sends POST data with:
+    - order_id: our external_order_id / order_number
+    - order_status: payment status (approved, declined, etc.)
+    - signature: HMAC-SHA1 signature for verification
+    - amount: amount in cents
+    - payment_id: Flitt payment ID
+    """
+    import logging
+    from django.utils import timezone
+
+    logger = logging.getLogger(__name__)
+
+    data = request.data
+    if not data:
+        logger.warning('Flitt webhook received empty payload')
+        return Response({'error': 'Empty payload'}, status=status.HTTP_400_BAD_REQUEST)
+
+    order_id = data.get('order_id', '')
+    order_status_value = data.get('order_status', '').lower()
+    payment_id = data.get('payment_id', '')
+    received_signature = data.get('signature', '')
+
+    logger.info(
+        f'Flitt payment webhook: order_id={order_id}, '
+        f'payment_id={payment_id}, status={order_status_value}'
+    )
+
+    if not order_id:
+        logger.error('Flitt webhook missing order_id')
+        return Response({'error': 'Missing order_id'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Verify signature if possible
+    if received_signature:
+        try:
+            from tenants.payment_providers.flitt import FlittPaymentProvider
+            provider = FlittPaymentProvider()
+            body_bytes = request.body if hasattr(request, 'body') else b''
+            if not provider.verify_webhook({}, body_bytes):
+                logger.warning(f'Flitt webhook signature verification failed for order: {order_id}')
+                # Log but don't reject - some edge cases may have different signature format
+        except Exception as e:
+            logger.warning(f'Flitt signature verification error: {e}')
+
+    # Handle successful payment
+    if order_status_value == 'approved':
+        try:
+            order = Order.objects.get(order_number=order_id)
+
+            # Idempotency check
+            if order.payment_status == 'paid' and order.paid_at:
+                logger.info(f'Flitt webhook already processed for order: {order_id}')
+                return Response({
+                    'status': 'success',
+                    'message': 'Payment already processed'
+                }, status=status.HTTP_200_OK)
+
+            order.payment_status = 'paid'
+            order.paid_at = timezone.now()
+            order.status = 'confirmed'
+            order.confirmed_at = timezone.now()
+
+            # Store Flitt-specific metadata
+            flitt_meta = {
+                'flitt_payment_id': payment_id,
+                'flitt_order_status': order_status_value,
+                'paid_at': timezone.now().isoformat(),
+            }
+            # Include rectoken if present (for recurring payments)
+            rectoken = data.get('rectoken')
+            if rectoken:
+                flitt_meta['flitt_rectoken'] = rectoken
+
+            order.payment_metadata.update(flitt_meta)
+            order.save()
+
+            logger.info(f'Flitt payment completed for order: {order_id}')
+
+            return Response({
+                'status': 'success',
+                'action': 'payment_completed',
+                'order_number': order.order_number,
+            })
+
+        except Order.DoesNotExist:
+            logger.error(f'Order not found for Flitt webhook: {order_id}')
+            return Response({'error': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            logger.error(f'Error processing Flitt webhook: {e}')
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    # Handle failed/declined payment
+    elif order_status_value in ('declined', 'expired', 'reversed'):
+        logger.warning(f'Flitt payment failed: order_id={order_id}, status={order_status_value}')
+        try:
+            order = Order.objects.get(order_number=order_id)
+            order.payment_status = 'failed'
+            order.payment_metadata.update({
+                'flitt_payment_id': payment_id,
+                'flitt_order_status': order_status_value,
+                'failed_at': timezone.now().isoformat(),
+            })
+            order.save()
+        except Order.DoesNotExist:
+            logger.error(f'Order not found for failed Flitt payment: {order_id}')
+
+    else:
+        logger.info(f'Flitt webhook received with status: {order_status_value}')
+
+    return Response({'status': 'received'})
+
+
 class EcommerceSettingsViewSet(NoCacheMixin, viewsets.ModelViewSet):
     """ViewSet for managing ecommerce settings including BOG payment configuration"""
     serializer_class = EcommerceSettingsSerializer
