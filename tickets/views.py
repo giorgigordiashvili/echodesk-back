@@ -692,6 +692,61 @@ class TicketViewSet(viewsets.ModelViewSet):
         serializer = TicketHistorySerializer(history_entries, many=True)
         return Response(serializer.data)
 
+    @action(detail=True, methods=['get'], permission_classes=[permissions.IsAuthenticated])
+    def activity(self, request, pk=None):
+        """Get unified activity timeline: comments + history events sorted chronologically."""
+        ticket = self.get_object()
+
+        # Fetch comments
+        comments = list(ticket.comments.select_related('user').order_by('created_at').values(
+            'id', 'comment', 'created_at', 'user__id', 'user__first_name', 'user__last_name', 'user__email'
+        ))
+
+        # Fetch history
+        history = list(ticket.history.select_related('user').order_by('created_at').values(
+            'id', 'action', 'field_name', 'old_value', 'new_value', 'description', 'created_at',
+            'user__id', 'user__first_name', 'user__last_name', 'user__email'
+        ))
+
+        # Build unified timeline
+        timeline = []
+
+        for c in comments:
+            timeline.append({
+                'type': 'comment',
+                'id': f'comment-{c["id"]}',
+                'comment_id': c['id'],
+                'text': c['comment'],
+                'created_at': c['created_at'].isoformat(),
+                'user': {
+                    'id': c['user__id'],
+                    'name': f"{c['user__first_name'] or ''} {c['user__last_name'] or ''}".strip() or c['user__email'],
+                    'email': c['user__email'],
+                },
+            })
+
+        for h in history:
+            timeline.append({
+                'type': 'event',
+                'id': f'event-{h["id"]}',
+                'action': h['action'],
+                'field_name': h['field_name'],
+                'old_value': h['old_value'],
+                'new_value': h['new_value'],
+                'description': h['description'],
+                'created_at': h['created_at'].isoformat(),
+                'user': {
+                    'id': h['user__id'],
+                    'name': f"{h['user__first_name'] or ''} {h['user__last_name'] or ''}".strip() or (h['user__email'] or 'System'),
+                    'email': h['user__email'],
+                } if h['user__id'] else {'id': None, 'name': 'System', 'email': ''},
+            })
+
+        # Sort chronologically (oldest first for chat-style)
+        timeline.sort(key=lambda x: x['created_at'])
+
+        return Response(timeline)
+
 
 class TagViewSet(viewsets.ModelViewSet):
     """
