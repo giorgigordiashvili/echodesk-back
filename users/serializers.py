@@ -4,7 +4,7 @@ from django.contrib.auth.models import Group, Permission
 from django.contrib.auth.password_validation import validate_password
 from django.contrib.contenttypes.models import ContentType
 from django.utils import timezone
-from .models import Department, TenantGroup, Notification, UserOnlineStatus, TeamChatConversation, TeamChatMessage
+from .models import Department, TenantGroup, Notification, NotificationPreference, UserOnlineStatus, TeamChatConversation, TeamChatMessage
 from tenants.feature_models import Feature
 
 User = get_user_model()
@@ -438,6 +438,13 @@ class NotificationSerializer(serializers.ModelSerializer):
         """Get human-readable time ago"""
         from django.utils.timesince import timesince
         return timesince(obj.created_at)
+
+
+class NotificationPreferenceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = NotificationPreference
+        fields = ['id', 'notification_type', 'in_app', 'sound', 'push']
+        read_only_fields = ['id']
 
 
 # Team Chat Serializers

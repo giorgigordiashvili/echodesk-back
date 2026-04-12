@@ -81,7 +81,7 @@ def create_notification(user, notification_type, title, message, ticket_id=None,
     the same user + type + ticket, the existing notification is updated rather
     than creating a duplicate.
     """
-    from users.models import Notification
+    from users.models import Notification, NotificationPreference
     from users.consumers import send_notification_to_user
     from asgiref.sync import async_to_sync
     from django.utils.timesince import timesince
@@ -90,6 +90,19 @@ def create_notification(user, notification_type, title, message, ticket_id=None,
         metadata = {}
 
     tenant_schema = getattr(connection, 'schema_name', 'public')
+
+    # --- Check user notification preferences ---
+    pref = NotificationPreference.objects.filter(
+        user=user, notification_type=notification_type
+    ).first()
+
+    # Default: all enabled
+    should_create_in_app = pref.in_app if pref else True
+    should_push = pref.push if pref else True
+    sound_enabled = pref.sound if pref else True
+
+    if not should_create_in_app:
+        return None  # User disabled this notification type
 
     # --- Phase 5: batching / debounce (30-second window) ---
     recent = Notification.objects.filter(
@@ -141,6 +154,7 @@ def create_notification(user, notification_type, title, message, ticket_id=None,
         'time_ago': timesince(notification.created_at),
         'user': notification.user.id,
         'user_name': notification.user.get_full_name() or notification.user.email,
+        'sound_enabled': sound_enabled,
     }
 
     try:
@@ -153,29 +167,30 @@ def create_notification(user, notification_type, title, message, ticket_id=None,
     except Exception as e:
         print(f"[notification_utils] Error broadcasting via WebSocket: {e}")
 
-    # --- Web Push ---
-    try:
-        from notifications.utils import send_notification_to_user as send_push
+    # --- Web Push (only if user has push enabled) ---
+    if should_push:
+        try:
+            from notifications.utils import send_notification_to_user as send_push
 
-        nav_url = link_url or (f'/tickets/{ticket_id}' if ticket_id else '/')
+            nav_url = link_url or (f'/tickets/{ticket_id}' if ticket_id else '/')
 
-        send_push(
-            user=user,
-            title=title,
-            body=message,
-            data={
-                'ticket_id': ticket_id,
-                'notification_type': notification_type,
-                'notification_id': notification.id,
-                'url': nav_url,
-            },
-            icon='/favicon.ico',
-            url=nav_url,
-            tag=f'echodesk-{ticket_id or notification.id}',
-        )
-        print(f"[notification_utils] Web Push sent for notification {notification.id}")
-    except Exception as e:
-        print(f"[notification_utils] Error sending Web Push: {e}")
+            send_push(
+                user=user,
+                title=title,
+                body=message,
+                data={
+                    'ticket_id': ticket_id,
+                    'notification_type': notification_type,
+                    'notification_id': notification.id,
+                    'url': nav_url,
+                },
+                icon='/favicon.ico',
+                url=nav_url,
+                tag=f'echodesk-{ticket_id or notification.id}',
+            )
+            print(f"[notification_utils] Web Push sent for notification {notification.id}")
+        except Exception as e:
+            print(f"[notification_utils] Error sending Web Push: {e}")
 
 
 # ---------------------------------------------------------------------------

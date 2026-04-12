@@ -5764,6 +5764,43 @@ def mark_conversation_read(request):
 
         logger.info(f"Marked {updated_count} {platform} messages as read for conversation {conversation_id}")
 
+        # --- Auto-clear message_received notifications for this conversation ---
+        try:
+            from users.models import Notification
+            from django.db import connection as db_connection
+
+            tenant_schema = getattr(db_connection, 'schema_name', 'public')
+
+            cleared_count = Notification.objects.filter(
+                user=request.user,
+                notification_type='message_received',
+                is_read=False,
+                metadata__conversation_id=str(conversation_id),
+            ).update(is_read=True, read_at=timezone.now())
+
+            if cleared_count > 0:
+                # Invalidate cached unread count so next check recounts from DB
+                from users.notification_utils import get_unread_count
+                from django.core.cache import cache as notif_cache
+                cache_key = f'notif_unread:{tenant_schema}:{request.user.id}'
+                notif_cache.delete(cache_key)
+
+                # Broadcast updated unread count via WebSocket
+                from asgiref.sync import async_to_sync
+                from users.consumers import send_unread_count_update
+                try:
+                    count = get_unread_count(request.user, tenant_schema)
+                    async_to_sync(send_unread_count_update)(tenant_schema, request.user.id, count)
+                except Exception:
+                    pass
+
+                logger.info(
+                    f"Cleared {cleared_count} message_received notifications for user {request.user.id} "
+                    f"conversation {conversation_id}"
+                )
+        except Exception as e:
+            logger.warning(f"Failed to clear message notifications on conversation read: {e}")
+
         return Response({
             'success': True,
             'messages_marked_read': updated_count

@@ -13,14 +13,15 @@ import secrets
 import string
 import logging
 from tenants.email_service import email_service
-from .models import Department, TenantGroup, Notification, UserOnlineStatus, TeamChatConversation, TeamChatMessage, HiddenTeamChatConversation
+from .models import Department, TenantGroup, Notification, NotificationPreference, UserOnlineStatus, TeamChatConversation, TeamChatMessage, HiddenTeamChatConversation
 from .serializers import (
     UserSerializer, UserCreateSerializer, UserUpdateSerializer,
     GroupSerializer, GroupCreateSerializer, PermissionSerializer,
     BulkUserActionSerializer, PasswordChangeSerializer, DepartmentSerializer,
     TenantGroupSerializer, TenantGroupCreateSerializer, NotificationSerializer,
     TeamChatUserSerializer, TeamChatConversationSerializer, TeamChatConversationDetailSerializer,
-    TeamChatMessageSerializer, TeamChatCreateMessageSerializer, TeamChatFileUploadSerializer
+    TeamChatMessageSerializer, TeamChatCreateMessageSerializer, TeamChatFileUploadSerializer,
+    NotificationPreferenceSerializer
 )
 
 logger = logging.getLogger(__name__)
@@ -547,6 +548,45 @@ class NotificationViewSet(viewsets.ModelViewSet):
         """Clear all read notifications"""
         deleted_count, _ = self.get_queryset().filter(is_read=True).delete()
         return Response({'deleted': deleted_count})
+
+
+from rest_framework.decorators import api_view, permission_classes as perm_classes
+
+
+@api_view(['GET'])
+@perm_classes([permissions.IsAuthenticated])
+def notification_preferences_list(request):
+    """List all notification preferences for the current user."""
+    prefs = NotificationPreference.objects.filter(user=request.user)
+    return Response(NotificationPreferenceSerializer(prefs, many=True).data)
+
+
+@api_view(['PUT'])
+@perm_classes([permissions.IsAuthenticated])
+def notification_preferences_bulk_update(request):
+    """Bulk update notification preferences. Accepts a list of {notification_type, in_app, sound, push}."""
+    prefs_data = request.data  # list of {notification_type, in_app, sound, push}
+    if not isinstance(prefs_data, list):
+        return Response(
+            {'error': 'Request body must be a list of preference objects'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    results = []
+    for pref_data in prefs_data:
+        notification_type = pref_data.get('notification_type')
+        if not notification_type:
+            continue
+        obj, _ = NotificationPreference.objects.update_or_create(
+            user=request.user,
+            notification_type=notification_type,
+            defaults={
+                'in_app': pref_data.get('in_app', True),
+                'sound': pref_data.get('sound', True),
+                'push': pref_data.get('push', True),
+            }
+        )
+        results.append(NotificationPreferenceSerializer(obj).data)
+    return Response(results)
 
 
 def tenant_homepage(request):

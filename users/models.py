@@ -596,6 +596,22 @@ class Notification(models.Model):
             self.save(update_fields=['is_read', 'read_at'])
 
 
+class NotificationPreference(models.Model):
+    """Per-user notification delivery preferences."""
+    user = models.ForeignKey('User', on_delete=models.CASCADE, related_name='notification_preferences')
+    notification_type = models.CharField(max_length=50, help_text='Notification type key')
+    in_app = models.BooleanField(default=True, help_text='Show in-app notification')
+    sound = models.BooleanField(default=True, help_text='Play sound')
+    push = models.BooleanField(default=True, help_text='Send browser push notification')
+
+    class Meta:
+        unique_together = ['user', 'notification_type']
+        indexes = [models.Index(fields=['user', 'notification_type'])]
+
+    def __str__(self):
+        return f"{self.user.email} - {self.notification_type}"
+
+
 class UserOnlineStatus(models.Model):
     """
     Tracks user online/offline status for team chat
