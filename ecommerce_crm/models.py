@@ -596,6 +596,9 @@ class ClientAddress(models.Model):
         help_text="Longitude coordinate from Google Maps"
     )
 
+    postal_code = models.CharField(max_length=20, blank=True, default='')
+    country = models.CharField(max_length=100, blank=True, default='')
+
     # Default address flag
     is_default = models.BooleanField(
         default=False,

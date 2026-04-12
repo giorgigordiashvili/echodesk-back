@@ -68,6 +68,7 @@ class ClientAddressSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'client', 'label', 'address', 'city',
             'extra_instructions', 'latitude', 'longitude',
+            'postal_code', 'country',
             'is_default', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'client', 'created_at', 'updated_at']
@@ -117,6 +118,54 @@ class ClientProfileViewSet(viewsets.GenericViewSet):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data)
+
+
+@extend_schema(
+    tags=['Ecommerce Client - Auth'],
+    summary='Change client password',
+    description='Change the password of the authenticated client. Requires current password for verification.',
+    request=inline_serializer(
+        name='ChangePasswordRequest',
+        fields={
+            'current_password': serializers.CharField(),
+            'new_password': serializers.CharField(),
+        },
+    ),
+    responses={
+        200: inline_serializer(
+            name='ChangePasswordResponse',
+            fields={
+                'message': serializers.CharField(),
+            },
+        ),
+        400: OpenApiResponse(description='Validation error'),
+    },
+)
+@api_view(['POST'])
+@authentication_classes([EcommerceClientJWTAuthentication])
+@permission_classes([IsAuthenticated])
+def change_password(request):
+    """Change password for the authenticated ecommerce client"""
+    current_password = request.data.get('current_password')
+    new_password = request.data.get('new_password')
+
+    if not current_password or not new_password:
+        return Response(
+            {'error': 'current_password and new_password are required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    client = request.user
+    if not client.check_password(current_password):
+        return Response(
+            {'error': 'Current password is incorrect'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    client.set_password(new_password)
+    client.save(update_fields=['password'])
+
+    return Response({'message': 'Password changed successfully'})
 
 
 class ClientAttributeViewSet(viewsets.ReadOnlyModelViewSet):

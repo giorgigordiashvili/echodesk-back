@@ -23,6 +23,7 @@ from ecommerce_crm.views_client import (
     get_store_theme,
     validate_promo_code,
     guest_checkout,
+    change_password,
     ClientProductReviewViewSet,
     ClientShippingMethodViewSet,
 )
@@ -37,6 +38,7 @@ urlpatterns = [
     path('api/ecommerce/clients/me/', get_current_client, name='current-client'),
     path('api/ecommerce/clients/password-reset/request/', request_password_reset, name='password-reset-request'),
     path('api/ecommerce/clients/password-reset/confirm/', confirm_password_reset, name='password-reset-confirm'),
+    path('api/ecommerce/clients/change-password/', change_password, name='change-password'),
 
     # Client-facing card management endpoints (requires client JWT)
     path('api/ecommerce/client/cards/add/', add_client_card, name='client-add-card'),

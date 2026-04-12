@@ -51,6 +51,7 @@ from .views_client import (
     get_store_theme,
     validate_promo_code,
     guest_checkout,
+    change_password,
 )
 
 # Admin router - requires admin JWT authentication
@@ -100,6 +101,7 @@ urlpatterns = [
     path('clients/me/', get_current_client, name='current-client'),
     path('clients/password-reset/request/', request_password_reset, name='password-reset-request'),
     path('clients/password-reset/confirm/', confirm_password_reset, name='password-reset-confirm'),
+    path('clients/change-password/', change_password, name='change-password'),
     # Payment webhooks (public access - called by payment providers)
     path('payment-webhook/', ecommerce_payment_webhook, name='payment-webhook'),
     path('payment-webhook/tbc/', tbc_payment_webhook, name='tbc-payment-webhook'),

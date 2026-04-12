@@ -470,6 +470,39 @@ class ProductViewSet(NoCacheMixin, viewsets.ModelViewSet):
         serializer = ProductDetailSerializer(product, context=self.get_serializer_context())
         return Response(serializer.data)
 
+    @extend_schema(
+        tags=['Ecommerce Admin - Products'],
+        summary='Bulk update product status',
+        description='Update the status of multiple products at once',
+        request=inline_serializer(
+            name='BulkProductUpdateRequest',
+            fields={
+                'product_ids': serializers.ListField(child=serializers.IntegerField()),
+                'status': serializers.CharField(),
+            },
+        ),
+        responses={
+            200: inline_serializer(
+                name='BulkProductUpdateResponse',
+                fields={
+                    'updated': serializers.IntegerField(),
+                },
+            ),
+            400: OpenApiResponse(description='Validation error'),
+        },
+    )
+    @action(detail=False, methods=['post'], url_path='bulk-update')
+    def bulk_update(self, request):
+        """Bulk update product status"""
+        product_ids = request.data.get('product_ids', [])
+        status_value = request.data.get('status')
+
+        if not product_ids or not status_value:
+            return Response({'error': 'product_ids and status are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        updated = Product.objects.filter(id__in=product_ids).update(status=status_value)
+        return Response({'updated': updated})
+
 
 class ProductImageViewSet(NoCacheMixin, viewsets.ModelViewSet):
     """ViewSet for product images (Admin only)"""
@@ -1798,6 +1831,41 @@ class OrderViewSet(NoCacheMixin, viewsets.ModelViewSet):
 
         serializer = self.get_serializer(order)
         return Response(serializer.data)
+
+    @extend_schema(
+        tags=['Ecommerce Admin - Orders'],
+        summary='Refund order',
+        description='Mark an order as refunded and restore stock for inventory-tracked products',
+        request=None,
+        responses={
+            200: inline_serializer(
+                name='OrderRefundResponse',
+                fields={
+                    'status': serializers.CharField(),
+                },
+            ),
+            400: OpenApiResponse(description='Order already refunded or cancelled'),
+        },
+    )
+    @action(detail=True, methods=['post'], url_path='refund')
+    def refund(self, request, pk=None):
+        """Mark order as refunded and restore stock"""
+        order = self.get_object()
+
+        if order.status in ['refunded', 'cancelled']:
+            return Response({'error': 'Order already refunded or cancelled'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Restore stock
+        for item in order.items.all():
+            if item.product and item.product.track_inventory:
+                item.product.quantity += item.quantity
+                item.product.save(update_fields=['quantity'])
+
+        order.status = 'refunded'
+        order.payment_status = 'refunded'
+        order.save(update_fields=['status', 'payment_status'])
+
+        return Response({'status': 'refunded'})
 
     @extend_schema(
         tags=['Ecommerce Admin - Orders'],
