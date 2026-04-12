@@ -1054,6 +1054,29 @@ class EcommerceSettings(models.Model):
         help_text="Use TBC production environment (unchecked = sandbox)"
     )
 
+    # Paddle Payment Settings
+    paddle_api_key_encrypted = models.BinaryField(
+        blank=True,
+        null=True,
+        help_text="Encrypted Paddle API Key"
+    )
+    paddle_webhook_secret = models.CharField(
+        max_length=255,
+        blank=True,
+        default='',
+        help_text="Paddle Webhook Secret for signature verification"
+    )
+    paddle_client_token = models.CharField(
+        max_length=255,
+        blank=True,
+        default='',
+        help_text="Paddle Client Token for frontend Paddle.js"
+    )
+    paddle_use_production = models.BooleanField(
+        default=False,
+        help_text="Use Paddle production environment (unchecked = sandbox)"
+    )
+
     # Flitt (formerly Fondy) Payment Gateway Settings
     flitt_merchant_id = models.CharField(
         max_length=255,
@@ -1290,6 +1313,33 @@ class EcommerceSettings(models.Model):
     def has_flitt_credentials(self) -> bool:
         """Check if Flitt credentials are configured"""
         return bool(self.flitt_merchant_id and self.flitt_password_encrypted)
+
+    def set_paddle_api_key(self, api_key: str):
+        """Encrypt and store Paddle API key"""
+        import base64
+        from cryptography.fernet import Fernet
+        from django.conf import settings
+
+        key = settings.SECRET_KEY[:32].encode().ljust(32, b'0')
+        fernet = Fernet(base64.urlsafe_b64encode(key))
+        self.paddle_api_key_encrypted = fernet.encrypt(api_key.encode())
+
+    def get_paddle_api_key(self) -> str:
+        """Decrypt and return Paddle API key"""
+        if not self.paddle_api_key_encrypted:
+            return ''
+        import base64
+        from cryptography.fernet import Fernet
+        from django.conf import settings
+
+        key = settings.SECRET_KEY[:32].encode().ljust(32, b'0')
+        fernet = Fernet(base64.urlsafe_b64encode(key))
+        return fernet.decrypt(bytes(self.paddle_api_key_encrypted)).decode()
+
+    @property
+    def has_paddle_credentials(self) -> bool:
+        """Check if Paddle credentials are configured"""
+        return bool(self.paddle_api_key_encrypted and self.paddle_client_token)
 
 
 class PasswordResetToken(models.Model):

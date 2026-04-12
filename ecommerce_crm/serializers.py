@@ -639,6 +639,15 @@ class EcommerceSettingsSerializer(serializers.ModelSerializer):
     )
     has_flitt_credentials = serializers.BooleanField(read_only=True)
 
+    # Paddle API key (write-only)
+    paddle_api_key = serializers.CharField(
+        write_only=True,
+        required=False,
+        allow_blank=True,
+        help_text="Paddle API Key (write-only, will be encrypted)"
+    )
+    has_paddle_credentials = serializers.BooleanField(read_only=True)
+
     class Meta:
         model = EcommerceSettings
         fields = [
@@ -652,6 +661,9 @@ class EcommerceSettingsSerializer(serializers.ModelSerializer):
             'has_tbc_credentials',
             # Flitt fields
             'flitt_merchant_id', 'flitt_password', 'has_flitt_credentials',
+            # Paddle fields
+            'paddle_api_key', 'paddle_webhook_secret', 'paddle_client_token',
+            'paddle_use_production', 'has_paddle_credentials',
             # Payment settings
             'enable_cash_on_delivery', 'enable_card_payment',
             'store_name', 'store_email', 'store_phone',
@@ -666,7 +678,7 @@ class EcommerceSettingsSerializer(serializers.ModelSerializer):
         read_only_fields = [
             'id', 'tenant', 'ecommerce_frontend_url', 'deployment_status',
             'vercel_project_id', 'custom_domain',
-            'has_bog_credentials', 'has_tbc_credentials', 'has_flitt_credentials',
+            'has_bog_credentials', 'has_tbc_credentials', 'has_flitt_credentials', 'has_paddle_credentials',
             'created_at', 'updated_at',
         ]
 
@@ -675,6 +687,7 @@ class EcommerceSettingsSerializer(serializers.ModelSerializer):
         bog_secret = validated_data.pop('bog_client_secret', None)
         tbc_secret = validated_data.pop('tbc_client_secret', None)
         flitt_password = validated_data.pop('flitt_password', None)
+        paddle_api_key = validated_data.pop('paddle_api_key', None)
 
         instance = super().create(validated_data)
 
@@ -688,6 +701,9 @@ class EcommerceSettingsSerializer(serializers.ModelSerializer):
         if flitt_password:
             instance.set_flitt_password(flitt_password)
             needs_save = True
+        if paddle_api_key:
+            instance.set_paddle_api_key(paddle_api_key)
+            needs_save = True
         if needs_save:
             instance.save()
 
@@ -698,6 +714,7 @@ class EcommerceSettingsSerializer(serializers.ModelSerializer):
         bog_secret = validated_data.pop('bog_client_secret', None)
         tbc_secret = validated_data.pop('tbc_client_secret', None)
         flitt_password = validated_data.pop('flitt_password', None)
+        paddle_api_key = validated_data.pop('paddle_api_key', None)
 
         instance = super().update(instance, validated_data)
 
@@ -710,6 +727,9 @@ class EcommerceSettingsSerializer(serializers.ModelSerializer):
             needs_save = True
         if flitt_password:
             instance.set_flitt_password(flitt_password)
+            needs_save = True
+        if paddle_api_key:
+            instance.set_paddle_api_key(paddle_api_key)
             needs_save = True
         if needs_save:
             instance.save()

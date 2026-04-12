@@ -31,11 +31,11 @@ class PaddlePaymentProvider(PaymentProvider):
     - Bearer token auth via PADDLE_API_KEY
     """
 
-    def __init__(self):
-        self._api_key = getattr(settings, 'PADDLE_API_KEY', '')
-        self._webhook_secret = getattr(settings, 'PADDLE_WEBHOOK_SECRET', '')
-        environment = getattr(settings, 'PADDLE_ENVIRONMENT', 'sandbox')
-        if environment == 'production':
+    def __init__(self, api_key=None, webhook_secret=None, client_token=None, use_production=False):
+        self._api_key = api_key or getattr(settings, 'PADDLE_API_KEY', '')
+        self._webhook_secret = webhook_secret or getattr(settings, 'PADDLE_WEBHOOK_SECRET', '')
+        self._client_token = client_token or getattr(settings, 'PADDLE_CLIENT_TOKEN', '')
+        if use_production or getattr(settings, 'PADDLE_ENVIRONMENT', 'sandbox') == 'production':
             self._base_url = 'https://api.paddle.com'
         else:
             self._base_url = 'https://sandbox-api.paddle.com'
