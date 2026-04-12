@@ -113,6 +113,8 @@ class ProductListSerializer(serializers.ModelSerializer):
     is_low_stock = serializers.BooleanField(read_only=True)
     is_in_stock = serializers.BooleanField(read_only=True)
     attribute_values = ProductAttributeValueSerializer(many=True, read_only=True)
+    average_rating = serializers.SerializerMethodField()
+    review_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
@@ -121,9 +123,18 @@ class ProductListSerializer(serializers.ModelSerializer):
             'price', 'compare_at_price', 'discount_percentage',
             'image', 'quantity', 'status', 'is_featured',
             'is_low_stock', 'is_in_stock', 'attribute_values',
+            'average_rating', 'review_count',
             'created_at', 'updated_at'
         ]
         read_only_fields = ['created_at', 'updated_at']
+
+    def get_average_rating(self, obj):
+        from django.db.models import Avg
+        result = obj.reviews.filter(is_approved=True).aggregate(avg=Avg('rating'))
+        return round(result['avg'], 1) if result['avg'] else None
+
+    def get_review_count(self, obj):
+        return obj.reviews.filter(is_approved=True).count()
 
 
 class ProductDetailSerializer(serializers.ModelSerializer):
@@ -134,6 +145,8 @@ class ProductDetailSerializer(serializers.ModelSerializer):
     discount_percentage = serializers.FloatField(read_only=True)
     is_low_stock = serializers.BooleanField(read_only=True)
     is_in_stock = serializers.BooleanField(read_only=True)
+    average_rating = serializers.SerializerMethodField()
+    review_count = serializers.SerializerMethodField()
     created_by_name = serializers.SerializerMethodField()
     updated_by_name = serializers.SerializerMethodField()
 
@@ -146,6 +159,7 @@ class ProductDetailSerializer(serializers.ModelSerializer):
             'is_low_stock', 'is_in_stock', 'status', 'is_featured',
             'weight', 'dimensions', 'meta_title', 'meta_description',
             'attribute_values', 'variants',
+            'average_rating', 'review_count',
             'created_at', 'updated_at', 'created_by', 'created_by_name',
             'updated_by', 'updated_by_name'
         ]
@@ -160,6 +174,14 @@ class ProductDetailSerializer(serializers.ModelSerializer):
         if obj.updated_by:
             return f"{obj.updated_by.first_name} {obj.updated_by.last_name}".strip() or obj.updated_by.email
         return None
+
+    def get_average_rating(self, obj):
+        from django.db.models import Avg
+        result = obj.reviews.filter(is_approved=True).aggregate(avg=Avg('rating'))
+        return round(result['avg'], 1) if result['avg'] else None
+
+    def get_review_count(self, obj):
+        return obj.reviews.filter(is_approved=True).count()
 
 
 class ProductCreateUpdateSerializer(serializers.ModelSerializer):
