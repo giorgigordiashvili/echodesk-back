@@ -9,7 +9,7 @@ from rest_framework import viewsets, filters, status, serializers
 from rest_framework.decorators import action, api_view, permission_classes, authentication_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
-from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiParameter, OpenApiExample, extend_schema_view
+from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiParameter, OpenApiExample, extend_schema_view, inline_serializer
 from drf_spectacular.openapi import AutoSchema
 from django_filters.rest_framework import DjangoFilterBackend
 from django.views.decorators.cache import cache_page
@@ -1454,33 +1454,27 @@ def get_homepage_config(request):
     summary='Get store theme configuration',
     description='Get the theme configuration (colors, border radius) for the storefront. This endpoint is public and does not require authentication.',
     responses={
-        200: OpenApiResponse(
-            description='Theme configuration',
-            examples=[
-                OpenApiExample(
-                    'Theme Response',
-                    value={
-                        'preset': 'default',
-                        'colors': {
-                            'primary': '221 83% 53%',
-                            'secondary': '215 16% 47%',
-                            'accent': '221 83% 53%',
-                            'background': '0 0% 100%',
-                            'foreground': '0 0% 9%',
-                            'muted': '0 0% 96%',
-                            'muted_foreground': '0 0% 45%',
-                            'destructive': '0 84.2% 60.2%',
-                            'border': '0 0% 90%',
-                            'card': '0 0% 100%',
-                            'card_foreground': '0 0% 9%',
-                        },
-                        'radius': '0.5rem',
-                        'store_name': 'My Store',
+        200: inline_serializer(
+            name='StoreThemeResponse',
+            fields={
+                'preset': serializers.CharField(),
+                'colors': serializers.DictField(child=serializers.CharField()),
+                'radius': serializers.CharField(),
+                'store_name': serializers.CharField(),
+                'payment': inline_serializer(
+                    name='PaymentConfigResponse',
+                    fields={
+                        'active_providers': serializers.ListField(child=serializers.CharField()),
+                        'enable_cash_on_delivery': serializers.BooleanField(),
+                        'enable_card_payment': serializers.BooleanField(),
+                        'currency': serializers.CharField(),
+                        'tax_rate': serializers.DecimalField(max_digits=5, decimal_places=2, required=False),
+                        'tax_label': serializers.CharField(required=False),
+                        'tax_inclusive': serializers.BooleanField(required=False),
                     }
-                )
-            ]
+                ),
+            }
         ),
-        404: OpenApiResponse(description='Settings not found')
     },
     tags=['Store']
 )
@@ -1539,6 +1533,9 @@ def get_store_theme(request):
                 'enable_cash_on_delivery': settings.enable_cash_on_delivery,
                 'enable_card_payment': settings.enable_card_payment,
                 'currency': 'GEL',
+                'tax_rate': str(settings.tax_rate) if settings.tax_rate else '0',
+                'tax_label': settings.tax_label or 'VAT',
+                'tax_inclusive': settings.tax_inclusive,
             },
         })
     except Exception as e:
@@ -1581,7 +1578,26 @@ class ClientShippingMethodViewSet(viewsets.ReadOnlyModelViewSet):
 @extend_schema(
     tags=['Ecommerce Client - Promo'],
     summary='Validate promo code',
-    description='Validate a promo code and return the discount amount'
+    description='Validate a promo code and return the discount amount',
+    request=inline_serializer(
+        name='PromoValidateRequest',
+        fields={
+            'code': serializers.CharField(),
+            'subtotal': serializers.DecimalField(max_digits=10, decimal_places=2),
+        }
+    ),
+    responses={
+        200: inline_serializer(
+            name='PromoValidateResponse',
+            fields={
+                'valid': serializers.BooleanField(),
+                'discount_amount': serializers.CharField(required=False),
+                'discount_type': serializers.CharField(required=False),
+                'discount_value': serializers.CharField(required=False),
+                'message': serializers.CharField(),
+            }
+        )
+    }
 )
 @api_view(['POST'])
 @permission_classes([AllowAny])
