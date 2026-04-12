@@ -1395,6 +1395,13 @@ def cancel_subscription(request):
             status=status.HTTP_403_FORBIDDEN
         )
 
+    # Only staff/admin can cancel subscription
+    if not request.user.is_staff:
+        return Response(
+            {'error': 'Only administrators can cancel subscriptions'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
     try:
         subscription = TenantSubscription.objects.get(tenant=request.tenant, is_active=True)
         subscription.is_active = False

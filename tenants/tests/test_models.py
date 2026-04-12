@@ -196,7 +196,8 @@ class TestTenantSubscription(SubscriptionModelTestMixin, EchoDeskTenantTestCase)
 
     def test_days_until_next_billing(self):
         sub = self._make_subscription()
-        sub.next_billing_date = timezone.now() + timedelta(days=15)
+        # Add extra hours to avoid off-by-one from sub-second elapsed time
+        sub.next_billing_date = timezone.now() + timedelta(days=15, hours=1)
         sub.save()
         self.assertEqual(sub.days_until_next_billing, 15)
 

@@ -73,9 +73,9 @@ class TestLanguageModel(EchoDeskTenantTestCase):
         self.assertFalse(lang.is_active)
 
     def test_language_code_unique(self):
-        Language.objects.create(code='unique-code', name={'en': 'Test'})
+        Language.objects.create(code='uniq', name={'en': 'Test'})
         with self.assertRaises(IntegrityError):
-            Language.objects.create(code='unique-code', name={'en': 'Duplicate'})
+            Language.objects.create(code='uniq', name={'en': 'Duplicate'})
 
 
 # ============================================================================

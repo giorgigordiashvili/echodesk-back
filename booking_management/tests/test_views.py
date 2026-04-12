@@ -47,7 +47,9 @@ class BookingViewTestMixin:
 
     def _ensure_booking_feature(self):
         """Create a booking_management Feature and give the tenant a subscription
-        that includes it, so that admin users pass HasBookingManagementFeature."""
+        that includes it, so that admin users pass HasBookingManagementFeature.
+        Also patches has_feature on the admin user (if self.admin exists) so the
+        permission check succeeds without needing full group setup."""
         feat, _ = Feature.objects.get_or_create(
             key='booking_management',
             defaults={
@@ -67,6 +69,10 @@ class BookingViewTestMixin:
             },
         )
         sub.selected_features.add(feat)
+        # Patch has_feature on the admin user so it always returns True,
+        # matching the pattern used in invoices/tests/conftest.py.
+        if hasattr(self, 'admin') and self.admin is not None:
+            self.admin.has_feature = lambda key: True
         return sub
 
 
@@ -216,7 +222,7 @@ class TestAdminBookingStaffCRUD(BookingViewTestMixin, BookingTestCase):
     def test_create_staff(self):
         user = self.create_user(email='new-staff@test.com', role='agent')
         resp = self.api_post(ADMIN_STAFF_URL, {
-            'user': user.id,
+            'user_id': user.id,
             'bio': 'New staff member',
             'is_active_for_bookings': True,
         }, user=self.admin)
@@ -789,6 +795,7 @@ class TestClientBookingRating(BookingViewTestMixin, BookingTestCase):
         self._ensure_booking_feature()
         self.bk_client = self.create_client()
         self.bk_client.is_booking_enabled = True
+        self.bk_client.is_verified = True
         self.bk_client.set_password('TestPass1')
         self.bk_client.save()
         self.service = self.create_service()
@@ -900,7 +907,7 @@ class TestClientBookingRating(BookingViewTestMixin, BookingTestCase):
 
 class TestPaymentWebhook(BookingTestCase):
 
-    @patch('booking_management.views_client.get_booking_payment_service')
+    @patch('booking_management.payment_service.get_booking_payment_service')
     def test_webhook_success(self, mock_payment):
         mock_svc = MagicMock()
         mock_svc.process_webhook.return_value = MagicMock()
@@ -908,7 +915,7 @@ class TestPaymentWebhook(BookingTestCase):
         resp = self.api_post(PAYMENT_WEBHOOK_URL, {'order_id': 'test123'})
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
 
-    @patch('booking_management.views_client.get_booking_payment_service')
+    @patch('booking_management.payment_service.get_booking_payment_service')
     def test_webhook_error(self, mock_payment):
         mock_payment.return_value.process_webhook.side_effect = Exception('Bad data')
         resp = self.api_post(PAYMENT_WEBHOOK_URL, {'order_id': 'bad'})

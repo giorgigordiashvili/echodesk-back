@@ -25,6 +25,7 @@ from tenants.feature_models import Feature
 # URL constants
 # ---------------------------------------------------------------------------
 SAVED_CARD_URL = '/api/payments/saved-card/'
+REMOVE_CARD_URL = '/api/payments/saved-card/remove/'
 SET_DEFAULT_CARD_URL = '/api/payments/saved-card/set-default/'
 INVOICES_URL = '/api/payments/invoices/'
 CANCEL_SUBSCRIPTION_URL = '/api/payments/cancel/'
@@ -152,14 +153,11 @@ class TestRemoveSavedCard(ExtendedSubscriptionMixin, EchoDeskTenantTestCase):
 
     def test_remove_card_success(self):
         card = self._make_saved_card()
-        resp = self.api_delete(SAVED_CARD_URL, user=self.admin, data={'card_id': card.id})
-        # The DELETE endpoint reads card_id from request.data
-        # Use api_client.delete with data
         from rest_framework.test import APIClient
         client = APIClient()
         client.force_authenticate(user=self.admin)
         resp = client.delete(
-            SAVED_CARD_URL,
+            REMOVE_CARD_URL,
             {'card_id': card.id},
             format='json',
             HTTP_HOST='tenant.test.com',
@@ -173,7 +171,7 @@ class TestRemoveSavedCard(ExtendedSubscriptionMixin, EchoDeskTenantTestCase):
         client = APIClient()
         client.force_authenticate(user=self.admin)
         resp = client.delete(
-            SAVED_CARD_URL,
+            REMOVE_CARD_URL,
             {'card_id': 99999},
             format='json',
             HTTP_HOST='tenant.test.com',
@@ -185,7 +183,7 @@ class TestRemoveSavedCard(ExtendedSubscriptionMixin, EchoDeskTenantTestCase):
         client = APIClient()
         client.force_authenticate(user=self.admin)
         resp = client.delete(
-            SAVED_CARD_URL,
+            REMOVE_CARD_URL,
             {},
             format='json',
             HTTP_HOST='tenant.test.com',
@@ -198,7 +196,7 @@ class TestRemoveSavedCard(ExtendedSubscriptionMixin, EchoDeskTenantTestCase):
         client = APIClient()
         client.force_authenticate(user=self.regular)
         resp = client.delete(
-            SAVED_CARD_URL,
+            REMOVE_CARD_URL,
             {'card_id': card.id},
             format='json',
             HTTP_HOST='tenant.test.com',
@@ -216,7 +214,7 @@ class TestRemoveSavedCard(ExtendedSubscriptionMixin, EchoDeskTenantTestCase):
         client = APIClient()
         client.force_authenticate(user=self.admin)
         resp = client.delete(
-            SAVED_CARD_URL,
+            REMOVE_CARD_URL,
             {'card_id': card1.id},
             format='json',
             HTTP_HOST='tenant.test.com',

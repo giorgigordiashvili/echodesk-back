@@ -593,7 +593,6 @@ class AdminBookingViewSet(viewsets.ModelViewSet):
             return Response({'error': error_msg}, status=status.HTTP_400_BAD_REQUEST)
 
         # Update booking
-        from datetime import datetime, timedelta
         booking.date = new_date
         booking.start_time = new_time
         end_dt = datetime.combine(new_date, new_time) + timedelta(minutes=booking.service.total_duration_minutes)
