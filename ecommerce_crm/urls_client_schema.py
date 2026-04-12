@@ -20,6 +20,10 @@ from ecommerce_crm.views_client import (
     delete_client_card,
     set_default_client_card,
     get_homepage_config,
+    get_store_theme,
+    validate_promo_code,
+    ClientProductReviewViewSet,
+    ClientShippingMethodViewSet,
 )
 
 urlpatterns = [
@@ -41,6 +45,15 @@ urlpatterns = [
 
     # Public homepage endpoint
     path('api/ecommerce/client/homepage/', get_homepage_config, name='client-homepage'),
+
+    # Store theme (public)
+    path('api/ecommerce/client/theme/', get_store_theme, name='client-theme'),
+
+    # Promo code validation
+    path('api/ecommerce/client/promo/validate/', validate_promo_code, name='client-promo-validate'),
+
+    # Product reviews
+    path('api/ecommerce/client/products/<int:product_id>/reviews/', ClientProductReviewViewSet.as_view({'get': 'list', 'post': 'create'}), name='client-product-reviews'),
 
     # Client-facing endpoints (requires client JWT)
     path('api/ecommerce/client/', include(client_router.urls)),
