@@ -673,6 +673,8 @@ class EcommerceSettingsSerializer(serializers.ModelSerializer):
             'theme_background_color', 'theme_foreground_color', 'theme_muted_color',
             'theme_muted_foreground_color', 'theme_destructive_color', 'theme_border_color',
             'theme_border_radius', 'theme_card_color', 'theme_card_foreground_color',
+            # Homepage variant
+            'homepage_variant',
             'created_at', 'updated_at'
         ]
         read_only_fields = [

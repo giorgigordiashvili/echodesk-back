@@ -1221,6 +1221,21 @@ class EcommerceSettings(models.Model):
         help_text="Card foreground/text color in HSL format"
     )
 
+    # Homepage variant
+    HOMEPAGE_VARIANT_CHOICES = [
+        ('classic', 'Classic'),
+        ('modern', 'Modern'),
+        ('minimal', 'Minimal'),
+        ('boutique', 'Boutique'),
+        ('marketplace', 'Marketplace'),
+    ]
+    homepage_variant = models.CharField(
+        max_length=20,
+        choices=HOMEPAGE_VARIANT_CHOICES,
+        blank=True,
+        default='',
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

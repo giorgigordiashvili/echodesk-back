@@ -2895,3 +2895,64 @@ class HomepageSectionViewSet(NoCacheMixin, viewsets.ModelViewSet):
                 for choice in HomepageSection.DISPLAY_MODE_CHOICES
             ]
         })
+
+    @extend_schema(
+        tags=['Ecommerce Admin - Homepage Builder'],
+        summary='List available homepage variants',
+        description='Get all predefined homepage variant templates with their section layouts'
+    )
+    @action(detail=False, methods=['get'], url_path='variants')
+    def list_variants(self, request):
+        """List all available homepage variant templates."""
+        from .homepage_variants import HOMEPAGE_VARIANTS
+        variants = []
+        for key, v in HOMEPAGE_VARIANTS.items():
+            variants.append({
+                'key': key,
+                'name': v['name'],
+                'description': v['description'],
+                'section_count': len(v['sections']),
+                'section_types': [s['section_type'] for s in v['sections']],
+            })
+        return Response(variants)
+
+    @extend_schema(
+        tags=['Ecommerce Admin - Homepage Builder'],
+        summary='Generate homepage from variant',
+        description='Delete all existing homepage sections and generate new ones from a predefined variant template'
+    )
+    @action(detail=False, methods=['post'], url_path='generate-from-variant')
+    def generate_from_variant(self, request):
+        """Generate homepage sections from a predefined variant."""
+        from .homepage_variants import HOMEPAGE_VARIANTS
+
+        variant_key = request.data.get('variant')
+        if variant_key not in HOMEPAGE_VARIANTS:
+            return Response(
+                {'error': f'Invalid variant. Choose from: {list(HOMEPAGE_VARIANTS.keys())}'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        variant = HOMEPAGE_VARIANTS[variant_key]
+
+        # Delete existing sections
+        HomepageSection.objects.all().delete()
+
+        # Create new sections
+        created = []
+        for section_config in variant['sections']:
+            section = HomepageSection.objects.create(**section_config)
+            created.append(section)
+
+        # Update settings with selected variant
+        settings = EcommerceSettings.objects.first()
+        if settings:
+            settings.homepage_variant = variant_key
+            settings.save(update_fields=['homepage_variant'])
+
+        serializer = HomepageSectionSerializer(created, many=True)
+        return Response({
+            'variant': variant_key,
+            'sections': serializer.data,
+            'message': f'Generated {len(created)} sections from "{variant["name"]}" variant'
+        })
