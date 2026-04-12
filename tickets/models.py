@@ -242,6 +242,11 @@ class Ticket(models.Model):
 
     class Meta:
         ordering = ['column__position', 'position_in_column', '-created_at']
+        indexes = [
+            models.Index(fields=['column', 'position_in_column'], name='ticket_col_pos_idx'),
+            models.Index(fields=['created_by', '-created_at'], name='ticket_creator_idx'),
+            models.Index(fields=['assigned_to'], name='ticket_assignee_idx'),
+        ]
 
     def __str__(self):
         return self.title
@@ -310,25 +315,38 @@ class Ticket(models.Model):
         return self.remaining_balance
 
     def save(self, *args, **kwargs):
+        from django.db import transaction
+
         # Auto-assign to default column if no column is set
         if not self.column_id:
-            default_column = TicketColumn.objects.filter(is_default=True).first()
+            # Try to get default column from the default board first,
+            # then fall back to any default column.
+            default_board = Board.objects.filter(is_default=True).first()
+            if default_board:
+                default_column = TicketColumn.objects.filter(
+                    board=default_board, is_default=True
+                ).first()
+            else:
+                default_column = TicketColumn.objects.filter(is_default=True).first()
             if default_column:
                 self.column = default_column
-                
+
         # Auto-assign position in column if not set
         if self.column and not self.position_in_column:
-            max_position = Ticket.objects.filter(column=self.column).aggregate(
-                models.Max('position_in_column')
-            )['position_in_column__max'] or 0
-            self.position_in_column = max_position + 1
-        
+            with transaction.atomic():
+                max_position = Ticket.objects.filter(
+                    column=self.column
+                ).select_for_update().aggregate(
+                    models.Max('position_in_column')
+                )['position_in_column__max'] or 0
+                self.position_in_column = max_position + 1
+
         # Auto-update payment status
         if self.price and self.amount_paid >= self.price:
             self.is_paid = True
         elif self.price and self.amount_paid < self.price:
             self.is_paid = False
-            
+
         super().save(*args, **kwargs)
 
 

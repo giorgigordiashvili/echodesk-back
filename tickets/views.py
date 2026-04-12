@@ -147,6 +147,12 @@ class TicketColumnViewSet(viewsets.ModelViewSet):
     def destroy(self, request, *args, **kwargs):
         """Delete a ticket column (superadmin only)."""
         self.check_superadmin_permission(request)
+        column = self.get_object()
+        if column.tickets.exists():
+            return Response(
+                {'error': 'Cannot delete column with tickets. Move tickets first.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         return super().destroy(request, *args, **kwargs)
 
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
@@ -233,6 +239,7 @@ class TicketColumnViewSet(viewsets.ModelViewSet):
                 'assigned_users',
                 'assigned_groups',
                 'tags',
+                'attachments',
                 Prefetch(
                     'ticketassignment_set',
                     queryset=TicketAssignment.objects.select_related('user', 'assigned_by'),
@@ -244,7 +251,7 @@ class TicketColumnViewSet(viewsets.ModelViewSet):
         columns = (
             columns_qs
             .order_by('position')
-            .select_related('created_by')
+            .select_related('board', 'created_by')
             .annotate(tickets_count=Count('tickets'))
             .prefetch_related(Prefetch('tickets', queryset=ticket_qs))
         )
@@ -554,24 +561,26 @@ class TicketViewSet(viewsets.ModelViewSet):
         ticket = self.get_object()
         column_id = request.data.get('column_id')
         new_position = request.data.get('position_in_column')
-        
+
         if not column_id:
             return Response(
-                {'error': 'column_id is required'}, 
+                {'error': 'column_id is required'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         try:
             new_column = TicketColumn.objects.get(id=column_id)
         except TicketColumn.DoesNotExist:
             return Response(
-                {'error': 'Column not found'}, 
+                {'error': 'Column not found'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         with transaction.atomic():
+            # Re-fetch ticket with row lock to prevent race conditions
+            ticket = Ticket.objects.select_for_update().get(pk=ticket.pk)
             old_column = ticket.column
-            
+
             # Handle time tracking for old column (if enabled and ticket is leaving a column)
             if old_column and old_column.track_time:
                 # Find the active time log for this ticket in the old column
@@ -580,37 +589,39 @@ class TicketViewSet(viewsets.ModelViewSet):
                     column=old_column,
                     exited_at__isnull=True
                 ).first()
-                
+
                 if active_time_log:
                     from django.utils import timezone
                     active_time_log.exited_at = timezone.now()
                     active_time_log.calculate_duration()
-            
-            # Remove ticket from old column and adjust positions
+
+            # Lock affected tickets in old column to prevent concurrent reorder issues
             if old_column:
-                Ticket.objects.filter(
+                Ticket.objects.select_for_update().filter(
                     column=old_column,
                     position_in_column__gt=ticket.position_in_column
                 ).update(position_in_column=F('position_in_column') - 1)
-            
-            # Add ticket to new column
+
+            # Lock affected tickets in new column and insert at position
             if new_position is not None:
                 # Insert at specific position
-                Ticket.objects.filter(
+                Ticket.objects.select_for_update().filter(
                     column=new_column,
                     position_in_column__gte=new_position
                 ).update(position_in_column=F('position_in_column') + 1)
                 ticket.position_in_column = new_position
             else:
                 # Add to end of column
-                max_position = Ticket.objects.filter(column=new_column).aggregate(
+                max_position = Ticket.objects.select_for_update().filter(
+                    column=new_column
+                ).aggregate(
                     max_pos=Max('position_in_column')
                 )['max_pos'] or 0
                 ticket.position_in_column = max_position + 1
-            
+
             ticket.column = new_column
             ticket.save()
-            
+
             # Handle time tracking for new column (if enabled)
             if new_column.track_time:
                 # Create a new time log entry for the new column
@@ -619,7 +630,7 @@ class TicketViewSet(viewsets.ModelViewSet):
                     column=new_column,
                     user=request.user
                 )
-        
+
         serializer = self.get_serializer(ticket)
         return Response(serializer.data)
 
@@ -847,6 +858,17 @@ class TicketAssignmentViewSet(viewsets.ModelViewSet):
         user_ids = request.data.get('user_ids', [])
         roles = request.data.get('roles', {})
 
+        # Validate all users exist and are active before assigning
+        if user_ids:
+            from django.contrib.auth import get_user_model
+            User = get_user_model()
+            valid_users = User.objects.filter(id__in=user_ids, is_active=True)
+            if valid_users.count() != len(user_ids):
+                return Response(
+                    {'error': 'Some users not found or inactive'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
         with transaction.atomic():
             # Clear existing assignments if replace is True
             if request.data.get('replace', False):
@@ -1072,6 +1094,7 @@ class BoardViewSet(viewsets.ModelViewSet):
                 'assigned_users',
                 'assigned_groups',
                 'tags',
+                'attachments',
                 Prefetch(
                     'ticketassignment_set',
                     queryset=TicketAssignment.objects.select_related('user', 'assigned_by'),
@@ -1085,7 +1108,7 @@ class BoardViewSet(viewsets.ModelViewSet):
             TicketColumn.objects
             .filter(board=board)
             .order_by('position')
-            .select_related('created_by')
+            .select_related('board', 'created_by')
             .annotate(tickets_count=Count('tickets'))
             .prefetch_related(Prefetch('tickets', queryset=ticket_qs))
         )

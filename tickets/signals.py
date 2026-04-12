@@ -9,6 +9,7 @@ from .models import (
     TicketComment,
     TicketAssignment,
     TicketAttachment,
+    TicketHistory,
 )
 import re
 from asgiref.sync import async_to_sync
@@ -222,6 +223,46 @@ def notify_on_ticket_comment(sender, instance, created, **kwargs):
                 'commenter': commenter.email,
             }
         )
+
+
+@receiver(pre_save, sender=Ticket)
+def record_ticket_history(sender, instance, **kwargs):
+    """
+    Record changes to tracked ticket fields in TicketHistory.
+    Only runs for existing tickets (not on create).
+    """
+    if not instance.pk:
+        return  # Skip on create
+
+    try:
+        old = Ticket.objects.get(pk=instance.pk)
+    except Ticket.DoesNotExist:
+        return
+
+    tracked_fields = [
+        ('title', 'updated'),
+        ('description', 'updated'),
+        ('priority', 'priority_changed'),
+        ('column_id', 'status_changed'),
+        ('assigned_to_id', 'assigned'),
+        ('assigned_department_id', 'updated'),
+    ]
+
+    # Try to get the user from instance._current_user (set by views if available)
+    current_user = getattr(instance, '_current_user', None)
+
+    for field, action in tracked_fields:
+        old_val = getattr(old, field)
+        new_val = getattr(instance, field)
+        if old_val != new_val:
+            TicketHistory.objects.create(
+                ticket=instance,
+                action=action,
+                field_name=field,
+                old_value=str(old_val) if old_val is not None else '',
+                new_value=str(new_val) if new_val is not None else '',
+                user=current_user,
+            )
 
 
 @receiver(pre_save, sender=Ticket)
