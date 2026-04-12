@@ -2297,10 +2297,15 @@ def ecommerce_payment_webhook(request):
             order.save()
             
             logger.info(f'Payment completed for order: {external_order_id}')
-            
-            # TODO: Send order confirmation email to client
-            # TODO: Notify admin of new paid order
-            
+
+            # Send order confirmation email
+            try:
+                from .tasks import send_order_email
+                from django.db import connection
+                send_order_email.delay(connection.schema_name, order.id, 'confirmation')
+            except Exception:
+                pass
+
             return Response({
                 'status': 'success',
                 'action': 'payment_completed',

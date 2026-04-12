@@ -47,16 +47,10 @@ class EcommerceClientSchemaGenerator(SchemaGenerator):
         """Filter endpoints to include only ecommerce client paths"""
         endpoints = super().get_endpoints(request)
 
-        print(f"[DEBUG] Total endpoints before filtering: {len(endpoints)}")
-
         # Filter to include only ecommerce client endpoints
         client_endpoints = []
         for path, path_regex, method, callback in endpoints:
-            # Include only paths that start with /api/ecommerce/client/
-            # This excludes /api/ecommerce/admin/ endpoints
             if path.startswith('/api/ecommerce/client'):
-                print(f"[DEBUG] Including: {path}")
                 client_endpoints.append((path, path_regex, method, callback))
 
-        print(f"[DEBUG] Total client endpoints after filtering: {len(client_endpoints)}")
         return client_endpoints
