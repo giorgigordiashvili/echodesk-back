@@ -1767,6 +1767,40 @@ class OrderViewSet(NoCacheMixin, viewsets.ModelViewSet):
 
     @extend_schema(
         tags=['Ecommerce Admin - Orders'],
+        summary='Mark order as paid',
+        description='Mark a cash-on-delivery or pending order as paid. Sets payment_status to paid and records paid_at timestamp.'
+    )
+    @action(detail=True, methods=['post'], url_path='mark-paid')
+    def mark_paid(self, request, pk=None):
+        """Mark an order as paid (for cash on delivery or manual payment confirmation)"""
+        from django.utils import timezone as tz
+
+        order = self.get_object()
+
+        if order.payment_status == 'paid':
+            return Response({'error': 'Order is already marked as paid'}, status=status.HTTP_400_BAD_REQUEST)
+
+        order.payment_status = 'paid'
+        order.paid_at = tz.now()
+
+        # Optionally update order status to confirmed if still pending
+        if order.status == 'pending':
+            order.status = 'confirmed'
+            if not order.confirmed_at:
+                order.confirmed_at = tz.now()
+
+        # Accept optional payment notes
+        payment_notes = request.data.get('notes')
+        if payment_notes:
+            order.admin_notes = f"{order.admin_notes}\n[Payment] {payment_notes}".strip() if order.admin_notes else f"[Payment] {payment_notes}"
+
+        order.save()
+
+        serializer = self.get_serializer(order)
+        return Response(serializer.data)
+
+    @extend_schema(
+        tags=['Ecommerce Admin - Orders'],
         summary='Order analytics',
         description='Get order analytics: revenue, order counts, top products, status breakdown'
     )
