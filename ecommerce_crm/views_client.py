@@ -1487,6 +1487,12 @@ def get_store_theme(request):
             },
             'radius': settings.theme_border_radius,
             'store_name': settings.store_name,
+            'payment': {
+                'active_providers': settings.active_payment_providers or [],
+                'enable_cash_on_delivery': settings.enable_cash_on_delivery,
+                'enable_card_payment': settings.enable_card_payment,
+                'currency': 'GEL',
+            },
         })
     except Exception as e:
         return Response(
