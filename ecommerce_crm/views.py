@@ -1761,25 +1761,24 @@ class OrderViewSet(NoCacheMixin, viewsets.ModelViewSet):
                 'status': 'pending'
             })
 
-        # Get tenant's ecommerce settings for BOG credentials
+        # Get tenant's ecommerce settings — tenant MUST provide their own credentials
         try:
             from .models import EcommerceSettings
             ecommerce_settings = EcommerceSettings.objects.get(tenant=request.tenant)
-
-            # Use tenant-specific credentials if available
-            if ecommerce_settings.has_bog_credentials:
-                client_id = ecommerce_settings.bog_client_id
-                client_secret = ecommerce_settings.get_bog_secret()
-            else:
-                # Fall back to default credentials from settings
-                from django.conf import settings
-                client_id = settings.BOG_CLIENT_ID
-                client_secret = settings.BOG_CLIENT_SECRET
         except EcommerceSettings.DoesNotExist:
-            # Use default credentials
-            from django.conf import settings
-            client_id = settings.BOG_CLIENT_ID
-            client_secret = settings.BOG_CLIENT_SECRET
+            return Response(
+                {'error': 'Payment not configured. Please set up payment credentials in ecommerce settings.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not ecommerce_settings.has_bog_credentials:
+            return Response(
+                {'error': 'BOG payment credentials not configured. Please add your BOG Client ID and Secret in ecommerce settings.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        client_id = ecommerce_settings.bog_client_id
+        client_secret = ecommerce_settings.get_bog_secret()
 
         # Check payment method
         payment_method = request.data.get('payment_method', 'card')

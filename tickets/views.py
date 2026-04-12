@@ -231,12 +231,17 @@ class TicketColumnViewSet(viewsets.ModelViewSet):
                 columns_qs = TicketColumn.objects.filter(board__isnull=True)
 
         # Prefetch all ticket relations to avoid N+1 queries
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
         ticket_qs = (
             Ticket.objects
             .order_by('position_in_column', '-created_at')
-            .select_related('created_by', 'assigned_to', 'column')
+            .select_related(
+                'created_by', 'assigned_to', 'assigned_department',
+                'column', 'column__board', 'column__created_by',
+            )
             .prefetch_related(
-                'assigned_users',
+                Prefetch('assigned_users', queryset=User.objects.only('id', 'first_name', 'last_name', 'email')),
                 'assigned_groups',
                 'tags',
                 'attachments',
@@ -1141,12 +1146,17 @@ class BoardViewSet(viewsets.ModelViewSet):
         board = self.get_object()
 
         # Build optimized ticket queryset with all relations prefetched
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
         ticket_qs = (
             Ticket.objects
             .order_by('position_in_column')
-            .select_related('created_by', 'assigned_to', 'column')
+            .select_related(
+                'created_by', 'assigned_to', 'assigned_department',
+                'column', 'column__board', 'column__created_by',
+            )
             .prefetch_related(
-                'assigned_users',
+                Prefetch('assigned_users', queryset=User.objects.only('id', 'first_name', 'last_name', 'email')),
                 'assigned_groups',
                 'tags',
                 'attachments',
