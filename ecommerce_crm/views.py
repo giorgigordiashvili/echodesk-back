@@ -1863,6 +1863,123 @@ class OrderViewSet(NoCacheMixin, viewsets.ModelViewSet):
 
     @extend_schema(
         tags=['Ecommerce Admin - Orders'],
+        summary='Bulk update order status',
+        description='Update the status of multiple orders at once. Sends email notifications for shipped/delivered.',
+        request=inline_serializer(
+            name='BulkUpdateStatusRequest',
+            fields={
+                'order_ids': serializers.ListField(child=serializers.IntegerField()),
+                'status': serializers.ChoiceField(choices=Order.STATUS_CHOICES),
+            },
+        ),
+        responses={
+            200: OpenApiResponse(description='Orders updated successfully'),
+            400: OpenApiResponse(description='Validation error'),
+        },
+    )
+    @action(detail=False, methods=['post'], url_path='bulk-update-status')
+    def bulk_update_status(self, request):
+        """Bulk update the status of multiple orders"""
+        from django.utils import timezone
+        from django.db import connection
+
+        order_ids = request.data.get('order_ids', [])
+        new_status = request.data.get('status')
+
+        if not order_ids:
+            return Response({'error': 'order_ids is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not new_status:
+            return Response({'error': 'status is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if new_status not in dict(Order.STATUS_CHOICES):
+            return Response({'error': 'Invalid status'}, status=status.HTTP_400_BAD_REQUEST)
+
+        orders = Order.objects.filter(id__in=order_ids)
+        if orders.count() != len(order_ids):
+            found_ids = set(orders.values_list('id', flat=True))
+            missing = [oid for oid in order_ids if oid not in found_ids]
+            return Response(
+                {'error': f'Orders not found: {missing}'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        updated_orders = []
+        for order in orders:
+            order.status = new_status
+            if new_status == 'confirmed' and not order.confirmed_at:
+                order.confirmed_at = timezone.now()
+            elif new_status == 'shipped' and not order.shipped_at:
+                order.shipped_at = timezone.now()
+            elif new_status == 'delivered' and not order.delivered_at:
+                order.delivered_at = timezone.now()
+            order.save()
+            updated_orders.append(order)
+
+            # Send email notifications for shipped/delivered
+            email_type = None
+            if new_status == 'shipped':
+                email_type = 'shipped'
+            elif new_status == 'delivered':
+                email_type = 'delivered'
+
+            if email_type:
+                try:
+                    from .tasks import send_order_email
+                    send_order_email.delay(connection.schema_name, order.id, email_type)
+                except Exception:
+                    pass
+
+        return Response({
+            'updated': len(updated_orders),
+            'status': new_status,
+            'order_ids': [o.id for o in updated_orders],
+        })
+
+    @extend_schema(
+        tags=['Ecommerce Admin - Orders'],
+        summary='Export orders as CSV',
+        description='Download all orders (respecting current filters) as a CSV file.',
+        responses={
+            200: OpenApiResponse(description='CSV file download'),
+        },
+    )
+    @action(detail=False, methods=['get'], url_path='export')
+    def export_orders(self, request):
+        """Export filtered orders as CSV"""
+        import csv
+        from django.http import HttpResponse
+
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = 'attachment; filename="orders.csv"'
+        writer = csv.writer(response)
+        writer.writerow([
+            'Order Number', 'Date', 'Client', 'Email', 'Phone',
+            'Total', 'Subtotal', 'Shipping', 'Tax', 'Discount',
+            'Status', 'Payment Status', 'Payment Method',
+        ])
+
+        orders = self.filter_queryset(self.get_queryset()).select_related('client')
+        for order in orders:
+            writer.writerow([
+                order.order_number,
+                order.created_at.strftime('%Y-%m-%d %H:%M:%S') if order.created_at else '',
+                order.client.full_name if order.client else '',
+                order.client.email if order.client else '',
+                order.client.phone_number if order.client else '',
+                order.total_amount,
+                order.subtotal,
+                order.shipping_cost,
+                order.tax_amount,
+                order.discount_amount,
+                order.status,
+                order.payment_status,
+                order.payment_method,
+            ])
+        return response
+
+    @extend_schema(
+        tags=['Ecommerce Admin - Orders'],
         summary='Initiate payment for order',
         description='Create BOG payment session for an order'
     )

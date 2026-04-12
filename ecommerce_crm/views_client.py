@@ -1731,3 +1731,324 @@ class ClientProductReviewViewSet(viewsets.ModelViewSet):
 
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
+
+@extend_schema(
+    tags=['Ecommerce Client - Guest Checkout'],
+    summary='Guest checkout',
+    description='Place an order without authentication. Creates or finds a client by email.',
+    request=inline_serializer(
+        name='GuestCheckoutRequest',
+        fields={
+            'email': serializers.EmailField(),
+            'first_name': serializers.CharField(),
+            'last_name': serializers.CharField(),
+            'phone': serializers.CharField(),
+            'address': inline_serializer(
+                name='GuestAddress',
+                fields={
+                    'address': serializers.CharField(),
+                    'city': serializers.CharField(),
+                    'label': serializers.CharField(required=False, default='Delivery'),
+                },
+            ),
+            'items': serializers.ListField(
+                child=inline_serializer(
+                    name='GuestCheckoutItem',
+                    fields={
+                        'product_id': serializers.IntegerField(),
+                        'quantity': serializers.IntegerField(),
+                        'variant_id': serializers.IntegerField(required=False, allow_null=True),
+                    },
+                )
+            ),
+            'payment_method': serializers.CharField(required=False, default='cash_on_delivery'),
+            'shipping_method_id': serializers.IntegerField(required=False, allow_null=True),
+            'promo_code': serializers.CharField(required=False, allow_blank=True),
+            'notes': serializers.CharField(required=False, allow_blank=True),
+        },
+    ),
+    responses={
+        201: OpenApiResponse(description='Order created successfully'),
+        400: OpenApiResponse(description='Validation error'),
+    },
+)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def guest_checkout(request):
+    """Place order without authentication. Creates/finds client by email."""
+    import uuid
+    from django.db import transaction, connection
+    from decimal import Decimal
+
+    data = request.data
+
+    # --- Validate required fields ---
+    required_fields = ['email', 'first_name', 'last_name', 'phone', 'address', 'items']
+    missing = [f for f in required_fields if not data.get(f)]
+    if missing:
+        return Response(
+            {'error': f'Missing required fields: {", ".join(missing)}'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    items_data = data.get('items', [])
+    if not items_data:
+        return Response({'error': 'Items list cannot be empty.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    address_data = data.get('address', {})
+    if not address_data.get('address') or not address_data.get('city'):
+        return Response(
+            {'error': 'Address must include "address" and "city".'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # --- Find or create EcommerceClient ---
+    email = data['email'].strip().lower()
+    client, created = EcommerceClient.objects.get_or_create(
+        email=email,
+        defaults={
+            'first_name': data['first_name'],
+            'last_name': data['last_name'],
+            'phone_number': data['phone'],
+            'password': '',
+            'is_verified': True,
+        },
+    )
+    if created:
+        client.set_password(uuid.uuid4().hex)
+        client.save(update_fields=['password'])
+
+    # --- Create ClientAddress ---
+    delivery_address = ClientAddress.objects.create(
+        client=client,
+        label=address_data.get('label', 'Delivery'),
+        address=address_data['address'],
+        city=address_data['city'],
+    )
+
+    # --- Validate items, compute subtotal ---
+    order_items_to_create = []
+    subtotal = Decimal('0')
+    for item_data in items_data:
+        product_id = item_data.get('product_id')
+        quantity = item_data.get('quantity', 1)
+        variant_id = item_data.get('variant_id')
+
+        if not product_id or quantity < 1:
+            return Response(
+                {'error': 'Each item must have a valid product_id and quantity >= 1.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            product = Product.objects.get(id=product_id, status='active')
+        except Product.DoesNotExist:
+            return Response(
+                {'error': f'Product with id {product_id} not found or inactive.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        variant = None
+        if variant_id:
+            try:
+                from .models import ProductVariant
+                variant = ProductVariant.objects.get(id=variant_id, product=product, is_active=True)
+            except ProductVariant.DoesNotExist:
+                return Response(
+                    {'error': f'Variant with id {variant_id} not found for product {product_id}.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        price = variant.effective_price if variant else product.price
+        subtotal += price * quantity
+        order_items_to_create.append({
+            'product': product,
+            'variant': variant,
+            'quantity': quantity,
+            'price': price,
+            'product_name': product.name,
+        })
+
+    # --- Promo code ---
+    promo = None
+    discount_amount = Decimal('0')
+    promo_code_str = (data.get('promo_code') or '').strip()
+    if promo_code_str:
+        try:
+            promo = PromoCode.objects.get(code__iexact=promo_code_str)
+            is_valid, _msg = promo.is_valid(subtotal=subtotal)
+            if is_valid:
+                discount_amount = promo.calculate_discount(subtotal)
+        except PromoCode.DoesNotExist:
+            pass
+
+    # --- Shipping method ---
+    shipping_method = None
+    shipping_cost = Decimal('0')
+    shipping_method_id = data.get('shipping_method_id')
+    if shipping_method_id:
+        try:
+            shipping_method = ShippingMethod.objects.get(id=shipping_method_id, is_active=True)
+            shipping_cost = shipping_method.get_effective_price(subtotal)
+        except ShippingMethod.DoesNotExist:
+            pass
+
+    # --- Tax ---
+    tax_amount = Decimal('0')
+    ecommerce_settings = EcommerceSettings.objects.first()
+    if ecommerce_settings and ecommerce_settings.tax_rate > 0:
+        taxable_amount = subtotal - discount_amount
+        if ecommerce_settings.tax_inclusive:
+            tax_amount = taxable_amount - (taxable_amount / (1 + ecommerce_settings.tax_rate / Decimal('100')))
+        else:
+            tax_amount = taxable_amount * ecommerce_settings.tax_rate / Decimal('100')
+        tax_amount = tax_amount.quantize(Decimal('0.01'))
+
+    # --- Total ---
+    if tax_amount > 0 and ecommerce_settings and not ecommerce_settings.tax_inclusive:
+        total_amount = subtotal - discount_amount + shipping_cost + tax_amount
+    else:
+        total_amount = subtotal - discount_amount + shipping_cost
+
+    # --- Create order within transaction ---
+    try:
+        with transaction.atomic():
+            # Stock validation & decrement
+            for item_info in order_items_to_create:
+                product = item_info['product']
+                qty = item_info['quantity']
+                if product.track_inventory:
+                    # Re-fetch with lock
+                    locked_product = Product.objects.select_for_update().get(pk=product.pk)
+                    if locked_product.quantity < qty:
+                        raise serializers.ValidationError(
+                            f'Insufficient stock for {product.get_name("en")}. '
+                            f'Available: {locked_product.quantity}, Requested: {qty}'
+                        )
+                    locked_product.quantity -= qty
+                    locked_product.save(update_fields=['quantity'])
+
+            order = Order.objects.create(
+                order_number=Order.generate_order_number(),
+                client=client,
+                delivery_address=delivery_address,
+                subtotal=subtotal,
+                discount_amount=discount_amount,
+                promo_code=promo,
+                shipping_method=shipping_method,
+                shipping_cost=shipping_cost,
+                tax_amount=tax_amount,
+                total_amount=total_amount,
+                notes=data.get('notes', ''),
+                status='pending',
+            )
+
+            for item_info in order_items_to_create:
+                OrderItem.objects.create(
+                    order=order,
+                    product=item_info['product'],
+                    variant=item_info['variant'],
+                    product_name=item_info['product_name'],
+                    quantity=item_info['quantity'],
+                    price=item_info['price'],
+                )
+
+            if promo and discount_amount > 0:
+                promo.times_used += 1
+                promo.save(update_fields=['times_used'])
+
+    except serializers.ValidationError as ve:
+        return Response({'error': str(ve.detail)}, status=status.HTTP_400_BAD_REQUEST)
+
+    # --- Send confirmation email ---
+    try:
+        from .tasks import send_order_email
+        send_order_email.delay(connection.schema_name, order.id, 'confirmation')
+    except Exception:
+        pass
+
+    # --- Payment handling ---
+    payment_method = data.get('payment_method', 'cash_on_delivery')
+
+    if payment_method == 'cash_on_delivery':
+        order.payment_method = 'cash_on_delivery'
+        order.payment_status = 'pending'
+        order.save(update_fields=['payment_method', 'payment_status'])
+
+        output_serializer = OrderSerializer(order)
+        response_data = output_serializer.data
+        response_data['payment_method'] = 'cash_on_delivery'
+        response_data['message'] = 'Order will be paid on delivery'
+        return Response(response_data, status=status.HTTP_201_CREATED)
+
+    # Card payment via BOG
+    try:
+        from django.conf import settings as django_settings
+        from tenants.bog_payment import BOGPaymentService
+
+        try:
+            ec_settings = EcommerceSettings.objects.get(tenant=request.tenant)
+            if ec_settings.has_bog_credentials:
+                client_id = ec_settings.bog_client_id
+                client_secret = ec_settings.get_bog_secret()
+            else:
+                client_id = django_settings.BOG_CLIENT_ID
+                client_secret = django_settings.BOG_CLIENT_SECRET
+        except Exception:
+            client_id = django_settings.BOG_CLIENT_ID
+            client_secret = django_settings.BOG_CLIENT_SECRET
+
+        bog_service_instance = BOGPaymentService()
+        bog_service_instance.client_id = client_id
+        bog_service_instance.client_secret = client_secret
+        bog_service_instance.auth_url = django_settings.BOG_AUTH_URL
+        bog_service_instance.base_url = django_settings.BOG_API_BASE_URL
+
+        callback_url = f"https://{request.get_host()}/api/ecommerce/payment-webhook/"
+
+        try:
+            ec_settings = EcommerceSettings.objects.get(tenant=request.tenant)
+            return_url_success = ec_settings.bog_return_url_success or ''
+            return_url_fail = ec_settings.bog_return_url_fail or ''
+        except EcommerceSettings.DoesNotExist:
+            return_url_success = ''
+            return_url_fail = ''
+
+        payment_result = bog_service_instance.create_payment(
+            amount=float(order.total_amount),
+            currency='GEL',
+            description=f"Order {order.order_number}",
+            customer_email=client.email,
+            customer_name=client.full_name,
+            customer_phone=client.phone_number or '',
+            return_url_success=return_url_success,
+            return_url_fail=return_url_fail,
+            callback_url=callback_url,
+            external_order_id=order.order_number,
+            metadata={
+                'order_id': order.id,
+                'order_number': order.order_number,
+                'tenant_id': request.tenant.id,
+            },
+        )
+
+        order.bog_order_id = payment_result['order_id']
+        order.payment_url = payment_result['payment_url']
+        order.payment_status = 'pending'
+        order.payment_method = 'card'
+        order.payment_metadata = payment_result
+        order.save()
+
+        output_serializer = OrderSerializer(order)
+        response_data = output_serializer.data
+        response_data['payment_url'] = payment_result['payment_url']
+        response_data['bog_order_id'] = payment_result['order_id']
+        return Response(response_data, status=status.HTTP_201_CREATED)
+
+    except Exception as e:
+        output_serializer = OrderSerializer(order)
+        response_data = output_serializer.data
+        response_data['payment_error'] = str(e)
+        response_data['message'] = 'Order created but payment initialization failed'
+        return Response(response_data, status=status.HTTP_201_CREATED)
+

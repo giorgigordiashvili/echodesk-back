@@ -22,6 +22,7 @@ from ecommerce_crm.views_client import (
     get_homepage_config,
     get_store_theme,
     validate_promo_code,
+    guest_checkout,
     ClientProductReviewViewSet,
     ClientShippingMethodViewSet,
 )
@@ -51,6 +52,9 @@ urlpatterns = [
 
     # Promo code validation
     path('api/ecommerce/client/promo/validate/', validate_promo_code, name='client-promo-validate'),
+
+    # Guest checkout (public access)
+    path('api/ecommerce/client/guest-checkout/', guest_checkout, name='client-guest-checkout'),
 
     # Product reviews
     path('api/ecommerce/client/products/<int:product_id>/reviews/', ClientProductReviewViewSet.as_view({'get': 'list', 'post': 'create'}), name='client-product-reviews'),

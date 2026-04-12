@@ -50,6 +50,7 @@ from .views_client import (
     get_homepage_config,
     get_store_theme,
     validate_promo_code,
+    guest_checkout,
 )
 
 # Admin router - requires admin JWT authentication
@@ -114,6 +115,8 @@ urlpatterns = [
     path('client/theme/', get_store_theme, name='client-theme'),
     # Promo code validation
     path('client/promo/validate/', validate_promo_code, name='client-promo-validate'),
+    # Guest checkout (public access)
+    path('client/guest-checkout/', guest_checkout, name='client-guest-checkout'),
     # Product reviews (nested under products)
     path('client/products/<int:product_pk>/reviews/',
          ClientProductReviewViewSet.as_view({'get': 'list', 'post': 'create'}),

@@ -20,6 +20,16 @@
             text-align: center;
             border-radius: 8px 8px 0 0;
         }
+        .store-logo {
+            max-height: 60px;
+            max-width: 200px;
+            margin-bottom: 12px;
+        }
+        .store-name {
+            font-size: 14px;
+            opacity: 0.9;
+            margin-bottom: 8px;
+        }
         .content {
             background-color: #ffffff;
             padding: 30px 20px;
@@ -106,6 +116,12 @@
 </head>
 <body>
     <div class="header">
+        {% if store_logo %}
+        <img src="{{ store_logo }}" alt="{{ store_name }}" class="store-logo">
+        {% endif %}
+        {% if store_name %}
+        <div class="store-name">{{ store_name }}</div>
+        {% endif %}
         <h1>Your Order Has Been Shipped!</h1>
         <div class="order-number">Order #{{ order_number }}</div>
     </div>
@@ -169,10 +185,14 @@
             <a href="{{ frontend_url }}" class="button">Track Your Order</a>
         </p>
 
-        <p>Best regards,<br>The {{ site_name }} Team</p>
+        <p>Best regards,<br>The {{ store_name|default:site_name }} Team</p>
     </div>
     <div class="footer">
-        <p>&copy; {{ site_name }}. All rights reserved.</p>
+        {% if store_email %}
+        <p>Questions? Contact us at <a href="mailto:{{ store_email }}">{{ store_email }}</a></p>
+        {% endif %}
+        <p>Thank you for shopping with {{ store_name|default:site_name }}!</p>
+        <p>&copy; {{ store_name|default:site_name }}. All rights reserved.</p>
         <p>This email was sent to {{ client_email }}</p>
     </div>
 </body>

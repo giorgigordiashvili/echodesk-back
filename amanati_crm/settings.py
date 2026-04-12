@@ -592,6 +592,11 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'booking_management.tasks.cancel_unpaid_bookings',
         'schedule': crontab(minute=0, hour='*/6'),  # Every 6 hours
     },
+    # Ecommerce low stock check
+    'check-low-stock': {
+        'task': 'ecommerce_crm.tasks.check_low_stock_products',
+        'schedule': crontab(hour=8, minute=0),  # Daily at 8 AM
+    },
 }
 
 # Bank of Georgia (BOG) Payment Gateway Configuration

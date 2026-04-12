@@ -61,6 +61,24 @@ def send_order_email(self, schema_name, order_id, email_type):
                     'city': order.delivery_address.city,
                 }
 
+            # Add store branding context
+            try:
+                from .models import EcommerceSettings
+                store_settings = EcommerceSettings.objects.first()
+                context['store_name'] = store_settings.store_name if store_settings and store_settings.store_name else 'Our Store'
+                context['store_email'] = store_settings.store_email if store_settings and store_settings.store_email else ''
+                context['store_phone'] = store_settings.store_phone if store_settings and store_settings.store_phone else ''
+                context['store_logo'] = ''
+                # Theme colors for email branding
+                if store_settings:
+                    context['theme_primary_color'] = store_settings.theme_primary_color or '221 83% 53%'
+            except Exception:
+                context['store_name'] = 'Our Store'
+                context['store_email'] = ''
+                context['store_phone'] = ''
+                context['store_logo'] = ''
+                context['theme_primary_color'] = '221 83% 53%'
+
             if email_type == 'confirmation':
                 subject = f'Order Confirmed - {order.order_number}'
                 template_name = 'order_confirmation'
@@ -111,3 +129,79 @@ def _get_product_name(product_name_field):
     if isinstance(product_name_field, dict):
         return product_name_field.get('en', next(iter(product_name_field.values()), 'Product'))
     return str(product_name_field)
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+def check_low_stock_products(self):
+    """Daily check for low stock products - sends email to store admin."""
+    from tenant_schemas.utils import schema_context
+    from tenants.models import Tenant
+    from django.db.models import F
+
+    try:
+        tenants = Tenant.objects.exclude(schema_name='public')
+
+        for tenant in tenants:
+            try:
+                with schema_context(tenant.schema_name):
+                    from .models import Product, EcommerceSettings
+                    from .email_utils import send_email
+
+                    low_stock = Product.objects.filter(
+                        track_inventory=True,
+                        quantity__lte=F('low_stock_threshold'),
+                        status='active',
+                    )
+
+                    if not low_stock.exists():
+                        continue
+
+                    settings_obj = EcommerceSettings.objects.first()
+                    if not settings_obj or not settings_obj.store_email:
+                        logger.info(
+                            f'Low stock products found for tenant {tenant.schema_name} '
+                            f'but no store_email configured. Skipping.'
+                        )
+                        continue
+
+                    products_list = []
+                    for product in low_stock[:50]:  # Limit to 50 products per email
+                        products_list.append({
+                            'name': _get_product_name(product.name),
+                            'sku': product.sku,
+                            'quantity': product.quantity,
+                            'threshold': product.low_stock_threshold,
+                        })
+
+                    context = {
+                        'products': products_list,
+                        'total_low_stock': low_stock.count(),
+                        'store_name': settings_obj.store_name or 'Your Store',
+                    }
+
+                    success = send_email(
+                        subject=f'Low Stock Alert - {len(products_list)} products need attention',
+                        recipient_email=settings_obj.store_email,
+                        template_name='low_stock_alert',
+                        context=context,
+                    )
+
+                    if success:
+                        logger.info(
+                            f'Low stock alert sent for tenant {tenant.schema_name}: '
+                            f'{low_stock.count()} products'
+                        )
+                    else:
+                        logger.warning(
+                            f'Failed to send low stock alert for tenant {tenant.schema_name}'
+                        )
+
+            except Exception as e:
+                logger.error(
+                    f'Error checking low stock for tenant {tenant.schema_name}: {e}'
+                )
+                continue
+
+    except Exception as exc:
+        logger.error(f'Error in check_low_stock_products task: {exc}')
+        raise self.retry(exc=exc)
