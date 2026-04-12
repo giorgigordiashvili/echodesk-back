@@ -17,6 +17,9 @@ from .models import (
     EcommerceSettings,
     ClientCard,
     HomepageSection,
+    ShippingMethod,
+    PromoCode,
+    ProductReview,
 )
 from tickets.models import ItemList, ListItem
 
@@ -572,9 +575,60 @@ class OrderListSerializer(serializers.ModelSerializer):
         model = Order
         fields = [
             'id', 'order_number', 'client', 'client_name', 'status',
-            'payment_status', 'total_amount', 'created_at'
+            'payment_status', 'total_amount', 'tracking_number',
+            'shipping_cost', 'tax_amount', 'subtotal', 'discount_amount',
+            'created_at'
         ]
         read_only_fields = ['id', 'order_number', 'created_at']
+
+
+class ShippingMethodSerializer(serializers.ModelSerializer):
+    """Serializer for shipping methods"""
+    class Meta:
+        model = ShippingMethod
+        fields = [
+            'id', 'name', 'description', 'price', 'free_shipping_threshold',
+            'is_active', 'estimated_days', 'position', 'created_at'
+        ]
+        read_only_fields = ['id', 'created_at']
+
+
+class PromoCodeSerializer(serializers.ModelSerializer):
+    """Serializer for promo codes (admin)"""
+    class Meta:
+        model = PromoCode
+        fields = [
+            'id', 'code', 'discount_type', 'discount_value',
+            'min_order_amount', 'max_uses', 'times_used',
+            'valid_from', 'valid_until', 'is_active', 'created_at'
+        ]
+        read_only_fields = ['id', 'times_used', 'created_at']
+
+
+class ProductReviewSerializer(serializers.ModelSerializer):
+    """Serializer for product reviews"""
+    client_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProductReview
+        fields = [
+            'id', 'product', 'client', 'client_name', 'rating', 'title',
+            'content', 'is_verified_purchase', 'is_approved', 'created_at'
+        ]
+        read_only_fields = [
+            'id', 'client', 'is_verified_purchase', 'is_approved', 'created_at'
+        ]
+
+    def get_client_name(self, obj):
+        return obj.client.first_name or 'Anonymous'
+
+
+class ProductReviewCreateSerializer(serializers.ModelSerializer):
+    """Serializer for creating product reviews (client-facing)"""
+    class Meta:
+        model = ProductReview
+        fields = ['id', 'rating', 'title', 'content', 'created_at']
+        read_only_fields = ['id', 'created_at']
 
 
 class OrderSerializer(serializers.ModelSerializer):
@@ -583,12 +637,18 @@ class OrderSerializer(serializers.ModelSerializer):
     delivery_address = ClientAddressSerializer(read_only=True)
     total_items = serializers.IntegerField(read_only=True)
     client_details = serializers.SerializerMethodField()
+    shipping_method_details = ShippingMethodSerializer(source='shipping_method', read_only=True)
 
     class Meta:
         model = Order
         fields = [
             'id', 'order_number', 'client', 'client_details', 'delivery_address',
             'status', 'total_amount', 'notes', 'admin_notes', 'items', 'total_items',
+            # Shipping fields
+            'tracking_number', 'courier_provider', 'shipping_cost',
+            'estimated_delivery_date', 'shipping_method', 'shipping_method_details',
+            # Tax and pricing
+            'tax_amount', 'subtotal', 'discount_amount', 'promo_code',
             # Payment fields
             'payment_status', 'payment_method', 'bog_order_id', 'payment_url',
             'payment_metadata',
@@ -673,6 +733,8 @@ class EcommerceSettingsSerializer(serializers.ModelSerializer):
             'theme_background_color', 'theme_foreground_color', 'theme_muted_color',
             'theme_muted_foreground_color', 'theme_destructive_color', 'theme_border_color',
             'theme_border_radius', 'theme_card_color', 'theme_card_foreground_color',
+            # Tax configuration
+            'tax_rate', 'tax_inclusive', 'tax_label',
             # Homepage variant
             'homepage_variant',
             'created_at', 'updated_at'
@@ -775,6 +837,8 @@ class OrderCreateSerializer(serializers.Serializer):
     delivery_address_id = serializers.IntegerField(required=True)
     card_id = serializers.IntegerField(required=False, allow_null=True)
     notes = serializers.CharField(required=False, allow_blank=True)
+    promo_code = serializers.CharField(required=False, allow_blank=True)
+    shipping_method_id = serializers.IntegerField(required=False, allow_null=True)
 
     def validate_cart_id(self, value):
         """Validate cart exists and has items"""
@@ -804,38 +868,130 @@ class OrderCreateSerializer(serializers.Serializer):
         except ClientCard.DoesNotExist:
             raise serializers.ValidationError("Card not found or inactive")
 
+    def validate_shipping_method_id(self, value):
+        """Validate shipping method exists and is active"""
+        if value is None:
+            return value
+        try:
+            ShippingMethod.objects.get(id=value, is_active=True)
+            return value
+        except ShippingMethod.DoesNotExist:
+            raise serializers.ValidationError("Shipping method not found or inactive")
+
     def create(self, validated_data):
-        """Create order from cart"""
-        cart = Cart.objects.get(id=validated_data['cart_id'])
+        """Create order from cart with stock management, tax, shipping, and promo code"""
+        from django.db import transaction
+        from decimal import Decimal
+
+        cart = Cart.objects.prefetch_related(
+            'items__product', 'items__variant'
+        ).get(id=validated_data['cart_id'])
         delivery_address = ClientAddress.objects.get(id=validated_data['delivery_address_id'])
+
+        # Calculate subtotal from cart
+        subtotal = Decimal('0')
+        for cart_item in cart.items.all():
+            subtotal += cart_item.price_at_add * cart_item.quantity
+
+        # Handle promo code
+        promo = None
+        discount_amount = Decimal('0')
+        promo_code_str = validated_data.get('promo_code', '').strip()
+        if promo_code_str:
+            try:
+                promo = PromoCode.objects.get(code__iexact=promo_code_str)
+                is_valid, message = promo.is_valid(subtotal=subtotal)
+                if is_valid:
+                    discount_amount = promo.calculate_discount(subtotal)
+                # Silently ignore invalid promo codes during order creation
+            except PromoCode.DoesNotExist:
+                pass
+
+        # Handle shipping method
+        shipping_method = None
+        shipping_cost = Decimal('0')
+        shipping_method_id = validated_data.get('shipping_method_id')
+        if shipping_method_id:
+            try:
+                shipping_method = ShippingMethod.objects.get(id=shipping_method_id, is_active=True)
+                shipping_cost = shipping_method.get_effective_price(subtotal)
+            except ShippingMethod.DoesNotExist:
+                pass
+
+        # Calculate tax
+        tax_amount = Decimal('0')
+        try:
+            from .models import EcommerceSettings
+            ecommerce_settings = EcommerceSettings.objects.first()
+            if ecommerce_settings and ecommerce_settings.tax_rate > 0:
+                taxable_amount = subtotal - discount_amount
+                if ecommerce_settings.tax_inclusive:
+                    # Prices already include tax, extract it
+                    tax_amount = taxable_amount - (taxable_amount / (1 + ecommerce_settings.tax_rate / Decimal('100')))
+                else:
+                    # Tax is added on top
+                    tax_amount = taxable_amount * ecommerce_settings.tax_rate / Decimal('100')
+                tax_amount = tax_amount.quantize(Decimal('0.01'))
+        except Exception:
+            pass
+
+        # Calculate total
+        if tax_amount > 0 and ecommerce_settings and not ecommerce_settings.tax_inclusive:
+            total_amount = subtotal - discount_amount + shipping_cost + tax_amount
+        else:
+            total_amount = subtotal - discount_amount + shipping_cost
 
         # Generate unique order number
         order_number = Order.generate_order_number()
 
-        # Create order
-        order = Order.objects.create(
-            order_number=order_number,
-            client=cart.client,
-            delivery_address=delivery_address,
-            total_amount=cart.total_amount,
-            notes=validated_data.get('notes', ''),
-            status='pending'
-        )
+        with transaction.atomic():
+            # Stock validation and decrement
+            for cart_item in cart.items.select_for_update().select_related('product'):
+                product = cart_item.product
+                if product.track_inventory:
+                    if product.quantity < cart_item.quantity:
+                        raise serializers.ValidationError(
+                            f'Insufficient stock for {product.get_name("en")}. '
+                            f'Available: {product.quantity}, Requested: {cart_item.quantity}'
+                        )
+                    product.quantity -= cart_item.quantity
+                    product.save(update_fields=['quantity'])
 
-        # Create order items from cart items
-        for cart_item in cart.items.all():
-            OrderItem.objects.create(
-                order=order,
-                product=cart_item.product,
-                variant=cart_item.variant,
-                product_name=cart_item.product.name,  # Snapshot of product name
-                quantity=cart_item.quantity,
-                price=cart_item.price_at_add
+            # Create order
+            order = Order.objects.create(
+                order_number=order_number,
+                client=cart.client,
+                delivery_address=delivery_address,
+                subtotal=subtotal,
+                discount_amount=discount_amount,
+                promo_code=promo,
+                shipping_method=shipping_method,
+                shipping_cost=shipping_cost,
+                tax_amount=tax_amount,
+                total_amount=total_amount,
+                notes=validated_data.get('notes', ''),
+                status='pending'
             )
 
-        # Mark cart as converted
-        cart.status = 'converted'
-        cart.save()
+            # Create order items from cart items
+            for cart_item in cart.items.all():
+                OrderItem.objects.create(
+                    order=order,
+                    product=cart_item.product,
+                    variant=cart_item.variant,
+                    product_name=cart_item.product.name,
+                    quantity=cart_item.quantity,
+                    price=cart_item.price_at_add
+                )
+
+            # Increment promo code usage
+            if promo and discount_amount > 0:
+                promo.times_used += 1
+                promo.save(update_fields=['times_used'])
+
+            # Mark cart as converted
+            cart.status = 'converted'
+            cart.save()
 
         return order
 

@@ -14,6 +14,9 @@ from .views import (
     OrderViewSet,
     EcommerceSettingsViewSet,
     HomepageSectionViewSet,
+    ShippingMethodViewSet,
+    PromoCodeViewSet,
+    ProductReviewAdminViewSet,
     register_client,
     login_client,
     logout_client,
@@ -38,12 +41,15 @@ from .views_client import (
     ClientOrderViewSet,
     ClientItemListViewSet,
     ClientLanguageViewSet,
+    ClientShippingMethodViewSet,
+    ClientProductReviewViewSet,
     add_client_card,
     list_client_cards,
     delete_client_card,
     set_default_client_card,
     get_homepage_config,
     get_store_theme,
+    validate_promo_code,
 )
 
 # Admin router - requires admin JWT authentication
@@ -61,6 +67,9 @@ admin_router.register(r'cart-items', CartItemViewSet, basename='cart-item')
 admin_router.register(r'orders', OrderViewSet, basename='order')
 admin_router.register(r'settings', EcommerceSettingsViewSet, basename='ecommerce-settings')
 admin_router.register(r'homepage-sections', HomepageSectionViewSet, basename='homepage-section')
+admin_router.register(r'shipping-methods', ShippingMethodViewSet, basename='shipping-method')
+admin_router.register(r'promo-codes', PromoCodeViewSet, basename='promo-code')
+admin_router.register(r'reviews', ProductReviewAdminViewSet, basename='product-review-admin')
 
 # Client router - public and authenticated client access
 client_router = DefaultRouter()
@@ -74,6 +83,7 @@ client_router.register(r'cart-items', ClientCartItemViewSet, basename='client-ca
 client_router.register(r'orders', ClientOrderViewSet, basename='client-order')
 client_router.register(r'item-lists', ClientItemListViewSet, basename='client-item-list')
 client_router.register(r'languages', ClientLanguageViewSet, basename='client-language')
+client_router.register(r'shipping-methods', ClientShippingMethodViewSet, basename='client-shipping-method')
 
 app_name = 'ecommerce_crm'
 
@@ -102,6 +112,12 @@ urlpatterns = [
     path('client/homepage/', get_homepage_config, name='client-homepage'),
     # Public theme endpoint
     path('client/theme/', get_store_theme, name='client-theme'),
+    # Promo code validation
+    path('client/promo/validate/', validate_promo_code, name='client-promo-validate'),
+    # Product reviews (nested under products)
+    path('client/products/<int:product_pk>/reviews/',
+         ClientProductReviewViewSet.as_view({'get': 'list', 'post': 'create'}),
+         name='client-product-reviews'),
     # Client-facing endpoints (requires client JWT)
     path('client/', include(client_router.urls)),
     # Admin endpoints (requires admin JWT)

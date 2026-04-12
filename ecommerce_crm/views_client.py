@@ -25,9 +25,13 @@ from .models import (
     Cart,
     CartItem,
     Order,
+    OrderItem,
     ClientCard,
     EcommerceSettings,
     Language,
+    ShippingMethod,
+    PromoCode,
+    ProductReview,
 )
 from tickets.models import ItemList, ListItem
 from .serializers import (
@@ -48,6 +52,9 @@ from .serializers import (
     ListItemSerializer,
     LanguageSerializer,
     HomepageSectionPublicSerializer,
+    ShippingMethodSerializer,
+    ProductReviewSerializer,
+    ProductReviewCreateSerializer,
 )
 from .models import HomepageSection
 
@@ -853,15 +860,24 @@ class ClientOrderViewSet(viewsets.ModelViewSet):
         description='''Submit cart and create order.
         - If card_id is provided: Charges the saved card directly
         - If card_id is null/not provided: Returns a BOG payment URL for new payment
-        - If payment_method is "cash_on_delivery": Creates order without payment processing'''
+        - If payment_method is "cash_on_delivery": Creates order without payment processing
+        - Optional promo_code and shipping_method_id for discounts and shipping'''
     )
     def create(self, request, *args, **kwargs):
         from tenants.bog_payment import bog_service
         from django.conf import settings
+        from django.db import connection
 
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         order = serializer.save()
+
+        # Send order confirmation email asynchronously
+        try:
+            from .tasks import send_order_email
+            send_order_email.delay(connection.schema_name, order.id, 'confirmation')
+        except Exception:
+            pass  # Don't fail order creation if email task fails
 
         # Automatically generate payment URL
         payment_method = request.data.get('payment_method', 'card')
@@ -1034,6 +1050,37 @@ class ClientOrderViewSet(viewsets.ModelViewSet):
             response_data['payment_error'] = str(e)
             response_data['message'] = 'Order created but payment initialization failed'
             return Response(response_data, status=status.HTTP_201_CREATED)
+
+    @extend_schema(
+        tags=['Ecommerce Client - Orders'],
+        summary='Cancel order',
+        description='Cancel an order that is still pending or confirmed. Restores product stock.'
+    )
+    @action(detail=True, methods=['post'])
+    def cancel(self, request, pk=None):
+        """Cancel an order and restore stock"""
+        order = self.get_object()
+
+        if order.status not in ['pending', 'confirmed']:
+            return Response(
+                {'error': 'Cannot cancel this order. Only pending or confirmed orders can be cancelled.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        from django.db import transaction
+
+        with transaction.atomic():
+            # Restore stock for inventory-tracked products
+            for item in order.items.select_related('product'):
+                if item.product.track_inventory:
+                    item.product.quantity += item.quantity
+                    item.product.save(update_fields=['quantity'])
+
+            order.status = 'cancelled'
+            order.save(update_fields=['status'])
+
+        serializer = OrderSerializer(order)
+        return Response(serializer.data)
 
 
 @extend_schema(
@@ -1499,4 +1546,172 @@ def get_store_theme(request):
             {'error': f'Failed to fetch theme: {str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+
+class ClientShippingMethodViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    Client-facing shipping methods (read-only, public access).
+    Returns active shipping methods for order checkout.
+    """
+    serializer_class = ShippingMethodSerializer
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    filter_backends = [filters.OrderingFilter]
+    ordering = ['position']
+
+    def get_queryset(self):
+        return ShippingMethod.objects.filter(is_active=True)
+
+    @extend_schema(
+        tags=['Ecommerce Client - Shipping'],
+        summary='List available shipping methods',
+        description='Get all active shipping methods for checkout'
+    )
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce Client - Shipping'],
+        summary='Get shipping method details'
+    )
+    def retrieve(self, request, *args, **kwargs):
+        return super().retrieve(request, *args, **kwargs)
+
+
+@extend_schema(
+    tags=['Ecommerce Client - Promo'],
+    summary='Validate promo code',
+    description='Validate a promo code and return the discount amount'
+)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def validate_promo_code(request):
+    """
+    Validate a promo code.
+    POST /api/ecommerce/client/promo/validate/
+    Body: {"code": "SAVE10", "subtotal": 100.00}
+    """
+    from decimal import Decimal, InvalidOperation
+
+    code = request.data.get('code', '').strip()
+    if not code:
+        return Response(
+            {'valid': False, 'message': 'Promo code is required.'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        subtotal_raw = request.data.get('subtotal', 0)
+        subtotal = Decimal(str(subtotal_raw))
+    except (InvalidOperation, TypeError, ValueError):
+        return Response(
+            {'valid': False, 'message': 'Invalid subtotal value.'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        promo = PromoCode.objects.get(code__iexact=code)
+    except PromoCode.DoesNotExist:
+        return Response({
+            'valid': False,
+            'message': 'Promo code not found.'
+        })
+
+    is_valid, message = promo.is_valid(subtotal=subtotal)
+    if not is_valid:
+        return Response({
+            'valid': False,
+            'message': message
+        })
+
+    discount_amount = promo.calculate_discount(subtotal)
+    return Response({
+        'valid': True,
+        'discount_amount': str(discount_amount),
+        'discount_type': promo.discount_type,
+        'discount_value': str(promo.discount_value),
+        'message': message,
+    })
+
+
+class ClientProductReviewViewSet(viewsets.ModelViewSet):
+    """
+    Client-facing product review management.
+    List reviews (public), create reviews (authenticated clients only).
+    """
+    authentication_classes = [EcommerceClientJWTAuthentication]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    ordering_fields = ['created_at', 'rating']
+    ordering = ['-created_at']
+
+    def get_permissions(self):
+        if self.action in ['list', 'retrieve']:
+            return [AllowAny()]
+        return [IsAuthenticated()]
+
+    def get_authentication_classes(self):
+        if self.action in ['list', 'retrieve']:
+            return []
+        return [EcommerceClientJWTAuthentication]
+
+    def get_queryset(self):
+        product_id = self.kwargs.get('product_pk')
+        qs = ProductReview.objects.filter(is_approved=True)
+        if product_id:
+            qs = qs.filter(product_id=product_id)
+        return qs.select_related('client', 'product')
+
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return ProductReviewCreateSerializer
+        return ProductReviewSerializer
+
+    @extend_schema(
+        tags=['Ecommerce Client - Reviews'],
+        summary='List product reviews',
+        description='Get all approved reviews for a product'
+    )
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce Client - Reviews'],
+        summary='Create product review',
+        description='Submit a review for a product. One review per product per client.'
+    )
+    def create(self, request, *args, **kwargs):
+        product_id = self.kwargs.get('product_pk')
+
+        try:
+            product = Product.objects.get(id=product_id, status='active')
+        except Product.DoesNotExist:
+            return Response(
+                {'error': 'Product not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Check if client already reviewed this product
+        if ProductReview.objects.filter(product=product, client=request.user).exists():
+            return Response(
+                {'error': 'You have already reviewed this product'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        # Check if this is a verified purchase
+        is_verified = OrderItem.objects.filter(
+            order__client=request.user,
+            product=product,
+            order__status='delivered'
+        ).exists()
+
+        serializer.save(
+            product=product,
+            client=request.user,
+            is_verified_purchase=is_verified,
+        )
+
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 

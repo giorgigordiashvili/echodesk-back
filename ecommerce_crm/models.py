@@ -1,6 +1,6 @@
 from django.db import models
 from django.conf import settings
-from django.core.validators import MinValueValidator
+from django.core.validators import MinValueValidator, MaxValueValidator
 from django.contrib.auth.hashers import make_password, check_password
 from decimal import Decimal
 import uuid
@@ -872,6 +872,25 @@ class Order(models.Model):
         help_text="Payment gateway response data"
     )
 
+    # Shipping fields
+    tracking_number = models.CharField(max_length=100, blank=True, default='')
+    courier_provider = models.CharField(max_length=50, blank=True, default='')
+    shipping_cost = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    estimated_delivery_date = models.DateField(null=True, blank=True)
+    shipping_method = models.ForeignKey(
+        'ShippingMethod', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='orders', help_text="Shipping method selected for this order"
+    )
+
+    # Tax and pricing breakdown
+    tax_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    subtotal = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    discount_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    promo_code = models.ForeignKey(
+        'PromoCode', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='orders', help_text="Promo code applied to this order"
+    )
+
     notes = models.TextField(
         blank=True,
         help_text="Customer notes or special instructions"
@@ -1219,6 +1238,20 @@ class EcommerceSettings(models.Model):
         max_length=50,
         default="0 0% 9%",
         help_text="Card foreground/text color in HSL format"
+    )
+
+    # Tax configuration
+    tax_rate = models.DecimalField(
+        max_digits=5, decimal_places=2, default=0,
+        help_text='Tax rate percentage, e.g. 18.00'
+    )
+    tax_inclusive = models.BooleanField(
+        default=False,
+        help_text='True = product prices include tax'
+    )
+    tax_label = models.CharField(
+        max_length=50, default='VAT', blank=True,
+        help_text='Label for tax (e.g. VAT, GST, Sales Tax)'
     )
 
     # Homepage variant
@@ -1608,5 +1641,152 @@ class HomepageSection(models.Model):
         if isinstance(self.subtitle, dict):
             return self.subtitle.get(language, self.subtitle.get('en', ''))
         return str(self.subtitle) if self.subtitle else ''
+
+
+class ShippingMethod(models.Model):
+    """
+    Configurable shipping methods for ecommerce orders.
+    Supports multilingual names/descriptions and free shipping thresholds.
+    """
+    name = models.JSONField(
+        default=dict,
+        help_text='Multilingual name: {"en": "Standard Shipping", "ka": "..."}'
+    )
+    description = models.JSONField(
+        default=dict, blank=True,
+        help_text='Multilingual description'
+    )
+    price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    free_shipping_threshold = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True,
+        help_text='Orders above this amount get free shipping'
+    )
+    is_active = models.BooleanField(default=True)
+    estimated_days = models.IntegerField(default=3, help_text='Estimated delivery days')
+    position = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['position']
+        verbose_name = 'Shipping Method'
+        verbose_name_plural = 'Shipping Methods'
+        indexes = [
+            models.Index(fields=['is_active', 'position']),
+        ]
+
+    def __str__(self):
+        if isinstance(self.name, dict):
+            return self.name.get('en', str(list(self.name.values())[0]) if self.name else 'Unnamed')
+        return str(self.name)
+
+    def get_name(self, language='en'):
+        if isinstance(self.name, dict):
+            return self.name.get(language, self.name.get('en', ''))
+        return str(self.name)
+
+    def get_effective_price(self, order_subtotal):
+        """Return 0 if order meets free shipping threshold, else method price."""
+        if self.free_shipping_threshold and order_subtotal >= self.free_shipping_threshold:
+            return Decimal('0')
+        return self.price
+
+
+class PromoCode(models.Model):
+    """
+    Promotional codes for ecommerce discounts.
+    Supports percentage and fixed-amount discounts with usage limits and validity periods.
+    """
+    DISCOUNT_TYPES = [
+        ('percentage', 'Percentage'),
+        ('fixed', 'Fixed Amount'),
+    ]
+
+    code = models.CharField(max_length=50, unique=True)
+    discount_type = models.CharField(max_length=10, choices=DISCOUNT_TYPES)
+    discount_value = models.DecimalField(max_digits=10, decimal_places=2)
+    min_order_amount = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True,
+        help_text='Minimum order subtotal required to use this code'
+    )
+    max_uses = models.IntegerField(
+        null=True, blank=True,
+        help_text='Maximum number of times this code can be used (null = unlimited)'
+    )
+    times_used = models.IntegerField(default=0)
+    valid_from = models.DateTimeField()
+    valid_until = models.DateTimeField()
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Promo Code'
+        verbose_name_plural = 'Promo Codes'
+        indexes = [
+            models.Index(fields=['code']),
+            models.Index(fields=['is_active', 'valid_from', 'valid_until']),
+        ]
+
+    def __str__(self):
+        return f"{self.code} ({self.get_discount_type_display()})"
+
+    def is_valid(self, subtotal=None):
+        """Check if this promo code can be used."""
+        from django.utils import timezone
+        now = timezone.now()
+        if not self.is_active:
+            return False, 'This promo code is not active.'
+        if now < self.valid_from:
+            return False, 'This promo code is not yet valid.'
+        if now > self.valid_until:
+            return False, 'This promo code has expired.'
+        if self.max_uses is not None and self.times_used >= self.max_uses:
+            return False, 'This promo code has reached its usage limit.'
+        if subtotal is not None and self.min_order_amount and subtotal < self.min_order_amount:
+            return False, f'Minimum order amount of {self.min_order_amount} required.'
+        return True, 'Valid'
+
+    def calculate_discount(self, subtotal):
+        """Calculate the discount amount for a given subtotal."""
+        if self.discount_type == 'percentage':
+            discount = (subtotal * self.discount_value) / Decimal('100')
+            return min(discount, subtotal)
+        else:
+            return min(self.discount_value, subtotal)
+
+
+class ProductReview(models.Model):
+    """
+    Product reviews from ecommerce clients.
+    One review per product per client, with verified purchase tracking.
+    """
+    product = models.ForeignKey(
+        Product, on_delete=models.CASCADE, related_name='reviews'
+    )
+    client = models.ForeignKey(
+        EcommerceClient, on_delete=models.CASCADE, related_name='reviews'
+    )
+    rating = models.IntegerField(
+        validators=[MinValueValidator(1), MaxValueValidator(5)]
+    )
+    title = models.CharField(max_length=200, blank=True)
+    content = models.TextField(blank=True)
+    is_verified_purchase = models.BooleanField(default=False)
+    is_approved = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ['product', 'client']
+        ordering = ['-created_at']
+        verbose_name = 'Product Review'
+        verbose_name_plural = 'Product Reviews'
+        indexes = [
+            models.Index(fields=['product', '-created_at']),
+            models.Index(fields=['client']),
+            models.Index(fields=['is_approved', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f"Review by {self.client.email} for {self.product.sku} ({self.rating}/5)"
 
 

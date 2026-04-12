@@ -32,7 +32,10 @@ from .models import (
     Order,
     OrderItem,
     EcommerceSettings,
-    HomepageSection
+    HomepageSection,
+    ShippingMethod,
+    PromoCode,
+    ProductReview,
 )
 from .serializers import (
     LanguageSerializer,
@@ -61,7 +64,10 @@ from .serializers import (
     EcommerceSettingsSerializer,
     HomepageSectionSerializer,
     HomepageSectionPublicSerializer,
-    HomepageSectionReorderSerializer
+    HomepageSectionReorderSerializer,
+    ShippingMethodSerializer,
+    PromoCodeSerializer,
+    ProductReviewSerializer,
 )
 
 
@@ -1701,12 +1707,16 @@ class OrderViewSet(NoCacheMixin, viewsets.ModelViewSet):
     @extend_schema(
         tags=['Ecommerce Admin - Orders'],
         summary='Update order status',
-        description='Change order status (pending, confirmed, shipped, etc.)'
+        description='Change order status (pending, confirmed, shipped, etc.). '
+                    'Optionally include tracking_number, courier_provider, estimated_delivery_date '
+                    'when setting status to shipped.'
     )
     @action(detail=True, methods=['post'])
     def update_status(self, request, pk=None):
-        """Update order status"""
+        """Update order status and trigger appropriate email notifications"""
         from django.utils import timezone
+        from django.db import connection
+
         order = self.get_object()
         new_status = request.data.get('status')
 
@@ -1723,12 +1733,99 @@ class OrderViewSet(NoCacheMixin, viewsets.ModelViewSet):
             order.confirmed_at = timezone.now()
         elif new_status == 'shipped' and not order.shipped_at:
             order.shipped_at = timezone.now()
+            # Allow setting shipping details when marking as shipped
+            tracking_number = request.data.get('tracking_number')
+            courier_provider = request.data.get('courier_provider')
+            estimated_delivery_date = request.data.get('estimated_delivery_date')
+            if tracking_number:
+                order.tracking_number = tracking_number
+            if courier_provider:
+                order.courier_provider = courier_provider
+            if estimated_delivery_date:
+                order.estimated_delivery_date = estimated_delivery_date
         elif new_status == 'delivered' and not order.delivered_at:
             order.delivered_at = timezone.now()
 
         order.save()
+
+        # Send email notifications for status changes
+        email_type = None
+        if new_status == 'shipped':
+            email_type = 'shipped'
+        elif new_status == 'delivered':
+            email_type = 'delivered'
+
+        if email_type:
+            try:
+                from .tasks import send_order_email
+                send_order_email.delay(connection.schema_name, order.id, email_type)
+            except Exception:
+                pass  # Don't fail status update if email task fails
+
         serializer = self.get_serializer(order)
         return Response(serializer.data)
+
+    @extend_schema(
+        tags=['Ecommerce Admin - Orders'],
+        summary='Order analytics',
+        description='Get order analytics: revenue, order counts, top products, status breakdown'
+    )
+    @action(detail=False, methods=['get'], url_path='analytics')
+    def analytics(self, request):
+        """Get order analytics for the admin dashboard"""
+        from django.db.models import Sum, Count
+        from django.utils import timezone
+        from datetime import timedelta
+
+        now = timezone.now()
+        today = now.date()
+        week_ago = today - timedelta(days=7)
+        month_ago = today - timedelta(days=30)
+
+        orders = Order.objects.exclude(status='cancelled')
+
+        revenue_today = orders.filter(
+            created_at__date=today, payment_status='paid'
+        ).aggregate(total=Sum('total_amount'))['total'] or 0
+        revenue_week = orders.filter(
+            created_at__date__gte=week_ago, payment_status='paid'
+        ).aggregate(total=Sum('total_amount'))['total'] or 0
+        revenue_month = orders.filter(
+            created_at__date__gte=month_ago, payment_status='paid'
+        ).aggregate(total=Sum('total_amount'))['total'] or 0
+        revenue_total = orders.filter(
+            payment_status='paid'
+        ).aggregate(total=Sum('total_amount'))['total'] or 0
+
+        from django.db.models import F
+
+        top_products = list(
+            OrderItem.objects.values('product__name').annotate(
+                sold=Sum('quantity'),
+                revenue=Sum(F('price') * F('quantity'))
+            ).order_by('-sold')[:10]
+        )
+
+        status_breakdown = dict(
+            orders.values_list('status').annotate(count=Count('id')).values_list('status', 'count')
+        )
+
+        return Response({
+            'revenue': {
+                'today': revenue_today,
+                'week': revenue_week,
+                'month': revenue_month,
+                'total': revenue_total,
+            },
+            'orders': {
+                'today': orders.filter(created_at__date=today).count(),
+                'week': orders.filter(created_at__date__gte=week_ago).count(),
+                'month': orders.filter(created_at__date__gte=month_ago).count(),
+                'total': orders.count(),
+            },
+            'top_products': top_products,
+            'order_status_breakdown': status_breakdown,
+        })
 
     @extend_schema(
         tags=['Ecommerce Admin - Orders'],
@@ -2967,3 +3064,132 @@ class HomepageSectionViewSet(NoCacheMixin, viewsets.ModelViewSet):
             'sections': serializer.data,
             'message': f'Generated {len(created)} sections from "{variant["name"]}" variant'
         })
+
+
+class ShippingMethodViewSet(NoCacheMixin, viewsets.ModelViewSet):
+    """Admin CRUD for shipping methods"""
+    queryset = ShippingMethod.objects.all()
+    serializer_class = ShippingMethodSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['is_active']
+    ordering_fields = ['position', 'price', 'created_at']
+    ordering = ['position']
+
+    @extend_schema(tags=['Ecommerce Admin - Shipping'], summary='List shipping methods')
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+
+    @extend_schema(tags=['Ecommerce Admin - Shipping'], summary='Create shipping method')
+    def create(self, request, *args, **kwargs):
+        return super().create(request, *args, **kwargs)
+
+    @extend_schema(tags=['Ecommerce Admin - Shipping'], summary='Get shipping method details')
+    def retrieve(self, request, *args, **kwargs):
+        return super().retrieve(request, *args, **kwargs)
+
+    @extend_schema(tags=['Ecommerce Admin - Shipping'], summary='Update shipping method')
+    def update(self, request, *args, **kwargs):
+        return super().update(request, *args, **kwargs)
+
+    @extend_schema(tags=['Ecommerce Admin - Shipping'], summary='Partial update shipping method')
+    def partial_update(self, request, *args, **kwargs):
+        return super().partial_update(request, *args, **kwargs)
+
+    @extend_schema(tags=['Ecommerce Admin - Shipping'], summary='Delete shipping method')
+    def destroy(self, request, *args, **kwargs):
+        return super().destroy(request, *args, **kwargs)
+
+
+class PromoCodeViewSet(NoCacheMixin, viewsets.ModelViewSet):
+    """Admin CRUD for promo codes"""
+    queryset = PromoCode.objects.all()
+    serializer_class = PromoCodeSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['code']
+    filterset_fields = ['is_active', 'discount_type']
+    ordering_fields = ['created_at', 'valid_from', 'valid_until', 'times_used']
+    ordering = ['-created_at']
+
+    @extend_schema(tags=['Ecommerce Admin - Promo Codes'], summary='List promo codes')
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+
+    @extend_schema(tags=['Ecommerce Admin - Promo Codes'], summary='Create promo code')
+    def create(self, request, *args, **kwargs):
+        return super().create(request, *args, **kwargs)
+
+    @extend_schema(tags=['Ecommerce Admin - Promo Codes'], summary='Get promo code details')
+    def retrieve(self, request, *args, **kwargs):
+        return super().retrieve(request, *args, **kwargs)
+
+    @extend_schema(tags=['Ecommerce Admin - Promo Codes'], summary='Update promo code')
+    def update(self, request, *args, **kwargs):
+        return super().update(request, *args, **kwargs)
+
+    @extend_schema(tags=['Ecommerce Admin - Promo Codes'], summary='Partial update promo code')
+    def partial_update(self, request, *args, **kwargs):
+        return super().partial_update(request, *args, **kwargs)
+
+    @extend_schema(tags=['Ecommerce Admin - Promo Codes'], summary='Delete promo code')
+    def destroy(self, request, *args, **kwargs):
+        return super().destroy(request, *args, **kwargs)
+
+
+class ProductReviewAdminViewSet(NoCacheMixin, viewsets.ModelViewSet):
+    """Admin management for product reviews (approve/reject)"""
+    queryset = ProductReview.objects.all()
+    serializer_class = ProductReviewSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['product', 'is_approved', 'is_verified_purchase', 'rating']
+    ordering_fields = ['created_at', 'rating']
+    ordering = ['-created_at']
+
+    def get_queryset(self):
+        return super().get_queryset().select_related('product', 'client')
+
+    @extend_schema(tags=['Ecommerce Admin - Reviews'], summary='List all reviews')
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+
+    @extend_schema(tags=['Ecommerce Admin - Reviews'], summary='Get review details')
+    def retrieve(self, request, *args, **kwargs):
+        return super().retrieve(request, *args, **kwargs)
+
+    @extend_schema(tags=['Ecommerce Admin - Reviews'], summary='Update review (approve/reject)')
+    def update(self, request, *args, **kwargs):
+        return super().update(request, *args, **kwargs)
+
+    @extend_schema(tags=['Ecommerce Admin - Reviews'], summary='Partial update review')
+    def partial_update(self, request, *args, **kwargs):
+        return super().partial_update(request, *args, **kwargs)
+
+    @extend_schema(tags=['Ecommerce Admin - Reviews'], summary='Delete review')
+    def destroy(self, request, *args, **kwargs):
+        return super().destroy(request, *args, **kwargs)
+
+    @extend_schema(
+        tags=['Ecommerce Admin - Reviews'],
+        summary='Approve review',
+        description='Approve a product review to make it visible on the storefront'
+    )
+    @action(detail=True, methods=['post'])
+    def approve(self, request, pk=None):
+        review = self.get_object()
+        review.is_approved = True
+        review.save(update_fields=['is_approved'])
+        return Response(ProductReviewSerializer(review).data)
+
+    @extend_schema(
+        tags=['Ecommerce Admin - Reviews'],
+        summary='Reject review',
+        description='Reject a product review to hide it from the storefront'
+    )
+    @action(detail=True, methods=['post'])
+    def reject(self, request, pk=None):
+        review = self.get_object()
+        review.is_approved = False
+        review.save(update_fields=['is_approved'])
+        return Response(ProductReviewSerializer(review).data)
