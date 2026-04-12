@@ -94,9 +94,11 @@ class TicketColumnViewSet(viewsets.ModelViewSet):
     ordering = ['position', 'created_at']
 
     def get_queryset(self):
-        """Annotate queryset with tickets_count to avoid N+1 queries."""
-        return TicketColumn.objects.annotate(
-            tickets_count=Count('tickets')
+        """Annotate queryset with tickets_count and eager-load relations to avoid N+1 queries."""
+        return (
+            TicketColumn.objects
+            .select_related('board', 'created_by')
+            .annotate(tickets_count=Count('tickets'))
         )
 
     def get_serializer_class(self):
