@@ -2535,6 +2535,17 @@ class EcommerceSettingsViewSet(NoCacheMixin, viewsets.ModelViewSet):
             result = service.get_domains(settings.vercel_project_id)
 
             if result.get("success"):
+                # Filter domains to only show this tenant's domains
+                from django.db import connection
+                schema_name = getattr(connection, 'schema_name', '')
+                tenant_domains = []
+                for domain in result.get("domains", []):
+                    domain_name = domain.get("name", "")
+                    # Include if: matches tenant subdomain pattern, or is tenant's custom domain
+                    if (schema_name and schema_name in domain_name) or \
+                       (settings.custom_domain and domain_name == settings.custom_domain):
+                        tenant_domains.append(domain)
+                result["domains"] = tenant_domains
                 return Response(result, status=status.HTTP_200_OK)
             else:
                 return Response({
