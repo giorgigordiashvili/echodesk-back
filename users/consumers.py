@@ -164,12 +164,10 @@ class NotificationConsumer(AsyncWebsocketConsumer):
     # Database operations
     @database_sync_to_async
     def get_unread_count(self):
-        """Get the count of unread notifications for the current user"""
+        """Get the count of unread notifications for the current user (cached)."""
         with schema_context(self.tenant_schema):
-            return Notification.objects.filter(
-                user=self.user,
-                is_read=False
-            ).count()
+            from users.notification_utils import get_unread_count as _cached_count
+            return _cached_count(self.user, self.tenant_schema)
 
     @database_sync_to_async
     def mark_notification_read(self, notification_id):
@@ -177,6 +175,7 @@ class NotificationConsumer(AsyncWebsocketConsumer):
         try:
             with schema_context(self.tenant_schema):
                 from django.utils import timezone
+                from users.notification_utils import decrement_unread
                 notification = Notification.objects.get(
                     id=notification_id,
                     user=self.user
@@ -185,6 +184,7 @@ class NotificationConsumer(AsyncWebsocketConsumer):
                     notification.is_read = True
                     notification.read_at = timezone.now()
                     notification.save(update_fields=['is_read', 'read_at'])
+                    decrement_unread(self.user, self.tenant_schema)
                 return True
         except Notification.DoesNotExist:
             return False
@@ -198,6 +198,7 @@ class NotificationConsumer(AsyncWebsocketConsumer):
         try:
             with schema_context(self.tenant_schema):
                 from django.utils import timezone
+                from users.notification_utils import reset_unread
                 count = Notification.objects.filter(
                     user=self.user,
                     is_read=False
@@ -205,6 +206,7 @@ class NotificationConsumer(AsyncWebsocketConsumer):
                     is_read=True,
                     read_at=timezone.now()
                 )
+                reset_unread(self.user, self.tenant_schema)
                 return count
         except Exception as e:
             print(f"[NotificationWS] Error marking all notifications as read: {str(e)}")

@@ -18,102 +18,24 @@ from tenant_schemas.utils import schema_context
 User = get_user_model()
 
 
-def create_notification(user, notification_type, title, message, ticket_id=None, metadata=None):
+def create_notification(user, notification_type, title, message, ticket_id=None, metadata=None, link_url=''):
     """
-    Helper function to create notifications and broadcast them via WebSocket.
+    Thin wrapper that delegates to users.notification_utils.create_notification.
+
+    Kept here so that existing call sites inside this module (and any external
+    code that imports ``from tickets.signals import create_notification``) keep
+    working without changes.
     """
-    from users.models import Notification
-    from users.consumers import send_notification_to_user
-
-    if metadata is None:
-        metadata = {}
-
-    # Don't create duplicate notifications within 1 minute
-    from django.utils import timezone
-    from datetime import timedelta
-
-    recent_notification = Notification.objects.filter(
+    from users.notification_utils import create_notification as _create
+    return _create(
         user=user,
         notification_type=notification_type,
+        title=title,
+        message=message,
         ticket_id=ticket_id,
-        created_at__gte=timezone.now() - timedelta(minutes=1)
-    ).first()
-
-    if not recent_notification:
-        notification = Notification.objects.create(
-            user=user,
-            notification_type=notification_type,
-            title=title,
-            message=message,
-            ticket_id=ticket_id,
-            metadata=metadata
-        )
-
-        # Get updated unread count
-        unread_count = Notification.objects.filter(
-            user=user,
-            is_read=False
-        ).count()
-
-        # Broadcast notification via WebSocket
-        # Get tenant schema from current database connection
-        tenant_schema = getattr(connection, 'schema_name', 'public')
-
-        # Prepare notification data for WebSocket
-        from django.utils.timesince import timesince
-        notification_data = {
-            'id': notification.id,
-            'notification_type': notification.notification_type,
-            'title': notification.title,
-            'message': notification.message,
-            'ticket_id': notification.ticket_id,
-            'metadata': notification.metadata,
-            'is_read': notification.is_read,
-            'created_at': notification.created_at.isoformat(),
-            'read_at': notification.read_at.isoformat() if notification.read_at else None,
-            'time_ago': timesince(notification.created_at),
-            'user': notification.user.id,
-            'user_name': notification.user.get_full_name() or notification.user.email,
-        }
-
-        # Send via WebSocket (async_to_sync to call async function from sync context)
-        try:
-            async_to_sync(send_notification_to_user)(
-                tenant_schema=tenant_schema,
-                user_id=user.id,
-                notification_data=notification_data,
-                unread_count=unread_count
-            )
-        except Exception as e:
-            # Log error but don't fail the notification creation
-            print(f"[Signals] Error broadcasting notification via WebSocket: {str(e)}")
-
-        # Send Web Push notification (for when app is closed)
-        try:
-            from notifications.utils import send_notification_to_user as send_push
-
-            # Build ticket URL if ticket_id exists
-            ticket_url = f'/tickets/{ticket_id}' if ticket_id else '/'
-
-            # Send push notification to all user's devices
-            send_push(
-                user=user,
-                title=title,
-                body=message,
-                data={
-                    'ticket_id': ticket_id,
-                    'notification_type': notification_type,
-                    'notification_id': notification.id,
-                    'url': ticket_url
-                },
-                icon='/favicon.ico',
-                url=ticket_url,
-                tag=f'echodesk-{ticket_id or notification.id}'
-            )
-            print(f"[Signals] Web Push sent for notification {notification.id}")
-        except Exception as e:
-            # Log error but don't fail - Web Push is optional
-            print(f"[Signals] Error sending Web Push notification: {str(e)}")
+        metadata=metadata,
+        link_url=link_url,
+    )
 
 
 def extract_mentions(text):

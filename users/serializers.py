@@ -425,7 +425,7 @@ class NotificationSerializer(serializers.ModelSerializer):
         model = Notification
         fields = [
             'id', 'user', 'user_name', 'notification_type', 'title',
-            'message', 'ticket_id', 'metadata', 'is_read', 'read_at',
+            'message', 'ticket_id', 'link_url', 'metadata', 'is_read', 'read_at',
             'created_at', 'time_ago'
         ]
         read_only_fields = ['user', 'created_at', 'read_at']

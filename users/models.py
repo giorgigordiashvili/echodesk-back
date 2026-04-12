@@ -501,6 +501,24 @@ class Notification(models.Model):
         ('sub_ticket_created', 'Sub-ticket Created'),
         ('ticket_due_soon', 'Ticket Due Soon'),
         ('bug_report_update', 'Bug Report Update'),
+        # Social messages
+        ('message_received', 'New Message Received'),
+        ('message_assigned', 'Message Assigned'),
+        # Invoices
+        ('invoice_created', 'Invoice Created'),
+        ('invoice_paid', 'Invoice Paid'),
+        ('invoice_overdue', 'Invoice Overdue'),
+        # Leave
+        ('leave_request_submitted', 'Leave Request Submitted'),
+        ('leave_request_approved', 'Leave Request Approved'),
+        ('leave_request_rejected', 'Leave Request Rejected'),
+        # Bookings
+        ('booking_confirmed', 'Booking Confirmed'),
+        ('booking_cancelled', 'Booking Cancelled'),
+        ('booking_reminder', 'Booking Reminder'),
+        # Calls
+        ('call_missed', 'Missed Call'),
+        ('call_voicemail', 'New Voicemail'),
     ]
 
     user = models.ForeignKey(
@@ -527,6 +545,14 @@ class Notification(models.Model):
         null=True,
         blank=True,
         help_text='ID of related ticket'
+    )
+
+    # URL to navigate to when notification is clicked (for non-ticket notifications)
+    link_url = models.CharField(
+        max_length=500,
+        blank=True,
+        default='',
+        help_text='URL to navigate to when clicked'
     )
 
     # Additional metadata

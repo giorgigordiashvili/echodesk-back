@@ -2127,6 +2127,21 @@ def facebook_webhook(request):
                                                 )
                                                 send_websocket_notification(current_schema, ws_message_data, ws_conversation_id, assigned_user_id)
 
+                                                # Create in-app notification for incoming customer messages
+                                                if sender_id != page_id:
+                                                    try:
+                                                        from users.notification_utils import create_social_message_notification
+                                                        create_social_message_notification(
+                                                            platform='Facebook',
+                                                            sender_name=sender_name,
+                                                            message_text=message_text,
+                                                            conversation_id=sender_id,
+                                                            sender_id=sender_id,
+                                                            assigned_user_id=assigned_user_id,
+                                                        )
+                                                    except Exception as notif_err:
+                                                        logger.error(f"Failed to create Facebook message notification: {notif_err}")
+
                                         except Exception as e:
                                             logger.error(f"❌ Failed to save message: {e}")
                                     else:
@@ -3563,6 +3578,20 @@ def instagram_webhook(request):
                                                 account_id=account_connection.instagram_account_id
                                             )
                                             send_websocket_notification(current_schema, ws_message_data, ws_conversation_id, assigned_user_id)
+
+                                            # Create in-app notification for incoming customer messages
+                                            try:
+                                                from users.notification_utils import create_social_message_notification
+                                                create_social_message_notification(
+                                                    platform='Instagram',
+                                                    sender_name=sender_name or sender_username or str(sender_id),
+                                                    message_text=message_text,
+                                                    conversation_id=sender_id,
+                                                    sender_id=sender_id,
+                                                    assigned_user_id=assigned_user_id,
+                                                )
+                                            except Exception as notif_err:
+                                                logger.error(f"Failed to create Instagram message notification: {notif_err}")
                                         else:
                                             logger.warning(f"⚠️ WebSocket: Could not determine tenant schema - skipping notification")
 
@@ -7474,6 +7503,20 @@ def whatsapp_webhook(request):
                         account_id=account.waba_id
                     )
                     send_websocket_notification(tenant_schema, ws_message_data, from_number, assigned_user_id)
+
+                    # Create in-app notification for incoming customer messages
+                    try:
+                        from users.notification_utils import create_social_message_notification
+                        create_social_message_notification(
+                            platform='WhatsApp',
+                            sender_name=contact_name or from_number,
+                            message_text=message_text,
+                            conversation_id=from_number,
+                            sender_id=from_number,
+                            assigned_user_id=assigned_user_id,
+                        )
+                    except Exception as notif_err:
+                        logger.error(f"Failed to create WhatsApp message notification: {notif_err}")
 
                 # Handle message status updates
                 statuses = value.get('statuses', [])
