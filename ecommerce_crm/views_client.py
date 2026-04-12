@@ -800,6 +800,26 @@ class ClientCartItemViewSet(viewsets.ModelViewSet):
         summary='Add item to cart'
     )
     def create(self, request, *args, **kwargs):
+        """If same product+variant already in cart, increment quantity instead of duplicating."""
+        cart_id = request.data.get('cart')
+        product_id = request.data.get('product')
+        variant_id = request.data.get('variant')
+        add_quantity = int(request.data.get('quantity', 1))
+
+        if cart_id and product_id:
+            existing = CartItem.objects.filter(
+                cart_id=cart_id,
+                cart__client=request.user,
+                product_id=product_id,
+                variant_id=variant_id,
+            ).first()
+
+            if existing:
+                existing.quantity += add_quantity
+                existing.save(update_fields=['quantity'])
+                serializer = CartItemSerializer(existing)
+                return Response(serializer.data, status=status.HTTP_200_OK)
+
         return super().create(request, *args, **kwargs)
 
     @extend_schema(
