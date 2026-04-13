@@ -583,26 +583,32 @@ class CartItemCreateSerializer(serializers.ModelSerializer):
 class OrderItemSerializer(serializers.ModelSerializer):
     """Serializer for order items"""
     subtotal = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    product_image = serializers.CharField(source='product.image', read_only=True)
 
     class Meta:
         model = OrderItem
-        fields = ['id', 'order', 'product', 'variant', 'product_name', 'quantity', 'price', 'subtotal', 'created_at']
+        fields = ['id', 'order', 'product', 'variant', 'product_name', 'product_image', 'quantity', 'price', 'subtotal', 'created_at']
         read_only_fields = ['id', 'created_at']
 
 
 class OrderListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for order lists - excludes nested items for faster list views"""
     client_name = serializers.CharField(source='client.full_name', read_only=True)
+    client_email = serializers.CharField(source='client.email', read_only=True)
+    total_items = serializers.SerializerMethodField()
 
     class Meta:
         model = Order
         fields = [
-            'id', 'order_number', 'client', 'client_name', 'status',
-            'payment_status', 'total_amount', 'tracking_number',
-            'shipping_cost', 'tax_amount', 'subtotal', 'discount_amount',
-            'created_at'
+            'id', 'order_number', 'client', 'client_name', 'client_email',
+            'total_items', 'status', 'payment_status', 'total_amount',
+            'tracking_number', 'shipping_cost', 'tax_amount', 'subtotal',
+            'discount_amount', 'created_at'
         ]
         read_only_fields = ['id', 'order_number', 'created_at']
+
+    def get_total_items(self, obj):
+        return obj.items.count()
 
 
 class ShippingMethodSerializer(serializers.ModelSerializer):
@@ -676,7 +682,8 @@ class OrderSerializer(serializers.ModelSerializer):
             'payment_status', 'payment_method', 'bog_order_id', 'payment_url',
             'payment_metadata',
             # Timestamps
-            'created_at', 'updated_at', 'paid_at', 'confirmed_at', 'shipped_at', 'delivered_at'
+            'created_at', 'updated_at', 'paid_at', 'confirmed_at', 'processing_at',
+            'shipped_at', 'delivered_at', 'cancelled_at'
         ]
         read_only_fields = [
             'id', 'order_number', 'created_at', 'updated_at', 'paid_at',

@@ -1764,6 +1764,8 @@ class OrderViewSet(NoCacheMixin, viewsets.ModelViewSet):
         # Update timestamps based on status
         if new_status == 'confirmed' and not order.confirmed_at:
             order.confirmed_at = timezone.now()
+        elif new_status == 'processing' and not order.processing_at:
+            order.processing_at = timezone.now()
         elif new_status == 'shipped' and not order.shipped_at:
             order.shipped_at = timezone.now()
             # Allow setting shipping details when marking as shipped
@@ -1778,6 +1780,8 @@ class OrderViewSet(NoCacheMixin, viewsets.ModelViewSet):
                 order.estimated_delivery_date = estimated_delivery_date
         elif new_status == 'delivered' and not order.delivered_at:
             order.delivered_at = timezone.now()
+        elif new_status == 'cancelled' and not order.cancelled_at:
+            order.cancelled_at = timezone.now()
 
         order.save()
 
@@ -1977,10 +1981,14 @@ class OrderViewSet(NoCacheMixin, viewsets.ModelViewSet):
             order.status = new_status
             if new_status == 'confirmed' and not order.confirmed_at:
                 order.confirmed_at = timezone.now()
+            elif new_status == 'processing' and not order.processing_at:
+                order.processing_at = timezone.now()
             elif new_status == 'shipped' and not order.shipped_at:
                 order.shipped_at = timezone.now()
             elif new_status == 'delivered' and not order.delivered_at:
                 order.delivered_at = timezone.now()
+            elif new_status == 'cancelled' and not order.cancelled_at:
+                order.cancelled_at = timezone.now()
             order.save()
             updated_orders.append(order)
 

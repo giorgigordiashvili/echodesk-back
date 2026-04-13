@@ -906,8 +906,10 @@ class Order(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     paid_at = models.DateTimeField(null=True, blank=True, help_text="When payment was completed")
     confirmed_at = models.DateTimeField(null=True, blank=True)
+    processing_at = models.DateTimeField(null=True, blank=True)
     shipped_at = models.DateTimeField(null=True, blank=True)
     delivered_at = models.DateTimeField(null=True, blank=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ['-created_at']
