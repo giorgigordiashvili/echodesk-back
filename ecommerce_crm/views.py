@@ -1879,7 +1879,8 @@ class OrderViewSet(NoCacheMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='analytics')
     def analytics(self, request):
         """Get order analytics for the admin dashboard"""
-        from django.db.models import Sum, Count
+        from django.db.models import Sum, Count, Q
+        from django.db.models.functions import TruncDate
         from django.utils import timezone
         from datetime import timedelta
 
@@ -1887,24 +1888,53 @@ class OrderViewSet(NoCacheMixin, viewsets.ModelViewSet):
         today = now.date()
         week_ago = today - timedelta(days=7)
         month_ago = today - timedelta(days=30)
+        prev_month_start = today - timedelta(days=60)
 
         orders = Order.objects.exclude(status='cancelled')
+        paid_orders = orders.filter(payment_status='paid')
 
-        revenue_today = orders.filter(
-            created_at__date=today, payment_status='paid'
+        # Revenue by period
+        revenue_today = paid_orders.filter(
+            created_at__date=today
         ).aggregate(total=Sum('total_amount'))['total'] or 0
-        revenue_week = orders.filter(
-            created_at__date__gte=week_ago, payment_status='paid'
+        revenue_week = paid_orders.filter(
+            created_at__date__gte=week_ago
         ).aggregate(total=Sum('total_amount'))['total'] or 0
-        revenue_month = orders.filter(
-            created_at__date__gte=month_ago, payment_status='paid'
+        revenue_month = paid_orders.filter(
+            created_at__date__gte=month_ago
         ).aggregate(total=Sum('total_amount'))['total'] or 0
-        revenue_total = orders.filter(
-            payment_status='paid'
+        revenue_prev_month = paid_orders.filter(
+            created_at__date__gte=prev_month_start,
+            created_at__date__lt=month_ago
         ).aggregate(total=Sum('total_amount'))['total'] or 0
+        revenue_total = paid_orders.aggregate(
+            total=Sum('total_amount')
+        )['total'] or 0
+
+        # Order counts
+        orders_today = orders.filter(created_at__date=today).count()
+        orders_week = orders.filter(created_at__date__gte=week_ago).count()
+        orders_month = orders.filter(created_at__date__gte=month_ago).count()
+        orders_prev_month = orders.filter(
+            created_at__date__gte=prev_month_start,
+            created_at__date__lt=month_ago
+        ).count()
+        orders_total = orders.count()
+
+        # Percentage changes
+        revenue_change = (
+            round(((float(revenue_month) - float(revenue_prev_month)) / float(revenue_prev_month)) * 100, 1)
+            if revenue_prev_month else 0
+        )
+        orders_change = (
+            round(((orders_month - orders_prev_month) / orders_prev_month) * 100, 1)
+            if orders_prev_month else 0
+        )
+        avg_order_value = float(revenue_total) / orders_total if orders_total else 0
 
         from django.db.models import F
 
+        # Top products
         top_products = list(
             OrderItem.objects.values('product__name').annotate(
                 sold=Sum('quantity'),
@@ -1912,25 +1942,92 @@ class OrderViewSet(NoCacheMixin, viewsets.ModelViewSet):
             ).order_by('-sold')[:10]
         )
 
+        # Order status breakdown
         status_breakdown = dict(
-            orders.values_list('status').annotate(count=Count('id')).values_list('status', 'count')
+            orders.values_list('status').annotate(
+                count=Count('id')
+            ).values_list('status', 'count')
         )
+
+        # Sales trend (daily revenue for last 7 days)
+        sales_trend = list(
+            paid_orders.filter(
+                created_at__date__gte=week_ago
+            ).annotate(
+                date=TruncDate('created_at')
+            ).values('date').annotate(
+                revenue=Sum('total_amount'),
+                orders=Count('id')
+            ).order_by('date')
+        )
+        # Convert dates to strings
+        for item in sales_trend:
+            item['date'] = item['date'].isoformat()
+            item['revenue'] = float(item['revenue'] or 0)
+
+        # Customer insights
+        from .models import EcommerceClient
+        total_customers = EcommerceClient.objects.filter(is_active=True).count()
+        new_customers = EcommerceClient.objects.filter(
+            created_at__date__gte=month_ago
+        ).count()
+        # Returning = customers with more than 1 order
+        returning_customers = EcommerceClient.objects.annotate(
+            order_count=Count('orders', filter=Q(orders__status__in=['confirmed', 'processing', 'shipped', 'delivered']))
+        ).filter(order_count__gt=1).count()
+
+        # Revenue by payment method
+        revenue_by_method = list(
+            paid_orders.values('payment_method').annotate(
+                revenue=Sum('total_amount'),
+                count=Count('id')
+            ).order_by('-revenue')
+        )
+        method_total = sum(float(m['revenue'] or 0) for m in revenue_by_method)
+        for m in revenue_by_method:
+            m['revenue'] = float(m['revenue'] or 0)
+            m['percentage'] = round((m['revenue'] / method_total) * 100, 1) if method_total else 0
+
+        # Recent orders (last 10)
+        recent_orders = list(
+            orders.select_related('client').order_by('-created_at')[:10].values(
+                'id', 'order_number', 'status', 'payment_status',
+                'total_amount', 'created_at',
+                'client__first_name', 'client__last_name', 'client__email'
+            )
+        )
+        for o in recent_orders:
+            o['created_at'] = o['created_at'].isoformat()
+            o['total_amount'] = float(o['total_amount'])
+            o['client_name'] = f"{o.pop('client__first_name', '')} {o.pop('client__last_name', '')}".strip()
+            o.pop('client__email', None)
 
         return Response({
             'revenue': {
-                'today': revenue_today,
-                'week': revenue_week,
-                'month': revenue_month,
-                'total': revenue_total,
+                'today': float(revenue_today),
+                'week': float(revenue_week),
+                'month': float(revenue_month),
+                'total': float(revenue_total),
+                'change': revenue_change,
             },
             'orders': {
-                'today': orders.filter(created_at__date=today).count(),
-                'week': orders.filter(created_at__date__gte=week_ago).count(),
-                'month': orders.filter(created_at__date__gte=month_ago).count(),
-                'total': orders.count(),
+                'today': orders_today,
+                'week': orders_week,
+                'month': orders_month,
+                'total': orders_total,
+                'change': orders_change,
             },
+            'avg_order_value': round(avg_order_value, 2),
             'top_products': top_products,
             'order_status_breakdown': status_breakdown,
+            'sales_trend': sales_trend,
+            'customer_insights': {
+                'total': total_customers,
+                'new': new_customers,
+                'returning': returning_customers,
+            },
+            'revenue_by_method': revenue_by_method,
+            'recent_orders': recent_orders,
         })
 
     @extend_schema(
