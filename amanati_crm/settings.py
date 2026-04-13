@@ -543,7 +543,7 @@ CACHES = {
 # VAPID Keys for Web Push Notifications
 VAPID_PRIVATE_KEY = os.environ.get('VAPID_PRIVATE_KEY', '-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgwmgsQK3QWTB7Y865\nL+lq5OwG7WCkf5H9yMmqB0MkioqhRANCAARjq4eZN5897cxOa+D9GHNREft2+yKa\nY1HldgWrWGU8Wt1++xjlVSbYUAj8VLeWX8xABtaftQ5WR1HkYkdBHrvf\n-----END PRIVATE KEY-----\n')
 VAPID_PUBLIC_KEY = os.environ.get('VAPID_PUBLIC_KEY', 'BGOrh5k3nz3tzE5r4P0Yc1ER-3b7IppjUeV2BatYZTxa3X77GOVVJthQCPxUt5ZfzEAG1p-1DlZHUeRiR0Eeu98')
-VAPID_ADMIN_EMAIL = os.environ.get('VAPID_ADMIN_EMAIL', 'mailto:admin@echodesk.ge')
+VAPID_ADMIN_EMAIL = os.environ.get('VAPID_ADMIN_EMAIL', 'mailto:info@echodesk.ge')
 
 # Celery Configuration (Redis DB 2)
 if redis_password:
