@@ -1,10 +1,13 @@
-from rest_framework import viewsets, permissions, status, filters
+import logging
+import socket
+
+from rest_framework import serializers as drf_serializers, viewsets, permissions, status, filters
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
 from datetime import timedelta
-from drf_spectacular.utils import extend_schema, OpenApiParameter
+from drf_spectacular.utils import extend_schema, OpenApiParameter, inline_serializer
 from drf_spectacular.types import OpenApiTypes
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
@@ -16,8 +19,150 @@ from .serializers import (
     CallLogCreateSerializer, CallInitiateSerializer, CallStatusUpdateSerializer,
     CallLogDetailSerializer, CallEventSerializer, CallRecordingSerializer,
     UserPhoneAssignmentSerializer, UserPhoneAssignmentDetailSerializer,
-    PbxSettingsSerializer, ConsultationInitiateSerializer,
+    PbxSettingsSerializer, ConsultationInitiateSerializer, MergeConferenceSerializer,
 )
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Asterisk AMI constants
+# ---------------------------------------------------------------------------
+AMI_PORT = 5038
+AMI_USERNAME = "echodesk"
+AMI_SECRET = "EchoDesk_AMI_2024!"
+
+
+# ---------------------------------------------------------------------------
+# Asterisk AMI helpers (raw TCP, no external library)
+# ---------------------------------------------------------------------------
+
+def _ami_send_action(sock, action_lines):
+    """Send a single AMI action (dict of key/value pairs) and return the raw response."""
+    msg = ""
+    for key, value in action_lines:
+        msg += f"{key}: {value}\r\n"
+    msg += "\r\n"
+    sock.sendall(msg.encode("utf-8"))
+    return _ami_read_response(sock)
+
+
+def _ami_read_response(sock, timeout=5):
+    """Read from the AMI socket until we get a complete response (ends with \\r\\n\\r\\n)."""
+    sock.settimeout(timeout)
+    data = b""
+    while True:
+        try:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+            # AMI responses are terminated by a blank line
+            if b"\r\n\r\n" in data:
+                break
+        except socket.timeout:
+            break
+    return data.decode("utf-8", errors="replace")
+
+
+def _ami_connect_and_login(host):
+    """Open a TCP connection to AMI, read the banner, and log in.
+    Returns the socket on success; raises on failure."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(10)
+    sock.connect((host, AMI_PORT))
+
+    # Read the AMI banner (e.g. "Asterisk Call Manager/...")
+    _ami_read_response(sock, timeout=3)
+
+    # Login
+    resp = _ami_send_action(sock, [
+        ("Action", "Login"),
+        ("Username", AMI_USERNAME),
+        ("Secret", AMI_SECRET),
+    ])
+    if "Success" not in resp:
+        sock.close()
+        raise ConnectionError(f"AMI login failed: {resp.strip()}")
+    return sock
+
+
+def _ami_logoff(sock):
+    """Send Logoff and close the socket."""
+    try:
+        _ami_send_action(sock, [("Action", "Logoff")])
+    except Exception:
+        pass
+    try:
+        sock.close()
+    except Exception:
+        pass
+
+
+def _ami_get_channels(host):
+    """Connect to AMI, run CoreShowChannels, and return a list of channel dicts.
+
+    Each dict has at least:
+        - channel: full channel name (e.g. PJSIP/geo-provider-endpoint-00000001)
+        - context, exten, calleridnum, duration, application, bridgeid, ...
+    """
+    sock = _ami_connect_and_login(host)
+    try:
+        # CoreShowChannels returns multiple "Event: CoreShowChannel" messages
+        # followed by "Event: CoreShowChannelsComplete".
+        msg = "Action: CoreShowChannels\r\n\r\n"
+        sock.sendall(msg.encode("utf-8"))
+
+        raw = b""
+        sock.settimeout(5)
+        while True:
+            try:
+                chunk = sock.recv(8192)
+                if not chunk:
+                    break
+                raw += chunk
+                if b"CoreShowChannelsComplete" in raw:
+                    break
+            except socket.timeout:
+                break
+
+        text = raw.decode("utf-8", errors="replace")
+        channels = []
+        # Split into blocks by double CRLF
+        blocks = text.split("\r\n\r\n")
+        for block in blocks:
+            if "Event: CoreShowChannel\r\n" not in block and "Event: CoreShowChannel\n" not in block:
+                continue
+            channel_info = {}
+            for line in block.strip().splitlines():
+                if ": " in line:
+                    key, _, value = line.partition(": ")
+                    channel_info[key.strip().lower()] = value.strip()
+            if channel_info.get("channel"):
+                channels.append(channel_info)
+        return channels
+    finally:
+        _ami_logoff(sock)
+
+
+def _ami_redirect_to_confbridge(host, channel, conference_room):
+    """Redirect a single Asterisk channel into a ConfBridge room.
+
+    Uses the ``confbridge-dynamic`` dialplan context.
+    """
+    sock = _ami_connect_and_login(host)
+    try:
+        resp = _ami_send_action(sock, [
+            ("Action", "Redirect"),
+            ("Channel", channel),
+            ("Context", "confbridge-dynamic"),
+            ("Exten", conference_room),
+            ("Priority", "1"),
+        ])
+        if "Success" not in resp:
+            raise RuntimeError(f"AMI Redirect failed for {channel}: {resp.strip()}")
+        return resp
+    finally:
+        _ami_logoff(sock)
 
 
 class SipConfigurationViewSet(viewsets.ModelViewSet):
@@ -929,6 +1074,202 @@ class CallLogViewSet(viewsets.ModelViewSet):
 
         serializer = CallLogSerializer(original_call)
         return Response(serializer.data)
+
+    @extend_schema(
+        summary="Merge into 3-way conference",
+        description=(
+            "Merge an attended-transfer consultation call into a 3-way conference. "
+            "Both the original (on-hold) call and the consultation call are redirected "
+            "into an Asterisk ConfBridge room via AMI."
+        ),
+        request=MergeConferenceSerializer,
+        responses={
+            200: inline_serializer(
+                name="MergeConferenceResponse",
+                fields={
+                    "conference_room": drf_serializers.CharField(),
+                    "original_call_id": drf_serializers.CharField(),
+                    "consultation_call_id": drf_serializers.CharField(),
+                    "channels_redirected": drf_serializers.ListField(
+                        child=drf_serializers.CharField()
+                    ),
+                },
+            ),
+            400: "Invalid request or call not in correct state",
+            404: "Call or consultation log not found",
+            502: "AMI communication error",
+        },
+    )
+    @action(detail=True, methods=["post"])
+    def merge_conference(self, request, pk=None):
+        """Merge an attended-transfer consultation into a 3-way conference via Asterisk AMI."""
+        original_call = self.get_object()
+
+        serializer = MergeConferenceSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        consultation_log_id = serializer.validated_data["consultation_log_id"]
+
+        # --- Validate original call state --------------------------------
+        if original_call.status != "on_hold":
+            return Response(
+                {"error": "Original call must be on hold to merge into conference"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if original_call.transfer_type != "attended":
+            return Response(
+                {"error": "Original call must have transfer_type='attended'"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # --- Look up the consultation leg --------------------------------
+        try:
+            consultation_log = CallLog.objects.get(
+                pk=consultation_log_id, parent_call=original_call
+            )
+        except CallLog.DoesNotExist:
+            return Response(
+                {"error": "Consultation log not found for this call"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # --- Determine PBX host from SIP configuration ------------------
+        sip_config = original_call.sip_configuration
+        if not sip_config:
+            return Response(
+                {"error": "No SIP configuration associated with this call"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        pbx_host = sip_config.sip_server
+
+        # --- Generate a unique conference room ID -----------------------
+        conference_room = f"conf_{original_call.id}"
+
+        # --- Discover active channels via AMI ---------------------------
+        try:
+            all_channels = _ami_get_channels(pbx_host)
+        except Exception as exc:
+            logger.error("AMI CoreShowChannels failed on %s: %s", pbx_host, exc)
+            return Response(
+                {"error": f"Failed to list AMI channels: {exc}"},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        # Build a set of channel names we want to redirect.
+        # Strategy: find channels whose calleridnum or connectedlinenum
+        # matches the phone numbers involved in the two call legs, OR
+        # whose channel name contains the agent's extension.
+        agent_extension = None
+        assignment = UserPhoneAssignment.objects.filter(
+            user=request.user, is_active=True, is_primary=True
+        ).first()
+        if assignment:
+            agent_extension = assignment.extension
+
+        # Collect the relevant phone numbers (last 7 digits for matching)
+        def _last7(number):
+            clean = number.replace("+", "").replace(" ", "").replace("-", "")
+            return clean[-7:] if len(clean) >= 7 else clean
+
+        relevant_numbers = set()
+        for num_field in [
+            original_call.caller_number,
+            original_call.recipient_number,
+            consultation_log.caller_number,
+            consultation_log.recipient_number,
+        ]:
+            if num_field:
+                relevant_numbers.add(_last7(num_field))
+
+        matched_channels = []
+        for ch in all_channels:
+            ch_name = ch.get("channel", "")
+
+            # Match by agent extension in channel name (e.g. PJSIP/100-00000002)
+            if agent_extension and f"/{agent_extension}-" in ch_name:
+                matched_channels.append(ch_name)
+                continue
+
+            # Match by caller ID or connected-line number
+            for field_key in ("calleridnum", "connectedlinenum"):
+                num = ch.get(field_key, "")
+                if num and _last7(num) in relevant_numbers:
+                    matched_channels.append(ch_name)
+                    break
+
+        # Deduplicate while preserving order
+        seen = set()
+        unique_channels = []
+        for ch_name in matched_channels:
+            if ch_name not in seen:
+                seen.add(ch_name)
+                unique_channels.append(ch_name)
+
+        if not unique_channels:
+            return Response(
+                {"error": "No active Asterisk channels found for this call"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # --- Redirect each channel into the ConfBridge ------------------
+        redirected = []
+        errors = []
+        for ch_name in unique_channels:
+            try:
+                _ami_redirect_to_confbridge(pbx_host, ch_name, conference_room)
+                redirected.append(ch_name)
+            except Exception as exc:
+                logger.error("AMI Redirect failed for %s: %s", ch_name, exc)
+                errors.append(f"{ch_name}: {exc}")
+
+        if not redirected:
+            return Response(
+                {"error": f"All AMI redirects failed: {'; '.join(errors)}"},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        # --- Update CallLog records ------------------------------------
+        now = timezone.now()
+
+        original_call.status = "answered"
+        original_call.call_type = "conference"
+        original_call.save(update_fields=["status", "call_type", "updated_at"])
+
+        consultation_log.status = "answered"
+        consultation_log.call_type = "conference"
+        consultation_log.save(update_fields=["status", "call_type", "updated_at"])
+
+        # --- Create CallEvents -----------------------------------------
+        event_metadata = {
+            "conference_room": conference_room,
+            "channels_redirected": redirected,
+            "consultation_log_id": consultation_log.id,
+        }
+        if errors:
+            event_metadata["redirect_errors"] = errors
+
+        self._create_call_event(
+            original_call,
+            "conference_started",
+            metadata=event_metadata,
+        )
+        self._create_call_event(
+            consultation_log,
+            "conference_started",
+            metadata=event_metadata,
+        )
+
+        return Response(
+            {
+                "conference_room": conference_room,
+                "original_call_id": str(original_call.call_id),
+                "consultation_call_id": str(consultation_log.call_id),
+                "channels_redirected": redirected,
+            },
+            status=status.HTTP_200_OK,
+        )
 
     @extend_schema(
         summary="Hold/Unhold call",

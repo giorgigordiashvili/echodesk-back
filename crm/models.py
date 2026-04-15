@@ -279,6 +279,7 @@ class CallEvent(models.Model):
         ('ended', 'Call Ended'),
         ('failed', 'Call Failed'),
         ('error', 'Error Occurred'),
+        ('conference_started', 'Conference Started'),
     ]
     
     call_log = models.ForeignKey(CallLog, on_delete=models.CASCADE, related_name='events')

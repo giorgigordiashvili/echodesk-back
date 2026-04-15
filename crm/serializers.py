@@ -151,6 +151,11 @@ class ConsultationInitiateSerializer(serializers.Serializer):
     target_user_id = serializers.IntegerField(required=False)
 
 
+class MergeConferenceSerializer(serializers.Serializer):
+    """Serializer for merging an attended transfer into a 3-way conference"""
+    consultation_log_id = serializers.IntegerField(help_text="ID of the consultation CallLog")
+
+
 class CallLogCreateSerializer(serializers.ModelSerializer):
     """Serializer for creating new call logs"""
 
