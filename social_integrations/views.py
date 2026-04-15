@@ -2946,15 +2946,7 @@ def instagram_send_message(request):
 
         attachments_meta = []
 
-        print(f"🚀 Sending Instagram message:")
-        print(f"   Instagram Account: @{account_connection.username} (ID: {instagram_account_id})")
-        print(f"   Facebook Page ID: {page_id}")
-        print(f"   To recipient: {recipient_id}")
-        print(f"   Last message from user: {latest_message.timestamp}")
-        print(f"   Time since last message: {hours_passed:.1f} hours (must be < 24)")
-        print(f"   Message: {message_text}")
-        print(f"   Has media: {bool(media_file)}")
-        print(f"   URL: {send_url}")
+        logger.info(f"Sending Instagram message to {recipient_id} via @{account_connection.username}")
 
         if media_file:
             # Upload media as attachment via Messenger Platform API (same as Facebook)

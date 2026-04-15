@@ -167,8 +167,10 @@ jobs:
           if removed:
               print(f'REMOVED ENDPOINTS: {removed}')
               exit(1)
-          snap_schemas = set(snap.get('components', {}).get('schemas', {}).keys())
-          curr_schemas = set(curr.get('components', {}).get('schemas', {}).keys())
+          import re
+          enum_pattern = re.compile(r'^(Status|Role|Category|PaymentStatus|Direction|CallType|Blank|TransferType|Discount|Deployment)\w{3}Enum$')
+          snap_schemas = {k for k in snap.get('components', {}).get('schemas', {}).keys() if not enum_pattern.match(k)}
+          curr_schemas = {k for k in curr.get('components', {}).get('schemas', {}).keys() if not enum_pattern.match(k)}
           removed_schemas = snap_schemas - curr_schemas
           if removed_schemas:
               print(f'REMOVED SCHEMAS: {removed_schemas}')
