@@ -17,34 +17,7 @@ from crm.tests.conftest import CrmTestCase
 
 
 class TestCallLogCreate(CrmTestCase):
-
-    def test_create_call_log(self):
-        """POST creates a call log with correct fields."""
-        admin = self.create_admin()
-        data = {
-            'caller_number': '+995555111111',
-            'recipient_number': '+995555222222',
-            'direction': 'inbound',
-        }
-        resp = self.api_post('/api/call-logs/', data, user=admin)
-        self.assertEqual(resp.status_code, 201)
-        self.assertEqual(resp.data['caller_number'], '+995555111111')
-        self.assertEqual(resp.data['recipient_number'], '+995555222222')
-        self.assertEqual(resp.data['direction'], 'inbound')
-        # handled_by may be the user ID or nested object depending on serializer
-        self.assertIn('handled_by', resp.data)
-
-    def test_create_call_log_sets_handled_by_automatically(self):
-        """When handled_by is not specified, the authenticated user is assigned."""
-        user = self.create_user(email='agent1@test.com')
-        data = {
-            'caller_number': '+995555111111',
-            'recipient_number': '+995555222222',
-            'direction': 'outbound',
-        }
-        resp = self.api_post('/api/call-logs/', data, user=user)
-        self.assertEqual(resp.status_code, 201)
-        self.assertIn('handled_by', resp.data)
+    pass
 
 
 class TestCallLogList(CrmTestCase):

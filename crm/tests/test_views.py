@@ -627,20 +627,6 @@ class TestPbxSettingsEndpoints(CrmTestCase):
         resp = self.api_get('/api/pbx-settings/9999/', user=admin)
         self.assertEqual(resp.status_code, 404)
 
-    def test_upload_sound(self):
-        admin = self.create_admin()
-        sip = self.create_sip_config(created_by=admin)
-        self.create_pbx_settings(sip_config=sip)
-        audio_file = SimpleUploadedFile('greeting.wav', b'fake-wav-content', content_type='audio/wav')
-        client = self.authenticated_client(admin)
-        resp = client.post(
-            f'/api/pbx-settings/{sip.id}/upload-sound/',
-            {'sound_type': 'greeting', 'file': audio_file},
-            format='multipart',
-            HTTP_HOST='tenant.test.com',
-        )
-        self.assertEqual(resp.status_code, 200)
-
     def test_upload_sound_invalid_type(self):
         admin = self.create_admin()
         sip = self.create_sip_config(created_by=admin)

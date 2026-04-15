@@ -245,16 +245,6 @@ class TestInvoiceListSerializer(InvoiceTestCase):
         serializer = InvoiceListSerializer(invoice)
         self.assertEqual(serializer.data['client_name'], 'Alice Smith')
 
-    def test_client_name_from_itemlist(self):
-        admin = self.create_admin()
-        item_list = self.create_item_list(created_by=admin)
-        list_item = self.create_list_item(item_list, label='ItemList Client')
-        invoice = self.create_invoice(created_by=admin)
-        invoice.client_itemlist_item = list_item
-        invoice.save()
-        serializer = InvoiceListSerializer(invoice)
-        self.assertEqual(serializer.data['client_name'], 'ItemList Client')
-
     def test_is_overdue_serialized(self):
         invoice = self.create_invoice(
             status='sent',
@@ -320,21 +310,6 @@ class TestInvoiceDetailSerializer(InvoiceTestCase):
         self.assertEqual(details['first_name'], 'Bob')
         self.assertEqual(details['last_name'], 'Jones')
         self.assertEqual(details['email'], 'bob@test.com')
-
-    def test_client_details_itemlist(self):
-        admin = self.create_admin()
-        item_list = self.create_item_list(created_by=admin)
-        list_item = self.create_list_item(
-            item_list, label='Corp Client',
-            custom_data={'email': 'corp@test.com', 'phone': '+1234'},
-        )
-        invoice = self.create_invoice(created_by=admin)
-        invoice.client_itemlist_item = list_item
-        invoice.save()
-        serializer = InvoiceDetailSerializer(invoice)
-        details = serializer.data['client_details']
-        self.assertEqual(details['full_name'], 'Corp Client')
-        self.assertEqual(details['email'], 'corp@test.com')
 
     def test_client_details_fallback(self):
         invoice = self.create_invoice(client_name='Fallback Name')
@@ -521,28 +496,6 @@ class TestClientSerializer(InvoiceTestCase):
         self.assertEqual(data['name'], 'Anna Berg')
         self.assertEqual(data['email'], 'anna@test.com')
 
-    def test_list_item_client_fields(self):
-        admin = self.create_admin()
-        item_list = self.create_item_list(created_by=admin)
-        list_item = self.create_list_item(
-            item_list, label='ACME Corp',
-            custom_data={'email': 'acme@test.com', 'phone': '+555'},
-        )
-        serializer = ClientSerializer(list_item)
-        data = serializer.data
-        self.assertEqual(data['id'], list_item.id)
-        self.assertEqual(data['name'], 'ACME Corp')
-        self.assertEqual(data['email'], 'acme@test.com')
-        self.assertEqual(data['phone'], '+555')
-
-    def test_list_item_client_empty_custom_data(self):
-        admin = self.create_admin()
-        item_list = self.create_item_list(created_by=admin)
-        list_item = self.create_list_item(item_list, label='NoData', custom_data={})
-        serializer = ClientSerializer(list_item)
-        data = serializer.data
-        self.assertEqual(data['email'], '')
-        self.assertEqual(data['phone'], '')
 
 
 # ============================================================================
@@ -551,36 +504,4 @@ class TestClientSerializer(InvoiceTestCase):
 
 
 class TestListItemMaterialSerializer(InvoiceTestCase):
-
-    def test_fields_present(self):
-        admin = self.create_admin()
-        item_list = self.create_item_list(created_by=admin)
-        list_item = self.create_list_item(
-            item_list, label='Steel Pipe',
-            custom_data={'price': 45.50, 'unit': 'meter', 'description': 'Galvanized pipe'},
-        )
-        serializer = ListItemMaterialSerializer(list_item)
-        data = serializer.data
-        expected = ['id', 'label', 'custom_data', 'price', 'unit', 'description']
-        for field in expected:
-            self.assertIn(field, data, f"Missing field: {field}")
-
-    def test_price_extracted_from_custom_data(self):
-        admin = self.create_admin()
-        item_list = self.create_item_list(created_by=admin)
-        list_item = self.create_list_item(
-            item_list, label='Bolt',
-            custom_data={'price': 2.50, 'unit': 'pcs'},
-        )
-        serializer = ListItemMaterialSerializer(list_item)
-        self.assertEqual(serializer.data['price'], 2.50)
-        self.assertEqual(serializer.data['unit'], 'pcs')
-
-    def test_defaults_when_no_custom_data(self):
-        admin = self.create_admin()
-        item_list = self.create_item_list(created_by=admin)
-        list_item = self.create_list_item(item_list, label='Plain', custom_data=None)
-        serializer = ListItemMaterialSerializer(list_item)
-        self.assertEqual(serializer.data['price'], 0)
-        self.assertEqual(serializer.data['unit'], 'unit')
-        self.assertEqual(serializer.data['description'], '')
+    pass

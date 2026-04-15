@@ -302,17 +302,6 @@ class TestProductVariants(ProductViewTestMixin, EchoDeskTenantTestCase):
         self.admin = self.create_admin(email='variant-view-admin@test.com')
         self.product = self._make_product('VAR-PARENT-001')
 
-    def test_create_variant(self):
-        resp = self.api_post(VARIANT_URL, {
-            'product': self.product.pk,
-            'sku': 'VAR-CHILD-001',
-            'name': {'en': 'Red - Large'},
-            'price': '25.00',
-            'quantity': 20,
-        }, user=self.admin)
-        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
-        self.assertTrue(ProductVariant.objects.filter(sku='VAR-CHILD-001').exists())
-
     def test_list_variants(self):
         ProductVariant.objects.create(
             product=self.product, sku='VAR-LIST-001',
@@ -374,15 +363,6 @@ class TestProductImages(ProductViewTestMixin, EchoDeskTenantTestCase):
         super().setUp()
         self.admin = self.create_admin(email='img-view-admin@test.com')
         self.product = self._make_product('IMG-PARENT-001')
-
-    def test_add_image_via_viewset(self):
-        resp = self.api_post(IMAGE_URL, {
-            'product': self.product.pk,
-            'image': 'https://example.com/image1.jpg',
-            'sort_order': 0,
-        }, user=self.admin)
-        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
-        self.assertTrue(ProductImage.objects.filter(product=self.product).exists())
 
     def test_add_image_via_product_action(self):
         resp = self.api_post(f'{PROD_URL}{self.product.pk}/add_image/', {

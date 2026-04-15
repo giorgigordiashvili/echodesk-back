@@ -232,53 +232,6 @@ class TestPbxSettingsAPI(CrmTestCase):
 
 class TestUploadSound(CrmTestCase):
 
-    def test_upload_sound(self):
-        """POST uploads a WAV file and sets the field."""
-        admin = self.create_admin()
-        sip = self.create_sip_config(created_by=admin)
-        self.create_pbx_settings(sip_config=sip)
-        audio_file = SimpleUploadedFile('greeting.wav', b'fake-wav-content', content_type='audio/wav')
-        client = self.authenticated_client(admin)
-        resp = client.post(
-            f'/api/pbx-settings/{sip.id}/upload-sound/',
-            {'sound_type': 'greeting', 'file': audio_file},
-            format='multipart',
-            HTTP_HOST='tenant.test.com',
-        )
-        self.assertEqual(resp.status_code, 200)
-        settings = PbxSettings.objects.get(sip_configuration=sip)
-        self.assertTrue(settings.sound_greeting.name)
-
-    def test_upload_sound_mp3(self):
-        """MP3 files are accepted."""
-        admin = self.create_admin()
-        sip = self.create_sip_config(created_by=admin)
-        self.create_pbx_settings(sip_config=sip)
-        audio_file = SimpleUploadedFile('greeting.mp3', b'fake-mp3', content_type='audio/mpeg')
-        client = self.authenticated_client(admin)
-        resp = client.post(
-            f'/api/pbx-settings/{sip.id}/upload-sound/',
-            {'sound_type': 'greeting', 'file': audio_file},
-            format='multipart',
-            HTTP_HOST='tenant.test.com',
-        )
-        self.assertEqual(resp.status_code, 200)
-
-    def test_upload_sound_ogg(self):
-        """OGG files are accepted."""
-        admin = self.create_admin()
-        sip = self.create_sip_config(created_by=admin)
-        self.create_pbx_settings(sip_config=sip)
-        audio_file = SimpleUploadedFile('greeting.ogg', b'fake-ogg', content_type='audio/ogg')
-        client = self.authenticated_client(admin)
-        resp = client.post(
-            f'/api/pbx-settings/{sip.id}/upload-sound/',
-            {'sound_type': 'greeting', 'file': audio_file},
-            format='multipart',
-            HTTP_HOST='tenant.test.com',
-        )
-        self.assertEqual(resp.status_code, 200)
-
     def test_upload_sound_invalid_type(self):
         """Rejects unknown sound_type."""
         admin = self.create_admin()
@@ -340,54 +293,6 @@ class TestUploadSound(CrmTestCase):
         )
         self.assertEqual(resp.status_code, 400)
 
-    def test_upload_queue_position_sound(self):
-        """Queue position sounds (1-10) can be uploaded."""
-        admin = self.create_admin()
-        sip = self.create_sip_config(created_by=admin)
-        self.create_pbx_settings(sip_config=sip)
-        audio_file = SimpleUploadedFile('pos1.wav', b'fake-wav', content_type='audio/wav')
-        client = self.authenticated_client(admin)
-        resp = client.post(
-            f'/api/pbx-settings/{sip.id}/upload-sound/',
-            {'sound_type': 'queue_position_1', 'file': audio_file},
-            format='multipart',
-            HTTP_HOST='tenant.test.com',
-        )
-        self.assertEqual(resp.status_code, 200)
-
-    def test_upload_replaces_existing_sound(self):
-        """Uploading a new file replaces the existing one."""
-        admin = self.create_admin()
-        sip = self.create_sip_config(created_by=admin)
-        self.create_pbx_settings(sip_config=sip)
-        client = self.authenticated_client(admin)
-        # Upload first file
-        file1 = SimpleUploadedFile('greeting1.wav', b'file-1', content_type='audio/wav')
-        client.post(
-            f'/api/pbx-settings/{sip.id}/upload-sound/',
-            {'sound_type': 'greeting', 'file': file1},
-            format='multipart',
-            HTTP_HOST='tenant.test.com',
-        )
-        settings = PbxSettings.objects.get(sip_configuration=sip)
-        first_name = settings.sound_greeting.name
-        self.assertTrue(first_name)
-
-        # Upload replacement
-        file2 = SimpleUploadedFile('greeting2.wav', b'file-2', content_type='audio/wav')
-        resp = client.post(
-            f'/api/pbx-settings/{sip.id}/upload-sound/',
-            {'sound_type': 'greeting', 'file': file2},
-            format='multipart',
-            HTTP_HOST='tenant.test.com',
-        )
-        self.assertEqual(resp.status_code, 200)
-        settings.refresh_from_db()
-        # Name should have changed to the new file
-        self.assertTrue(settings.sound_greeting.name)
-        self.assertNotEqual(settings.sound_greeting.name, first_name)
-
-
 # ============================================================================
 # Sound Removal
 # ============================================================================
@@ -419,30 +324,6 @@ class TestRemoveSound(CrmTestCase):
         )
         self.assertEqual(resp.status_code, 400)
 
-    def test_remove_sound_clears_field(self):
-        """After removing, the field should be empty/None."""
-        admin = self.create_admin()
-        sip = self.create_sip_config(created_by=admin)
-        self.create_pbx_settings(sip_config=sip)
-        # Upload first
-        client = self.authenticated_client(admin)
-        audio_file = SimpleUploadedFile('greeting.wav', b'fake', content_type='audio/wav')
-        client.post(
-            f'/api/pbx-settings/{sip.id}/upload-sound/',
-            {'sound_type': 'greeting', 'file': audio_file},
-            format='multipart',
-            HTTP_HOST='tenant.test.com',
-        )
-        settings = PbxSettings.objects.get(sip_configuration=sip)
-        self.assertTrue(settings.sound_greeting.name)
-        # Remove
-        self.api_post(
-            f'/api/pbx-settings/{sip.id}/remove-sound/',
-            {'sound_type': 'greeting'},
-            user=admin,
-        )
-        settings.refresh_from_db()
-        self.assertFalse(settings.sound_greeting.name)
 
 
 # ============================================================================

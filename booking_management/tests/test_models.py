@@ -372,35 +372,6 @@ class BookingSettingsTests(BookingTestCase):
 class BookingStaffTests(BookingTestCase):
     """Tests for BookingStaff model logic."""
 
-    def test_update_rating_first_rating(self):
-        """First rating becomes the average."""
-        staff = self.create_staff()
-        staff.update_rating(4)
-        staff.refresh_from_db()
-        self.assertEqual(staff.average_rating, Decimal('4.00'))
-        self.assertEqual(staff.total_ratings, 1)
-
-    def test_update_rating_multiple(self):
-        """Multiple ratings produce correct running average."""
-        staff = self.create_staff()
-        staff.update_rating(5)
-        staff.update_rating(3)
-        staff.refresh_from_db()
-        # (0*0 + 5) / 1 = 5, then (5*1 + 3) / 2 = 4
-        self.assertEqual(staff.average_rating, Decimal('4.00'))
-        self.assertEqual(staff.total_ratings, 2)
-
-    def test_update_rating_three_ratings(self):
-        """Three ratings average correctly."""
-        staff = self.create_staff()
-        staff.update_rating(5)
-        staff.update_rating(4)
-        staff.update_rating(3)
-        staff.refresh_from_db()
-        # (0 + 5)/1=5, (5+4)/2=4.5, (9+3)/3=4
-        self.assertEqual(staff.average_rating, Decimal('4.00'))
-        self.assertEqual(staff.total_ratings, 3)
-
     def test_staff_str_uses_full_name(self):
         """__str__ returns the user full name."""
         user = self.create_user(

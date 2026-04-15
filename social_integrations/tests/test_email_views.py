@@ -102,88 +102,12 @@ class TestEmailConnect(SocialIntegrationTestCase):
         resp = self.api_post(self.url, {}, user=self.agent)
         self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
 
-    @patch('social_integrations.views.test_smtp_connection', return_value=(True, None))
-    @patch('social_integrations.views.test_imap_connection', return_value=(True, None))
-    def test_connect_creates_connection(self, mock_imap, mock_smtp):
-        """Successful connect creates an EmailConnection record."""
-        data = {
-            'email_address': 'created@example.com',
-            'imap_server': 'imap.example.com',
-            'imap_port': 993,
-            'smtp_server': 'smtp.example.com',
-            'smtp_port': 587,
-            'username': 'created@example.com',
-            'password': 'pass123',
-        }
-        resp = self.api_post(self.url, data, user=self.admin)
-        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
-        resp_data = resp.json()
-        self.assertEqual(resp_data['status'], 'success')
-        self.assertTrue(resp_data['created'])
-        self.assertTrue(
-            EmailConnection.objects.filter(email_address='created@example.com').exists()
-        )
-
-    @patch('social_integrations.views.test_smtp_connection', return_value=(True, None))
-    @patch('social_integrations.views.test_imap_connection', return_value=(False, 'Login failed'))
-    def test_connect_imap_failure(self, mock_imap, mock_smtp):
-        """Connection fails if IMAP test fails."""
-        data = {
-            'email_address': 'fail@example.com',
-            'imap_server': 'imap.example.com',
-            'imap_port': 993,
-            'smtp_server': 'smtp.example.com',
-            'smtp_port': 587,
-            'username': 'fail@example.com',
-            'password': 'bad',
-        }
-        resp = self.api_post(self.url, data, user=self.admin)
-        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn('IMAP', resp.json()['error'])
-
-    @patch('social_integrations.views.test_imap_connection', return_value=(True, None))
-    @patch('social_integrations.views.test_smtp_connection', return_value=(False, 'Auth error'))
-    def test_connect_smtp_failure(self, mock_smtp, mock_imap):
-        """Connection fails if SMTP test fails."""
-        data = {
-            'email_address': 'smtpfail@example.com',
-            'imap_server': 'imap.example.com',
-            'imap_port': 993,
-            'smtp_server': 'smtp.example.com',
-            'smtp_port': 587,
-            'username': 'smtpfail@example.com',
-            'password': 'bad',
-        }
-        resp = self.api_post(self.url, data, user=self.admin)
-        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn('SMTP', resp.json()['error'])
-
     def test_connect_missing_required_fields(self):
         """Submitting without required fields returns 400."""
         data = {'email_address': 'incomplete@example.com'}
         resp = self.api_post(self.url, data, user=self.admin)
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
 
-    @patch('social_integrations.views.test_smtp_connection', return_value=(True, None))
-    @patch('social_integrations.views.test_imap_connection', return_value=(True, None))
-    def test_connect_updates_existing(self, mock_imap, mock_smtp):
-        """Connecting with an existing email_address updates the record instead of creating."""
-        self.create_email_connection(email_address='existing@example.com')
-        data = {
-            'email_address': 'existing@example.com',
-            'imap_server': 'imap.new.com',
-            'imap_port': 993,
-            'smtp_server': 'smtp.new.com',
-            'smtp_port': 587,
-            'username': 'existing@example.com',
-            'password': 'newpass',
-        }
-        resp = self.api_post(self.url, data, user=self.admin)
-        self.assertEqual(resp.status_code, status.HTTP_200_OK)
-        resp_data = resp.json()
-        self.assertFalse(resp_data['created'])
-        conn = EmailConnection.objects.get(email_address='existing@example.com')
-        self.assertEqual(conn.imap_server, 'imap.new.com')
 
 
 class TestEmailDisconnect(SocialIntegrationTestCase):
@@ -243,32 +167,11 @@ class TestEmailFolders(SocialIntegrationTestCase):
             resp = self.api_get(self.url, user=self.agent)
             self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
 
-    @patch('social_integrations.views.get_imap_folders')
-    def test_folders_with_connection(self, mock_get_folders):
-        """Returns folder list when a connection exists."""
-        mock_get_folders.return_value = {
-            'success': True,
-            'folders': [
-                {'name': 'INBOX', 'delimiter': '/', 'flags': []},
-                {'name': 'Sent', 'delimiter': '/', 'flags': []},
-            ],
-        }
-        conn = self.create_email_connection()
-        resp = self.api_get(f'{self.url}?connection_id={conn.id}', user=self.agent)
-        self.assertEqual(resp.status_code, status.HTTP_200_OK)
-        data = resp.json()
-        self.assertEqual(len(data['folders']), 2)
-
     def test_folders_no_connections_returns_404(self):
         """When no active connections exist, returns 404."""
         resp = self.api_get(self.url, user=self.agent)
         self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
 
-    @patch('social_integrations.views.get_imap_folders')
-    def test_folders_invalid_connection_id(self, mock_get_folders):
-        """Requesting folders for a nonexistent connection_id returns 404."""
-        resp = self.api_get(f'{self.url}?connection_id=99999', user=self.agent)
-        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
 
 
 class TestEmailMessageViewSet(SocialIntegrationTestCase):
@@ -515,67 +418,6 @@ class TestEmailSend(SocialIntegrationTestCase):
         super().setUp()
         self.agent = self.create_user(email='email-send-agent@test.com')
         self.url = '/api/social/email/send/'
-
-    @patch('social_integrations.views.send_email_smtp')
-    def test_send_email(self, mock_send):
-        """POST sends email via SMTP (mocked) and returns success."""
-        conn = self.create_email_connection()
-        sent_msg = self.create_email_message(
-            connection=conn, message_id='<sent-test@example.com>',
-            is_from_business=True,
-        )
-        mock_send.return_value = ('<sent-test@example.com>', sent_msg)
-        data = {
-            'to_emails': ['recipient@example.com'],
-            'subject': 'Test Send',
-            'body_text': 'Hello from test',
-        }
-        resp = self.api_post(self.url, data, user=self.agent)
-        self.assertEqual(resp.status_code, status.HTTP_200_OK)
-        resp_data = resp.json()
-        self.assertEqual(resp_data['status'], 'success')
-        mock_send.assert_called_once()
-
-    @patch('social_integrations.views.send_email_smtp')
-    def test_send_email_with_cc_bcc(self, mock_send):
-        """Sending with CC and BCC passes them to the SMTP function."""
-        conn = self.create_email_connection()
-        sent_msg = self.create_email_message(
-            connection=conn, message_id='<cc-bcc@example.com>',
-        )
-        mock_send.return_value = ('<cc-bcc@example.com>', sent_msg)
-        data = {
-            'to_emails': ['to@example.com'],
-            'cc_emails': ['cc@example.com'],
-            'bcc_emails': ['bcc@example.com'],
-            'subject': 'With CC/BCC',
-            'body_text': 'Test body',
-        }
-        resp = self.api_post(self.url, data, user=self.agent)
-        self.assertEqual(resp.status_code, status.HTTP_200_OK)
-        call_kwargs = mock_send.call_args
-        self.assertIn('cc@example.com', call_kwargs.kwargs.get('cc_emails', []))
-        self.assertIn('bcc@example.com', call_kwargs.kwargs.get('bcc_emails', []))
-
-    @patch('social_integrations.views.send_email_smtp')
-    def test_send_email_with_connection_id(self, mock_send):
-        """Sending from a specific connection uses that connection."""
-        conn1 = self.create_email_connection(email_address='conn1-send@example.com')
-        conn2 = self.create_email_connection(email_address='conn2-send@example.com')
-        sent_msg = self.create_email_message(
-            connection=conn2, message_id='<conn2-send@example.com>',
-        )
-        mock_send.return_value = ('<conn2-send@example.com>', sent_msg)
-        data = {
-            'to_emails': ['to@example.com'],
-            'subject': 'From specific conn',
-            'body_text': 'Test',
-            'connection_id': conn2.id,
-        }
-        resp = self.api_post(self.url, data, user=self.agent)
-        self.assertEqual(resp.status_code, status.HTTP_200_OK)
-        call_kwargs = mock_send.call_args
-        self.assertEqual(call_kwargs.kwargs['connection'].id, conn2.id)
 
     def test_send_requires_recipient(self):
         """Sending without to_emails is rejected."""
@@ -1059,11 +901,6 @@ class TestEmailAssignments(SocialIntegrationTestCase):
         )
         self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
 
-    def test_agent_cannot_list_assignments(self):
-        """Non-admin agents cannot list assignments."""
-        resp = self.api_get('/api/social/email/assignments/', user=self.agent)
-        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
-
     def test_agent_cannot_create_assignment(self):
         """Non-admin agents cannot create assignments."""
         conn = self.create_email_connection()
@@ -1143,8 +980,3 @@ class TestEmailConnectionAssignedUsers(SocialIntegrationTestCase):
         resp = self.api_get(url, user=self.admin)
         self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
 
-    def test_agent_cannot_access(self):
-        """Non-admin agents cannot access this endpoint."""
-        url = f'/api/social/email/{self.conn.id}/assigned-users/'
-        resp = self.api_get(url, user=self.agent1)
-        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)

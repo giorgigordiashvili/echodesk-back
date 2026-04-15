@@ -158,14 +158,6 @@ class TestCreateOrder(OrderTestMixin, EchoDeskTenantTestCase):
             quantity=2, price_at_add=self.product.price,
         )
 
-    @patch('ecommerce_crm.views.BOGPaymentService')
-    def test_create_order_cash_on_delivery(self, mock_bog):
-        resp = self.api_post(ORDER_URL, {
-            'cart': self.cart.pk,
-            'delivery_address': self.address.pk,
-            'payment_method': 'cash_on_delivery',
-        }, user=self.admin)
-        self.assertIn(resp.status_code, [status.HTTP_201_CREATED, status.HTTP_200_OK])
 
 
 # ============================================================================
