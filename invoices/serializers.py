@@ -64,8 +64,8 @@ class InvoiceLineItemSerializer(serializers.ModelSerializer):
     line_total = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
 
     # Include related object names
-    product_name = serializers.CharField(source='product.name', read_only=True)
-    list_item_label = serializers.CharField(source='list_item.label', read_only=True)
+    product_name = serializers.CharField(source='product.name', read_only=True, default=None, allow_null=True)
+    list_item_label = serializers.CharField(source='list_item.label', read_only=True, default=None, allow_null=True)
 
     class Meta:
         model = InvoiceLineItem

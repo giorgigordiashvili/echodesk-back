@@ -94,12 +94,10 @@ class TestApprovalWorkflow(LeaveTestCase):
         request = self.create_leave_request(employee, lt, status='pending')
 
         admin = self.create_admin(email='admin@test.com')
-        self.api_login(admin)
-        resp = self.client.post(
+        resp = self.api_post(
             f'/api/leave/admin/leave-requests/{request.id}/approve/',
             {'comments': 'Approved by manager'},
-            format='json',
-            HTTP_HOST='tenant.test.com',
+            user=admin,
         )
         self.assertEqual(resp.status_code, 200)
         request.refresh_from_db()
@@ -113,12 +111,10 @@ class TestApprovalWorkflow(LeaveTestCase):
         request = self.create_leave_request(employee, lt, total_days=Decimal('3'))
 
         admin = self.create_admin(email='admin@test.com')
-        self.api_login(admin)
-        resp = self.client.post(
+        resp = self.api_post(
             f'/api/leave/admin/leave-requests/{request.id}/reject/',
             {'comments': 'Rejected'},
-            format='json',
-            HTTP_HOST='tenant.test.com',
+            user=admin,
         )
         self.assertEqual(resp.status_code, 200)
         request.refresh_from_db()
@@ -135,12 +131,10 @@ class TestApprovalWorkflow(LeaveTestCase):
         )
 
         admin = self.create_admin(email='admin@test.com')
-        self.api_login(admin)
-        resp = self.client.post(
+        resp = self.api_post(
             f'/api/leave/admin/leave-requests/{request.id}/cancel/',
             {'reason': 'Plans changed'},
-            format='json',
-            HTTP_HOST='tenant.test.com',
+            user=admin,
         )
         self.assertEqual(resp.status_code, 200)
         request.refresh_from_db()
@@ -154,12 +148,10 @@ class TestApprovalWorkflow(LeaveTestCase):
         request = self.create_leave_request(employee, lt, status='approved')
 
         admin = self.create_admin(email='admin@test.com')
-        self.api_login(admin)
-        resp = self.client.post(
+        resp = self.api_post(
             f'/api/leave/admin/leave-requests/{request.id}/approve/',
             {'comments': ''},
-            format='json',
-            HTTP_HOST='tenant.test.com',
+            user=admin,
         )
         self.assertEqual(resp.status_code, 400)
 
@@ -169,12 +161,10 @@ class TestApprovalWorkflow(LeaveTestCase):
         request = self.create_leave_request(employee, lt, status='cancelled')
 
         admin = self.create_admin(email='admin@test.com')
-        self.api_login(admin)
-        resp = self.client.post(
+        resp = self.api_post(
             f'/api/leave/admin/leave-requests/{request.id}/reject/',
             {'comments': ''},
-            format='json',
-            HTTP_HOST='tenant.test.com',
+            user=admin,
         )
         self.assertEqual(resp.status_code, 400)
 
@@ -184,11 +174,9 @@ class TestApprovalWorkflow(LeaveTestCase):
         request = self.create_leave_request(employee, lt, status='cancelled')
 
         admin = self.create_admin(email='admin@test.com')
-        self.api_login(admin)
-        resp = self.client.post(
+        resp = self.api_post(
             f'/api/leave/admin/leave-requests/{request.id}/cancel/',
             {'reason': ''},
-            format='json',
-            HTTP_HOST='tenant.test.com',
+            user=admin,
         )
         self.assertEqual(resp.status_code, 400)

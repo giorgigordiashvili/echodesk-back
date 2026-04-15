@@ -44,7 +44,7 @@ class InvoiceSettingsViewSet(viewsets.ModelViewSet):
     queryset = InvoiceSettings.objects.select_related('client_itemlist').all()
     serializer_class = InvoiceSettingsSerializer
     permission_classes = [IsAuthenticated, CanManageInvoices]
-    http_method_names = ['get', 'post', 'put', 'patch']
+    http_method_names = ['get', 'post', 'put', 'patch', 'delete']
 
     def list(self, request, *args, **kwargs):
         """Get or create invoice settings (singleton)"""

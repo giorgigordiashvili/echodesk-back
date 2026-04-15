@@ -19,7 +19,7 @@ from crm.tests.conftest import CrmTestCase
 
 class TestIsWorkingHours(CrmTestCase):
 
-    @patch('crm.models.timezone.now')
+    @patch('django.utils.timezone.now')
     def test_is_working_hours_during_schedule(self, mock_now):
         """Returns True during configured working hours."""
         # Wednesday 10:00 Tbilisi = 06:00 UTC
@@ -33,7 +33,7 @@ class TestIsWorkingHours(CrmTestCase):
         )
         self.assertTrue(settings.is_working_hours_now())
 
-    @patch('crm.models.timezone.now')
+    @patch('django.utils.timezone.now')
     def test_is_working_hours_outside_schedule(self, mock_now):
         """Returns False outside configured working hours."""
         # Wednesday 02:00 Tbilisi = Monday 22:00 UTC
@@ -60,7 +60,7 @@ class TestIsWorkingHours(CrmTestCase):
         )
         self.assertTrue(settings.is_working_hours_now())
 
-    @patch('crm.models.timezone.now')
+    @patch('django.utils.timezone.now')
     def test_is_working_hours_holiday(self, mock_now):
         """Returns False on a holiday date even if within working hours."""
         # Wednesday 10:00 Tbilisi = normally open
@@ -75,7 +75,7 @@ class TestIsWorkingHours(CrmTestCase):
         )
         self.assertFalse(settings.is_working_hours_now())
 
-    @patch('crm.models.timezone.now')
+    @patch('django.utils.timezone.now')
     def test_is_working_hours_holiday_as_string(self, mock_now):
         """Holiday list with plain date strings (not dicts) is also supported."""
         mock_now.return_value = datetime(2026, 4, 8, 6, 0, 0, tzinfo=ZoneInfo('UTC'))
@@ -89,7 +89,7 @@ class TestIsWorkingHours(CrmTestCase):
         )
         self.assertFalse(settings.is_working_hours_now())
 
-    @patch('crm.models.timezone.now')
+    @patch('django.utils.timezone.now')
     def test_is_working_hours_day_not_in_schedule(self, mock_now):
         """Returns False for a day not listed in schedule."""
         # Saturday 10:00 Tbilisi
@@ -103,7 +103,7 @@ class TestIsWorkingHours(CrmTestCase):
         )
         self.assertFalse(settings.is_working_hours_now())
 
-    @patch('crm.models.timezone.now')
+    @patch('django.utils.timezone.now')
     def test_is_working_hours_boundary_start(self, mock_now):
         """Returns True at the first hour of working hours."""
         # Wednesday 09:00 Tbilisi = 05:00 UTC
@@ -117,7 +117,7 @@ class TestIsWorkingHours(CrmTestCase):
         )
         self.assertTrue(settings.is_working_hours_now())
 
-    @patch('crm.models.timezone.now')
+    @patch('django.utils.timezone.now')
     def test_is_working_hours_boundary_end(self, mock_now):
         """Returns False at the hour right after working hours end."""
         # Wednesday 18:00 Tbilisi = 14:00 UTC (schedule ends at 17)
@@ -468,7 +468,7 @@ class TestCallRouting(CrmTestCase):
         self.create_phone_assignment(user=admin, sip_config=sip, extension='100')
         return admin, sip, settings
 
-    @patch('crm.models.timezone.now')
+    @patch('django.utils.timezone.now')
     def test_call_routing_working_hours(self, mock_now):
         """Returns is_working_hours=True during working hours."""
         mock_now.return_value = datetime(2026, 4, 8, 6, 0, 0, tzinfo=ZoneInfo('UTC'))
@@ -484,7 +484,7 @@ class TestCallRouting(CrmTestCase):
         self.assertTrue(resp.data['is_working_hours'])
         self.assertEqual(resp.data['action'], 'queue')
 
-    @patch('crm.models.timezone.now')
+    @patch('django.utils.timezone.now')
     def test_call_routing_after_hours(self, mock_now):
         """Returns is_working_hours=False outside working hours."""
         # Wednesday 02:00 Tbilisi
