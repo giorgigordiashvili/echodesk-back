@@ -3,6 +3,7 @@ from decimal import Decimal
 from datetime import timedelta
 from django.utils import timezone
 from django.db import IntegrityError
+from django.core.exceptions import ValidationError
 from invoices.models import (
     InvoiceSettings, Invoice, InvoiceLineItem, InvoicePayment, InvoiceTemplate,
 )
@@ -414,3 +415,222 @@ class TestInvoiceTemplate(InvoiceTestCase):
         template = self.create_invoice_template(supported_languages=['en', 'ka', 'ru'])
         self.assertEqual(len(template.supported_languages), 3)
         self.assertIn('ka', template.supported_languages)
+
+
+# ============================================================================
+# Additional Invoice model tests
+# ============================================================================
+
+
+class TestInvoiceStatusChoices(InvoiceTestCase):
+
+    def test_all_valid_statuses(self):
+        """All STATUS_CHOICES values should be accepted by the model."""
+        valid_statuses = [choice[0] for choice in Invoice.STATUS_CHOICES]
+        expected = ['draft', 'sent', 'viewed', 'partially_paid', 'paid', 'overdue', 'cancelled']
+        self.assertEqual(valid_statuses, expected)
+
+    def test_status_display_names(self):
+        admin = self.create_admin()
+        for code, label in Invoice.STATUS_CHOICES:
+            invoice = self.create_invoice(created_by=admin, status=code)
+            self.assertEqual(invoice.get_status_display(), str(label))
+
+
+class TestInvoiceStatusTransitions(InvoiceTestCase):
+
+    def test_draft_to_sent(self):
+        invoice = self.create_invoice(status='draft')
+        invoice.status = 'sent'
+        invoice.save()
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, 'sent')
+
+    def test_sent_to_partially_paid(self):
+        invoice = self.create_invoice(
+            status='sent', total=Decimal('100.00'), paid_amount=Decimal('50.00'),
+        )
+        invoice.update_payment_status()
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, 'partially_paid')
+
+    def test_partially_paid_to_paid(self):
+        invoice = self.create_invoice(
+            status='partially_paid', total=Decimal('100.00'), paid_amount=Decimal('100.00'),
+        )
+        invoice.update_payment_status()
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, 'paid')
+
+    def test_full_lifecycle_draft_to_paid(self):
+        admin = self.create_admin()
+        invoice = self.create_invoice(
+            created_by=admin, status='draft', total=Decimal('200.00'),
+        )
+        # Draft -> Sent
+        invoice.status = 'sent'
+        invoice.save()
+        # Sent -> Partially paid
+        self.create_payment(invoice, amount=Decimal('50.00'), recorded_by=admin)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, 'partially_paid')
+        # Partially paid -> Paid
+        self.create_payment(invoice, amount=Decimal('150.00'), recorded_by=admin)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, 'paid')
+        self.assertIsNotNone(invoice.paid_date)
+
+
+class TestInvoiceOverdueDetection(InvoiceTestCase):
+
+    def test_overdue_for_viewed_status(self):
+        invoice = self.create_invoice(
+            status='viewed',
+            due_date=timezone.now().date() - timedelta(days=1),
+        )
+        self.assertTrue(invoice.is_overdue())
+
+    def test_overdue_for_partially_paid_status(self):
+        invoice = self.create_invoice(
+            status='partially_paid',
+            due_date=timezone.now().date() - timedelta(days=1),
+        )
+        self.assertTrue(invoice.is_overdue())
+
+    def test_not_overdue_same_day(self):
+        """Invoice due today is not overdue (overdue means past due_date)."""
+        invoice = self.create_invoice(
+            status='sent',
+            due_date=timezone.now().date(),
+        )
+        self.assertFalse(invoice.is_overdue())
+
+
+class TestInvoiceCalculateTotalsMultipleItems(InvoiceTestCase):
+
+    def test_multiple_line_items_sum(self):
+        invoice = self.create_invoice()
+        InvoiceLineItem.objects.create(
+            invoice=invoice, description='A', quantity=Decimal('1'),
+            unit_price=Decimal('100.00'), tax_rate=Decimal('0.00'),
+            discount_percent=Decimal('0.00'), item_source='manual',
+        )
+        InvoiceLineItem.objects.create(
+            invoice=invoice, description='B', quantity=Decimal('2'),
+            unit_price=Decimal('50.00'), tax_rate=Decimal('0.00'),
+            discount_percent=Decimal('0.00'), item_source='manual',
+        )
+        invoice.refresh_from_db()
+        total = invoice.calculate_totals()
+        # A=100, B=100, subtotal=200, tax=0, total=200
+        self.assertEqual(invoice.subtotal, Decimal('200.00'))
+        self.assertEqual(total, Decimal('200.00'))
+
+
+class TestInvoiceLineItemCascadeDelete(InvoiceTestCase):
+
+    def test_line_items_deleted_with_invoice(self):
+        invoice = self.create_invoice()
+        self.create_line_item(invoice, description='Item 1')
+        self.create_line_item(invoice, description='Item 2')
+        invoice_id = invoice.id
+        self.assertEqual(InvoiceLineItem.objects.filter(invoice_id=invoice_id).count(), 2)
+        invoice.delete()
+        self.assertEqual(InvoiceLineItem.objects.filter(invoice_id=invoice_id).count(), 0)
+
+
+class TestInvoicePaymentCascadeDelete(InvoiceTestCase):
+
+    def test_payments_deleted_with_invoice(self):
+        admin = self.create_admin()
+        invoice = self.create_invoice(
+            created_by=admin, total=Decimal('300.00'), status='sent',
+        )
+        self.create_payment(invoice, amount=Decimal('100.00'), recorded_by=admin)
+        self.create_payment(invoice, amount=Decimal('50.00'), recorded_by=admin)
+        invoice_id = invoice.id
+        self.assertEqual(InvoicePayment.objects.filter(invoice_id=invoice_id).count(), 2)
+        invoice.delete()
+        self.assertEqual(InvoicePayment.objects.filter(invoice_id=invoice_id).count(), 0)
+
+
+class TestInvoicePaymentAmountValidation(InvoiceTestCase):
+
+    def test_positive_amount_accepted(self):
+        invoice = self.create_invoice(total=Decimal('100.00'))
+        payment = self.create_payment(invoice, amount=Decimal('50.00'))
+        self.assertEqual(payment.amount, Decimal('50.00'))
+
+    def test_zero_amount_rejected(self):
+        """MinValueValidator(0.01) should reject amount=0."""
+        invoice = self.create_invoice(total=Decimal('100.00'))
+        admin = self.create_admin()
+        payment = InvoicePayment(
+            invoice=invoice, amount=Decimal('0.00'),
+            payment_method='cash', recorded_by=admin,
+        )
+        with self.assertRaises(ValidationError):
+            payment.full_clean()
+
+
+class TestInvoiceSettingsSingleton(InvoiceTestCase):
+
+    def test_get_or_create_returns_same_instance(self):
+        settings1, created1 = InvoiceSettings.objects.get_or_create()
+        self.assertTrue(created1)
+        settings2, created2 = InvoiceSettings.objects.get_or_create()
+        self.assertFalse(created2)
+        self.assertEqual(settings1.id, settings2.id)
+
+
+class TestInvoiceUUID(InvoiceTestCase):
+
+    def test_uuid_auto_generated(self):
+        invoice = self.create_invoice()
+        self.assertIsNotNone(invoice.uuid)
+
+    def test_uuid_unique_across_invoices(self):
+        admin = self.create_admin()
+        inv1 = self.create_invoice(created_by=admin)
+        inv2 = self.create_invoice(created_by=admin)
+        self.assertNotEqual(inv1.uuid, inv2.uuid)
+
+
+class TestInvoiceOrdering(InvoiceTestCase):
+
+    def test_default_ordering_newest_first(self):
+        admin = self.create_admin()
+        inv1 = self.create_invoice(created_by=admin)
+        inv2 = self.create_invoice(created_by=admin)
+        invoices = list(Invoice.objects.all())
+        # newest first
+        self.assertEqual(invoices[0].id, inv2.id)
+        self.assertEqual(invoices[1].id, inv1.id)
+
+
+class TestInvoicePaymentMethods(InvoiceTestCase):
+
+    def test_all_payment_methods_valid(self):
+        valid_methods = [choice[0] for choice in InvoicePayment.PAYMENT_METHOD_CHOICES]
+        expected = ['card', 'cash', 'bank_transfer', 'check', 'other']
+        self.assertEqual(valid_methods, expected)
+
+    def test_payment_with_each_method(self):
+        admin = self.create_admin()
+        for method, _ in InvoicePayment.PAYMENT_METHOD_CHOICES:
+            invoice = self.create_invoice(
+                created_by=admin, total=Decimal('100.00'), status='sent',
+            )
+            payment = self.create_payment(
+                invoice, recorded_by=admin,
+                amount=Decimal('100.00'), payment_method=method,
+            )
+            self.assertEqual(payment.payment_method, method)
+
+
+class TestInvoiceLineItemSources(InvoiceTestCase):
+
+    def test_all_item_source_choices(self):
+        valid_sources = [choice[0] for choice in InvoiceLineItem.ITEM_SOURCE_CHOICES]
+        expected = ['product', 'list_item', 'manual']
+        self.assertEqual(valid_sources, expected)

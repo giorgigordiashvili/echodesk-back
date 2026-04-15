@@ -1,13 +1,14 @@
 """Tests for Invoice views: settings, CRUD, line items, payments, templates."""
 from decimal import Decimal
 from datetime import timedelta
-from unittest.mock import patch, PropertyMock
+from unittest.mock import patch, PropertyMock, MagicMock
 from django.utils import timezone
 from django.core.files.uploadedfile import SimpleUploadedFile
 from invoices.models import (
     InvoiceSettings, Invoice, InvoiceLineItem, InvoicePayment, InvoiceTemplate,
 )
 from invoices.tests.conftest import InvoiceTestCase
+from tickets.models import ItemList, ListItem
 
 
 # ============================================================================
@@ -613,3 +614,553 @@ class TestInvoicePermissions(InvoiceTestCase):
         user = self.create_user(email='no-feature-s@test.com')
         resp = self.api_get('/api/invoices/settings/', user=user)
         self.assertEqual(resp.status_code, 403)
+
+
+# ============================================================================
+# Additional Invoice List / Filter / Search Tests
+# ============================================================================
+
+
+class TestInvoiceListFilters(InvoiceTestCase):
+
+    def test_filter_by_client(self):
+        user = self.create_invoice_user()
+        client_a = self.create_ecommerce_client(first_name='Alice', last_name='A')
+        client_b = self.create_ecommerce_client(first_name='Bob', last_name='B')
+        self.create_invoice(created_by=user, client=client_a)
+        self.create_invoice(created_by=user, client=client_b)
+        self.create_invoice(created_by=user, client=client_a)
+        resp = self.api_get(f'/api/invoices/invoices/?client={client_a.id}', user=user)
+        self.assertEqual(resp.status_code, 200)
+        results = self.get_results(resp)
+        self.assertEqual(len(results), 2)
+
+    def test_filter_by_date_range(self):
+        user = self.create_invoice_user()
+        ecom_client = self.create_ecommerce_client()
+        today = timezone.now().date()
+        self.create_invoice(
+            created_by=user, client=ecom_client,
+            issue_date=today - timedelta(days=10),
+        )
+        self.create_invoice(
+            created_by=user, client=ecom_client,
+            issue_date=today,
+        )
+        self.create_invoice(
+            created_by=user, client=ecom_client,
+            issue_date=today - timedelta(days=30),
+        )
+        date_from = str(today - timedelta(days=15))
+        date_to = str(today)
+        resp = self.api_get(
+            f'/api/invoices/invoices/?date_from={date_from}&date_to={date_to}',
+            user=user,
+        )
+        self.assertEqual(resp.status_code, 200)
+        results = self.get_results(resp)
+        self.assertEqual(len(results), 2)
+
+    def test_filter_overdue_only(self):
+        user = self.create_invoice_user()
+        ecom_client = self.create_ecommerce_client()
+        # Overdue invoice
+        self.create_invoice(
+            created_by=user, client=ecom_client, status='sent',
+            due_date=timezone.now().date() - timedelta(days=5),
+        )
+        # Not overdue invoice
+        self.create_invoice(
+            created_by=user, client=ecom_client, status='sent',
+            due_date=timezone.now().date() + timedelta(days=5),
+        )
+        # Paid invoice (not overdue even with past due date)
+        self.create_invoice(
+            created_by=user, client=ecom_client, status='paid',
+            due_date=timezone.now().date() - timedelta(days=5),
+        )
+        resp = self.api_get('/api/invoices/invoices/?overdue=true', user=user)
+        self.assertEqual(resp.status_code, 200)
+        results = self.get_results(resp)
+        self.assertEqual(len(results), 1)
+
+    def test_search_by_invoice_number(self):
+        user = self.create_invoice_user()
+        ecom_client = self.create_ecommerce_client()
+        inv = self.create_invoice(
+            created_by=user, client=ecom_client,
+            invoice_number='SRCH-2026-9999',
+        )
+        self.create_invoice(created_by=user, client=ecom_client)
+        resp = self.api_get('/api/invoices/invoices/?search=SRCH-2026', user=user)
+        self.assertEqual(resp.status_code, 200)
+        results = self.get_results(resp)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]['invoice_number'], 'SRCH-2026-9999')
+
+    def test_filter_by_multiple_statuses(self):
+        user = self.create_invoice_user()
+        ecom_client = self.create_ecommerce_client()
+        self.create_invoice(created_by=user, client=ecom_client, status='draft')
+        self.create_invoice(created_by=user, client=ecom_client, status='paid')
+        self.create_invoice(created_by=user, client=ecom_client, status='cancelled')
+        # Filter for paid only
+        resp = self.api_get('/api/invoices/invoices/?status=paid', user=user)
+        results = self.get_results(resp)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]['status'], 'paid')
+
+    def test_ordering_by_total(self):
+        user = self.create_invoice_user()
+        ecom_client = self.create_ecommerce_client()
+        self.create_invoice(
+            created_by=user, client=ecom_client, total=Decimal('100.00'),
+        )
+        self.create_invoice(
+            created_by=user, client=ecom_client, total=Decimal('500.00'),
+        )
+        self.create_invoice(
+            created_by=user, client=ecom_client, total=Decimal('200.00'),
+        )
+        resp = self.api_get('/api/invoices/invoices/?ordering=total', user=user)
+        self.assertEqual(resp.status_code, 200)
+        results = self.get_results(resp)
+        totals = [Decimal(r['total']) for r in results]
+        self.assertEqual(totals, sorted(totals))
+
+
+# ============================================================================
+# Invoice Auto-Number Generation
+# ============================================================================
+
+
+class TestInvoiceAutoNumber(InvoiceTestCase):
+
+    def test_auto_generates_invoice_number(self):
+        user = self.create_invoice_user()
+        ecom_client = self.create_ecommerce_client()
+        self.create_invoice_settings(invoice_prefix='AUTO', starting_number=1)
+        data = {
+            'client': ecom_client.id,
+            'issue_date': str(timezone.now().date()),
+            'due_date': str(timezone.now().date() + timedelta(days=30)),
+        }
+        resp = self.api_post('/api/invoices/invoices/', data, user=user)
+        self.assertEqual(resp.status_code, 201)
+        year = timezone.now().year
+        self.assertTrue(resp.data['invoice_number'].startswith(f'AUTO-{year}-'))
+
+    def test_sequential_invoice_numbers(self):
+        user = self.create_invoice_user()
+        ecom_client = self.create_ecommerce_client()
+        self.create_invoice_settings(invoice_prefix='SEQ', starting_number=1)
+        year = timezone.now().year
+
+        for i in range(1, 4):
+            data = {
+                'client': ecom_client.id,
+                'issue_date': str(timezone.now().date()),
+                'due_date': str(timezone.now().date() + timedelta(days=30)),
+            }
+            resp = self.api_post('/api/invoices/invoices/', data, user=user)
+            self.assertEqual(resp.status_code, 201)
+            self.assertEqual(resp.data['invoice_number'], f'SEQ-{year}-{str(i).zfill(4)}')
+
+
+# ============================================================================
+# Invoice Total Calculation via API
+# ============================================================================
+
+
+class TestInvoiceCalculatesTotalViaAPI(InvoiceTestCase):
+
+    def test_create_invoice_calculates_total(self):
+        user = self.create_invoice_user()
+        ecom_client = self.create_ecommerce_client()
+        self.create_invoice_settings()
+        data = {
+            'client': ecom_client.id,
+            'issue_date': str(timezone.now().date()),
+            'due_date': str(timezone.now().date() + timedelta(days=30)),
+            'line_items': [
+                {
+                    'description': 'Item A',
+                    'quantity': '2',
+                    'unit_price': '100.00',
+                    'tax_rate': '18.00',
+                    'discount_percent': '0.00',
+                    'item_source': 'manual',
+                },
+                {
+                    'description': 'Item B',
+                    'quantity': '1',
+                    'unit_price': '50.00',
+                    'tax_rate': '0.00',
+                    'discount_percent': '0.00',
+                    'item_source': 'manual',
+                },
+            ],
+        }
+        resp = self.api_post('/api/invoices/invoices/', data, user=user)
+        self.assertEqual(resp.status_code, 201)
+        # subtotal = 200 + 50 = 250, tax = 36 (only Item A), total = 250 + 36 = 286
+        self.assertEqual(Decimal(resp.data['subtotal']), Decimal('250.00'))
+        self.assertEqual(Decimal(resp.data['total']), Decimal('286.00'))
+
+
+# ============================================================================
+# Invoice Detail with Line Items and Payments
+# ============================================================================
+
+
+class TestInvoiceDetailInclusions(InvoiceTestCase):
+
+    def test_detail_includes_line_items(self):
+        user = self.create_invoice_user()
+        ecom_client = self.create_ecommerce_client()
+        invoice = self.create_invoice(created_by=user, client=ecom_client)
+        self.create_line_item(invoice, description='Detail Item A')
+        self.create_line_item(invoice, description='Detail Item B')
+        resp = self.api_get(f'/api/invoices/invoices/{invoice.id}/', user=user)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(resp.data['line_items']), 2)
+
+    def test_detail_includes_payments(self):
+        user = self.create_invoice_user()
+        ecom_client = self.create_ecommerce_client()
+        invoice = self.create_invoice(
+            created_by=user, client=ecom_client,
+            total=Decimal('300.00'), status='sent',
+        )
+        self.create_payment(invoice, amount=Decimal('100.00'), recorded_by=user)
+        resp = self.api_get(f'/api/invoices/invoices/{invoice.id}/', user=user)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(resp.data['payments']), 1)
+
+    def test_detail_includes_client_details(self):
+        user = self.create_invoice_user()
+        ecom_client = self.create_ecommerce_client(
+            first_name='Detail', last_name='Client',
+        )
+        invoice = self.create_invoice(
+            created_by=user, client=ecom_client, client_name='Detail Client',
+        )
+        resp = self.api_get(f'/api/invoices/invoices/{invoice.id}/', user=user)
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('client_details', resp.data)
+        self.assertEqual(resp.data['client_details']['first_name'], 'Detail')
+
+
+# ============================================================================
+# Line Item Update
+# ============================================================================
+
+
+class TestInvoiceLineItemUpdate(InvoiceTestCase):
+
+    def test_update_line_item_quantity(self):
+        user = self.create_invoice_user()
+        invoice = self.create_invoice(created_by=user)
+        item = self.create_line_item(
+            invoice, quantity=Decimal('1'), unit_price=Decimal('100.00'),
+        )
+        resp = self.api_patch(
+            f'/api/invoices/line-items/{item.id}/',
+            {'quantity': '5', 'invoice': invoice.id},
+            user=user,
+        )
+        self.assertEqual(resp.status_code, 200)
+        item.refresh_from_db()
+        self.assertEqual(item.quantity, Decimal('5.00'))
+
+    def test_update_line_item_price(self):
+        user = self.create_invoice_user()
+        invoice = self.create_invoice(created_by=user)
+        item = self.create_line_item(
+            invoice, quantity=Decimal('1'), unit_price=Decimal('100.00'),
+        )
+        resp = self.api_patch(
+            f'/api/invoices/line-items/{item.id}/',
+            {'unit_price': '250.00', 'invoice': invoice.id},
+            user=user,
+        )
+        self.assertEqual(resp.status_code, 200)
+        item.refresh_from_db()
+        self.assertEqual(item.unit_price, Decimal('250.00'))
+
+
+# ============================================================================
+# Payment updates invoice status
+# ============================================================================
+
+
+class TestPaymentUpdatesInvoiceStatus(InvoiceTestCase):
+
+    def test_full_payment_marks_invoice_paid(self):
+        user = self.create_invoice_user()
+        invoice = self.create_invoice(
+            created_by=user, total=Decimal('500.00'), status='sent',
+        )
+        data = {
+            'invoice': invoice.id,
+            'amount': '500.00',
+            'payment_method': 'card',
+        }
+        resp = self.api_post('/api/invoices/payments/', data, user=user)
+        self.assertEqual(resp.status_code, 201)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, 'paid')
+        self.assertEqual(invoice.paid_amount, Decimal('500.00'))
+
+    def test_partial_payment_does_not_mark_paid(self):
+        user = self.create_invoice_user()
+        invoice = self.create_invoice(
+            created_by=user, total=Decimal('500.00'), status='sent',
+        )
+        data = {
+            'invoice': invoice.id,
+            'amount': '200.00',
+            'payment_method': 'bank_transfer',
+        }
+        resp = self.api_post('/api/invoices/payments/', data, user=user)
+        self.assertEqual(resp.status_code, 201)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, 'partially_paid')
+        self.assertEqual(invoice.paid_amount, Decimal('200.00'))
+
+
+# ============================================================================
+# Invoice Duplicate
+# ============================================================================
+
+
+class TestInvoiceDuplicate(InvoiceTestCase):
+
+    def test_duplicate_invoice(self):
+        user = self.create_invoice_user()
+        ecom_client = self.create_ecommerce_client()
+        self.create_invoice_settings()
+        original = self.create_invoice(
+            created_by=user, client=ecom_client, status='sent',
+            notes='Original notes',
+        )
+        self.create_line_item(original, description='Dup Item', quantity=Decimal('3'))
+        resp = self.api_post(
+            f'/api/invoices/invoices/{original.id}/duplicate/',
+            user=user,
+        )
+        self.assertEqual(resp.status_code, 201)
+        # New invoice should have different number
+        self.assertNotEqual(resp.data['invoice_number'], original.invoice_number)
+        # New invoice should be draft
+        self.assertEqual(resp.data['status'], 'draft')
+
+
+# ============================================================================
+# Invoice Send Email
+# ============================================================================
+
+
+class TestInvoiceSendEmail(InvoiceTestCase):
+
+    @patch('invoices.tasks.send_invoice_email.delay')
+    def test_send_email_with_valid_recipient(self, mock_task):
+        user = self.create_invoice_user()
+        ecom_client = self.create_ecommerce_client()
+        invoice = self.create_invoice(
+            created_by=user, client=ecom_client, status='sent',
+        )
+        resp = self.api_post(
+            f'/api/invoices/invoices/{invoice.id}/send_email/',
+            {
+                'recipient_email': 'customer@example.com',
+                'subject': 'Your Invoice',
+                'message': 'Please find attached.',
+            },
+            user=user,
+        )
+        self.assertEqual(resp.status_code, 200)
+        mock_task.assert_called_once()
+        invoice.refresh_from_db()
+        self.assertIsNotNone(invoice.sent_date)
+
+    @patch('invoices.tasks.send_invoice_email.delay')
+    def test_send_email_with_cc_emails(self, mock_task):
+        user = self.create_invoice_user()
+        ecom_client = self.create_ecommerce_client()
+        invoice = self.create_invoice(
+            created_by=user, client=ecom_client, status='sent',
+        )
+        resp = self.api_post(
+            f'/api/invoices/invoices/{invoice.id}/send_email/',
+            {
+                'recipient_email': 'customer@example.com',
+                'cc_emails': ['cc1@example.com', 'cc2@example.com'],
+            },
+            user=user,
+        )
+        self.assertEqual(resp.status_code, 200)
+        mock_task.assert_called_once()
+
+
+# ============================================================================
+# Invoice Stats
+# ============================================================================
+
+
+class TestInvoiceStatsEndpoint(InvoiceTestCase):
+
+    def test_stats_structure(self):
+        user = self.create_invoice_user()
+        resp = self.api_get('/api/invoices/invoices/stats/', user=user)
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('current_month', resp.data)
+        self.assertIn('outstanding_amount', resp.data)
+        self.assertIn('overdue_count', resp.data)
+        self.assertIn('total_invoiced', resp.data['current_month'])
+        self.assertIn('total_paid', resp.data['current_month'])
+        self.assertIn('count', resp.data['current_month'])
+
+    def test_stats_reflect_data(self):
+        user = self.create_invoice_user()
+        ecom_client = self.create_ecommerce_client()
+        self.create_invoice(
+            created_by=user, client=ecom_client,
+            status='paid', total=Decimal('1000.00'),
+        )
+        self.create_invoice(
+            created_by=user, client=ecom_client,
+            status='sent', total=Decimal('500.00'),
+            due_date=timezone.now().date() - timedelta(days=5),
+        )
+        resp = self.api_get('/api/invoices/invoices/stats/', user=user)
+        self.assertEqual(resp.status_code, 200)
+        self.assertGreaterEqual(resp.data['overdue_count'], 1)
+
+
+# ============================================================================
+# Invoice Settings Available ItemLists
+# ============================================================================
+
+
+class TestInvoiceSettingsAvailableItemLists(InvoiceTestCase):
+
+    def test_available_itemlists(self):
+        user = self.create_invoice_user()
+        self.create_item_list(title='Clients List', created_by=user)
+        self.create_item_list(title='Products List', created_by=user)
+        resp = self.api_get('/api/invoices/settings/available-itemlists/', user=user)
+        self.assertEqual(resp.status_code, 200)
+        self.assertGreaterEqual(len(resp.data), 2)
+
+
+# ============================================================================
+# Invoice Template Update
+# ============================================================================
+
+
+class TestInvoiceTemplateUpdate(InvoiceTestCase):
+
+    def test_update_template_name(self):
+        user = self.create_invoice_user()
+        template = self.create_invoice_template(name='Old Name', created_by=user)
+        resp = self.api_patch(
+            f'/api/invoices/templates/{template.id}/',
+            {'name': 'New Name'},
+            user=user,
+        )
+        self.assertEqual(resp.status_code, 200)
+        template.refresh_from_db()
+        self.assertEqual(template.name, 'New Name')
+
+    def test_update_template_html(self):
+        user = self.create_invoice_user()
+        template = self.create_invoice_template(created_by=user)
+        new_html = '<html><body>Updated {{ invoice }}</body></html>'
+        resp = self.api_patch(
+            f'/api/invoices/templates/{template.id}/',
+            {'html_content': new_html},
+            user=user,
+        )
+        self.assertEqual(resp.status_code, 200)
+        template.refresh_from_db()
+        self.assertEqual(template.html_content, new_html)
+
+    def test_update_template_set_default(self):
+        user = self.create_invoice_user()
+        t1 = self.create_invoice_template(
+            name='T1', is_default=True, created_by=user,
+        )
+        t2 = self.create_invoice_template(
+            name='T2', is_default=False, created_by=user,
+        )
+        resp = self.api_patch(
+            f'/api/invoices/templates/{t2.id}/',
+            {'is_default': True},
+            user=user,
+        )
+        self.assertEqual(resp.status_code, 200)
+        t1.refresh_from_db()
+        t2.refresh_from_db()
+        self.assertFalse(t1.is_default)
+        self.assertTrue(t2.is_default)
+
+
+# ============================================================================
+# Client ViewSet
+# ============================================================================
+
+
+class TestClientViewSet(InvoiceTestCase):
+
+    def test_list_clients_from_ecommerce(self):
+        """When no client_itemlist configured, returns EcommerceClients."""
+        user = self.create_invoice_user()
+        self.create_ecommerce_client(first_name='Ecom', last_name='Client')
+        resp = self.api_get('/api/invoices/clients/', user=user)
+        self.assertEqual(resp.status_code, 200)
+
+    def test_list_clients_from_itemlist(self):
+        """When client_itemlist configured, returns ListItems."""
+        user = self.create_invoice_user()
+        item_list = self.create_item_list(title='Clients', created_by=user)
+        self.create_list_item(item_list, label='Client A')
+        self.create_list_item(item_list, label='Client B')
+        settings, _ = InvoiceSettings.objects.get_or_create()
+        settings.client_itemlist = item_list
+        settings.save()
+        resp = self.api_get('/api/invoices/clients/', user=user)
+        self.assertEqual(resp.status_code, 200)
+        results = self.get_results(resp)
+        self.assertEqual(len(results), 2)
+
+
+# ============================================================================
+# Materials ViewSet
+# ============================================================================
+
+
+class TestMaterialsViewSet(InvoiceTestCase):
+
+    def test_list_materials_from_configured_itemlist(self):
+        user = self.create_invoice_user()
+        item_list = self.create_item_list(title='Materials', created_by=user)
+        self.create_list_item(
+            item_list, label='Steel',
+            custom_data={'price': 50, 'unit': 'kg'},
+        )
+        settings, _ = InvoiceSettings.objects.get_or_create()
+        settings.materials_itemlist = item_list
+        settings.save()
+        resp = self.api_get('/api/invoices/materials/', user=user)
+        self.assertEqual(resp.status_code, 200)
+        results = self.get_results(resp)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]['label'], 'Steel')
+
+    def test_list_materials_empty_when_not_configured(self):
+        user = self.create_invoice_user()
+        resp = self.api_get('/api/invoices/materials/', user=user)
+        self.assertEqual(resp.status_code, 200)
+        results = self.get_results(resp)
+        self.assertEqual(len(results), 0)
