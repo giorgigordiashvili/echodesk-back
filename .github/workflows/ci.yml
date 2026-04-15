@@ -85,6 +85,15 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     env:
       SECRET_KEY: ci-test-key
       DB_NAME: test_echodesk
@@ -93,6 +102,8 @@ jobs:
       DB_HOST: localhost
       DB_PORT: 5432
       DB_SSLMODE: disable
+      REDIS_URL: redis://localhost:6379/0
+      CELERY_BROKER_URL: redis://localhost:6379/1
       DEBUG: "False"
       MAIN_DOMAIN: echodesk.ge
       API_DOMAIN: api.echodesk.ge
@@ -109,28 +120,21 @@ jobs:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
       - run: pip install -r requirements.txt
-      - name: Run core tests
+      - name: Run all tests
         run: >
           python manage.py test
-          users.tests.test_auth
-          users.tests.test_user_views
-          users.tests.test_group_views
+          users.tests
           crm.tests
-          social_integrations.tests
           tickets.tests
-          invoices.tests
-          tenants.tests
-          amanati_crm.tests
-          --verbosity=2
-      - name: Run extended tests (non-blocking)
-        continue-on-error: true
-        run: >
-          python manage.py test
+          social_integrations.tests
           ecommerce_crm.tests
+          invoices.tests
           booking_management.tests
           leave_management.tests
           notifications.tests
           help_center.tests
+          tenants.tests
+          amanati_crm.tests
           --verbosity=2
 
   schema:
