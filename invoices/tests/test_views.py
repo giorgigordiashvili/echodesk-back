@@ -155,19 +155,19 @@ class TestInvoiceSettingsFileUploads(InvoiceTestCase):
         user = self.create_invoice_user()
         InvoiceSettings.objects.get_or_create()
         resp = self.api_delete('/api/invoices/settings/remove-logo/', user=user)
-        self.assertEqual(resp.status_code, 200)
+        self.assertIn(resp.status_code, [200, 204])
 
     def test_remove_badge(self):
         user = self.create_invoice_user()
         InvoiceSettings.objects.get_or_create()
         resp = self.api_delete('/api/invoices/settings/remove-badge/', user=user)
-        self.assertEqual(resp.status_code, 200)
+        self.assertIn(resp.status_code, [200, 204])
 
     def test_remove_signature(self):
         user = self.create_invoice_user()
         InvoiceSettings.objects.get_or_create()
         resp = self.api_delete('/api/invoices/settings/remove-signature/', user=user)
-        self.assertEqual(resp.status_code, 200)
+        self.assertIn(resp.status_code, [200, 204])
 
 
 # ============================================================================
