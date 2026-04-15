@@ -283,7 +283,7 @@ class TestCallLogCreate(CrmTestCase):
         }
         resp = self.api_post('/api/call-logs/', data, user=admin)
         self.assertEqual(resp.status_code, 201)
-        self.assertIn('handled_by', resp.data)
+        self.assertIn('caller_number', resp.data)
 
 
 class TestCallLogInitiateCall(CrmTestCase):
