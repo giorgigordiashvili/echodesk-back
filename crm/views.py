@@ -16,7 +16,7 @@ from .serializers import (
     CallLogCreateSerializer, CallInitiateSerializer, CallStatusUpdateSerializer,
     CallLogDetailSerializer, CallEventSerializer, CallRecordingSerializer,
     UserPhoneAssignmentSerializer, UserPhoneAssignmentDetailSerializer,
-    PbxSettingsSerializer,
+    PbxSettingsSerializer, ConsultationInitiateSerializer,
 )
 
 
@@ -714,7 +714,222 @@ class CallLogViewSet(viewsets.ModelViewSet):
         
         serializer = CallLogSerializer(call_log)
         return Response(serializer.data)
-    
+
+    @extend_schema(
+        summary="Initiate consultation call for attended transfer",
+        description="Start a consultation call to a target number before completing an attended transfer",
+        request=ConsultationInitiateSerializer,
+        responses={
+            201: "Consultation call initiated",
+            400: "Invalid request or call not in correct state",
+            404: "Call not found",
+        },
+    )
+    @action(detail=True, methods=['post'])
+    def initiate_consultation(self, request, pk=None):
+        """Initiate a consultation call for an attended (warm) transfer."""
+        original_call = self.get_object()
+
+        serializer = ConsultationInitiateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        target_number = serializer.validated_data['target_number']
+        target_user_id = serializer.validated_data.get('target_user_id')
+
+        # Validate original call is in a transferable state
+        if original_call.status not in ('answered', 'on_hold'):
+            return Response(
+                {'error': 'Call must be answered or on hold to initiate consultation'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Create the consultation leg
+        consultation_log = CallLog.objects.create(
+            direction='outbound',
+            caller_number=original_call.recipient_number if original_call.direction == 'inbound' else original_call.caller_number,
+            recipient_number=target_number,
+            parent_call=original_call,
+            status='initiated',
+            handled_by=request.user,
+            sip_configuration=original_call.sip_configuration,
+        )
+
+        # If a target user was specified, record it
+        if target_user_id:
+            try:
+                from django.contrib.auth import get_user_model
+                User = get_user_model()
+                target_user = User.objects.get(pk=target_user_id)
+                consultation_log.transferred_to_user = target_user
+                consultation_log.save(update_fields=['transferred_to_user'])
+            except User.DoesNotExist:
+                pass
+
+        # Create transfer_initiated event on the original call
+        self._create_call_event(
+            original_call,
+            'transfer_initiated',
+            metadata={
+                'transfer_type': 'attended',
+                'target_number': target_number,
+                'consultation_log_id': consultation_log.id,
+            },
+        )
+
+        # Put the original call on hold
+        original_call.status = 'on_hold'
+        original_call.save(update_fields=['status'])
+
+        return Response(
+            {
+                'consultation_log_id': consultation_log.id,
+                'consultation_call_id': str(consultation_log.call_id),
+                'original_call_id': str(original_call.call_id),
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+    @extend_schema(
+        summary="Complete attended transfer",
+        description="Complete an attended transfer after a successful consultation call",
+        request={
+            "application/json": {
+                "type": "object",
+                "properties": {
+                    "consultation_log_id": {"type": "integer"},
+                    "target_number": {"type": "string"},
+                },
+                "required": ["consultation_log_id", "target_number"],
+            }
+        },
+        responses={
+            200: CallLogSerializer,
+            400: "Invalid request or call not in correct state",
+            404: "Call or consultation log not found",
+        },
+    )
+    @action(detail=True, methods=['post'])
+    def complete_attended_transfer(self, request, pk=None):
+        """Complete an attended (warm) transfer."""
+        original_call = self.get_object()
+
+        consultation_log_id = request.data.get('consultation_log_id')
+        target_number = request.data.get('target_number')
+
+        if not consultation_log_id or not target_number:
+            return Response(
+                {'error': 'consultation_log_id and target_number are required'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            consultation_log = CallLog.objects.get(pk=consultation_log_id, parent_call=original_call)
+        except CallLog.DoesNotExist:
+            return Response(
+                {'error': 'Consultation log not found for this call'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        now = timezone.now()
+
+        # Mark original call as transferred
+        original_call.status = 'transferred'
+        original_call.transfer_type = 'attended'
+        original_call.transferred_to = target_number
+        original_call.transferred_at = now
+        original_call.ended_at = now
+        if original_call.answered_at:
+            original_call.duration = now - original_call.answered_at
+
+        # Try to set transferred_to_user from the consultation log's recipient
+        if consultation_log.transferred_to_user:
+            original_call.transferred_to_user = consultation_log.transferred_to_user
+        else:
+            # Try to find user by phone assignment
+            assignment = UserPhoneAssignment.objects.filter(
+                phone_number__endswith=target_number[-7:], is_active=True
+            ).first()
+            if assignment:
+                original_call.transferred_to_user = assignment.user
+
+        original_call.save()
+
+        # Create transfer_completed event
+        self._create_call_event(
+            original_call,
+            'transfer_completed',
+            metadata={
+                'transfer_type': 'attended',
+                'target_number': target_number,
+                'consultation_log_id': consultation_log.id,
+            },
+        )
+
+        serializer = CallLogSerializer(original_call)
+        return Response(serializer.data)
+
+    @extend_schema(
+        summary="Cancel consultation call",
+        description="Cancel an ongoing consultation and return to the original call",
+        request={
+            "application/json": {
+                "type": "object",
+                "properties": {
+                    "consultation_log_id": {"type": "integer"},
+                },
+                "required": ["consultation_log_id"],
+            }
+        },
+        responses={
+            200: CallLogSerializer,
+            400: "Invalid request",
+            404: "Call or consultation log not found",
+        },
+    )
+    @action(detail=True, methods=['post'])
+    def cancel_consultation(self, request, pk=None):
+        """Cancel a consultation call and resume the original call."""
+        original_call = self.get_object()
+
+        consultation_log_id = request.data.get('consultation_log_id')
+        if not consultation_log_id:
+            return Response(
+                {'error': 'consultation_log_id is required'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            consultation_log = CallLog.objects.get(pk=consultation_log_id, parent_call=original_call)
+        except CallLog.DoesNotExist:
+            return Response(
+                {'error': 'Consultation log not found for this call'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        now = timezone.now()
+
+        # End the consultation call
+        consultation_log.status = 'ended'
+        consultation_log.ended_at = now
+        if consultation_log.answered_at:
+            consultation_log.duration = now - consultation_log.answered_at
+        consultation_log.save()
+
+        # Resume the original call
+        original_call.status = 'answered'
+        original_call.save(update_fields=['status'])
+
+        # Record the cancellation event
+        self._create_call_event(
+            original_call,
+            'transfer_initiated',
+            metadata={'action': 'consultation_cancelled'},
+        )
+
+        serializer = CallLogSerializer(original_call)
+        return Response(serializer.data)
+
     @extend_schema(
         summary="Hold/Unhold call",
         description="Put call on hold or resume from hold",

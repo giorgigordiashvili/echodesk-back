@@ -103,9 +103,10 @@ class CallLogSerializer(serializers.ModelSerializer):
             'handled_by', 'handled_by_name', 'sip_configuration',
             'sip_config_name', 'recording_url', 'call_quality_score',
             'transferred_to', 'transferred_to_user', 'transferred_to_user_name',
-            'transferred_at', 'created_at', 'updated_at'
+            'transferred_at', 'parent_call', 'transfer_type',
+            'created_at', 'updated_at'
         ]
-        read_only_fields = ['id', 'call_id', 'created_at', 'updated_at', 'client', 'social_client']
+        read_only_fields = ['id', 'call_id', 'created_at', 'updated_at', 'client', 'social_client', 'parent_call']
 
     @extend_schema_field(serializers.CharField)
     def get_client_name(self, obj):
@@ -144,13 +145,19 @@ class CallLogSerializer(serializers.ModelSerializer):
         return None
 
 
+class ConsultationInitiateSerializer(serializers.Serializer):
+    """Serializer for initiating an attended transfer consultation call"""
+    target_number = serializers.CharField(max_length=30)
+    target_user_id = serializers.IntegerField(required=False)
+
+
 class CallLogCreateSerializer(serializers.ModelSerializer):
     """Serializer for creating new call logs"""
-    
+
     class Meta:
         model = CallLog
         fields = [
-            'caller_number', 'recipient_number', 'direction', 
+            'caller_number', 'recipient_number', 'direction',
             'call_type', 'sip_call_id', 'sip_configuration', 'notes'
         ]
 

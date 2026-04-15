@@ -212,6 +212,16 @@ class CallLog(models.Model):
         help_text="User the call was transferred to"
     )
     transferred_at = models.DateTimeField(null=True, blank=True)
+    parent_call = models.ForeignKey(
+        'self', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='consultation_calls',
+        help_text="Original call this consultation was created for"
+    )
+    transfer_type = models.CharField(
+        max_length=10, blank=True, default='',
+        choices=[('', 'None'), ('blind', 'Blind'), ('attended', 'Attended')],
+        help_text="Type of transfer"
+    )
 
     # Recording and quality
     recording_url = models.URLField(blank=True, help_text="Call recording file URL")
