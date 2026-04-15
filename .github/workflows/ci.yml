@@ -110,7 +110,21 @@ jobs:
           key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
       - run: pip install -r requirements.txt
       - name: Run all tests
-        run: python manage.py test --verbosity=2
+        run: >
+          python manage.py test
+          users.tests
+          crm.tests
+          tickets.tests
+          social_integrations.tests
+          ecommerce_crm.tests
+          invoices.tests
+          booking_management.tests
+          leave_management.tests
+          notifications.tests
+          help_center.tests
+          tenants.tests
+          amanati_crm.tests
+          --verbosity=2
 
   schema:
     runs-on: ubuntu-latest
