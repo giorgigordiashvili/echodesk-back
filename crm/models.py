@@ -410,6 +410,46 @@ class PbxSettings(models.Model):
         upload_to=SanitizedUploadTo('pbx_sounds', date_based=False),
         blank=True, null=True, help_text="Review thank you message"
     )
+    sound_queue_position_1 = models.FileField(
+        upload_to=SanitizedUploadTo('pbx_sounds', date_based=False),
+        blank=True, null=True, help_text="Sound for queue position 1"
+    )
+    sound_queue_position_2 = models.FileField(
+        upload_to=SanitizedUploadTo('pbx_sounds', date_based=False),
+        blank=True, null=True, help_text="Sound for queue position 2"
+    )
+    sound_queue_position_3 = models.FileField(
+        upload_to=SanitizedUploadTo('pbx_sounds', date_based=False),
+        blank=True, null=True, help_text="Sound for queue position 3"
+    )
+    sound_queue_position_4 = models.FileField(
+        upload_to=SanitizedUploadTo('pbx_sounds', date_based=False),
+        blank=True, null=True, help_text="Sound for queue position 4"
+    )
+    sound_queue_position_5 = models.FileField(
+        upload_to=SanitizedUploadTo('pbx_sounds', date_based=False),
+        blank=True, null=True, help_text="Sound for queue position 5"
+    )
+    sound_queue_position_6 = models.FileField(
+        upload_to=SanitizedUploadTo('pbx_sounds', date_based=False),
+        blank=True, null=True, help_text="Sound for queue position 6"
+    )
+    sound_queue_position_7 = models.FileField(
+        upload_to=SanitizedUploadTo('pbx_sounds', date_based=False),
+        blank=True, null=True, help_text="Sound for queue position 7"
+    )
+    sound_queue_position_8 = models.FileField(
+        upload_to=SanitizedUploadTo('pbx_sounds', date_based=False),
+        blank=True, null=True, help_text="Sound for queue position 8"
+    )
+    sound_queue_position_9 = models.FileField(
+        upload_to=SanitizedUploadTo('pbx_sounds', date_based=False),
+        blank=True, null=True, help_text="Sound for queue position 9"
+    )
+    sound_queue_position_10 = models.FileField(
+        upload_to=SanitizedUploadTo('pbx_sounds', date_based=False),
+        blank=True, null=True, help_text="Sound for queue position 10"
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -452,6 +492,10 @@ class PbxSettings(models.Model):
             'sound_greeting', 'sound_after_hours', 'sound_queue_hold',
             'sound_voicemail_prompt', 'sound_thank_you', 'sound_transfer_hold',
             'sound_review_prompt', 'sound_review_invalid', 'sound_review_thanks',
+            'sound_queue_position_1', 'sound_queue_position_2', 'sound_queue_position_3',
+            'sound_queue_position_4', 'sound_queue_position_5', 'sound_queue_position_6',
+            'sound_queue_position_7', 'sound_queue_position_8', 'sound_queue_position_9',
+            'sound_queue_position_10',
         ]:
             field_file = getattr(self, field_name)
             if field_file and field_file.name:

@@ -315,6 +315,16 @@ class PbxSettingsSerializer(serializers.ModelSerializer):
     sound_review_prompt_url = serializers.SerializerMethodField()
     sound_review_invalid_url = serializers.SerializerMethodField()
     sound_review_thanks_url = serializers.SerializerMethodField()
+    sound_queue_position_1_url = serializers.SerializerMethodField()
+    sound_queue_position_2_url = serializers.SerializerMethodField()
+    sound_queue_position_3_url = serializers.SerializerMethodField()
+    sound_queue_position_4_url = serializers.SerializerMethodField()
+    sound_queue_position_5_url = serializers.SerializerMethodField()
+    sound_queue_position_6_url = serializers.SerializerMethodField()
+    sound_queue_position_7_url = serializers.SerializerMethodField()
+    sound_queue_position_8_url = serializers.SerializerMethodField()
+    sound_queue_position_9_url = serializers.SerializerMethodField()
+    sound_queue_position_10_url = serializers.SerializerMethodField()
 
     class Meta:
         model = PbxSettings
@@ -325,9 +335,17 @@ class PbxSettingsSerializer(serializers.ModelSerializer):
             'sound_greeting', 'sound_after_hours', 'sound_queue_hold',
             'sound_voicemail_prompt', 'sound_thank_you', 'sound_transfer_hold',
             'sound_review_prompt', 'sound_review_invalid', 'sound_review_thanks',
+            'sound_queue_position_1', 'sound_queue_position_2', 'sound_queue_position_3',
+            'sound_queue_position_4', 'sound_queue_position_5', 'sound_queue_position_6',
+            'sound_queue_position_7', 'sound_queue_position_8', 'sound_queue_position_9',
+            'sound_queue_position_10',
             'sound_greeting_url', 'sound_after_hours_url', 'sound_queue_hold_url',
             'sound_voicemail_prompt_url', 'sound_thank_you_url', 'sound_transfer_hold_url',
             'sound_review_prompt_url', 'sound_review_invalid_url', 'sound_review_thanks_url',
+            'sound_queue_position_1_url', 'sound_queue_position_2_url', 'sound_queue_position_3_url',
+            'sound_queue_position_4_url', 'sound_queue_position_5_url', 'sound_queue_position_6_url',
+            'sound_queue_position_7_url', 'sound_queue_position_8_url', 'sound_queue_position_9_url',
+            'sound_queue_position_10_url',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'sip_configuration', 'created_at', 'updated_at']
@@ -341,6 +359,16 @@ class PbxSettingsSerializer(serializers.ModelSerializer):
             'sound_review_prompt': {'write_only': True, 'required': False},
             'sound_review_invalid': {'write_only': True, 'required': False},
             'sound_review_thanks': {'write_only': True, 'required': False},
+            'sound_queue_position_1': {'write_only': True, 'required': False},
+            'sound_queue_position_2': {'write_only': True, 'required': False},
+            'sound_queue_position_3': {'write_only': True, 'required': False},
+            'sound_queue_position_4': {'write_only': True, 'required': False},
+            'sound_queue_position_5': {'write_only': True, 'required': False},
+            'sound_queue_position_6': {'write_only': True, 'required': False},
+            'sound_queue_position_7': {'write_only': True, 'required': False},
+            'sound_queue_position_8': {'write_only': True, 'required': False},
+            'sound_queue_position_9': {'write_only': True, 'required': False},
+            'sound_queue_position_10': {'write_only': True, 'required': False},
         }
 
     def _get_url(self, obj, field_name):
@@ -375,3 +403,33 @@ class PbxSettingsSerializer(serializers.ModelSerializer):
 
     def get_sound_review_thanks_url(self, obj):
         return self._get_url(obj, 'sound_review_thanks')
+
+    def get_sound_queue_position_1_url(self, obj):
+        return self._get_url(obj, 'sound_queue_position_1')
+
+    def get_sound_queue_position_2_url(self, obj):
+        return self._get_url(obj, 'sound_queue_position_2')
+
+    def get_sound_queue_position_3_url(self, obj):
+        return self._get_url(obj, 'sound_queue_position_3')
+
+    def get_sound_queue_position_4_url(self, obj):
+        return self._get_url(obj, 'sound_queue_position_4')
+
+    def get_sound_queue_position_5_url(self, obj):
+        return self._get_url(obj, 'sound_queue_position_5')
+
+    def get_sound_queue_position_6_url(self, obj):
+        return self._get_url(obj, 'sound_queue_position_6')
+
+    def get_sound_queue_position_7_url(self, obj):
+        return self._get_url(obj, 'sound_queue_position_7')
+
+    def get_sound_queue_position_8_url(self, obj):
+        return self._get_url(obj, 'sound_queue_position_8')
+
+    def get_sound_queue_position_9_url(self, obj):
+        return self._get_url(obj, 'sound_queue_position_9')
+
+    def get_sound_queue_position_10_url(self, obj):
+        return self._get_url(obj, 'sound_queue_position_10')
