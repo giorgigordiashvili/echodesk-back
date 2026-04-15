@@ -1,0 +1,185 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main, qa]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install flake8 black isort
+      - name: Flake8 syntax check
+        run: flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+      - name: Black formatting check
+        run: black --check --diff .
+        continue-on-error: true
+      - name: isort import order check
+        run: isort --check-only --diff .
+        continue-on-error: true
+
+  check:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: test_echodesk
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_pass
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      SECRET_KEY: ci-test-key
+      DB_NAME: test_echodesk
+      DB_USER: test_user
+      DB_PASSWORD: test_pass
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_SSLMODE: disable
+      DEBUG: "False"
+      MAIN_DOMAIN: echodesk.ge
+      API_DOMAIN: api.echodesk.ge
+      SENDGRID_API_KEY: fake
+      DJANGO_SETTINGS_MODULE: amanati_crm.settings
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+      - run: pip install -r requirements.txt
+      - name: Django system check
+        run: python manage.py check --deploy --fail-level ERROR
+      - name: Check for missing migrations
+        run: python manage.py makemigrations --check --dry-run
+
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: test_echodesk
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_pass
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      SECRET_KEY: ci-test-key
+      DB_NAME: test_echodesk
+      DB_USER: test_user
+      DB_PASSWORD: test_pass
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_SSLMODE: disable
+      DEBUG: "False"
+      MAIN_DOMAIN: echodesk.ge
+      API_DOMAIN: api.echodesk.ge
+      SENDGRID_API_KEY: fake
+      DJANGO_SETTINGS_MODULE: amanati_crm.settings
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+      - run: pip install -r requirements.txt
+      - name: Run all tests
+        run: python manage.py test --verbosity=2
+
+  schema:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: test_echodesk
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_pass
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      SECRET_KEY: ci-test-key
+      DB_NAME: test_echodesk
+      DB_USER: test_user
+      DB_PASSWORD: test_pass
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_SSLMODE: disable
+      DEBUG: "False"
+      MAIN_DOMAIN: echodesk.ge
+      API_DOMAIN: api.echodesk.ge
+      SENDGRID_API_KEY: fake
+      DJANGO_SETTINGS_MODULE: amanati_crm.settings
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+      - run: pip install -r requirements.txt
+      - name: Generate API schema
+        run: python manage.py spectacular --format openapi-json --file api-schema.current.json
+      - name: Check schema snapshot
+        run: |
+          if [ -f api-schema.snapshot.json ]; then
+            python -c "
+          import json
+          with open('api-schema.snapshot.json') as f: snap = json.load(f)
+          with open('api-schema.current.json') as f: curr = json.load(f)
+          snap_paths = set(snap.get('paths', {}).keys())
+          curr_paths = set(curr.get('paths', {}).keys())
+          removed = snap_paths - curr_paths
+          if removed:
+              print(f'REMOVED ENDPOINTS: {removed}')
+              exit(1)
+          snap_schemas = set(snap.get('components', {}).get('schemas', {}).keys())
+          curr_schemas = set(curr.get('components', {}).get('schemas', {}).keys())
+          removed_schemas = snap_schemas - curr_schemas
+          if removed_schemas:
+              print(f'REMOVED SCHEMAS: {removed_schemas}')
+              exit(1)
+          print('Schema contract check passed')
+          "
+          else
+            echo "No schema snapshot found - skipping contract check"
+          fi
+      - name: Upload schema artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-schema
+          path: api-schema.current.json
