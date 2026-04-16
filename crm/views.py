@@ -12,7 +12,7 @@ from drf_spectacular.types import OpenApiTypes
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 
-from .models import CallLog, Client, SipConfiguration, CallEvent, CallRecording, UserPhoneAssignment, PbxSettings
+from .models import CallLog, Client, SipConfiguration, CallEvent, CallRecording, UserPhoneAssignment, PbxSettings, CallRating
 from .serializers import (
     CallLogSerializer, ClientSerializer, SipConfigurationSerializer,
     SipConfigurationListSerializer, SipConfigurationDetailSerializer,
@@ -20,6 +20,7 @@ from .serializers import (
     CallLogDetailSerializer, CallEventSerializer, CallRecordingSerializer,
     UserPhoneAssignmentSerializer, UserPhoneAssignmentDetailSerializer,
     PbxSettingsSerializer, ConsultationInitiateSerializer, MergeConferenceSerializer,
+    CallRatingSerializer,
 )
 
 logger = logging.getLogger(__name__)
@@ -1297,9 +1298,91 @@ class CallLogViewSet(viewsets.ModelViewSet):
         call_log.save()
         
         self._create_call_event(call_log, event_type)
-        
+
         serializer = CallLogSerializer(call_log)
         return Response(serializer.data)
+
+    @extend_schema(
+        summary="Send SMS review request for a completed call",
+        description="Send an SMS with a rating link to the caller of a completed call.",
+        responses={
+            200: inline_serializer(
+                name='SmsReviewResponse',
+                fields={
+                    'status': drf_serializers.CharField(),
+                    'message_id': drf_serializers.CharField(allow_null=True),
+                }
+            ),
+            400: "Bad request",
+            502: "SMS delivery failed",
+        }
+    )
+    @action(detail=True, methods=['post'])
+    def send_sms_review(self, request, pk=None):
+        """Send SMS review request for a completed call."""
+        import secrets
+        from django.db import connection
+        from .sms_utils import send_sms
+
+        call_log = self.get_object()
+        caller_number = call_log.caller_number
+
+        # Get PBX settings
+        sip_config = call_log.sip_configuration
+        if not sip_config:
+            sip_config = SipConfiguration.objects.filter(is_default=True).first()
+        if not sip_config:
+            return Response({'error': 'No SIP config'}, status=status.HTTP_400_BAD_REQUEST)
+
+        pbx_settings, _ = PbxSettings.objects.get_or_create(sip_configuration=sip_config)
+
+        if not pbx_settings.sms_api_key:
+            return Response({'error': 'SMS API key not configured'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check cooldown: don't send if a review was sent recently for this caller
+        cooldown_cutoff = timezone.now() - timedelta(hours=pbx_settings.review_cooldown_hours)
+        recent_rating = CallRating.objects.filter(
+            caller_number__endswith=caller_number.replace('+', '').replace(' ', '')[-7:],
+            sip_configuration=sip_config,
+            created_at__gte=cooldown_cutoff,
+        ).first()
+        if recent_rating:
+            return Response(
+                {'error': 'Review request already sent recently for this caller'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Generate token
+        token = secrets.token_urlsafe(48)
+        expires = timezone.now() + timedelta(days=7)
+
+        # Build rating link
+        tenant = connection.schema_name
+        link = f"https://{tenant}.echodesk.ge/review?token={token}&type=call"
+
+        # Get template
+        template = pbx_settings.sms_rating_template_ka or pbx_settings.sms_rating_template_en
+        message = template.replace('{link}', link)
+
+        # Send SMS
+        result = send_sms(pbx_settings.sms_api_key, caller_number, message)
+
+        if 'error' in result:
+            return Response({'error': result['error']}, status=status.HTTP_502_BAD_GATEWAY)
+
+        # Create CallRating record
+        CallRating.objects.create(
+            call_log=call_log,
+            caller_number=caller_number,
+            rated_user=call_log.handled_by,
+            rating_token=token,
+            token_expires_at=expires,
+            review_method='sms',
+            sip_configuration=sip_config,
+            sms_message_id=result.get('messageId', ''),
+        )
+
+        return Response({'status': 'sent', 'message_id': result.get('messageId')})
 
 
 class ClientViewSet(viewsets.ModelViewSet):
@@ -1641,6 +1724,129 @@ def call_rating_webhook(request):
         )
 
 
+@csrf_exempt
+@api_view(['POST'])
+@permission_classes([])
+def send_call_review_sms(request):
+    """
+    Called by PBX scripts to send SMS review for a caller.
+    Finds the most recent call by caller_number and sends an SMS review link.
+
+    Auth: Bearer token via PBX_SHARED_SECRET env var.
+
+    POST body:
+        caller_number: The caller's phone number
+        did: (optional) The DID that was called, to locate the tenant/SIP config
+    """
+    import secrets
+    from django.conf import settings as django_settings
+    from django.db import connection
+    from tenant_schemas.utils import schema_context
+    from tenants.models import Tenant
+    from .sms_utils import send_sms
+
+    # Authenticate via shared secret
+    auth_header = request.META.get('HTTP_AUTHORIZATION', '')
+    expected_token = getattr(django_settings, 'PBX_SHARED_SECRET', '')
+    if expected_token and not auth_header.endswith(expected_token):
+        return Response({'error': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    caller_number = request.data.get('caller_number', '').strip()
+    did = request.data.get('did', '').strip()
+
+    if not caller_number:
+        return Response({'error': 'caller_number is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    clean_caller = caller_number.replace('+', '').replace(' ', '').replace('-', '')
+    last_digits = clean_caller[-7:] if len(clean_caller) >= 7 else clean_caller
+    clean_did = did.replace('+', '').replace(' ', '').replace('-', '') if did else ''
+
+    # Search across tenants
+    tenants = Tenant.objects.exclude(schema_name='public')
+    for tenant in tenants:
+        try:
+            with schema_context(tenant.schema_name):
+                # Find matching SIP config
+                sip_config = None
+                if clean_did:
+                    sip_config = SipConfiguration.objects.filter(
+                        phone_number__endswith=clean_did[-7:]
+                    ).first()
+                if not sip_config:
+                    sip_config = SipConfiguration.objects.filter(is_default=True).first()
+                if not sip_config:
+                    continue
+
+                pbx_settings, _ = PbxSettings.objects.get_or_create(sip_configuration=sip_config)
+
+                # Check if SMS review is enabled
+                if pbx_settings.review_method not in ('sms', 'both'):
+                    continue
+
+                if not pbx_settings.sms_api_key:
+                    continue
+
+                # Find the most recent call from this caller
+                call_log = CallLog.objects.filter(
+                    direction='inbound',
+                    caller_number__endswith=last_digits,
+                ).order_by('-started_at').first()
+
+                if not call_log:
+                    continue
+
+                # Check cooldown
+                cooldown_cutoff = timezone.now() - timedelta(hours=pbx_settings.review_cooldown_hours)
+                recent_rating = CallRating.objects.filter(
+                    caller_number__endswith=last_digits,
+                    sip_configuration=sip_config,
+                    created_at__gte=cooldown_cutoff,
+                ).first()
+                if recent_rating:
+                    return Response(
+                        {'error': 'Review request already sent recently'},
+                        status=status.HTTP_429_TOO_MANY_REQUESTS,
+                    )
+
+                # Generate token and send SMS
+                token = secrets.token_urlsafe(48)
+                expires = timezone.now() + timedelta(days=7)
+                link = f"https://{tenant.schema_name}.echodesk.ge/review?token={token}&type=call"
+
+                template = pbx_settings.sms_rating_template_ka or pbx_settings.sms_rating_template_en
+                message = template.replace('{link}', link)
+
+                result = send_sms(pbx_settings.sms_api_key, caller_number, message)
+
+                if 'error' in result:
+                    return Response({'error': result['error']}, status=status.HTTP_502_BAD_GATEWAY)
+
+                CallRating.objects.create(
+                    call_log=call_log,
+                    caller_number=caller_number,
+                    rated_user=call_log.handled_by,
+                    rating_token=token,
+                    token_expires_at=expires,
+                    review_method='sms',
+                    sip_configuration=sip_config,
+                    sms_message_id=result.get('messageId', ''),
+                )
+
+                return Response({
+                    'status': 'sent',
+                    'message_id': result.get('messageId'),
+                    'tenant': tenant.schema_name,
+                })
+        except Exception as exc:
+            logger.error(f"send_call_review_sms error in tenant {tenant.schema_name}: {exc}")
+            continue
+
+    return Response(
+        {'error': 'No matching tenant or call found'},
+        status=status.HTTP_404_NOT_FOUND,
+    )
+
+
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated])
 def extension_status(request):
@@ -1892,6 +2098,7 @@ def call_routing(request):
                     'voicemail_enabled': pbx_settings.voicemail_enabled,
                     'after_hours_action': pbx_settings.after_hours_action,
                     'forward_number': pbx_settings.forward_number if pbx_settings.after_hours_action == 'forward' else None,
+                    'review_method': pbx_settings.review_method,
                 }
                 return Response(response_data)
         except Exception:

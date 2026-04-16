@@ -4,7 +4,7 @@ from .views import (
     CallLogViewSet, ClientViewSet, SipConfigurationViewSet, UserPhoneAssignmentViewSet,
     pbx_settings_detail, pbx_settings_upload_sound, pbx_settings_remove_sound,
     sip_webhook, recording_webhook, call_rating_webhook, call_recording_url_webhook,
-    extension_status, call_routing,
+    extension_status, call_routing, send_call_review_sms,
 )
 
 router = DefaultRouter()
@@ -21,6 +21,7 @@ urlpatterns = [
     path('api/webhooks/call-rating/', call_rating_webhook, name='call-rating-webhook'),
     path('api/webhooks/call-recording-url/', call_recording_url_webhook, name='call-recording-url-webhook'),
     path('api/pbx/call-routing/', call_routing, name='call-routing'),
+    path('api/pbx/send-review-sms/', send_call_review_sms, name='send_call_review_sms'),
     # PBX Settings (working hours + sounds)
     path('api/pbx-settings/<int:sip_config_id>/', pbx_settings_detail, name='pbx-settings-detail'),
     path('api/pbx-settings/<int:sip_config_id>/upload-sound/', pbx_settings_upload_sound, name='pbx-settings-upload-sound'),

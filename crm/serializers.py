@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
-from .models import CallLog, Client, SipConfiguration, CallEvent, CallRecording, UserPhoneAssignment, PbxSettings
+from .models import CallLog, Client, SipConfiguration, CallEvent, CallRecording, UserPhoneAssignment, PbxSettings, CallRating
 
 
 class UserPhoneAssignmentSerializer(serializers.ModelSerializer):
@@ -344,6 +344,8 @@ class PbxSettingsSerializer(serializers.ModelSerializer):
             'id', 'sip_configuration',
             'working_hours_enabled', 'working_hours_schedule', 'timezone', 'holidays',
             'after_hours_action', 'forward_number', 'voicemail_enabled',
+            'review_method', 'sms_api_key', 'sms_rating_template_ka', 'sms_rating_template_en',
+            'review_delay_hours', 'review_cooldown_hours',
             'sound_greeting', 'sound_after_hours', 'sound_queue_hold',
             'sound_voicemail_prompt', 'sound_thank_you', 'sound_transfer_hold',
             'sound_review_prompt', 'sound_review_invalid', 'sound_review_thanks',
@@ -362,6 +364,7 @@ class PbxSettingsSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'sip_configuration', 'created_at', 'updated_at']
         extra_kwargs = {
+            'sms_api_key': {'write_only': True},
             'sound_greeting': {'write_only': True, 'required': False},
             'sound_after_hours': {'write_only': True, 'required': False},
             'sound_queue_hold': {'write_only': True, 'required': False},
@@ -445,3 +448,25 @@ class PbxSettingsSerializer(serializers.ModelSerializer):
 
     def get_sound_queue_position_10_url(self, obj):
         return self._get_url(obj, 'sound_queue_position_10')
+
+
+class CallRatingSerializer(serializers.ModelSerializer):
+    """Serializer for call ratings collected via SMS or phone callback."""
+
+    rated_user_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CallRating
+        fields = [
+            'id', 'call_log', 'caller_number', 'rated_user', 'rated_user_name',
+            'rating', 'rating_token', 'token_expires_at', 'comment',
+            'sms_message_id', 'review_method', 'sip_configuration',
+            'created_at', 'rated_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'rated_at']
+
+    @extend_schema_field(serializers.CharField)
+    def get_rated_user_name(self, obj):
+        if obj.rated_user:
+            return f"{obj.rated_user.first_name} {obj.rated_user.last_name}".strip()
+        return None

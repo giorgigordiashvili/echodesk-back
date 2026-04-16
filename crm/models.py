@@ -462,6 +462,26 @@ class PbxSettings(models.Model):
         blank=True, null=True, help_text="Sound for queue position 10"
     )
 
+    # Review settings
+    review_method = models.CharField(
+        max_length=10, default='callback',
+        choices=[('callback', 'Phone Callback'), ('sms', 'SMS Link'), ('both', 'Both'), ('none', 'Disabled')],
+        help_text="How to collect post-call ratings"
+    )
+    sms_api_key = models.CharField(max_length=255, blank=True, default='', help_text="sender.ge API key")
+    sms_rating_template_ka = models.TextField(
+        blank=True,
+        default='გმადლობთ დაკავშირებისთვის! გთხოვთ შეაფასეთ ჩვენი მომსახურება: {link}',
+        help_text="SMS template Georgian with {link} placeholder"
+    )
+    sms_rating_template_en = models.TextField(
+        blank=True,
+        default='Thank you for calling! Please rate our service: {link}',
+        help_text="SMS template English with {link} placeholder"
+    )
+    review_delay_hours = models.IntegerField(default=3, help_text="Hours to wait after last call before review request")
+    review_cooldown_hours = models.IntegerField(default=24, help_text="Hours between review requests per caller")
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -514,3 +534,35 @@ class PbxSettings(models.Model):
             else:
                 urls[field_name.replace('sound_', '')] = None
         return urls
+
+
+class CallRating(models.Model):
+    """Tracks call ratings collected via SMS link or phone callback."""
+
+    call_log = models.ForeignKey(
+        'CallLog', on_delete=models.SET_NULL, null=True, blank=True, related_name='call_ratings'
+    )
+    caller_number = models.CharField(max_length=30, db_index=True)
+    rated_user = models.ForeignKey(
+        'users.User', on_delete=models.SET_NULL, null=True, blank=True
+    )
+    rating = models.IntegerField(default=0, help_text="0=pending, 1-5=rated")
+    rating_token = models.CharField(max_length=100, unique=True, null=True, blank=True)
+    token_expires_at = models.DateTimeField(null=True, blank=True)
+    comment = models.TextField(blank=True, default='')
+    sms_message_id = models.CharField(max_length=100, blank=True, default='')
+    review_method = models.CharField(
+        max_length=10, default='sms',
+        choices=[('sms', 'SMS'), ('callback', 'Callback')]
+    )
+    sip_configuration = models.ForeignKey(
+        'SipConfiguration', on_delete=models.CASCADE, related_name='call_ratings'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    rated_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"CallRating {self.caller_number} - {self.rating}/5"

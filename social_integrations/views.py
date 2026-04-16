@@ -4758,9 +4758,13 @@ def get_rating_info(request, token):
 
         # Switch to tenant schema and look up the rating
         with schema_context(tenant.schema_name):
-            try:
-                rating = ChatRating.objects.get(rating_token=token)
-            except ChatRating.DoesNotExist:
+            rating = ChatRating.objects.filter(rating_token=token).first()
+            if not rating:
+                # Fallback: try CallRating for phone-based reviews
+                from crm.models import CallRating
+                rating = CallRating.objects.filter(rating_token=token).first()
+
+            if not rating:
                 return Response({
                     'valid': False,
                     'error': 'Invalid token'
@@ -4853,9 +4857,16 @@ def submit_public_rating(request, token):
 
         # Switch to tenant schema and submit the rating
         with schema_context(tenant.schema_name):
-            try:
-                rating = ChatRating.objects.get(rating_token=token)
-            except ChatRating.DoesNotExist:
+            is_call_rating = False
+            rating = ChatRating.objects.filter(rating_token=token).first()
+            if not rating:
+                # Fallback: try CallRating for phone-based reviews
+                from crm.models import CallRating
+                rating = CallRating.objects.filter(rating_token=token).first()
+                if rating:
+                    is_call_rating = True
+
+            if not rating:
                 return Response({
                     'success': False,
                     'error': 'Invalid token'
@@ -4880,10 +4891,18 @@ def submit_public_rating(request, token):
             rating.comment = comment
             # Clear the token after use (single-use)
             rating.rating_token = None
-            rating.save()
+            if is_call_rating:
+                rating.rated_at = timezone.now()
+                rating.save()
+                # Also update call_quality_score on the related call log
+                if rating.call_log:
+                    rating.call_log.call_quality_score = float(rating_value)
+                    rating.call_log.save(update_fields=['call_quality_score'])
+            else:
+                rating.save()
 
             # Delete the assignment if it exists (chat becomes available again)
-            if rating.assignment:
+            if not is_call_rating and rating.assignment:
                 rating.assignment.delete()
                 logger.info(f"Assignment deleted after link-based rating for {rating.platform} conversation {rating.conversation_id}")
 
