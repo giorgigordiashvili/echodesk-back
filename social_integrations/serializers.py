@@ -216,6 +216,7 @@ class WhatsAppMessageSerializer(serializers.ModelSerializer):
     waba_id = serializers.CharField(source='business_account.waba_id', read_only=True)
     template_name = serializers.CharField(source='template.name', read_only=True, allow_null=True)
     sent_by_name = serializers.SerializerMethodField()
+    reply_to_id = serializers.PrimaryKeyRelatedField(source='reply_to', read_only=True)
 
     class Meta:
         model = WhatsAppMessage
@@ -230,12 +231,15 @@ class WhatsAppMessageSerializer(serializers.ModelSerializer):
             'source', 'is_echo', 'is_edited', 'edited_at', 'original_text', 'is_revoked', 'revoked_at',
             # Author tracking
             'sent_by', 'sent_by_name',
+            # Reply fields
+            'reply_to_message_id', 'reply_to_id',
             'created_at'
         ]
         read_only_fields = [
             'id', 'status', 'is_delivered', 'delivered_at', 'is_read', 'read_at',
             'source', 'is_echo', 'is_edited', 'edited_at', 'original_text', 'is_revoked', 'revoked_at',
             'sent_by', 'sent_by_name',
+            'reply_to_message_id', 'reply_to_id',
             'created_at'
         ]
 
@@ -249,6 +253,7 @@ class WhatsAppSendMessageSerializer(serializers.Serializer):
     to_number = serializers.CharField(max_length=20, help_text="Recipient's phone number (E.164 format, e.g., +1234567890)")
     message = serializers.CharField(required=False, allow_blank=True, default='', help_text="Message text to send (optional when sending media)")
     waba_id = serializers.CharField(max_length=100, help_text="WhatsApp Business Account ID to send from")
+    reply_to_message_id = serializers.CharField(max_length=255, required=False, allow_blank=True, default='', help_text="WhatsApp message ID (wamid) to reply to (optional)")
 
     def validate_to_number(self, value):
         """Ensure phone number starts with +"""

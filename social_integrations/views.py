@@ -7162,6 +7162,7 @@ def whatsapp_send_message(request):
         to_number = serializer.validated_data['to_number'].lstrip('+')
         message_text = serializer.validated_data.get('message', '')
         waba_id = serializer.validated_data['waba_id']
+        reply_to_message_id = serializer.validated_data.get('reply_to_message_id', '').strip()
         media_file = request.FILES.get('media')
 
         # Validate: must have text or media
@@ -7237,6 +7238,8 @@ def whatsapp_send_message(request):
                 'type': message_type,
                 message_type: media_object
             }
+            if reply_to_message_id:
+                message_payload['context'] = {'message_id': reply_to_message_id}
 
             attachments_meta = [{
                 'media_id': media_id,
@@ -7251,6 +7254,8 @@ def whatsapp_send_message(request):
                 'type': 'text',
                 'text': {'body': message_text}
             }
+            if reply_to_message_id:
+                message_payload['context'] = {'message_id': reply_to_message_id}
 
         # Send message via WhatsApp Cloud API
         send_url = f"https://graph.facebook.com/{fb_api_version}/{account.phone_number_id}/messages"
@@ -7290,6 +7295,11 @@ def whatsapp_send_message(request):
                 create_kwargs['media_mime_type'] = media_mime_type
             if attachments_meta:
                 create_kwargs['attachments'] = attachments_meta
+            if reply_to_message_id:
+                create_kwargs['reply_to_message_id'] = reply_to_message_id
+                reply_to_obj = WhatsAppMessage.objects.filter(message_id=reply_to_message_id).first()
+                if reply_to_obj:
+                    create_kwargs['reply_to'] = reply_to_obj
 
             wa_message = WhatsAppMessage.objects.create(**create_kwargs)
             logger.info(f"✅ Saved sent WhatsApp message: {message_id} (type={message_type})")
@@ -7343,6 +7353,8 @@ def whatsapp_send_message(request):
                     'is_from_business': True,
                     'waba_id': waba_id,
                     'sent_by': request.user.email if request.user else None,
+                    'reply_to_message_id': wa_message.reply_to_message_id,
+                    'reply_to_id': wa_message.reply_to_id,
                 }
                 async_to_sync(send_new_message_notification)(tenant_schema, to_number, message_data)
             except Exception as e:
@@ -7508,6 +7520,16 @@ def whatsapp_webhook(request):
                         logger.info(f"Skipping duplicate message: {message_id}")
                         continue
 
+                    # Extract reply context if this message is a reply
+                    context_data = message.get('context', {})
+                    reply_to_wa_msg_id = context_data.get('id')
+                    reply_to_obj = None
+                    if reply_to_wa_msg_id:
+                        reply_to_obj = WhatsAppMessage.objects.filter(
+                            message_id=reply_to_wa_msg_id
+                        ).first()
+                        logger.info(f"Reply to message: {reply_to_wa_msg_id}")
+
                     # Extract message content based on type
                     message_text = ''
                     media_url = ''
@@ -7661,7 +7683,9 @@ def whatsapp_webhook(request):
                         is_from_business=False,
                         status='delivered',
                         is_delivered=True,
-                        delivered_at=timezone.now()
+                        delivered_at=timezone.now(),
+                        reply_to_message_id=reply_to_wa_msg_id,
+                        reply_to=reply_to_obj,
                     )
 
                     logger.info(f"✅ Saved WhatsApp message from {contact_name or from_number}: {message_text[:50] if message_text else f'[{message_type}]'}")
@@ -7707,6 +7731,8 @@ def whatsapp_webhook(request):
                         'account_id': account.waba_id,
                         'waba_id': account.waba_id,
                         'chat_id': f'wa_{account.waba_id}_{from_number}',
+                        'reply_to_message_id': message_obj.reply_to_message_id,
+                        'reply_to_id': message_obj.reply_to_id,
                     }
                     # Get assignment for notification filtering
                     assigned_user_id = get_assignment_for_conversation(

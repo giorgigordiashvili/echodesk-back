@@ -554,6 +554,22 @@ class WhatsAppMessage(models.Model):
         help_text='When the reaction was added'
     )
 
+    # Reply fields (for message replies / quote-reply)
+    reply_to_message_id = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        help_text='WhatsApp message ID (wamid) this is a reply to'
+    )
+    reply_to = models.ForeignKey(
+        'self',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='replies',
+        help_text='Reference to the message this is replying to'
+    )
+
     # Soft delete fields for admin investigation
     is_deleted = models.BooleanField(default=False, help_text='Soft deleted by staff')
     deleted_at = models.DateTimeField(null=True, blank=True, help_text='When the message was deleted')
