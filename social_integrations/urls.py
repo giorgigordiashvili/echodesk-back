@@ -113,7 +113,7 @@ urlpatterns = [
 
     # Rating statistics endpoint (superadmin only)
     path('rating-statistics/', views.rating_statistics, name='rating_statistics'),
-    path('rating-statistics/user/<int:user_id>/', views.user_chat_sessions, name='user_chat_sessions'),
+    path('rating-statistics/user/<int:user_id>/', views.user_rating_sessions, name='user_rating_sessions'),
 
     # Public rating endpoints (no authentication required)
     path('public/rating/<str:token>/', views.get_rating_info, name='public_rating_info'),

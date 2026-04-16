@@ -4521,8 +4521,10 @@ def rating_statistics(request):
     Get rating statistics for all users.
     Superadmin only - returns aggregated stats per user.
     Supports date filtering via start_date and end_date query params.
-    Default: current month (1st to today)
+    Default: current month (1st to today).
+    Supports source filtering via source query param: all (default), social, calls.
     """
+    from crm.models import CallRating
 
     # Parse date filters (default: this month)
     from datetime import date
@@ -4531,6 +4533,7 @@ def rating_statistics(request):
 
     start_date_str = request.query_params.get('start_date')
     end_date_str = request.query_params.get('end_date')
+    source = request.query_params.get('source', 'all')  # all, social, calls
 
     try:
         if start_date_str:
@@ -4548,63 +4551,188 @@ def rating_statistics(request):
             status=status.HTTP_400_BAD_REQUEST
         )
 
-    # Query ratings within date range (only completed ratings, not pending)
-    ratings = ChatRating.objects.filter(
-        created_at__date__gte=start_date,
-        created_at__date__lte=end_date,
-        rating__gt=0  # Exclude pending ratings
-    ).select_related('rated_user')
+    if source not in ('all', 'social', 'calls'):
+        return Response(
+            {'error': "Invalid source. Use 'all', 'social', or 'calls'"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
 
-    # Aggregate stats per user
     from django.db.models import Avg, Count, Sum, Q
     from django.db.models.functions import Coalesce
 
-    user_stats = ratings.values(
-        'rated_user__id',
-        'rated_user__email',
-        'rated_user__first_name',
-        'rated_user__last_name'
-    ).annotate(
-        total_ratings=Count('id'),
-        average_rating=Avg('rating'),
-        rating_1=Count('id', filter=Q(rating=1)),
-        rating_2=Count('id', filter=Q(rating=2)),
-        rating_3=Count('id', filter=Q(rating=3)),
-        rating_4=Count('id', filter=Q(rating=4)),
-        rating_5=Count('id', filter=Q(rating=5)),
-    ).order_by('-average_rating', '-total_ratings')
+    # --- Query ChatRating (social) ---
+    include_social = source in ('all', 'social')
+    include_calls = source in ('all', 'calls')
 
-    # Format response
-    stats_list = []
-    for stat in user_stats:
-        if stat['rated_user__id']:  # Skip if user is null
-            stats_list.append({
-                'user_id': stat['rated_user__id'],
+    social_ratings = None
+    if include_social:
+        social_ratings = ChatRating.objects.filter(
+            created_at__date__gte=start_date,
+            created_at__date__lte=end_date,
+            rating__gt=0,
+        ).select_related('rated_user')
+
+    # --- Query CallRating (calls) ---
+    call_ratings = None
+    if include_calls:
+        call_ratings = CallRating.objects.filter(
+            created_at__date__gte=start_date,
+            created_at__date__lte=end_date,
+            rating__gt=0,
+        ).select_related('rated_user')
+
+    # --- Overall stats with by_source breakdown ---
+    social_overall = {'total': 0, 'average': 0}
+    calls_callback_overall = {'total': 0, 'average': 0}
+    calls_sms_overall = {'total': 0, 'average': 0}
+
+    if social_ratings is not None:
+        agg = social_ratings.aggregate(total=Count('id'), average=Avg('rating'))
+        social_overall = {
+            'total': agg['total'] or 0,
+            'average': round(agg['average'], 2) if agg['average'] else 0,
+        }
+
+    if call_ratings is not None:
+        cb_agg = call_ratings.filter(review_method='callback').aggregate(total=Count('id'), average=Avg('rating'))
+        calls_callback_overall = {
+            'total': cb_agg['total'] or 0,
+            'average': round(cb_agg['average'], 2) if cb_agg['average'] else 0,
+        }
+        sms_agg = call_ratings.filter(review_method='sms').aggregate(total=Count('id'), average=Avg('rating'))
+        calls_sms_overall = {
+            'total': sms_agg['total'] or 0,
+            'average': round(sms_agg['average'], 2) if sms_agg['average'] else 0,
+        }
+
+    combined_total = social_overall['total'] + calls_callback_overall['total'] + calls_sms_overall['total']
+    if combined_total > 0:
+        combined_sum = (
+            social_overall['average'] * social_overall['total']
+            + calls_callback_overall['average'] * calls_callback_overall['total']
+            + calls_sms_overall['average'] * calls_sms_overall['total']
+        )
+        combined_average = round(combined_sum / combined_total, 2)
+    else:
+        combined_average = 0
+
+    # --- Per-user stats ---
+    # Build a dict keyed by user_id with merged data
+    user_map = {}  # user_id -> { ...stats }
+
+    if social_ratings is not None:
+        social_user_stats = social_ratings.values(
+            'rated_user__id',
+            'rated_user__email',
+            'rated_user__first_name',
+            'rated_user__last_name',
+        ).annotate(
+            total_ratings=Count('id'),
+            average_rating=Avg('rating'),
+            rating_1=Count('id', filter=Q(rating=1)),
+            rating_2=Count('id', filter=Q(rating=2)),
+            rating_3=Count('id', filter=Q(rating=3)),
+            rating_4=Count('id', filter=Q(rating=4)),
+            rating_5=Count('id', filter=Q(rating=5)),
+        )
+        for stat in social_user_stats:
+            uid = stat['rated_user__id']
+            if not uid:
+                continue
+            user_map[uid] = {
+                'user_id': uid,
                 'email': stat['rated_user__email'],
                 'name': f"{stat['rated_user__first_name'] or ''} {stat['rated_user__last_name'] or ''}".strip() or stat['rated_user__email'],
                 'total_ratings': stat['total_ratings'],
-                'average_rating': round(stat['average_rating'], 2) if stat['average_rating'] else 0,
+                'rating_sum': (stat['average_rating'] or 0) * stat['total_ratings'],
                 'rating_breakdown': {
                     '1': stat['rating_1'],
                     '2': stat['rating_2'],
                     '3': stat['rating_3'],
                     '4': stat['rating_4'],
                     '5': stat['rating_5'],
-                }
-            })
+                },
+                'social_ratings': stat['total_ratings'],
+                'call_ratings': 0,
+            }
 
-    # Overall stats
-    overall = ratings.aggregate(
-        total_ratings=Count('id'),
-        average_rating=Avg('rating')
-    )
+    if call_ratings is not None:
+        call_user_stats = call_ratings.values(
+            'rated_user__id',
+            'rated_user__email',
+            'rated_user__first_name',
+            'rated_user__last_name',
+        ).annotate(
+            total_ratings=Count('id'),
+            average_rating=Avg('rating'),
+            rating_1=Count('id', filter=Q(rating=1)),
+            rating_2=Count('id', filter=Q(rating=2)),
+            rating_3=Count('id', filter=Q(rating=3)),
+            rating_4=Count('id', filter=Q(rating=4)),
+            rating_5=Count('id', filter=Q(rating=5)),
+        )
+        for stat in call_user_stats:
+            uid = stat['rated_user__id']
+            if not uid:
+                continue
+            if uid in user_map:
+                existing = user_map[uid]
+                existing['total_ratings'] += stat['total_ratings']
+                existing['rating_sum'] += (stat['average_rating'] or 0) * stat['total_ratings']
+                existing['rating_breakdown']['1'] += stat['rating_1']
+                existing['rating_breakdown']['2'] += stat['rating_2']
+                existing['rating_breakdown']['3'] += stat['rating_3']
+                existing['rating_breakdown']['4'] += stat['rating_4']
+                existing['rating_breakdown']['5'] += stat['rating_5']
+                existing['call_ratings'] += stat['total_ratings']
+            else:
+                # Need user info — fetch email/name from annotated values
+                user_map[uid] = {
+                    'user_id': uid,
+                    'email': stat['rated_user__email'],
+                    'name': f"{stat['rated_user__first_name'] or ''} {stat['rated_user__last_name'] or ''}".strip() or stat['rated_user__email'],
+                    'total_ratings': stat['total_ratings'],
+                    'rating_sum': (stat['average_rating'] or 0) * stat['total_ratings'],
+                    'rating_breakdown': {
+                        '1': stat['rating_1'],
+                        '2': stat['rating_2'],
+                        '3': stat['rating_3'],
+                        '4': stat['rating_4'],
+                        '5': stat['rating_5'],
+                    },
+                    'social_ratings': 0,
+                    'call_ratings': stat['total_ratings'],
+                }
+
+    # Finalize: compute average from sum/total and sort
+    stats_list = []
+    for entry in user_map.values():
+        total = entry['total_ratings']
+        avg = round(entry['rating_sum'] / total, 2) if total > 0 else 0
+        stats_list.append({
+            'user_id': entry['user_id'],
+            'email': entry['email'],
+            'name': entry['name'],
+            'total_ratings': total,
+            'average_rating': avg,
+            'rating_breakdown': entry['rating_breakdown'],
+            'social_ratings': entry['social_ratings'],
+            'call_ratings': entry['call_ratings'],
+        })
+
+    stats_list.sort(key=lambda x: (-x['average_rating'], -x['total_ratings']))
 
     return Response({
         'start_date': start_date.isoformat(),
         'end_date': end_date.isoformat(),
         'overall': {
-            'total_ratings': overall['total_ratings'] or 0,
-            'average_rating': round(overall['average_rating'], 2) if overall['average_rating'] else 0,
+            'total_ratings': combined_total,
+            'average_rating': combined_average,
+            'by_source': {
+                'social': social_overall,
+                'calls_callback': calls_callback_overall,
+                'calls_sms': calls_sms_overall,
+            },
         },
         'users': stats_list
     })
@@ -4612,15 +4740,19 @@ def rating_statistics(request):
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsStaffUser])
-def user_chat_sessions(request, user_id):
+def user_rating_sessions(request, user_id):
     """
-    Get detailed chat sessions for a specific user.
-    Superadmin only - allows investigating chat history.
+    Get detailed rating sessions for a specific user.
+    Includes both ChatRating (social) and CallRating (phone) sessions.
+    Superadmin only - allows investigating chat/call history.
+    Supports source filtering via source query param: all (default), social, calls.
     """
+    from crm.models import CallRating
 
     # Get date range from query params
     start_date_str = request.query_params.get('start_date')
     end_date_str = request.query_params.get('end_date')
+    source = request.query_params.get('source', 'all')  # all, social, calls
 
     # Default to current month
     today = timezone.now().date()
@@ -4640,62 +4772,90 @@ def user_chat_sessions(request, user_id):
     else:
         end_date = today
 
-    # Get ratings for this user
-    ratings = ChatRating.objects.filter(
-        rated_user_id=user_id,
-        created_at__date__gte=start_date,
-        created_at__date__lte=end_date,
-    ).order_by('-created_at')
-
     sessions = []
-    for rating in ratings:
-        # Try to get customer info from the conversation
-        customer_name = None
-        customer_identifier = rating.conversation_id
 
-        if rating.platform == 'facebook':
-            # Get customer name from their incoming messages (not page's outgoing messages)
-            msg = FacebookMessage.objects.filter(
-                sender_id=rating.conversation_id,
-                is_from_page=False
-            ).first()
-            if msg and msg.sender_name:
-                customer_name = msg.sender_name
-        elif rating.platform == 'instagram':
-            msg = InstagramMessage.objects.filter(
-                sender_id=rating.conversation_id,
-                is_from_business=False
-            ).first()
-            if msg and msg.sender_username:
-                customer_name = msg.sender_username
-        elif rating.platform == 'whatsapp':
-            msg = WhatsAppMessage.objects.filter(
-                from_number=rating.conversation_id,
-                is_from_business=False
-            ).first()
-            if msg and msg.contact_name:
-                customer_name = msg.contact_name
+    # --- Social (ChatRating) sessions ---
+    if source in ('all', 'social'):
+        chat_ratings = ChatRating.objects.filter(
+            rated_user_id=user_id,
+            created_at__date__gte=start_date,
+            created_at__date__lte=end_date,
+        ).order_by('-created_at')
 
-        # Check if conversation is archived
-        is_archived = ConversationArchive.objects.filter(
-            platform=rating.platform,
-            conversation_id=rating.conversation_id,
-            account_id=rating.account_id,
-        ).exists()
+        for rating in chat_ratings:
+            # Try to get customer info from the conversation
+            customer_name = None
+            customer_identifier = rating.conversation_id
 
-        sessions.append({
-            'id': rating.id,
-            'platform': rating.platform,
-            'conversation_id': rating.conversation_id,
-            'account_id': rating.account_id,
-            'customer_name': customer_name or customer_identifier,
-            'rating': rating.rating if rating.rating > 0 else None,
-            'comment': rating.comment or '',
-            'session_started_at': rating.session_started_at.isoformat() if rating.session_started_at else None,
-            'session_ended_at': rating.session_ended_at.isoformat() if rating.session_ended_at else None,
-            'created_at': rating.created_at.isoformat(),
-            'is_archived': is_archived,
-        })
+            if rating.platform == 'facebook':
+                msg = FacebookMessage.objects.filter(
+                    sender_id=rating.conversation_id,
+                    is_from_page=False
+                ).first()
+                if msg and msg.sender_name:
+                    customer_name = msg.sender_name
+            elif rating.platform == 'instagram':
+                msg = InstagramMessage.objects.filter(
+                    sender_id=rating.conversation_id,
+                    is_from_business=False
+                ).first()
+                if msg and msg.sender_username:
+                    customer_name = msg.sender_username
+            elif rating.platform == 'whatsapp':
+                msg = WhatsAppMessage.objects.filter(
+                    from_number=rating.conversation_id,
+                    is_from_business=False
+                ).first()
+                if msg and msg.contact_name:
+                    customer_name = msg.contact_name
+
+            # Check if conversation is archived
+            is_archived = ConversationArchive.objects.filter(
+                platform=rating.platform,
+                conversation_id=rating.conversation_id,
+                account_id=rating.account_id,
+            ).exists()
+
+            sessions.append({
+                'id': rating.id,
+                'platform': rating.platform,
+                'conversation_id': rating.conversation_id,
+                'account_id': rating.account_id,
+                'customer_name': customer_name or customer_identifier,
+                'rating': rating.rating if rating.rating > 0 else None,
+                'comment': rating.comment or '',
+                'session_started_at': rating.session_started_at.isoformat() if rating.session_started_at else None,
+                'session_ended_at': rating.session_ended_at.isoformat() if rating.session_ended_at else None,
+                'created_at': rating.created_at.isoformat(),
+                'is_archived': is_archived,
+            })
+
+    # --- Call (CallRating) sessions ---
+    if source in ('all', 'calls'):
+        call_ratings = CallRating.objects.filter(
+            rated_user_id=user_id,
+            created_at__date__gte=start_date,
+            created_at__date__lte=end_date,
+            rating__gt=0,
+        ).select_related('call_log').order_by('-created_at')
+
+        for rating in call_ratings:
+            sessions.append({
+                'id': rating.id,
+                'platform': 'phone_' + rating.review_method,  # phone_sms or phone_callback
+                'conversation_id': rating.caller_number,
+                'account_id': None,
+                'customer_name': rating.caller_number,
+                'rating': rating.rating,
+                'comment': rating.comment or '',
+                'session_started_at': rating.call_log.started_at.isoformat() if rating.call_log and rating.call_log.started_at else None,
+                'session_ended_at': rating.call_log.ended_at.isoformat() if rating.call_log and rating.call_log.ended_at else None,
+                'created_at': rating.created_at.isoformat(),
+                'is_archived': False,
+            })
+
+    # Sort combined sessions by created_at descending
+    sessions.sort(key=lambda s: s['created_at'], reverse=True)
 
     # Get user info
     from users.models import User
@@ -4716,6 +4876,10 @@ def user_chat_sessions(request, user_id):
         'sessions': sessions,
         'total_sessions': len(sessions),
     })
+
+
+# Backward-compatible alias
+user_chat_sessions = user_rating_sessions
 
 
 # =============================================================================
