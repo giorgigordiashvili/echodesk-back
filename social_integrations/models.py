@@ -1068,6 +1068,16 @@ class EmailConnection(models.Model):
     is_active = models.BooleanField(default=True)
     last_sync_at = models.DateTimeField(null=True, blank=True, help_text="Last successful IMAP sync")
     last_sync_error = models.TextField(blank=True, help_text="Last sync error message if any")
+    auto_disabled_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=(
+            "Set when the connection was disabled automatically by the sync "
+            "worker after a non-transient error. Non-null means `is_active` was "
+            "flipped to False by the system (not by a human); the user must go "
+            "to email settings and hit Reactivate to resume sync."
+        ),
+    )
 
     # Sync settings
     sync_folder = models.CharField(max_length=100, default='INBOX', help_text="IMAP folder to sync")

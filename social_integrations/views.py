@@ -8402,6 +8402,7 @@ def email_connection_status(request):
                 'is_active': conn.is_active,
                 'last_sync_at': conn.last_sync_at.isoformat() if conn.last_sync_at else None,
                 'last_sync_error': conn.last_sync_error,
+                'auto_disabled_at': conn.auto_disabled_at.isoformat() if conn.auto_disabled_at else None,
                 'sync_folder': conn.sync_folder,
                 'connected_at': conn.created_at.isoformat(),
                 'signature_enabled': conn.signature_enabled,
@@ -8593,6 +8594,112 @@ def email_update_connection(request):
         return Response({
             'error': f'Failed to update connection: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, CanManageSocialConnections])
+def email_reactivate(request):
+    """Reactivate an auto-disabled email connection after the user has fixed
+    credentials or server config.
+
+    Body (all optional except connection_id):
+    - connection_id (int, required)
+    - password (str) — if provided, updated on the connection before testing
+    - username, imap_server, imap_port, imap_use_ssl,
+      smtp_server, smtp_port, smtp_use_tls, smtp_use_ssl — any of these
+      overwrite the stored value before the test
+
+    Runs a live IMAP (and, if creds changed, SMTP) check; only flips
+    ``is_active`` back to True and clears ``auto_disabled_at`` if the test
+    passes. On failure returns 400 with the reason so the UI can surface it.
+    """
+    from .email_utils import test_imap_connection, test_smtp_connection
+
+    try:
+        connection_id = request.data.get('connection_id')
+        if not connection_id:
+            return Response(
+                {'error': 'connection_id is required'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        connection = EmailConnection.objects.filter(id=connection_id).first()
+        if not connection:
+            return Response(
+                {'error': 'Email connection not found'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Apply any field overrides from the payload (lets the user fix
+        # credentials inside the reactivate flow without a separate update).
+        overrideable_fields = [
+            'username', 'imap_server', 'imap_port', 'imap_use_ssl',
+            'smtp_server', 'smtp_port', 'smtp_use_tls', 'smtp_use_ssl',
+        ]
+        for field in overrideable_fields:
+            if field in request.data:
+                value = request.data[field]
+                if field in {'imap_port', 'smtp_port'}:
+                    value = int(value)
+                setattr(connection, field, value)
+
+        new_password = request.data.get('password')
+        if new_password:
+            connection.set_password(new_password)
+        password_for_test = new_password or connection.get_password()
+
+        # IMAP test is mandatory — sync needs it.
+        imap_ok, imap_error = test_imap_connection(
+            server=connection.imap_server,
+            port=connection.imap_port,
+            use_ssl=connection.imap_use_ssl,
+            username=connection.username,
+            password=password_for_test,
+        )
+        if not imap_ok:
+            return Response(
+                {'error': f'IMAP test failed: {imap_error}'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # SMTP test only when the user is providing new creds (outgoing is
+        # optional on reactivation — incoming sync is the blocker we care
+        # about; if SMTP breaks later, sending will surface its own error).
+        if new_password:
+            smtp_ok, smtp_error = test_smtp_connection(
+                server=connection.smtp_server,
+                port=connection.smtp_port,
+                username=connection.username,
+                password=password_for_test,
+                use_tls=connection.smtp_use_tls,
+                use_ssl=connection.smtp_use_ssl,
+            )
+            if not smtp_ok:
+                return Response(
+                    {'error': f'SMTP test failed: {smtp_error}'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        connection.is_active = True
+        connection.auto_disabled_at = None
+        connection.last_sync_error = ''
+        connection.save()
+
+        logger.info(
+            f"Email connection reactivated: {connection.email_address} "
+            f"by {request.user.email}"
+        )
+        return Response({
+            'message': 'Connection reactivated. Sync will resume on the next cycle.',
+            'connection': EmailConnectionSerializer(connection).data,
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to reactivate email connection: {e}")
+        return Response(
+            {'error': f'Failed to reactivate connection: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
 
 @api_view(['POST'])

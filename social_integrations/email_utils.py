@@ -1053,6 +1053,64 @@ def _connect_imap(connection):
     return imap
 
 
+def _auto_disable_email_connection(connection, error_message: str) -> None:
+    """Flip a connection to disabled after a non-transient sync failure.
+
+    - Sets ``is_active=False`` so subsequent Celery runs skip it.
+    - Stamps ``auto_disabled_at`` so the frontend can show "disabled by system"
+      and force the user through the Reactivate flow (which re-tests creds).
+    - Notifies tenant admins so the outage doesn't go silent.
+
+    Safe to call when the connection is already auto-disabled — we skip the
+    notification burst in that case (sync will still reset ``last_sync_error``).
+    """
+    was_already_disabled = connection.auto_disabled_at is not None
+    connection.is_active = False
+    connection.auto_disabled_at = timezone.now()
+    connection.last_sync_error = error_message
+    connection.save(update_fields=['is_active', 'auto_disabled_at', 'last_sync_error'])
+
+    logger.warning(
+        f"[EMAIL_SYNC] Auto-disabled {connection.email_address} — {error_message}"
+    )
+
+    if was_already_disabled:
+        return  # Don't spam admins on every retry cycle
+
+    # Notify tenant admins so the outage surfaces in-app.
+    try:
+        from django.contrib.auth import get_user_model
+        from users.notification_utils import create_notification
+        User = get_user_model()
+        admins = User.objects.filter(is_active=True).filter(
+            is_staff=True
+        ) | User.objects.filter(is_active=True, is_superuser=True)
+        admins = admins.distinct()
+        for admin in admins:
+            create_notification(
+                user=admin,
+                notification_type='email_sync_disabled',
+                title=f'Email sync disabled: {connection.email_address}',
+                message=(
+                    f'Automatic IMAP sync for {connection.email_address} was '
+                    f'disabled after an error. Go to email settings to fix '
+                    f'credentials and reactivate. Error: {error_message[:200]}'
+                ),
+                metadata={
+                    'connection_id': connection.id,
+                    'email_address': connection.email_address,
+                    'error': error_message[:500],
+                },
+                link_url='/settings/social/email',
+            )
+    except Exception:
+        # Never let notification dispatch break the sync worker.
+        logger.exception(
+            f"[EMAIL_SYNC] Failed to notify admins about auto-disabled "
+            f"{connection.email_address}"
+        )
+
+
 def sync_imap_messages(connection, max_messages: int = 500) -> int:
     """
     Sync messages from IMAP server for a given connection.
@@ -1163,13 +1221,15 @@ def sync_imap_messages(connection, max_messages: int = 500) -> int:
         # fire Sentry alerts — the next sync cycle will retry automatically.
         logger.warning(f"Transient email sync error for {connection.email_address}: {e}")
         connection.last_sync_error = str(e)
-        connection.save()
+        connection.save(update_fields=['last_sync_error'])
         return 0
     except Exception as e:
+        # Non-transient (auth failure, host resolution, permission, etc.) —
+        # disable the connection so the worker stops retrying. The user must
+        # fix credentials and click Reactivate in the UI to resume sync.
         logger.error(f"Email sync error for {connection.email_address}: {e}")
-        connection.last_sync_error = str(e)
-        connection.save()
-        raise
+        _auto_disable_email_connection(connection, str(e))
+        return 0
 
 
 def delete_emails_from_imap(connection, message_ids: List[str]) -> int:

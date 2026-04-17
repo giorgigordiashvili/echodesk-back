@@ -519,6 +519,8 @@ class Notification(models.Model):
         # Calls
         ('call_missed', 'Missed Call'),
         ('call_voicemail', 'New Voicemail'),
+        # Integrations
+        ('email_sync_disabled', 'Email Sync Disabled'),
     ]
 
     user = models.ForeignKey(

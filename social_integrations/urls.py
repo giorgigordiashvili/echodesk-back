@@ -71,6 +71,7 @@ urlpatterns = [
     path('email/connect/', views.email_connect, name='email_connect'),
     path('email/disconnect/', views.email_disconnect, name='email_disconnect'),
     path('email/update/', views.email_update_connection, name='email_update_connection'),
+    path('email/reactivate/', views.email_reactivate, name='email_reactivate'),
     path('email/send/', views.email_send, name='email_send'),
     path('email/action/', views.email_action, name='email_action'),
     path('email/folders/', views.email_folders, name='email_folders'),

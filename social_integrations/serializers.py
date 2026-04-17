@@ -515,11 +515,14 @@ class EmailConnectionSerializer(serializers.ModelSerializer):
             'imap_server', 'imap_port', 'imap_use_ssl',
             'smtp_server', 'smtp_port', 'smtp_use_tls', 'smtp_use_ssl',
             'username', 'is_active',
-            'last_sync_at', 'last_sync_error',
+            'last_sync_at', 'last_sync_error', 'auto_disabled_at',
             'sync_folder', 'sync_days_back',
             'created_at', 'updated_at'
         ]
-        read_only_fields = ['id', 'last_sync_at', 'last_sync_error', 'created_at', 'updated_at']
+        read_only_fields = [
+            'id', 'last_sync_at', 'last_sync_error', 'auto_disabled_at',
+            'created_at', 'updated_at',
+        ]
 
 
 class EmailConnectionCreateSerializer(serializers.Serializer):
@@ -725,12 +728,15 @@ class EmailConnectionWithAssignmentsSerializer(serializers.ModelSerializer):
             'imap_server', 'imap_port', 'imap_use_ssl',
             'smtp_server', 'smtp_port', 'smtp_use_tls', 'smtp_use_ssl',
             'username', 'is_active',
-            'last_sync_at', 'last_sync_error',
+            'last_sync_at', 'last_sync_error', 'auto_disabled_at',
             'sync_folder', 'sync_days_back',
             'assigned_users',
             'created_at', 'updated_at'
         ]
-        read_only_fields = ['id', 'last_sync_at', 'last_sync_error', 'created_at', 'updated_at']
+        read_only_fields = [
+            'id', 'last_sync_at', 'last_sync_error', 'auto_disabled_at',
+            'created_at', 'updated_at',
+        ]
 
 
 # =============================================================================
