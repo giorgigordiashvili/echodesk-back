@@ -455,11 +455,10 @@ class TicketSerializer(serializers.ModelSerializer):
 
         # Handle multiple user assignments update
         if assigned_user_ids is not None:
-            # Check minimum users requirement
-            from django.db import connection
-            from tenants.models import Tenant
-
-            tenant = Tenant.objects.get(schema_name=connection.schema_name)
+            # Check minimum users requirement — cache tenant on the request
+            # so repeated updates in the same request don't re-query.
+            from .views import get_current_tenant
+            tenant = get_current_tenant(self.context['request'])
             min_users_required = tenant.min_users_per_ticket
 
             # Get current assignment count
@@ -584,8 +583,18 @@ class ListItemSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at', 'updated_at', 'created_by']
 
     def get_children(self, obj):
-        """Recursively get all children of this item."""
-        children = obj.children.filter(is_active=True)
+        """Return this node's active children.
+
+        If the caller has pre-grouped children by parent_id into
+        ``context['_children_by_parent']`` (done by ItemListSerializer and the
+        root_items / public_items actions), we read from that map instead of
+        firing a fresh query per node. Otherwise fall back to a DB fetch.
+        """
+        children_by_parent = self.context.get('_children_by_parent')
+        if children_by_parent is not None:
+            children = children_by_parent.get(obj.id, [])
+        else:
+            children = obj.children.filter(is_active=True)
         return ListItemSerializer(children, many=True, context=self.context).data
 
     def create(self, validated_data):
@@ -621,14 +630,38 @@ class ItemListSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'created_by']
 
+    def to_representation(self, instance):
+        """Prebuild children-by-parent map from the prefetched items cache so
+        every nested ListItemSerializer resolves children from memory instead
+        of hitting the DB. Shared via context so both ``items`` and
+        ``root_items`` benefit, and counts come out of the same cache.
+        """
+        prefetched = list(instance.items.all())
+        active_items = [i for i in prefetched if i.is_active]
+        children_by_parent = {}
+        for item in active_items:
+            if item.parent_id is not None:
+                children_by_parent.setdefault(item.parent_id, []).append(item)
+        self.context['_children_by_parent'] = children_by_parent
+        self.context['_active_items'] = active_items
+        return super().to_representation(instance)
+
     def get_items_count(self, obj):
-        """Get the number of items in this list."""
+        """Get the number of active items in this list (uses prefetched cache)."""
+        active_items = self.context.get('_active_items')
+        if active_items is not None:
+            return len(active_items)
+        if hasattr(obj, '_active_items_count'):
+            return obj._active_items_count
         return obj.items.filter(is_active=True).count()
 
     def get_root_items(self, obj):
-        """Get only root-level items (items without parents)."""
-        root_items = obj.items.filter(parent__isnull=True, is_active=True)
-        return ListItemSerializer(root_items, many=True, context=self.context).data
+        """Root-level active items (without parents)."""
+        active_items = self.context.get('_active_items')
+        if active_items is None:
+            active_items = [i for i in obj.items.all() if i.is_active]
+        roots = [i for i in active_items if i.parent_id is None]
+        return ListItemSerializer(roots, many=True, context=self.context).data
 
     def create(self, validated_data):
         # Set created_by from request context

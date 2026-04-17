@@ -818,11 +818,20 @@ class ListItem(models.Model):
         return ' > '.join(path)
 
     def get_all_children(self):
-        """Recursively get all children of this item."""
-        children = list(self.children.all())
-        for child in list(children):
-            children.extend(child.get_all_children())
-        return children
+        """Return all descendants using a single query (was a per-node recursion)."""
+        all_items = list(ListItem.objects.filter(item_list_id=self.item_list_id))
+        children_by_parent = {}
+        for item in all_items:
+            if item.parent_id is not None:
+                children_by_parent.setdefault(item.parent_id, []).append(item)
+
+        result = []
+        queue = list(children_by_parent.get(self.id, []))
+        while queue:
+            item = queue.pop(0)
+            result.append(item)
+            queue.extend(children_by_parent.get(item.id, []))
+        return result
 
 
 class TicketForm(models.Model):

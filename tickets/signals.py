@@ -1,6 +1,7 @@
 """
 Signals for automatic notification creation on ticket events.
 """
+from django.db.models import Q
 from django.db.models.signals import post_save, pre_save, m2m_changed
 from django.dispatch import receiver
 from django.contrib.auth import get_user_model
@@ -53,21 +54,45 @@ def extract_mentions(text):
 def get_users_from_mentions(mentions):
     """
     Get User objects from list of mentioned usernames/emails.
+
+    Single DB query for the whole mention list (was up to 3 queries per mention).
+    Email (case-insensitive exact) is preferred; falls back to first_name / last_name
+    icontains matches, same as the prior per-mention behaviour.
     """
-    users = []
+    if not mentions:
+        return []
+
+    query = Q()
     for mention in mentions:
-        # Try to find by email first (most common)
-        user = User.objects.filter(email__iexact=mention).first()
-        if not user:
-            # Try to find by first name or last name
-            user = User.objects.filter(
-                first_name__icontains=mention
-            ).first() or User.objects.filter(
-                last_name__icontains=mention
-            ).first()
-        if user:
-            users.append(user)
-    return users
+        query |= Q(email__iexact=mention)
+        query |= Q(first_name__icontains=mention)
+        query |= Q(last_name__icontains=mention)
+
+    candidates = list(User.objects.filter(query).distinct()[:200])
+
+    resolved = []
+    used_ids = set()
+    for mention in mentions:
+        m_lower = mention.lower()
+        match = None
+        for u in candidates:
+            if u.id in used_ids:
+                continue
+            if u.email and u.email.lower() == m_lower:
+                match = u
+                break
+        if match is None:
+            for u in candidates:
+                if u.id in used_ids:
+                    continue
+                if (u.first_name and m_lower in u.first_name.lower()) or \
+                   (u.last_name and m_lower in u.last_name.lower()):
+                    match = u
+                    break
+        if match is not None:
+            resolved.append(match)
+            used_ids.add(match.id)
+    return resolved
 
 
 def _get_bug_report_status_key(column_name):
@@ -226,19 +251,28 @@ def notify_on_ticket_comment(sender, instance, created, **kwargs):
 
 
 @receiver(pre_save, sender=Ticket)
-def record_ticket_history(sender, instance, **kwargs):
+def capture_ticket_prev_state(sender, instance, **kwargs):
     """
-    Record changes to tracked ticket fields in TicketHistory.
-    Only runs for existing tickets (not on create).
+    Single pre_save receiver that fetches the old ticket once and:
+      - records changed fields into TicketHistory (was record_ticket_history)
+      - caches column/position/department/field diffs onto the instance for post_save
+        (was track_ticket_status_change)
+      - caches the assigned user IDs so post_save doesn't fire a separate query per move
+
+    Merged to eliminate the double `Ticket.objects.get(pk=...)` on every ticket write.
     """
     if not instance.pk:
-        return  # Skip on create
+        return  # create path
 
     try:
-        old = Ticket.objects.get(pk=instance.pk)
+        old = Ticket.objects.prefetch_related('assigned_users').select_related(
+            'column', 'assigned_department'
+        ).get(pk=instance.pk)
     except Ticket.DoesNotExist:
         return
 
+    # --- TicketHistory records ---
+    current_user = getattr(instance, '_current_user', None)
     tracked_fields = [
         ('title', 'updated'),
         ('description', 'updated'),
@@ -247,10 +281,6 @@ def record_ticket_history(sender, instance, **kwargs):
         ('assigned_to_id', 'assigned'),
         ('assigned_department_id', 'updated'),
     ]
-
-    # Try to get the user from instance._current_user (set by views if available)
-    current_user = getattr(instance, '_current_user', None)
-
     for field, action in tracked_fields:
         old_val = getattr(old, field)
         new_val = getattr(instance, field)
@@ -264,45 +294,34 @@ def record_ticket_history(sender, instance, **kwargs):
                 user=current_user,
             )
 
+    # --- Column (status) change ---
+    if old.column_id != instance.column_id:
+        instance._column_changed = True
+        instance._old_column_id = old.column_id
+        instance._old_column_name = old.column.name if old.column else 'None'
+        instance._new_column_name = instance.column.name if instance.column else 'None'
 
-@receiver(pre_save, sender=Ticket)
-def track_ticket_status_change(sender, instance, **kwargs):
-    """
-    Track ticket status changes and notify assigned users.
-    Uses pre_save to compare old and new column values.
-    """
-    if instance.pk:  # Only for existing tickets
-        try:
-            old_ticket = Ticket.objects.get(pk=instance.pk)
+    # --- Position change ---
+    if old.position_in_column != instance.position_in_column:
+        instance._position_changed = True
+        instance._old_position = old.position_in_column
 
-            # Check if column (status) changed
-            if old_ticket.column_id != instance.column_id:
-                instance._column_changed = True
-                instance._old_column_id = old_ticket.column_id
-                instance._old_column_name = old_ticket.column.name if old_ticket.column else 'None'
-                instance._new_column_name = instance.column.name if instance.column else 'None'
+    # --- Department change ---
+    if old.assigned_department_id != instance.assigned_department_id:
+        instance._department_changed = True
+        instance._old_department = old.assigned_department
+        instance._new_department = instance.assigned_department
 
-            # Check if position changed
-            if old_ticket.position_in_column != instance.position_in_column:
-                instance._position_changed = True
-                instance._old_position = old_ticket.position_in_column
+    # --- Field-change map for broadcasting ---
+    instance._field_changes = {}
+    for field in ['title', 'priority', 'assigned_department_id']:
+        old_value = getattr(old, field)
+        new_value = getattr(instance, field)
+        if old_value != new_value:
+            instance._field_changes[field] = {'old': old_value, 'new': new_value}
 
-            # Check if department changed
-            if old_ticket.assigned_department_id != instance.assigned_department_id:
-                instance._department_changed = True
-                instance._old_department = old_ticket.assigned_department
-                instance._new_department = instance.assigned_department
-
-            # Track any field changes for broadcasting
-            instance._field_changes = {}
-            for field in ['title', 'priority', 'assigned_department_id']:
-                old_value = getattr(old_ticket, field)
-                new_value = getattr(instance, field)
-                if old_value != new_value:
-                    instance._field_changes[field] = {'old': old_value, 'new': new_value}
-
-        except Ticket.DoesNotExist:
-            pass
+    # --- Assigned user IDs cached for post_save notification loop ---
+    instance._prev_assigned_user_ids = [u.id for u in old.assigned_users.all()]
 
 
 def _send_new_ticket_telegram_notification(ticket):
@@ -415,8 +434,16 @@ def notify_on_ticket_status_change(sender, instance, created, **kwargs):
         old_column_name = getattr(instance, '_old_column_name', 'Unknown')
         new_column_name = getattr(instance, '_new_column_name', 'Unknown')
 
-        # Notify all assigned users
-        for assigned_user in instance.assigned_users.all():
+        # Use the assigned user IDs cached by pre_save so we don't run a fresh
+        # query here on every column change. Fall back to a live read if the
+        # cache isn't there (e.g. for instances that skipped pre_save).
+        assigned_user_ids = getattr(instance, '_prev_assigned_user_ids', None)
+        assigned_users = (
+            User.objects.filter(id__in=assigned_user_ids)
+            if assigned_user_ids is not None
+            else instance.assigned_users.all()
+        )
+        for assigned_user in assigned_users:
             create_notification(
                 user=assigned_user,
                 notification_type='ticket_status_changed',

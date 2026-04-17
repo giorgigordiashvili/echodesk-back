@@ -27,6 +27,18 @@ from .serializers import (
 )
 
 
+def get_current_tenant(request):
+    """Resolve the current tenant once per request (was a fresh DB read each call)."""
+    cached = getattr(request, '_current_tenant', None)
+    if cached is not None:
+        return cached
+    from django.db import connection
+    from tenants.models import Tenant
+    cached = Tenant.objects.get(schema_name=connection.schema_name)
+    request._current_tenant = cached
+    return cached
+
+
 class BoardPermission(permissions.BasePermission):
     """
     Custom permission class for Board operations.
@@ -52,21 +64,15 @@ class BoardPermission(permissions.BasePermission):
             if has_permission:
                 return True
 
-            # Check if user is assigned to any board via group
-            user_groups = user.tenant_groups.filter(is_active=True)
-            if user_groups.exists():
-                from tickets.models import Board
-                has_board_access = Board.objects.filter(board_groups__in=user_groups).exists()
-                if has_board_access:
-                    return True
-
-            # Check if user is directly assigned to any board
-            from tickets.models import Board
-            has_direct_board = Board.objects.filter(board_users=user).exists()
-            if has_direct_board:
-                return True
-
-            return False
+            # Single query: does this user have access to any board either
+            # directly (board_users) or through one of their active groups?
+            user_group_ids = list(
+                user.tenant_groups.filter(is_active=True).values_list('id', flat=True)
+            )
+            access_filter = Q(board_users=user)
+            if user_group_ids:
+                access_filter |= Q(board_groups__id__in=user_group_ids)
+            return Board.objects.filter(access_filter).exists()
 
         elif view.action == 'create':
             return request.user.has_permission('create_boards')
@@ -99,7 +105,7 @@ class TicketColumnViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         """Annotate queryset with tickets_count to avoid N+1 queries."""
-        return TicketColumn.objects.select_related('created_by').annotate(
+        return TicketColumn.objects.select_related('created_by', 'board').annotate(
             tickets_count=Count('tickets')
         )
 
@@ -209,26 +215,22 @@ class TicketColumnViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def kanban_board(self, request):
         """Get all columns with their tickets for Kanban board view."""
-        # Get board_id from query params, default to default board
+        # Resolve the target board in a single query: explicit id if provided,
+        # otherwise prefer the default board and fall back to the first one.
         board_id = request.query_params.get('board_id')
 
         if board_id:
-            try:
-                board = Board.objects.get(id=board_id)
-                columns_qs = TicketColumn.objects.filter(board=board)
-            except Board.DoesNotExist:
+            board = Board.objects.filter(id=board_id).first()
+            if not board:
                 return Response({'error': 'Board not found'}, status=404)
         else:
-            # Get default board or first available board
-            default_board = Board.objects.filter(is_default=True).first()
-            if not default_board:
-                default_board = Board.objects.first()
+            board = Board.objects.order_by('-is_default', 'id').first()
 
-            if default_board:
-                columns_qs = TicketColumn.objects.filter(board=default_board)
-            else:
-                # Fallback to columns without board (legacy support)
-                columns_qs = TicketColumn.objects.filter(board__isnull=True)
+        columns_qs = (
+            TicketColumn.objects.filter(board=board)
+            if board is not None
+            else TicketColumn.objects.filter(board__isnull=True)  # legacy fallback
+        )
 
         # Prefetch all ticket relations to avoid N+1 queries
         from django.contrib.auth import get_user_model
@@ -438,11 +440,8 @@ class TicketViewSet(viewsets.ModelViewSet):
 
     def destroy(self, request, *args, **kwargs):
         """Delete a ticket with permission check based on tenant settings."""
-        from django.db import connection
-        from tenants.models import Tenant
-
         ticket = self.get_object()
-        tenant = Tenant.objects.get(schema_name=connection.schema_name)
+        tenant = get_current_tenant(request)
 
         # Check if only superadmin can delete tickets
         if tenant.only_superadmin_can_delete_tickets:
@@ -479,7 +478,7 @@ class TicketViewSet(viewsets.ModelViewSet):
     def comments(self, request, pk=None):
         """Get all comments for a ticket."""
         ticket = self.get_object()
-        comments = ticket.comments.all()
+        comments = ticket.comments.select_related('user').order_by('created_at')
         serializer = TicketCommentSerializer(comments, many=True)
         return Response(serializer.data)
 
@@ -894,11 +893,17 @@ class TicketAssignmentViewSet(viewsets.ModelViewSet):
         return TicketAssignment.objects.none()
     
     def perform_create(self, serializer):
-        """Create a new ticket assignment."""
-        from django.shortcuts import get_object_or_404
+        """Create a new ticket assignment.
+
+        Writes ``ticket_id`` directly instead of loading the full ticket row
+        (the FK constraint validates the id); keeps a cheap existence check
+        so a bad URL still returns 404 instead of a 500 on IntegrityError.
+        """
+        from django.http import Http404
         ticket_pk = self.kwargs.get('ticket_pk')
-        ticket = get_object_or_404(Ticket, pk=ticket_pk)
-        serializer.save(ticket=ticket, assigned_by=self.request.user)
+        if not Ticket.objects.filter(pk=ticket_pk).only('id').exists():
+            raise Http404('Ticket not found')
+        serializer.save(ticket_id=ticket_pk, assigned_by=self.request.user)
     
     @action(detail=False, methods=['post'])
     def bulk_assign(self, request, ticket_pk=None):
@@ -1064,21 +1069,27 @@ class TicketTimeLogViewSet(viewsets.ReadOnlyModelViewSet):
         )
         active_sessions_data = TicketTimeLogSerializer(active_sessions, many=True).data
         
-        # Daily breakdown for the period
-        daily_stats = {}
-        for log in user_logs.filter(duration_seconds__isnull=False):
-            date_key = log.entered_at.date().isoformat()
-            if date_key not in daily_stats:
-                daily_stats[date_key] = {
-                    'date': date_key,
-                    'total_seconds': 0,
-                    'session_count': 0
-                }
-            daily_stats[date_key]['total_seconds'] += log.duration_seconds or 0
-            daily_stats[date_key]['session_count'] += 1
-        
-        daily_breakdown = list(daily_stats.values())
-        daily_breakdown.sort(key=lambda x: x['date'], reverse=True)
+        # Daily breakdown for the period — single aggregate query instead of
+        # materialising every log into Python.
+        from django.db.models.functions import TruncDate
+        daily_breakdown_qs = (
+            user_logs.filter(duration_seconds__isnull=False)
+            .annotate(date=TruncDate('entered_at'))
+            .values('date')
+            .annotate(
+                total_seconds=Sum('duration_seconds'),
+                session_count=Count('id'),
+            )
+            .order_by('-date')
+        )
+        daily_breakdown = [
+            {
+                'date': row['date'].isoformat() if row['date'] else None,
+                'total_seconds': row['total_seconds'] or 0,
+                'session_count': row['session_count'] or 0,
+            }
+            for row in daily_breakdown_qs
+        ]
         
         return Response({
             'period_days': days,
@@ -1330,14 +1341,14 @@ class TicketPaymentViewSet(viewsets.ModelViewSet):
             self.request.user.has_permission('view_tickets')):
             return queryset
 
-        # Otherwise, filter to tickets the user can access
-        accessible_tickets = Ticket.objects.filter(
-            Q(created_by=self.request.user) |
-            Q(assigned_to=self.request.user) |
-            Q(assigned_users=self.request.user)
+        # Otherwise, scope directly via joins instead of a correlated
+        # subquery over Ticket — single query, uses existing indexes.
+        user = self.request.user
+        return queryset.filter(
+            Q(ticket__created_by=user) |
+            Q(ticket__assigned_to=user) |
+            Q(ticket__assigned_users=user)
         ).distinct()
-
-        return queryset.filter(ticket__in=accessible_tickets)
 
     @action(detail=False, methods=['post'])
     def process_payment(self, request):
@@ -1464,22 +1475,42 @@ class ItemListViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'])
     def root_items(self, request, pk=None):
-        """Get only root-level items for this list."""
+        """Get only root-level items for this list.
+
+        Loads all items in a single query, then groups children in memory so
+        the nested ListItemSerializer does not recurse back to the DB.
+        """
         item_list = self.get_object()
-        root_items = item_list.items.filter(parent__isnull=True, is_active=True)
-        serializer = ListItemSerializer(root_items, many=True, context={'request': request})
+        all_items = list(item_list.items.filter(is_active=True))
+        children_by_parent = {}
+        roots = []
+        for item in all_items:
+            if item.parent_id is None:
+                roots.append(item)
+            else:
+                children_by_parent.setdefault(item.parent_id, []).append(item)
+        serializer = ListItemSerializer(
+            roots,
+            many=True,
+            context={'request': request, '_children_by_parent': children_by_parent},
+        )
         return Response(serializer.data)
 
     @action(detail=False, methods=['get'], permission_classes=[permissions.AllowAny])
     def public(self, request):
         """Get all public item lists accessible to ecommerce clients."""
-        queryset = ItemList.objects.filter(is_public=True, is_active=True)
+        queryset = self.get_queryset().filter(is_public=True, is_active=True)
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
 
     @action(detail=True, methods=['get'], permission_classes=[permissions.AllowAny])
     def public_items(self, request, pk=None):
-        """Get items from a public list (only if the list is public)."""
+        """Get items from a public list (only if the list is public).
+
+        Loads all active items in a single query and passes an in-memory
+        parent→children map through context so the recursive serializer
+        resolves nested children without additional DB hits.
+        """
         try:
             item_list = ItemList.objects.get(pk=pk, is_public=True, is_active=True)
         except ItemList.DoesNotExist:
@@ -1488,9 +1519,16 @@ class ItemListViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        # Get all items from the list (with hierarchy)
-        items = item_list.items.filter(is_active=True)
-        serializer = ListItemSerializer(items, many=True, context={'request': request})
+        all_items = list(item_list.items.filter(is_active=True))
+        children_by_parent = {}
+        for item in all_items:
+            if item.parent_id is not None:
+                children_by_parent.setdefault(item.parent_id, []).append(item)
+        serializer = ListItemSerializer(
+            all_items,
+            many=True,
+            context={'request': request, '_children_by_parent': children_by_parent},
+        )
         return Response(serializer.data)
 
 
@@ -1612,7 +1650,16 @@ class TicketFormViewSet(viewsets.ModelViewSet):
     """ViewSet for managing ticket forms."""
     queryset = TicketForm.objects.all().select_related(
         'created_by', 'parent_form'
-    ).prefetch_related('item_lists', 'child_forms', 'submissions')
+    ).prefetch_related(
+        Prefetch(
+            'item_lists',
+            queryset=ItemList.objects.annotate(
+                _active_items_count=Count('items', filter=Q(items__is_active=True))
+            ),
+        ),
+        'child_forms',
+        'submissions',
+    )
     serializer_class = TicketFormSerializer
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
@@ -1647,12 +1694,12 @@ class TicketFormViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'])
     def default(self, request):
-        """Get the default form."""
-        default_form = TicketForm.objects.filter(is_default=True, is_active=True).first()
+        """Get the default form (uses the shared prefetched queryset)."""
+        qs = self.get_queryset()
+        default_form = qs.filter(is_default=True, is_active=True).first()
         if not default_form:
-            # If no default, use the first active form
-            default_form = TicketForm.objects.filter(is_active=True).first()
-        
+            default_form = qs.filter(is_active=True).first()
+
         if default_form:
             serializer = TicketFormSerializer(default_form, context={'request': request})
             return Response(serializer.data)
@@ -1678,7 +1725,9 @@ class TicketFormViewSet(viewsets.ModelViewSet):
 
 class TicketFormSubmissionViewSet(viewsets.ModelViewSet):
     """ViewSet for managing ticket form submissions."""
-    queryset = TicketFormSubmission.objects.select_related('form', 'ticket', 'submitted_by').prefetch_related('selected_items').all()
+    queryset = TicketFormSubmission.objects.select_related(
+        'form', 'ticket', 'ticket__column', 'submitted_by'
+    ).prefetch_related('selected_items').all()
     serializer_class = TicketFormSubmissionSerializer
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
