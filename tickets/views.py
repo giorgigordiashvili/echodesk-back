@@ -2,7 +2,7 @@ from rest_framework import viewsets, permissions, filters, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
-from django.db.models import Q, F, Max, Count, Prefetch
+from django.db.models import Q, F, Max, Count, Prefetch, Exists, OuterRef, Subquery, IntegerField
 from django.db import transaction
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse
@@ -99,7 +99,7 @@ class TicketColumnViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         """Annotate queryset with tickets_count to avoid N+1 queries."""
-        return TicketColumn.objects.annotate(
+        return TicketColumn.objects.select_related('created_by').annotate(
             tickets_count=Count('tickets')
         )
 
@@ -1099,42 +1099,64 @@ class BoardViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         """Return boards the user can access based on direct attachment or group membership."""
-        from django.db.models import Q, Count, Exists, OuterRef
-
         user = self.request.user
+
+        # Scalar subquery so columns_count doesn't fan out the main row set
+        from django.db.models.functions import Coalesce
+        columns_count_sq = (
+            TicketColumn.objects
+            .filter(board=OuterRef('pk'))
+            .order_by()
+            .values('board')
+            .annotate(c=Count('*'))
+            .values('c')
+        )
+        base_qs = Board.objects.annotate(
+            columns_count=Coalesce(
+                Subquery(columns_count_sq, output_field=IntegerField()),
+                0,
+                output_field=IntegerField(),
+            ),
+        )
 
         # Superusers and staff can see all boards
         if user.is_superuser or user.is_staff:
-            return Board.objects.annotate(
-                columns_count=Count('columns', distinct=True)
-            ).select_related('created_by').prefetch_related('board_users', 'board_groups', 'order_users', 'columns')
+            return base_qs.select_related('created_by').prefetch_related(
+                'board_users', 'board_groups', 'order_users', 'columns'
+            )
 
-        # Get user's groups
-        user_groups = user.tenant_groups.filter(is_active=True)
+        # Access check via Exists subqueries — avoids Cartesian join across 3+ M2Ms
+        BoardUsers = Board.board_users.through
+        BoardGroups = Board.board_groups.through
+        OrderUsers = Board.order_users.through
 
-        # Build filter conditions:
-        # 1. User is directly attached via order_users (for order creation)
-        order_user_attached = Q(order_users=user)
-
-        # 2. User is directly attached via board_users (for board visibility)
-        board_user_attached = Q(board_users=user)
-
-        # 3. User's group is attached via board_groups
-        group_attached = Q(board_groups__in=user_groups) if user_groups.exists() else Q(pk__in=[])
-
-        # Annotate boards with counts of restrictions and columns
-        from django.db.models import Count
-        boards_with_counts = Board.objects.annotate(
-            user_count=Count('board_users', distinct=True),
-            group_count=Count('board_groups', distinct=True),
-            columns_count=Count('columns', distinct=True)
+        user_group_ids = list(
+            user.tenant_groups.filter(is_active=True).values_list('id', flat=True)
         )
 
-        # Filter: user has access OR board has no restrictions (both counts are 0)
-        return boards_with_counts.filter(
-            Q(order_user_attached | board_user_attached | group_attached) |  # User has explicit access
-            Q(user_count=0, group_count=0)  # OR board is unrestricted
-        ).select_related('created_by').prefetch_related('board_users', 'board_groups', 'order_users', 'columns').distinct()
+        has_users_sq = BoardUsers.objects.filter(board_id=OuterRef('pk'))
+        has_groups_sq = BoardGroups.objects.filter(board_id=OuterRef('pk'))
+        user_in_board_sq = BoardUsers.objects.filter(board_id=OuterRef('pk'), user_id=user.id)
+        user_in_orders_sq = OrderUsers.objects.filter(board_id=OuterRef('pk'), user_id=user.id)
+        group_in_board_sq = (
+            BoardGroups.objects.filter(board_id=OuterRef('pk'), tenantgroup_id__in=user_group_ids)
+            if user_group_ids else BoardGroups.objects.none()
+        )
+
+        return base_qs.annotate(
+            _has_users=Exists(has_users_sq),
+            _has_groups=Exists(has_groups_sq),
+            _user_in_board=Exists(user_in_board_sq),
+            _user_in_orders=Exists(user_in_orders_sq),
+            _group_in_board=Exists(group_in_board_sq),
+        ).filter(
+            Q(_user_in_board=True)
+            | Q(_user_in_orders=True)
+            | Q(_group_in_board=True)
+            | Q(_has_users=False, _has_groups=False)
+        ).select_related('created_by').prefetch_related(
+            'board_users', 'board_groups', 'order_users', 'columns'
+        )
     
     def perform_create(self, serializer):
         """Set the created_by field when creating a board."""

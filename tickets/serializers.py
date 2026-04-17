@@ -79,7 +79,14 @@ class BoardSerializer(serializers.ModelSerializer):
         read_only_fields = ['created_at', 'updated_at', 'created_by']
     
     def get_payment_summary(self, obj):
-        """Get payment summary for this board."""
+        """Get payment summary for this board.
+
+        Skipped on list responses to avoid a per-board aggregation N+1;
+        callers that need it should hit the detail endpoint.
+        """
+        view = self.context.get('view')
+        if view is not None and getattr(view, 'action', None) == 'list':
+            return None
         return obj.get_payment_summary()
     
     def create(self, validated_data):
