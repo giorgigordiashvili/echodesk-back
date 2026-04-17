@@ -1501,6 +1501,73 @@ class ClientViewSet(viewsets.ModelViewSet):
         serializer = CallLogSerializer(calls, many=True)
         return Response(serializer.data)
 
+    @extend_schema(
+        summary="Lookup client by phone number (CRM + Social)",
+        description=(
+            "Find the most likely Client/SocialClient match for an arbitrary "
+            "phone number. Cleans the input, takes the last 7 digits, and "
+            "icontains-matches both crm.Client and social_integrations.SocialClient. "
+            "Returns the first hit (CRM preferred since it's manually curated) "
+            "in a unified shape so the call sidebar can render either source. "
+            "Used by the live-call sidebar so a number like 597147515 finds a "
+            "stored phone of '+995597147515'."
+        ),
+        parameters=[
+            OpenApiParameter(
+                name='phone',
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
+                required=True,
+                description='Phone number in any format (digits, spaces, dashes, leading +).',
+            ),
+        ],
+        responses={200: OpenApiTypes.OBJECT},
+    )
+    @action(detail=False, methods=['get'], url_path='lookup-by-phone')
+    def lookup_by_phone(self, request):
+        """Find a Client or SocialClient that owns this phone number."""
+        phone = (request.query_params.get('phone') or '').strip()
+        if not phone:
+            return Response({'results': [], 'count': 0})
+
+        cleaned = ''.join(ch for ch in phone if ch.isdigit())
+        if not cleaned:
+            return Response({'results': [], 'count': 0})
+        last_digits = cleaned[-7:] if len(cleaned) >= 7 else cleaned
+
+        # Prefer the CRM Client (manually curated) over SocialClient.
+        client = Client.objects.filter(phone__icontains=last_digits).first()
+        if client:
+            return Response({
+                'results': [{
+                    'id': client.id,
+                    'name': client.name,
+                    'email': client.email,
+                    'phone': client.phone,
+                    'company': client.company,
+                    'source': 'crm',
+                }],
+                'count': 1,
+            })
+
+        from social_integrations.models import SocialClient
+        sc = SocialClient.objects.filter(phone__icontains=last_digits).first()
+        if sc:
+            display_name = sc.name or f'{sc.first_name or ""} {sc.last_name or ""}'.strip()
+            return Response({
+                'results': [{
+                    'id': sc.id,
+                    'name': display_name,
+                    'email': sc.email or '',
+                    'phone': sc.phone,
+                    'company': '',
+                    'source': 'social',
+                }],
+                'count': 1,
+            })
+
+        return Response({'results': [], 'count': 0})
+
 
 @extend_schema(
     summary="SIP Call Event Webhook",
