@@ -5739,6 +5739,9 @@ def unread_messages_count(request):
     Returns counts for Facebook, Instagram, WhatsApp, Email, and total.
     Unread = incoming messages from customers that staff hasn't read yet.
 
+    Archived (history) conversations are excluded — the sidebar badge only
+    reflects chats visible in the active list.
+
     When chat_assignment_enabled is True:
     - Only counts messages in chats assigned to the current user
     - Also counts messages in chats not assigned to anyone
@@ -5757,6 +5760,23 @@ def unread_messages_count(request):
                 accessible_connection_ids.append(conn.id)
             elif is_admin or conn.user_assignments.filter(user=request.user).exists():
                 accessible_connection_ids.append(conn.id)
+
+        # Archived conversation IDs per platform — excluded from unread counts
+        # so the sidebar badge doesn't count messages in chats that are in history.
+        # Platform IDs (sender_id / from_number / thread_id) are effectively unique
+        # within a platform, so scoping by conversation_id alone is safe in practice.
+        archived_fb_ids = list(ConversationArchive.objects.filter(
+            platform='facebook'
+        ).values_list('conversation_id', flat=True))
+        archived_ig_ids = list(ConversationArchive.objects.filter(
+            platform='instagram'
+        ).values_list('conversation_id', flat=True))
+        archived_wa_numbers = list(ConversationArchive.objects.filter(
+            platform='whatsapp'
+        ).values_list('conversation_id', flat=True))
+        archived_email_threads = list(ConversationArchive.objects.filter(
+            platform='email'
+        ).values_list('conversation_id', flat=True))
 
         # Check if chat assignment filtering is enabled
         settings_obj = SocialIntegrationSettings.objects.first()
@@ -5811,6 +5831,8 @@ def unread_messages_count(request):
                 is_from_page=False,
                 is_read_by_staff=False,
                 is_deleted=False
+            ).exclude(
+                sender_id__in=archived_fb_ids  # Skip chats in history
             ).filter(
                 Q(sender_id__in=my_fb_assignments) |  # Assigned to me
                 ~Q(sender_id__in=all_fb_assignments)   # Not assigned to anyone
@@ -5821,6 +5843,8 @@ def unread_messages_count(request):
                 is_from_business=False,
                 is_read_by_staff=False,
                 is_deleted=False
+            ).exclude(
+                sender_id__in=archived_ig_ids  # Skip chats in history
             ).filter(
                 Q(sender_id__in=my_ig_assignments) |  # Assigned to me
                 ~Q(sender_id__in=all_ig_assignments)  # Not assigned to anyone
@@ -5831,6 +5855,8 @@ def unread_messages_count(request):
                 is_from_business=False,
                 is_read_by_staff=False,
                 is_deleted=False
+            ).exclude(
+                from_number__in=archived_wa_numbers  # Skip chats in history
             ).filter(
                 Q(from_number__in=my_wa_assignments) |  # Assigned to me
                 ~Q(from_number__in=all_wa_assignments)  # Not assigned to anyone
@@ -5844,6 +5870,8 @@ def unread_messages_count(request):
                 is_deleted=False,
                 folder='INBOX',  # Only count INBOX messages for notifications
                 connection_id__in=accessible_connection_ids,
+            ).exclude(
+                thread_id__in=archived_email_threads  # Skip chats in history
             ).filter(
                 Q(thread_id__in=my_email_assignments) |  # Assigned to me
                 ~Q(thread_id__in=all_email_assignments)  # Not assigned to anyone
@@ -5854,19 +5882,19 @@ def unread_messages_count(request):
                 is_from_page=False,
                 is_read_by_staff=False,
                 is_deleted=False
-            ).count()
+            ).exclude(sender_id__in=archived_fb_ids).count()
 
             instagram_unread = InstagramMessage.objects.filter(
                 is_from_business=False,
                 is_read_by_staff=False,
                 is_deleted=False
-            ).count()
+            ).exclude(sender_id__in=archived_ig_ids).count()
 
             whatsapp_unread = WhatsAppMessage.objects.filter(
                 is_from_business=False,
                 is_read_by_staff=False,
                 is_deleted=False
-            ).count()
+            ).exclude(from_number__in=archived_wa_numbers).count()
 
             email_unread = EmailMessage.objects.filter(
                 is_from_business=False,
@@ -5874,7 +5902,7 @@ def unread_messages_count(request):
                 is_deleted=False,
                 folder='INBOX',  # Only count INBOX messages for notifications
                 connection_id__in=accessible_connection_ids,
-            ).count()
+            ).exclude(thread_id__in=archived_email_threads).count()
 
         total_unread = facebook_unread + instagram_unread + whatsapp_unread + email_unread
 
