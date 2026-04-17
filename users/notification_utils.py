@@ -199,12 +199,21 @@ def create_notification(user, notification_type, title, message, ticket_id=None,
 
 def create_social_message_notification(platform, sender_name, message_text,
                                        conversation_id, sender_id,
+                                       account_id=None,
                                        assigned_user_id=None):
     """
     Create a 'message_received' notification for an incoming social message.
 
     If the conversation is assigned to a specific user, only that user is
-    notified.  Otherwise, up to 10 active users in the tenant are notified.
+    notified and the link is deep-linked into the "Assigned to me" tab.
+    Otherwise, up to 10 active users are notified and the link opens the
+    "All chats" tab.
+
+    `account_id` is the platform-side account identifier (Facebook page_id,
+    Instagram instagram_account_id, or WhatsApp waba_id). Together with
+    sender_id it's used to build the frontend chat ID (fb_<page>_<sender>,
+    ig_<account>_<sender>, wa_<waba>_<phone>) so the notification click
+    opens the exact chat rather than the messages index.
     """
     from django.contrib.auth import get_user_model
     User = get_user_model()
@@ -216,8 +225,26 @@ def create_social_message_notification(platform, sender_name, message_text,
         'conversation_id': conversation_id,
         'sender_name': sender_name,
         'sender_id': sender_id,
+        'account_id': account_id,
     }
-    link = f'/messages?conversation={conversation_id}'
+
+    # Build the chat ID in the exact format the frontend routes expect.
+    chat_id = None
+    if account_id and sender_id:
+        platform_lower = (platform or '').lower()
+        if platform_lower == 'facebook':
+            chat_id = f'fb_{account_id}_{sender_id}'
+        elif platform_lower == 'instagram':
+            chat_id = f'ig_{account_id}_{sender_id}'
+        elif platform_lower == 'whatsapp':
+            # Frontend strips the leading + from phone numbers when building
+            # the chat ID, so match that here.
+            normalized = str(sender_id).lstrip('+')
+            chat_id = f'wa_{account_id}_{normalized}'
+
+    # Fallback: if we can't build a proper chat ID, keep the user at the
+    # messages index rather than linking to a broken deep link.
+    base_link = f'/messages/{chat_id}' if chat_id else '/messages'
 
     if assigned_user_id:
         try:
@@ -229,12 +256,13 @@ def create_social_message_notification(platform, sender_name, message_text,
                 message=msg,
                 ticket_id=None,
                 metadata=meta,
-                link_url=link,
+                link_url=f'{base_link}?tab=assigned',
             )
         except User.DoesNotExist:
             pass
     else:
-        # No assignment — notify up to 10 active users
+        # No assignment — notify up to 10 active users. For each of them the
+        # chat is NOT assigned to them personally, so open the "All chats" tab.
         users = User.objects.filter(is_active=True)[:10]
         for user in users:
             create_notification(
@@ -244,5 +272,5 @@ def create_social_message_notification(platform, sender_name, message_text,
                 message=msg,
                 ticket_id=None,
                 metadata=meta,
-                link_url=link,
+                link_url=base_link,
             )

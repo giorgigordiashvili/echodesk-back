@@ -2137,6 +2137,7 @@ def facebook_webhook(request):
                                                             message_text=message_text,
                                                             conversation_id=sender_id,
                                                             sender_id=sender_id,
+                                                            account_id=page_id,
                                                             assigned_user_id=assigned_user_id,
                                                         )
                                                     except Exception as notif_err:
@@ -3580,6 +3581,7 @@ def instagram_webhook(request):
                                                     message_text=message_text,
                                                     conversation_id=sender_id,
                                                     sender_id=sender_id,
+                                                    account_id=account_connection.instagram_account_id,
                                                     assigned_user_id=assigned_user_id,
                                                 )
                                             except Exception as notif_err:
@@ -7781,6 +7783,7 @@ def whatsapp_webhook(request):
                             message_text=message_text,
                             conversation_id=from_number,
                             sender_id=from_number,
+                            account_id=account.waba_id,
                             assigned_user_id=assigned_user_id,
                         )
                     except Exception as notif_err:
