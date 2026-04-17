@@ -790,10 +790,28 @@ class CallLogViewSet(viewsets.ModelViewSet):
             finally:
                 upstream.close()
 
+        # Pick a Content-Type the browser's <audio> element will play. If the
+        # upstream nginx ever forgets the wav mime mapping (the system
+        # mime.types on Ubuntu doesn't ship with .wav) it sends
+        # application/octet-stream which Chrome/Safari refuse to play in an
+        # audio tag — override based on the source URL extension.
+        upstream_ct = (upstream.headers.get('Content-Type') or '').lower()
+        url_lower = source_url.lower()
+        if url_lower.endswith('.wav') and (
+            not upstream_ct or upstream_ct == 'application/octet-stream'
+        ):
+            content_type = 'audio/wav'
+        elif url_lower.endswith('.mp3') and (
+            not upstream_ct or upstream_ct == 'application/octet-stream'
+        ):
+            content_type = 'audio/mpeg'
+        else:
+            content_type = upstream_ct or 'audio/wav'
+
         response = StreamingHttpResponse(
             iterator(),
             status=upstream.status_code,
-            content_type=upstream.headers.get('Content-Type') or 'audio/wav',
+            content_type=content_type,
         )
         # Pass through seeking / caching headers where available.
         for header in ('Content-Length', 'Accept-Ranges', 'Content-Range', 'Last-Modified', 'ETag'):
