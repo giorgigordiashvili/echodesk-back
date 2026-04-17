@@ -734,6 +734,15 @@ class CallLogViewSet(viewsets.ModelViewSet):
         from django.http import StreamingHttpResponse
         import requests as _requests
 
+        # Recordings are admin-only — agents shouldn't be able to play back
+        # individual customer calls. Defense-in-depth alongside the serializer
+        # gate that already hides the URL from non-admins.
+        if not (request.user.is_staff or request.user.is_superuser):
+            return Response(
+                {'error': 'Only tenant admins can access call recordings.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         call_log = self.get_object()
 
         # Pick the first non-empty URL: legacy field, then related CallRecording.

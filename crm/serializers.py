@@ -84,6 +84,16 @@ class SipConfigurationDetailSerializer(serializers.ModelSerializer):
         ]
 
 
+def _is_admin_request(serializer):
+    """Tenant admin = is_staff or is_superuser. Recordings + review ratings
+    are gated to admins only — agents see neither the URL nor the score."""
+    request = serializer.context.get('request')
+    user = getattr(request, 'user', None)
+    if user is None or not user.is_authenticated:
+        return False
+    return bool(user.is_staff or user.is_superuser)
+
+
 class CallLogSerializer(serializers.ModelSerializer):
     """Enhanced serializer for CallLog model with SIP support"""
 
@@ -93,6 +103,7 @@ class CallLogSerializer(serializers.ModelSerializer):
     client_name = serializers.SerializerMethodField()
     sip_config_name = serializers.CharField(source='sip_configuration.name', read_only=True)
     recording_url = serializers.SerializerMethodField()
+    call_quality_score = serializers.SerializerMethodField()
 
     class Meta:
         model = CallLog
@@ -113,11 +124,13 @@ class CallLogSerializer(serializers.ModelSerializer):
     def get_recording_url(self, obj):
         """Return the recording URL, falling back to the related CallRecording.
 
-        Historical recordings were written to CallLog.recording_url; the
-        newer webhook pipeline writes to CallRecording.file_url instead and
-        doesn't always backfill the legacy field. Fall back to the related
-        CallRecording so both data shapes surface in the frontend.
+        Historical recordings were written to CallLog.recording_url; the newer
+        webhook pipeline writes to CallRecording.file_url instead and doesn't
+        always backfill the legacy field. Restricted to tenant admins only —
+        agents get an empty string so the recording UI hides itself.
         """
+        if not _is_admin_request(self):
+            return ''
         if obj.recording_url:
             return obj.recording_url
         # Reverse OneToOne raises RelatedObjectDoesNotExist when no recording
@@ -128,6 +141,14 @@ class CallLogSerializer(serializers.ModelSerializer):
         except CallRecording.DoesNotExist:
             return ''
         return recording.file_url or ''
+
+    @extend_schema_field(serializers.FloatField)
+    def get_call_quality_score(self, obj):
+        """Customer review rating (1-5 from IVR). Admin-only — agents
+        shouldn't see how individual customers rated them."""
+        if not _is_admin_request(self):
+            return None
+        return obj.call_quality_score
 
     @extend_schema_field(serializers.CharField)
     def get_client_name(self, obj):
@@ -299,12 +320,26 @@ class CallLogDetailSerializer(serializers.ModelSerializer):
     client_name = serializers.CharField(source='client.name', read_only=True)
     sip_config_name = serializers.CharField(source='sip_configuration.name', read_only=True)
     events = CallEventSerializer(many=True, read_only=True)
-    recording = CallRecordingSerializer(read_only=True)
+    recording = serializers.SerializerMethodField()
     recording_url = serializers.SerializerMethodField()
+    call_quality_score = serializers.SerializerMethodField()
+
+    @extend_schema_field(CallRecordingSerializer)
+    def get_recording(self, obj):
+        """Nested CallRecording — admin-only."""
+        if not _is_admin_request(self):
+            return None
+        try:
+            recording = obj.recording
+        except CallRecording.DoesNotExist:
+            return None
+        return CallRecordingSerializer(recording, context=self.context).data
 
     @extend_schema_field(serializers.CharField)
     def get_recording_url(self, obj):
-        """Fall back to CallRecording.file_url when the legacy field is empty."""
+        """Fall back to CallRecording.file_url; admin-only."""
+        if not _is_admin_request(self):
+            return ''
         if obj.recording_url:
             return obj.recording_url
         try:
@@ -312,6 +347,13 @@ class CallLogDetailSerializer(serializers.ModelSerializer):
         except CallRecording.DoesNotExist:
             return ''
         return recording.file_url or ''
+
+    @extend_schema_field(serializers.FloatField)
+    def get_call_quality_score(self, obj):
+        """Customer review rating (1-5 from IVR). Admin-only."""
+        if not _is_admin_request(self):
+            return None
+        return obj.call_quality_score
 
     class Meta:
         model = CallLog
