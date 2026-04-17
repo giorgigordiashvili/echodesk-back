@@ -715,6 +715,95 @@ class CallLogViewSet(viewsets.ModelViewSet):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
     @extend_schema(
+        summary="Stream call recording audio",
+        description=(
+            "Proxy the recording WAV bytes from the PBX recording host through "
+            "this API. Solves the browser's 403/CORS against the PBX recording "
+            "host, keeps the underlying URL private, and supports HTTP Range "
+            "so the <audio> element can seek."
+        ),
+        responses={
+            200: OpenApiTypes.BINARY,
+            404: OpenApiTypes.OBJECT,
+            502: OpenApiTypes.OBJECT,
+        },
+    )
+    @action(detail=True, methods=['get'], url_path='recording')
+    def stream_recording(self, request, pk=None):
+        """Stream the recording audio for a call log."""
+        from django.http import StreamingHttpResponse
+        import requests as _requests
+
+        call_log = self.get_object()
+
+        # Pick the first non-empty URL: legacy field, then related CallRecording.
+        source_url = call_log.recording_url
+        if not source_url:
+            try:
+                source_url = call_log.recording.file_url
+            except CallRecording.DoesNotExist:
+                source_url = None
+        if not source_url:
+            return Response(
+                {'error': 'No recording on this call'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Forward a Range request so the audio element can seek.
+        upstream_headers = {}
+        if 'HTTP_RANGE' in request.META:
+            upstream_headers['Range'] = request.META['HTTP_RANGE']
+
+        try:
+            upstream = _requests.get(
+                source_url,
+                headers=upstream_headers,
+                stream=True,
+                timeout=(5, 30),  # (connect, read)
+            )
+        except _requests.RequestException as exc:
+            logger.warning(
+                "Recording proxy unreachable for call %s (%s): %s",
+                call_log.pk, source_url, exc,
+            )
+            return Response(
+                {'error': 'Upstream recording server unreachable.'},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        if upstream.status_code >= 400:
+            logger.warning(
+                "Recording proxy got upstream %s for call %s (%s)",
+                upstream.status_code, call_log.pk, source_url,
+            )
+            upstream.close()
+            return Response(
+                {'error': f'Upstream recording server returned {upstream.status_code}.'},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        def iterator():
+            try:
+                for chunk in upstream.iter_content(chunk_size=64 * 1024):
+                    if chunk:
+                        yield chunk
+            finally:
+                upstream.close()
+
+        response = StreamingHttpResponse(
+            iterator(),
+            status=upstream.status_code,
+            content_type=upstream.headers.get('Content-Type') or 'audio/wav',
+        )
+        # Pass through seeking / caching headers where available.
+        for header in ('Content-Length', 'Accept-Ranges', 'Content-Range', 'Last-Modified', 'ETag'):
+            if header in upstream.headers:
+                response[header] = upstream.headers[header]
+        response['Cache-Control'] = 'private, max-age=600'
+        response['Content-Disposition'] = f'inline; filename="call-{call_log.pk}.wav"'
+        return response
+
+    @extend_schema(
         summary="Start call recording",
         description="Start recording for an active call",
         responses={
@@ -1617,13 +1706,20 @@ def recording_webhook(request):
             recording.file_size = file_size
         if duration_seconds:
             recording.duration = timedelta(seconds=duration_seconds)
-        
+
         if recording_status == 'started':
             recording.started_at = timezone.now()
         elif recording_status == 'completed':
             recording.completed_at = timezone.now()
-            
+
         recording.save()
+
+        # Also mirror the URL onto the legacy CallLog.recording_url field so
+        # list endpoints / older clients still see the recording even without
+        # the serializer fallback.
+        if file_url and call_log.recording_url != file_url:
+            call_log.recording_url = file_url
+            call_log.save(update_fields=['recording_url'])
         
         # Create call event
         event_type = f'recording_{recording_status}'

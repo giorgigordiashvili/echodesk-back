@@ -86,12 +86,13 @@ class SipConfigurationDetailSerializer(serializers.ModelSerializer):
 
 class CallLogSerializer(serializers.ModelSerializer):
     """Enhanced serializer for CallLog model with SIP support"""
-    
+
     handled_by_name = serializers.SerializerMethodField()
     transferred_to_user_name = serializers.SerializerMethodField()
     duration_display = serializers.SerializerMethodField()
     client_name = serializers.SerializerMethodField()
     sip_config_name = serializers.CharField(source='sip_configuration.name', read_only=True)
+    recording_url = serializers.SerializerMethodField()
 
     class Meta:
         model = CallLog
@@ -107,6 +108,26 @@ class CallLogSerializer(serializers.ModelSerializer):
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'call_id', 'created_at', 'updated_at', 'client', 'social_client', 'parent_call']
+
+    @extend_schema_field(serializers.CharField)
+    def get_recording_url(self, obj):
+        """Return the recording URL, falling back to the related CallRecording.
+
+        Historical recordings were written to CallLog.recording_url; the
+        newer webhook pipeline writes to CallRecording.file_url instead and
+        doesn't always backfill the legacy field. Fall back to the related
+        CallRecording so both data shapes surface in the frontend.
+        """
+        if obj.recording_url:
+            return obj.recording_url
+        # Reverse OneToOne raises RelatedObjectDoesNotExist when no recording
+        # row exists — guard with try/except rather than hasattr so a
+        # select_related hit doesn't spuriously fail.
+        try:
+            recording = obj.recording
+        except CallRecording.DoesNotExist:
+            return ''
+        return recording.file_url or ''
 
     @extend_schema_field(serializers.CharField)
     def get_client_name(self, obj):
@@ -279,6 +300,18 @@ class CallLogDetailSerializer(serializers.ModelSerializer):
     sip_config_name = serializers.CharField(source='sip_configuration.name', read_only=True)
     events = CallEventSerializer(many=True, read_only=True)
     recording = CallRecordingSerializer(read_only=True)
+    recording_url = serializers.SerializerMethodField()
+
+    @extend_schema_field(serializers.CharField)
+    def get_recording_url(self, obj):
+        """Fall back to CallRecording.file_url when the legacy field is empty."""
+        if obj.recording_url:
+            return obj.recording_url
+        try:
+            recording = obj.recording
+        except CallRecording.DoesNotExist:
+            return ''
+        return recording.file_url or ''
 
     class Meta:
         model = CallLog
