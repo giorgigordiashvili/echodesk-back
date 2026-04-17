@@ -8403,6 +8403,7 @@ def email_connection_status(request):
                 'last_sync_at': conn.last_sync_at.isoformat() if conn.last_sync_at else None,
                 'last_sync_error': conn.last_sync_error,
                 'auto_disabled_at': conn.auto_disabled_at.isoformat() if conn.auto_disabled_at else None,
+                'sync_failure_count': conn.sync_failure_count,
                 'sync_folder': conn.sync_folder,
                 'connected_at': conn.created_at.isoformat(),
                 'signature_enabled': conn.signature_enabled,
@@ -8683,6 +8684,7 @@ def email_reactivate(request):
         connection.is_active = True
         connection.auto_disabled_at = None
         connection.last_sync_error = ''
+        connection.sync_failure_count = 0
         connection.save()
 
         logger.info(

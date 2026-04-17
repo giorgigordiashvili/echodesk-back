@@ -1078,6 +1078,15 @@ class EmailConnection(models.Model):
             "to email settings and hit Reactivate to resume sync."
         ),
     )
+    sync_failure_count = models.PositiveIntegerField(
+        default=0,
+        help_text=(
+            "Number of consecutive sync attempts that have failed. Reset to 0 "
+            "on a successful sync or on manual reactivate. Once this crosses "
+            "the sync worker's threshold the connection is auto-disabled, "
+            "even for 'transient' errors (e.g. repeated connection resets)."
+        ),
+    )
 
     # Sync settings
     sync_folder = models.CharField(max_length=100, default='INBOX', help_text="IMAP folder to sync")

@@ -1053,12 +1053,19 @@ def _connect_imap(connection):
     return imap
 
 
+SYNC_FAILURE_THRESHOLD = 5
+
+
 def _auto_disable_email_connection(connection, error_message: str) -> None:
-    """Flip a connection to disabled after a non-transient sync failure.
+    """Flip a connection to disabled after a sync failure.
+
+    Triggered either by a non-transient error on a single attempt, or by
+    repeated transient errors accumulating past ``SYNC_FAILURE_THRESHOLD``.
 
     - Sets ``is_active=False`` so subsequent Celery runs skip it.
     - Stamps ``auto_disabled_at`` so the frontend can show "disabled by system"
       and force the user through the Reactivate flow (which re-tests creds).
+    - Resets ``sync_failure_count`` to 0 — reactivate starts from a clean slate.
     - Notifies tenant admins so the outage doesn't go silent.
 
     Safe to call when the connection is already auto-disabled — we skip the
@@ -1068,7 +1075,10 @@ def _auto_disable_email_connection(connection, error_message: str) -> None:
     connection.is_active = False
     connection.auto_disabled_at = timezone.now()
     connection.last_sync_error = error_message
-    connection.save(update_fields=['is_active', 'auto_disabled_at', 'last_sync_error'])
+    connection.sync_failure_count = 0
+    connection.save(update_fields=[
+        'is_active', 'auto_disabled_at', 'last_sync_error', 'sync_failure_count'
+    ])
 
     logger.warning(
         f"[EMAIL_SYNC] Auto-disabled {connection.email_address} — {error_message}"
@@ -1207,26 +1217,46 @@ def sync_imap_messages(connection, max_messages: int = 500) -> int:
         except Exception:
             pass  # Connection may already be closed
 
-        # Update connection status
+        # Update connection status — success clears the error + failure counter
         connection.last_sync_at = timezone.now()
         connection.last_sync_error = ''
-        connection.save()
+        connection.sync_failure_count = 0
+        connection.save(update_fields=['last_sync_at', 'last_sync_error', 'sync_failure_count'])
 
         logger.info(f"Synced {total_new_count} total new emails for {connection.email_address}")
         return total_new_count
 
     except (ssl.SSLError, socket.error, OSError, imaplib.IMAP4.abort) as e:
-        # Transient SSL/socket errors (e.g. BAD_LENGTH, EOF violations) are
-        # expected with flaky mail servers.  Log as warning so they don't
-        # fire Sentry alerts — the next sync cycle will retry automatically.
-        logger.warning(f"Transient email sync error for {connection.email_address}: {e}")
-        connection.last_sync_error = str(e)
-        connection.save(update_fields=['last_sync_error'])
+        # Transient SSL/socket errors (e.g. BAD_LENGTH, EOF violations, "connection
+        # reset by peer"). Normally we retry next cycle — but if the same class of
+        # error keeps happening, the server is effectively refusing us and retrying
+        # forever won't help. Track consecutive failures and auto-disable past the
+        # threshold so the user sees the outage.
+        connection.sync_failure_count = (connection.sync_failure_count or 0) + 1
+        failure_count = connection.sync_failure_count
+
+        if failure_count >= SYNC_FAILURE_THRESHOLD:
+            logger.warning(
+                f"[EMAIL_SYNC] {connection.email_address} hit "
+                f"{failure_count} consecutive transient errors; auto-disabling. "
+                f"Last error: {e}"
+            )
+            _auto_disable_email_connection(
+                connection,
+                f"Disabled after {failure_count} consecutive failures. Last error: {e}",
+            )
+        else:
+            logger.warning(
+                f"Transient email sync error for {connection.email_address} "
+                f"({failure_count}/{SYNC_FAILURE_THRESHOLD}): {e}"
+            )
+            connection.last_sync_error = str(e)
+            connection.save(update_fields=['last_sync_error', 'sync_failure_count'])
         return 0
     except Exception as e:
         # Non-transient (auth failure, host resolution, permission, etc.) —
-        # disable the connection so the worker stops retrying. The user must
-        # fix credentials and click Reactivate in the UI to resume sync.
+        # disable immediately. The user must fix credentials and click
+        # Reactivate in the UI to resume sync.
         logger.error(f"Email sync error for {connection.email_address}: {e}")
         _auto_disable_email_connection(connection, str(e))
         return 0
