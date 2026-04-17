@@ -631,11 +631,20 @@ class TeamChatConversationViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        """Only show conversations the user is part of, excluding hidden ones"""
+        """Conversations the user is part of — scoped to today's activity.
+
+        "Recent Chats" in the sidebar shows only conversations whose last
+        message was sent today (server TZ). Brand-new conversations without
+        messages are also included if created/updated today so a freshly
+        opened chat doesn't immediately vanish.
+        """
         # Get IDs of conversations hidden by this user
         hidden_conversation_ids = HiddenTeamChatConversation.objects.filter(
             user=self.request.user
         ).values_list('conversation_id', flat=True)
+
+        from django.utils import timezone
+        today_start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
 
         return TeamChatConversation.objects.filter(
             participants=self.request.user
@@ -646,6 +655,9 @@ class TeamChatConversationViewSet(viewsets.ModelViewSet):
             'messages', 'messages__sender', 'messages__sender__online_status'
         ).annotate(
             latest_message_time=Max('messages__created_at')
+        ).filter(
+            Q(latest_message_time__gte=today_start)
+            | Q(latest_message_time__isnull=True, updated_at__gte=today_start)
         ).order_by('-latest_message_time', '-updated_at')
 
     def get_serializer_class(self):

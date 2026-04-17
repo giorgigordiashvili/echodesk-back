@@ -408,3 +408,51 @@ class TestTeamChatModels(TeamChatTestMixin, EchoDeskTenantTestCase):
         first_read_at = msg.read_at
         msg.mark_as_read()
         self.assertEqual(msg.read_at, first_read_at)
+
+
+# ============================================================
+# Recent Chats (today-only scoping)
+# ============================================================
+class TestConversationListTodayFilter(TeamChatTestMixin, EchoDeskTenantTestCase):
+    """The list endpoint only returns conversations active today."""
+
+    def setUp(self):
+        super().setUp()
+        self.user1 = self.create_user(email='today1@test.com')
+        self.user2 = self.create_user(email='today2@test.com')
+
+    def test_today_message_shows_conversation(self):
+        """Conversation with a message today appears in Recent Chats."""
+        conv = self._make_conversation(self.user1, self.user2)
+        self._make_message(conv, self.user2, 'hi today')
+        resp = self.api_get(CONVERSATIONS_URL, user=self.user1)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        returned_ids = [c['id'] for c in resp.data.get('results', resp.data)]
+        self.assertIn(conv.pk, returned_ids)
+
+    def test_yesterday_message_hides_conversation(self):
+        """A conversation whose latest message is older than today is excluded."""
+        from datetime import timedelta
+        from django.utils import timezone
+        conv = self._make_conversation(self.user1, self.user2)
+        msg = self._make_message(conv, self.user2, 'stale')
+        # Backdate the message past today's start.
+        yesterday = timezone.now() - timedelta(days=1, hours=1)
+        TeamChatMessage.objects.filter(pk=msg.pk).update(created_at=yesterday)
+        # Also backdate the conversation's updated_at so it doesn't leak via
+        # the empty-conversation branch.
+        TeamChatConversation.objects.filter(pk=conv.pk).update(updated_at=yesterday)
+
+        resp = self.api_get(CONVERSATIONS_URL, user=self.user1)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        returned_ids = [c['id'] for c in resp.data.get('results', resp.data)]
+        self.assertNotIn(conv.pk, returned_ids)
+
+    def test_empty_conversation_updated_today_shows(self):
+        """A brand-new conversation with no messages but updated today shows."""
+        conv = self._make_conversation(self.user1, self.user2)
+        # No message at all — updated_at is auto-set to now().
+        resp = self.api_get(CONVERSATIONS_URL, user=self.user1)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        returned_ids = [c['id'] for c in resp.data.get('results', resp.data)]
+        self.assertIn(conv.pk, returned_ids)
