@@ -5457,9 +5457,6 @@ def unified_conversations(request):
     # Load WhatsApp conversations (optimized - single DISTINCT ON query)
     if 'whatsapp' in enabled_platforms:
         try:
-            from django.db.models import Case, When, Value, CharField
-            from django.db.models.functions import Coalesce
-
             accounts = WhatsAppBusinessAccount.objects.all()
             for account in accounts:
                 base_filter = {
@@ -5467,36 +5464,67 @@ def unified_conversations(request):
                     'is_deleted': False,
                 }
 
-                # Annotate with customer_number: use to_number when business sends, from_number when customer sends
-                # This ensures we group by the CUSTOMER's number, not the business number
-                annotated_qs = WhatsAppMessage.objects.filter(
-                    **base_filter
-                ).annotate(
-                    customer_number=Case(
-                        When(is_from_business=True, then='to_number'),
-                        default='from_number',
-                        output_field=CharField()
-                    )
-                )
+                # Split into two index-backed DISTINCT ON queries instead of using
+                # a Case/When annotation (which can't use an index). Customer-sent
+                # messages group by from_number; business-sent messages group by
+                # to_number. The indexes (business_account, from_number, -timestamp)
+                # and (business_account, to_number, -timestamp) make both scans
+                # cheap — Postgres uses an Index Scan and emits one row per key.
+                customer_sent = WhatsAppMessage.objects.filter(
+                    **base_filter, is_from_business=False
+                ).order_by('from_number', '-timestamp').distinct('from_number')
 
-                # Get latest message per customer_number using DISTINCT ON
-                latest_messages_qs = annotated_qs.order_by('customer_number', '-timestamp').distinct('customer_number')
+                business_sent = WhatsAppMessage.objects.filter(
+                    **base_filter, is_from_business=True
+                ).order_by('to_number', '-timestamp').distinct('to_number')
 
-                # Apply search filter if provided
+                # Merge in Python: pick whichever side has the newer message per
+                # customer_number. Each side already has at most one row per key.
+                latest_by_customer = {}
+                for m in customer_sent:
+                    latest_by_customer[m.from_number] = m
+                for m in business_sent:
+                    existing = latest_by_customer.get(m.to_number)
+                    if not existing or m.timestamp > existing.timestamp:
+                        latest_by_customer[m.to_number] = m
+
+                # Apply search filter if provided. We still use the annotated
+                # queryset here only to collect matching customer_numbers — this
+                # path is fine because it's only hit when search_query is set.
                 if search_query:
-                    matching_numbers = annotated_qs.filter(
-                        Q(contact_name__icontains=search_query) |
-                        Q(message_text__icontains=search_query) |
-                        Q(from_number__icontains=search_query) |
-                        Q(to_number__icontains=search_query)
-                    ).values_list('customer_number', flat=True).distinct()
-                    latest_messages_qs = latest_messages_qs.filter(customer_number__in=matching_numbers)
+                    from django.db.models import Case, When, CharField
+                    matching_numbers = set(
+                        WhatsAppMessage.objects.filter(
+                            **base_filter
+                        ).annotate(
+                            customer_number=Case(
+                                When(is_from_business=True, then='to_number'),
+                                default='from_number',
+                                output_field=CharField()
+                            )
+                        ).filter(
+                            Q(contact_name__icontains=search_query) |
+                            Q(message_text__icontains=search_query) |
+                            Q(from_number__icontains=search_query) |
+                            Q(to_number__icontains=search_query)
+                        ).values_list('customer_number', flat=True).distinct()
+                    )
+                    latest_by_customer = {
+                        k: v for k, v in latest_by_customer.items() if k in matching_numbers
+                    }
 
-                latest_messages = list(latest_messages_qs)
-                if not latest_messages:
+                if not latest_by_customer:
                     continue
 
-                customer_numbers = [msg.customer_number for msg in latest_messages]
+                # Synthesize customer_number on each message object so the rest of
+                # the loop (which reads msg.customer_number) keeps working without
+                # changes. This is pure in-memory assignment — no query cost.
+                latest_messages = []
+                for customer_number, msg in latest_by_customer.items():
+                    msg.customer_number = customer_number
+                    latest_messages.append(msg)
+
+                customer_numbers = list(latest_by_customer.keys())
 
                 # Batch fetch unread counts only (messages FROM customer, not from business)
                 unread_counts = {}
@@ -5559,16 +5587,18 @@ def unified_conversations(request):
             if email_connection_id:
                 connections = connections.filter(id=email_connection_id)
 
-            # Helper to check if user can access an email connection
+            # Helper to check if user can access an email connection. Uses the
+            # already-prefetched user_assignments to avoid N+1 queries — calling
+            # .exists() or .filter() on the related manager bypasses Django's
+            # prefetch cache and fires new SQL, so we iterate in Python instead.
             def can_access_email_connection(conn):
-                # If no user assignments, everyone can access
-                if not conn.user_assignments.exists():
+                assignments = list(conn.user_assignments.all())
+                if not assignments:
                     return True
-                # Admins can always access
                 if is_admin:
                     return True
-                # Check if user is assigned to this connection
-                return conn.user_assignments.filter(user=request.user).exists()
+                user_id = request.user.id
+                return any(a.user_id == user_id for a in assignments)
 
             for conn in connections:
                 # Skip connections the user cannot access

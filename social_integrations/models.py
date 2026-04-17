@@ -140,6 +140,11 @@ class FacebookMessage(models.Model):
 
     class Meta:
         ordering = ['-timestamp']
+        indexes = [
+            # Supports the DISTINCT ON (sender_id) ORDER BY sender_id, timestamp DESC
+            # used by unified_conversations to find the latest message per thread.
+            models.Index(fields=['page_connection', 'sender_id', '-timestamp']),
+        ]
 
     def __str__(self):
         if self.message_text:
@@ -298,6 +303,11 @@ class InstagramMessage(models.Model):
 
     class Meta:
         ordering = ['-timestamp']
+        indexes = [
+            # Supports the DISTINCT ON (sender_id) ORDER BY sender_id, timestamp DESC
+            # used by unified_conversations to find the latest message per thread.
+            models.Index(fields=['account_connection', 'sender_id', '-timestamp']),
+        ]
 
     def __str__(self):
         if self.message_text:
@@ -587,6 +597,13 @@ class WhatsAppMessage(models.Model):
         indexes = [
             models.Index(fields=['from_number', 'to_number']),
             models.Index(fields=['business_account', 'timestamp']),
+            # Supports DISTINCT ON (from_number) ORDER BY from_number, -timestamp
+            # used by unified_conversations to find the latest customer-sent message
+            # per customer (is_from_business=False branch of the split query).
+            models.Index(fields=['business_account', 'from_number', '-timestamp']),
+            # Supports DISTINCT ON (to_number) ORDER BY to_number, -timestamp used
+            # for the latest business-sent message per customer (is_from_business=True).
+            models.Index(fields=['business_account', 'to_number', '-timestamp']),
         ]
 
     def __str__(self):
