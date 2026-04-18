@@ -82,6 +82,7 @@ SHARED_APPS = [
     'users',    # Add users to shared apps so public schema gets the table
     'crm',      # Move CRM to shared apps so it's available in public schema too
     'help_center',  # Help center and documentation - global content
+    'blog',     # Marketing-site blog + AI-drafted posts — public schema only
 ]
 
 # Tenant-specific applications
@@ -458,6 +459,13 @@ FACEBOOK_APP_VERSION = config('FACEBOOK_APP_VERSION', default='v23.0')
 OPENAI_API_KEY = config('OPENAI_API_KEY', default='')
 OPENAI_MODEL = config('OPENAI_MODEL', default='gpt-4o')
 
+# Anthropic — powers the blog-post AI drafting pipeline.
+# The blog app reads these at request time; unset key ⇒ management
+# command exits with a clear error instead of crashing silently.
+ANTHROPIC_API_KEY = config('ANTHROPIC_API_KEY', default='')
+BLOG_AI_MODEL = config('BLOG_AI_MODEL', default='claude-sonnet-4-6')
+BLOG_DAILY_POST_LIMIT = config('BLOG_DAILY_POST_LIMIT', default=2, cast=int)
+
 # TikTok Shop Partner Center Integration Settings
 TIKTOK_SHOP_APP_KEY = config('TIKTOK_SHOP_APP_KEY', default='')
 TIKTOK_SHOP_APP_SECRET = config('TIKTOK_SHOP_APP_SECRET', default='')
@@ -601,6 +609,12 @@ CELERY_BEAT_SCHEDULE = {
     'check-low-stock': {
         'task': 'ecommerce_crm.tasks.check_low_stock_products',
         'schedule': crontab(hour=8, minute=0),  # Daily at 8 AM
+    },
+    # Blog: draft pending topics into BlogPost(review) via Claude.
+    # Daily at 06:00 UTC = 10:00 Tbilisi. Drafts BLOG_DAILY_POST_LIMIT posts.
+    'generate-daily-blog-posts': {
+        'task': 'blog.tasks.generate_daily_blog_posts',
+        'schedule': crontab(hour=6, minute=0),
     },
 }
 
