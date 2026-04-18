@@ -2250,6 +2250,9 @@ def call_routing(request):
 
     clean_did = did.replace('+', '').replace(' ', '').replace('-', '')
 
+    # Lazy imports so shared-schema code paths aren't touched at import time.
+    from crm.models import InboundRoute, Queue, Trunk
+
     # Search across all tenants for the SIP configuration with this phone number
     tenants = Tenant.objects.exclude(schema_name='public')
     for tenant in tenants:
@@ -2273,22 +2276,101 @@ def call_routing(request):
                 is_working = pbx_settings.is_working_hours_now()
                 sound_urls = pbx_settings.get_sound_urls()
 
-                # Get active extensions
-                extensions = list(
+                # Resolve InboundRoute for this DID (exact, then any route whose
+                # trunk owns this DID). When matched we can override extensions
+                # and action with the route's configured destination.
+                route = InboundRoute.objects.filter(
+                    did=did, is_active=True
+                ).first() or InboundRoute.objects.filter(
+                    did__endswith=clean_did[-9:], is_active=True
+                ).first()
+                if not route:
+                    trunk_for_did = Trunk.objects.filter(
+                        phone_numbers__contains=[did], is_active=True
+                    ).first()
+                    if trunk_for_did:
+                        route = InboundRoute.objects.filter(
+                            trunk=trunk_for_did, is_active=True
+                        ).order_by('priority').first()
+
+                inbound_route_info = None
+                queue_name = None
+                queue_slug = None
+                destination_extensions = []
+                if route:
+                    dest_type = str(route.destination_type or 'queue')
+                    inbound_route_info = {
+                        'id': route.id,
+                        'did': route.did,
+                        'destination_type': dest_type,
+                        'priority': route.priority,
+                    }
+                    if dest_type == 'queue' and route.destination_queue_id:
+                        queue = Queue.objects.filter(
+                            id=route.destination_queue_id, is_active=True
+                        ).select_related('group').first()
+                        if queue:
+                            # Asterisk queue name. Until realtime sync is enabled,
+                            # Asterisk still has the hand-written queue (e.g. "support"),
+                            # so we return the bare slug. Once ASTERISK_SYNC_ENABLED is
+                            # on, swap to the tenant-prefixed name.
+                            sync_on = getattr(django_settings, 'ASTERISK_SYNC_ENABLED', False)
+                            queue_slug = queue.slug
+                            queue_name = (
+                                f"{tenant.schema_name}_{queue.slug}" if sync_on else queue.slug
+                            )
+                            inbound_route_info['queue_slug'] = queue.slug
+                            inbound_route_info['queue_name'] = queue_name
+                            # Derive ringing extensions from the backing group.
+                            destination_extensions = list(
+                                UserPhoneAssignment.objects.filter(
+                                    user__tenant_groups=queue.group,
+                                    is_active=True,
+                                ).values_list('extension', flat=True).distinct()
+                            )
+                    elif dest_type == 'extension' and route.destination_extension_id:
+                        assignment = UserPhoneAssignment.objects.filter(
+                            id=route.destination_extension_id, is_active=True
+                        ).first()
+                        if assignment:
+                            destination_extensions = [assignment.extension]
+                            inbound_route_info['extension'] = assignment.extension
+                    elif dest_type == 'ivr_custom':
+                        inbound_route_info['ivr_custom_context'] = route.ivr_custom_context
+                    elif dest_type in ('voicemail', 'hangup'):
+                        pass  # handled below by action
+
+                # Legacy: if no InboundRoute matched, fall back to all active
+                # extensions on the SIP config (prior behavior).
+                fallback_extensions = list(
                     UserPhoneAssignment.objects.filter(
                         sip_configuration=sip_config, is_active=True
                     ).values_list('extension', flat=True)
                 )
+                extensions = destination_extensions or fallback_extensions
+
+                # Determine action: InboundRoute overrides, else working-hours gate
+                if route and not is_working:
+                    action = 'after_hours'
+                elif route and route.destination_type:
+                    action = str(route.destination_type)
+                else:
+                    action = 'queue' if is_working else 'after_hours'
 
                 response_data = {
                     'is_working_hours': is_working,
-                    'action': 'queue' if is_working else 'after_hours',
+                    'action': action,
                     'sounds': sound_urls,
                     'extensions': extensions,
                     'voicemail_enabled': pbx_settings.voicemail_enabled,
                     'after_hours_action': pbx_settings.after_hours_action,
                     'forward_number': pbx_settings.forward_number if pbx_settings.after_hours_action == 'forward' else None,
                     'review_method': pbx_settings.review_method,
+                    # New fields driven by the PBX management panel.
+                    'inbound_route': inbound_route_info,
+                    'queue_name': queue_name,
+                    'queue_slug': queue_slug,
+                    'tenant_schema': tenant.schema_name,
                 }
                 return Response(response_data)
         except Exception:

@@ -104,7 +104,7 @@ def main():
     data = query_echodesk_api(did)
 
     if data is None:
-        # API unreachable — fallback to open (route to queue)
+        # API unreachable — fallback to open (route to queue), legacy queue name.
         logging.warning('API unreachable, using fallback defaults')
         agi_set_variable('IS_WORKING', 'true')
         agi_set_variable('ROUTE_ACTION', 'queue')
@@ -114,6 +114,11 @@ def main():
         agi_set_variable('SOUND_VOICEMAIL_PROMPT', '')
         agi_set_variable('VM_ENABLED', 'false')
         agi_set_variable('FORWARD_NUMBER', '')
+        agi_set_variable('QUEUE_NAME', 'support')
+        agi_set_variable('QUEUE_SLUG', 'support')
+        agi_set_variable('TENANT_SCHEMA', '')
+        agi_set_variable('DEST_EXTENSIONS', '')
+        agi_set_variable('IVR_CONTEXT', '')
         agi_verbose('EchoDesk: API unreachable, fallback to queue')
         return
 
@@ -137,7 +142,26 @@ def main():
         url = sounds.get(sound_key, '') or ''
         agi_set_variable(f'SOUND_{sound_key.upper()}', url)
 
-    status_msg = f'EchoDesk: working={is_working}, action={action}, vm={vm_enabled}'
+    # InboundRoute-driven fields (new in PBX management panel):
+    # - QUEUE_NAME: Asterisk queue name to dial when action=queue. Before ARA
+    #   cutover this is the raw slug (e.g. "support"); after cutover it's the
+    #   tenant-prefixed name (e.g. "amanati_support").
+    # - QUEUE_SLUG: the product-level slug, independent of Asterisk naming.
+    # - TENANT_SCHEMA: helpful for logs + multi-tenant context switching later.
+    # - DEST_EXTENSIONS: comma-joined extensions for direct-extension routes.
+    # - IVR_CONTEXT: dialplan context name when action=ivr_custom.
+    agi_set_variable('QUEUE_NAME', data.get('queue_name') or '')
+    agi_set_variable('QUEUE_SLUG', data.get('queue_slug') or '')
+    agi_set_variable('TENANT_SCHEMA', data.get('tenant_schema') or '')
+    extensions = data.get('extensions') or []
+    agi_set_variable('DEST_EXTENSIONS', ','.join(extensions))
+    route_info = data.get('inbound_route') or {}
+    agi_set_variable('IVR_CONTEXT', route_info.get('ivr_custom_context') or '')
+
+    status_msg = (
+        f'EchoDesk: working={is_working}, action={action}, vm={vm_enabled}, '
+        f'queue={data.get("queue_name") or "-"}, tenant={data.get("tenant_schema") or "-"}'
+    )
     logging.info(status_msg)
     agi_verbose(status_msg)
 
