@@ -119,6 +119,7 @@ urlpatterns = [
     path('api/help/', include('help_center.urls')),
     path('api/blog/', include('blog.urls')),
     path('api/landing/', include('landing_pages.urls')),
+    path('api/marketing/', include('marketing.urls')),
     path('api/bookings/', include('booking_management.urls')),
     path('api/leave/', include('leave_management.urls')),
     path('api/invoices/', include('invoices.urls')),

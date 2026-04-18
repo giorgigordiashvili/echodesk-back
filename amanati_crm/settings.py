@@ -84,6 +84,7 @@ SHARED_APPS = [
     'help_center',  # Help center and documentation - global content
     'blog',     # Marketing-site blog + AI-drafted posts — public schema only
     'landing_pages',  # Marketing-site landing pages + AI-drafted — public schema only
+    'marketing',  # Marketing-site testimonials + contact form + newsletter — public schema only
 ]
 
 # Tenant-specific applications
@@ -693,6 +694,10 @@ EMAIL_HOST_USER = 'apikey'  # This is always 'apikey' for SendGrid
 EMAIL_HOST_PASSWORD = SENDGRID_API_KEY
 DEFAULT_FROM_EMAIL = SENDGRID_FROM_EMAIL
 SERVER_EMAIL = SENDGRID_FROM_EMAIL
+
+# Marketing-site sales inbox — new contact-form submissions go here.
+SALES_EMAIL = config('SALES_EMAIL', default='info@echodesk.ge')
+SITE_URL = config('SITE_URL', default='https://echodesk.ge')
 
 # Vercel Deployment Configuration
 VERCEL_TOKEN = config('VERCEL_TOKEN', default='')
