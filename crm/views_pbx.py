@@ -1,6 +1,6 @@
 """ViewSets for the PBX management panel (Trunks, Queues, Inbound routes).
 
-All endpoints are gated by the ``sip_calling`` subscription feature via the
+All endpoints are gated by the ``ip_calling`` subscription feature via the
 ``HasSubscriptionFeature`` DRF permission class. The sync layer that mirrors
 these rows into Asterisk's realtime Postgres is built in a follow-up step.
 """
@@ -23,9 +23,9 @@ from .serializers import (
 
 
 class _SipCallingFeature(HasSubscriptionFeature):
-    """Bind ``HasSubscriptionFeature`` to the ``sip_calling`` feature key."""
+    """Bind ``HasSubscriptionFeature`` to the ``ip_calling`` feature key."""
 
-    required_feature = 'sip_calling'
+    required_feature = 'ip_calling'
 
 
 @extend_schema(tags=['PBX'])
@@ -34,7 +34,7 @@ class TrunkViewSet(viewsets.ModelViewSet):
 
     Trunks represent the connection to a provider (Magti, Silknet, …) and
     own the set of inbound DIDs that route through them. Gated by the
-    ``sip_calling`` subscription feature.
+    ``ip_calling`` subscription feature.
     """
 
     permission_classes = [permissions.IsAuthenticated, _SipCallingFeature]
@@ -60,7 +60,7 @@ class QueueViewSet(viewsets.ModelViewSet):
 
     A queue is backed by a ``TenantGroup`` — members with an active
     ``UserPhoneAssignment`` are materialised into ``QueueMember`` rows
-    by the sync layer. Gated by the ``sip_calling`` subscription feature.
+    by the sync layer. Gated by the ``ip_calling`` subscription feature.
     """
 
     permission_classes = [permissions.IsAuthenticated, _SipCallingFeature]

@@ -2,7 +2,7 @@
 
 All aggregation is performed DB-side via ``annotate``/``aggregate`` plus
 ``TruncDate``/``Extract`` — there are no Python loops over large
-querysets. All endpoints are gated by the ``sip_calling`` subscription
+querysets. All endpoints are gated by the ``ip_calling`` subscription
 feature and require an authenticated user.
 """
 
@@ -105,7 +105,7 @@ def _answered_durations_filter() -> Q:
 )
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
-@require_subscription_feature('sip_calling')
+@require_subscription_feature('ip_calling')
 def users_stats(request):
     """Per-user call rollup for a month."""
     month_str = request.query_params.get('month')
@@ -194,7 +194,7 @@ def users_stats(request):
 )
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
-@require_subscription_feature('sip_calling')
+@require_subscription_feature('ip_calling')
 def user_timeline(request, user_id: int):
     """Day-bucketed call counts + talk time for a single user."""
     month_str = request.query_params.get('month')
@@ -287,7 +287,7 @@ def user_timeline(request, user_id: int):
 )
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
-@require_subscription_feature('sip_calling')
+@require_subscription_feature('ip_calling')
 def queue_stats(request):
     """Queue SLA metrics (answered/abandoned, avg wait, peak hour)."""
     queue_id = request.query_params.get('queue_id')
@@ -391,7 +391,7 @@ def queue_stats(request):
 )
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
-@require_subscription_feature('sip_calling')
+@require_subscription_feature('ip_calling')
 def overview_stats(request):
     """Tenant-wide call overview (numbers + top 5 users)."""
     range_str = request.query_params.get('range', 'month')

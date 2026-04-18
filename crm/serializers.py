@@ -572,7 +572,7 @@ class TrunkSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at', 'updated_at']
         extra_kwargs = {
             # Password is returned so admins can copy it back into provisioning
-            # scripts; the viewset is already gated by sip_calling feature.
+            # scripts; the viewset is already gated by ip_calling feature.
             'password': {'write_only': False},
         }
 
