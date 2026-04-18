@@ -1,5 +1,56 @@
-from django.contrib import admin
-from .models import Client, CallLog, SipConfiguration, CallEvent, CallRecording
+from django.contrib import admin, messages
+from django.db import connection
+
+from .asterisk_sync import AsteriskStateSync
+from .models import (
+    Client, CallLog, SipConfiguration, CallEvent, CallRecording,
+    Trunk, Queue, QueueMember, InboundRoute, UserPhoneAssignment,
+)
+
+
+def _resync_objs(modeladmin, request, queryset, sync_method_name: str):
+    """Shared implementation for the "Resync to Asterisk" admin action.
+
+    Iterates the selected queryset, calls the matching ``AsteriskStateSync``
+    method for each row, and reports counts via the Django messages framework.
+    Errors inside the service are swallowed/logged, so this surfaces a coarse
+    success count rather than a per-row status.
+    """
+    schema = getattr(connection, "schema_name", None)
+    if not schema or schema == "public":
+        modeladmin.message_user(
+            request,
+            "Asterisk resync requires a tenant context; run this from a tenant admin.",
+            level=messages.ERROR,
+        )
+        return
+
+    sync = AsteriskStateSync(schema)
+    method = getattr(sync, sync_method_name)
+    count = 0
+    for obj in queryset:
+        method(obj)
+        count += 1
+    modeladmin.message_user(
+        request,
+        f"Queued Asterisk resync for {count} row(s) (tenant={schema}).",
+        level=messages.SUCCESS,
+    )
+
+
+@admin.action(description="Resync selected trunk(s) to Asterisk realtime DB")
+def resync_trunks_to_asterisk(modeladmin, request, queryset):
+    _resync_objs(modeladmin, request, queryset, "sync_trunk")
+
+
+@admin.action(description="Resync selected queue(s) to Asterisk realtime DB")
+def resync_queues_to_asterisk(modeladmin, request, queryset):
+    _resync_objs(modeladmin, request, queryset, "sync_queue")
+
+
+@admin.action(description="Resync selected extension(s) to Asterisk realtime DB")
+def resync_extensions_to_asterisk(modeladmin, request, queryset):
+    _resync_objs(modeladmin, request, queryset, "sync_endpoint")
 
 
 @admin.register(SipConfiguration)
@@ -169,7 +220,7 @@ class ClientAdmin(admin.ModelAdmin):
     list_filter = ('is_active', 'created_at', 'company')
     search_fields = ('name', 'email', 'phone', 'company')
     readonly_fields = ('created_at', 'updated_at')
-    
+
     fieldsets = (
         ('Basic Information', {
             'fields': ('name', 'email', 'phone', 'company')
@@ -182,18 +233,144 @@ class ClientAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         })
     )
-class ClientAdmin(admin.ModelAdmin):
-    list_display = ('name', 'email', 'phone', 'company', 'is_active', 'created_at')
-    list_filter = ('is_active', 'created_at', 'company')
-    search_fields = ('name', 'email', 'phone', 'company')
+
+
+@admin.register(UserPhoneAssignment)
+class UserPhoneAssignmentAdmin(admin.ModelAdmin):
+    list_display = (
+        'user', 'extension', 'phone_number', 'sip_configuration',
+        'is_primary', 'is_active', 'created_at',
+    )
+    list_filter = ('is_active', 'is_primary', 'sip_configuration', 'created_at')
+    search_fields = (
+        'user__email', 'extension', 'phone_number', 'display_name',
+    )
     readonly_fields = ('created_at', 'updated_at')
-    
+    raw_id_fields = ('user', 'sip_configuration')
+    actions = [resync_extensions_to_asterisk]
+
+
+@admin.register(Trunk)
+class TrunkAdmin(admin.ModelAdmin):
+    list_display = (
+        'name', 'provider', 'sip_server', 'sip_port', 'username',
+        'register', 'is_active', 'is_default', 'created_at',
+    )
+    list_filter = ('is_active', 'is_default', 'register', 'provider', 'created_at')
+    search_fields = ('name', 'provider', 'sip_server', 'username', 'realm')
+    readonly_fields = ('created_at', 'updated_at')
+    actions = [resync_trunks_to_asterisk]
+
     fieldsets = (
         ('Basic Information', {
-            'fields': ('name', 'email', 'phone', 'company')
+            'fields': ('name', 'provider', 'is_active', 'is_default', 'register')
         }),
-        ('Status', {
-            'fields': ('is_active',)
+        ('SIP Server Settings', {
+            'fields': ('sip_server', 'sip_port', 'username', 'password', 'realm', 'proxy')
+        }),
+        ('Outbound / DID', {
+            'fields': ('caller_id_number', 'codecs', 'phone_numbers')
+        }),
+        ('Metadata', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        })
+    )
+
+
+class QueueMemberInline(admin.TabularInline):
+    model = QueueMember
+    extra = 0
+    readonly_fields = ('queue', 'user_phone_assignment', 'penalty', 'paused', 'is_active', 'synced_at')
+    can_delete = False
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(Queue)
+class QueueAdmin(admin.ModelAdmin):
+    list_display = (
+        'name', 'slug', 'strategy', 'group', 'timeout_seconds',
+        'max_wait_seconds', 'is_active', 'is_default', 'created_at',
+    )
+    list_filter = ('is_active', 'is_default', 'strategy', 'created_at')
+    search_fields = ('name', 'slug', 'group__name')
+    readonly_fields = ('created_at', 'updated_at')
+    inlines = [QueueMemberInline]
+    actions = [resync_queues_to_asterisk]
+
+    fieldsets = (
+        ('Basic Information', {
+            'fields': ('name', 'slug', 'group', 'is_active', 'is_default')
+        }),
+        ('Ring Strategy', {
+            'fields': ('strategy', 'timeout_seconds', 'max_wait_seconds', 'max_len', 'wrapup_time')
+        }),
+        ('Announcements', {
+            'fields': ('music_on_hold', 'announce_position', 'announce_holdtime')
+        }),
+        ('Edge-case behaviour', {
+            'fields': ('joinempty', 'leavewhenempty'),
+            'classes': ('collapse',)
+        }),
+        ('Metadata', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        })
+    )
+
+
+@admin.register(QueueMember)
+class QueueMemberAdmin(admin.ModelAdmin):
+    """Read-only in admin — rows are materialised by the sync layer."""
+
+    list_display = (
+        'queue', 'user_phone_assignment', 'penalty', 'paused', 'is_active', 'synced_at',
+    )
+    list_filter = ('paused', 'is_active', 'queue')
+    search_fields = (
+        'queue__name', 'queue__slug',
+        'user_phone_assignment__extension', 'user_phone_assignment__phone_number',
+        'user_phone_assignment__user__email',
+    )
+    readonly_fields = (
+        'queue', 'user_phone_assignment', 'penalty', 'paused', 'is_active', 'synced_at',
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(InboundRoute)
+class InboundRouteAdmin(admin.ModelAdmin):
+    list_display = (
+        'did', 'trunk', 'destination_type', 'destination_queue',
+        'destination_extension', 'priority', 'is_active', 'created_at',
+    )
+    list_filter = ('destination_type', 'is_active', 'trunk', 'created_at')
+    search_fields = ('did', 'ivr_custom_context', 'trunk__name', 'destination_queue__slug')
+    readonly_fields = ('created_at', 'updated_at')
+
+    fieldsets = (
+        ('DID Matching', {
+            'fields': ('did', 'trunk', 'priority', 'is_active')
+        }),
+        ('Destination', {
+            'fields': (
+                'destination_type', 'destination_queue', 'destination_extension',
+                'ivr_custom_context',
+            )
+        }),
+        ('Overrides', {
+            'fields': ('working_hours_override',),
+            'classes': ('collapse',)
         }),
         ('Metadata', {
             'fields': ('created_at', 'updated_at'),

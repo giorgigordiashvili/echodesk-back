@@ -85,6 +85,7 @@ SHARED_APPS = [
     'blog',     # Marketing-site blog + AI-drafted posts — public schema only
     'landing_pages',  # Marketing-site landing pages + AI-drafted — public schema only
     'marketing',  # Marketing-site testimonials + contact form + newsletter — public schema only
+    'asterisk_state',  # Shadow models for the Asterisk realtime DB (routed to ``asterisk`` alias)
 ]
 
 # Tenant-specific applications
@@ -182,7 +183,30 @@ DATABASES = {
     }
 }
 
+# Shared Asterisk realtime DB (ARA). Asterisk 18 reads this DB via
+# ``res_config_pgsql`` + sorcery; Django owns writes through the models in
+# the ``asterisk_state`` app. Unset env vars → ASTERISK_SYNC_ENABLED=False
+# and the sync layer no-ops. We register the alias regardless so tests and
+# local dev can swap it to an SQLite URL without touching code.
+ASTERISK_DB_NAME = config('ASTERISK_DB_NAME', default='')
+ASTERISK_SYNC_ENABLED = bool(ASTERISK_DB_NAME)
+DATABASES['asterisk'] = {
+    'ENGINE': 'django.db.backends.postgresql',
+    'NAME': ASTERISK_DB_NAME,
+    'USER': config('ASTERISK_DB_USER', default=''),
+    'PASSWORD': config('ASTERISK_DB_PASSWORD', default=''),
+    'HOST': config('ASTERISK_DB_HOST', default=''),
+    'PORT': config('ASTERISK_DB_PORT', default=''),
+    'CONN_MAX_AGE': 60,
+    'OPTIONS': {
+        'sslmode': config('ASTERISK_DB_SSLMODE', default='require'),
+    },
+}
+
+# Router order matters: the asterisk router short-circuits for its own app
+# label, then the tenant-schemas router handles everything else.
 DATABASE_ROUTERS = (
+    'amanati_crm.db_routers.AsteriskStateRouter',
     'tenant_schemas.routers.TenantSyncRouter',
 )
 

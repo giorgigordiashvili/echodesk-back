@@ -6,12 +6,19 @@ from .views import (
     sip_webhook, recording_webhook, call_rating_webhook, call_recording_url_webhook,
     extension_status, call_routing, send_call_review_sms,
 )
+from . import views_pbx, views_stats
 
 router = DefaultRouter()
 router.register(r'call-logs', CallLogViewSet, basename='call-logs')
 router.register(r'clients', ClientViewSet, basename='clients')
 router.register(r'sip-configurations', SipConfigurationViewSet, basename='sip-configurations')
 router.register(r'phone-assignments', UserPhoneAssignmentViewSet, basename='phone-assignments')
+
+# PBX management panel
+router.register(r'trunks', views_pbx.TrunkViewSet, basename='trunks')
+router.register(r'queues', views_pbx.QueueViewSet, basename='queues')
+router.register(r'queue-members', views_pbx.QueueMemberViewSet, basename='queue-members')
+router.register(r'inbound-routes', views_pbx.InboundRouteViewSet, basename='inbound-routes')
 
 urlpatterns = [
     path('api/', include(router.urls)),
@@ -26,4 +33,10 @@ urlpatterns = [
     path('api/pbx-settings/<int:sip_config_id>/', pbx_settings_detail, name='pbx-settings-detail'),
     path('api/pbx-settings/<int:sip_config_id>/upload-sound/', pbx_settings_upload_sound, name='pbx-settings-upload-sound'),
     path('api/pbx-settings/<int:sip_config_id>/remove-sound/', pbx_settings_remove_sound, name='pbx-settings-remove-sound'),
+
+    # Call statistics
+    path('api/call-stats/users/', views_stats.users_stats, name='call-stats-users'),
+    path('api/call-stats/users/<int:user_id>/timeline/', views_stats.user_timeline, name='call-stats-user-timeline'),
+    path('api/call-stats/queues/', views_stats.queue_stats, name='call-stats-queues'),
+    path('api/call-stats/overview/', views_stats.overview_stats, name='call-stats-overview'),
 ]

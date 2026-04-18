@@ -1,6 +1,10 @@
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
-from .models import CallLog, Client, SipConfiguration, CallEvent, CallRecording, UserPhoneAssignment, PbxSettings, CallRating
+from .models import (
+    CallLog, Client, SipConfiguration, CallEvent, CallRecording,
+    UserPhoneAssignment, PbxSettings, CallRating,
+    Trunk, Queue, QueueMember, InboundRoute,
+)
 
 
 class UserPhoneAssignmentSerializer(serializers.ModelSerializer):
@@ -545,3 +549,165 @@ class CallRatingSerializer(serializers.ModelSerializer):
         if obj.rated_user:
             return f"{obj.rated_user.first_name} {obj.rated_user.last_name}".strip()
         return None
+
+
+# ---------------------------------------------------------------------------
+# PBX management panel serializers
+# ---------------------------------------------------------------------------
+
+
+class TrunkSerializer(serializers.ModelSerializer):
+    """Full serializer for ``Trunk`` — used on retrieve/create/update."""
+
+    class Meta:
+        model = Trunk
+        fields = [
+            'id', 'name', 'provider',
+            'sip_server', 'sip_port', 'username', 'password',
+            'realm', 'proxy', 'register',
+            'codecs', 'caller_id_number', 'phone_numbers',
+            'is_active', 'is_default',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+        extra_kwargs = {
+            # Password is returned so admins can copy it back into provisioning
+            # scripts; the viewset is already gated by sip_calling feature.
+            'password': {'write_only': False},
+        }
+
+
+class TrunkListSerializer(serializers.ModelSerializer):
+    """Lighter serializer for trunk lists."""
+
+    class Meta:
+        model = Trunk
+        fields = ['id', 'name', 'provider', 'phone_numbers', 'is_active']
+
+
+class QueueSerializer(serializers.ModelSerializer):
+    """Full serializer for ``Queue`` — used on retrieve/create/update."""
+
+    group_name = serializers.CharField(source='group.name', read_only=True)
+    member_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Queue
+        fields = [
+            'id', 'name', 'slug', 'strategy',
+            'group', 'group_name',
+            'timeout_seconds', 'max_wait_seconds', 'max_len', 'wrapup_time',
+            'music_on_hold', 'announce_position', 'announce_holdtime',
+            'joinempty', 'leavewhenempty',
+            'is_active', 'is_default',
+            'member_count',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    @extend_schema_field(serializers.IntegerField)
+    def get_member_count(self, obj):
+        """Active QueueMember rows for this queue (materialised by sync layer)."""
+        return obj.members.filter(is_active=True).count()
+
+
+class QueueListSerializer(serializers.ModelSerializer):
+    """Lighter serializer for queue lists."""
+
+    group_name = serializers.CharField(source='group.name', read_only=True)
+    member_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Queue
+        fields = [
+            'id', 'name', 'slug', 'strategy',
+            'group', 'group_name', 'member_count',
+            'is_active', 'is_default',
+        ]
+
+    @extend_schema_field(serializers.IntegerField)
+    def get_member_count(self, obj):
+        return obj.members.filter(is_active=True).count()
+
+
+class QueueMemberSerializer(serializers.ModelSerializer):
+    """Read-only serializer for QueueMember.
+
+    Rows are materialised by the sync layer from ``Queue.group``'s members
+    that have an active ``UserPhoneAssignment``.
+    """
+
+    queue_slug = serializers.CharField(source='queue.slug', read_only=True)
+    queue_name = serializers.CharField(source='queue.name', read_only=True)
+    extension = serializers.CharField(source='user_phone_assignment.extension', read_only=True)
+    phone_number = serializers.CharField(source='user_phone_assignment.phone_number', read_only=True)
+    user_id = serializers.IntegerField(source='user_phone_assignment.user_id', read_only=True)
+    user_email = serializers.CharField(source='user_phone_assignment.user.email', read_only=True)
+    user_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = QueueMember
+        fields = [
+            'id', 'queue', 'queue_slug', 'queue_name',
+            'user_phone_assignment', 'extension', 'phone_number',
+            'user_id', 'user_email', 'user_name',
+            'penalty', 'paused', 'is_active', 'synced_at',
+        ]
+        read_only_fields = fields  # Entire serializer is read-only.
+
+    @extend_schema_field(serializers.CharField)
+    def get_user_name(self, obj):
+        user = obj.user_phone_assignment.user
+        return f"{user.first_name} {user.last_name}".strip() or user.email
+
+
+class InboundRouteSerializer(serializers.ModelSerializer):
+    """Serializer for ``InboundRoute`` with destination-consistency validation."""
+
+    trunk_name = serializers.CharField(source='trunk.name', read_only=True)
+    destination_queue_slug = serializers.CharField(source='destination_queue.slug', read_only=True)
+    destination_extension_display = serializers.SerializerMethodField()
+
+    class Meta:
+        model = InboundRoute
+        fields = [
+            'id', 'did',
+            'trunk', 'trunk_name',
+            'destination_type',
+            'destination_queue', 'destination_queue_slug',
+            'destination_extension', 'destination_extension_display',
+            'ivr_custom_context', 'working_hours_override',
+            'priority', 'is_active',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    @extend_schema_field(serializers.CharField)
+    def get_destination_extension_display(self, obj):
+        if obj.destination_extension:
+            return f"ext {obj.destination_extension.extension} ({obj.destination_extension.phone_number})"
+        return None
+
+    def validate(self, attrs):
+        """Mirror ``InboundRoute.clean()`` — DRF-side destination consistency."""
+        # Merge incoming attrs with the instance's current values so partial
+        # updates still get sensible validation.
+        merged = {}
+        if self.instance is not None:
+            for field in ('destination_type', 'destination_queue', 'destination_extension', 'ivr_custom_context'):
+                merged[field] = getattr(self.instance, field)
+        merged.update(attrs)
+
+        destination_type = merged.get('destination_type')
+        errors = {}
+
+        if destination_type == 'queue' and not merged.get('destination_queue'):
+            errors['destination_queue'] = "destination_queue is required when destination_type='queue'."
+        if destination_type == 'extension' and not merged.get('destination_extension'):
+            errors['destination_extension'] = "destination_extension is required when destination_type='extension'."
+        if destination_type == 'ivr_custom' and not merged.get('ivr_custom_context'):
+            errors['ivr_custom_context'] = "ivr_custom_context is required when destination_type='ivr_custom'."
+
+        if errors:
+            raise serializers.ValidationError(errors)
+        return attrs

@@ -566,3 +566,263 @@ class CallRating(models.Model):
 
     def __str__(self):
         return f"CallRating {self.caller_number} - {self.rating}/5"
+
+
+# ---------------------------------------------------------------------------
+# PBX management panel models
+#
+# These models back the full settings panel described in the PBX plan:
+# tenants own SIP trunks (inbound DID ownership + outbound egress), define
+# call queues tied to tenant groups, and route inbound DIDs to queues,
+# extensions, voicemail or custom IVR contexts. The realtime sync layer
+# (Django → Asterisk realtime DB) is built in a follow-up step; here we
+# just establish the product schema.
+# ---------------------------------------------------------------------------
+
+
+class Trunk(models.Model):
+    """A tenant-owned SIP trunk to a provider.
+
+    Superset of the outbound portion of ``SipConfiguration`` — coexists with
+    it during the MVP and eventually replaces it for DID ownership + outbound
+    egress. One tenant may have many trunks (e.g. Magti + Silknet).
+    """
+
+    name = models.CharField(max_length=100, unique=True, help_text="Trunk name (unique per tenant)")
+    provider = models.CharField(max_length=100, blank=True, help_text='Free-text provider label (e.g. "Magti", "Silknet")')
+
+    # SIP connection
+    sip_server = models.CharField(max_length=255, help_text="SIP server hostname/IP")
+    sip_port = models.IntegerField(default=5060, help_text="SIP server port")
+    username = models.CharField(max_length=100, help_text="SIP username")
+    password = models.CharField(max_length=255, help_text="SIP password")
+    realm = models.CharField(max_length=255, blank=True, help_text="SIP realm/domain")
+    proxy = models.CharField(max_length=255, blank=True, help_text="Outbound proxy")
+    register = models.BooleanField(default=True, help_text="Whether Asterisk should register against this trunk")
+
+    # Codecs and outbound caller ID
+    codecs = models.JSONField(
+        default=list, blank=True,
+        help_text='Preferred codec order, e.g. ["g722", "alaw", "ulaw"]'
+    )
+    caller_id_number = models.CharField(
+        max_length=30, blank=True,
+        help_text="Default caller ID number for outbound calls over this trunk"
+    )
+
+    # Inbound DIDs owned by this trunk (simple string list for MVP)
+    phone_numbers = models.JSONField(
+        default=list, blank=True,
+        help_text='DIDs owned by this trunk, e.g. ["+995322421219", "+995322421220"]'
+    )
+
+    is_active = models.BooleanField(default=True)
+    is_default = models.BooleanField(default=False, help_text="Default trunk for outbound calls (one per tenant)")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-is_default', 'name']
+
+    def __str__(self):
+        return f"{self.name} ({self.sip_server})"
+
+    def save(self, *args, **kwargs):
+        # Ensure only one default trunk per tenant (mirrors SipConfiguration.save)
+        if self.is_default:
+            Trunk.objects.filter(is_default=True).exclude(id=self.id).update(is_default=False)
+        super().save(*args, **kwargs)
+
+
+class Queue(models.Model):
+    """A call queue (Asterisk ``queues``-table analog).
+
+    Members are derived from ``group``'s members who have an active
+    ``UserPhoneAssignment`` — the sync layer materialises this into
+    ``QueueMember`` rows and into Asterisk's realtime ``queue_members`` table.
+    """
+
+    STRATEGY_CHOICES = [
+        ('ringall', 'Ring All'),
+        ('rrmemory', 'Round-Robin Memory'),
+        ('leastrecent', 'Least Recent'),
+        ('fewestcalls', 'Fewest Calls'),
+        ('random', 'Random'),
+        ('linear', 'Linear'),
+        ('wrandom', 'Weighted Random'),
+    ]
+
+    JOINEMPTY_CHOICES = [
+        ('yes', 'Yes'),
+        ('no', 'No'),
+        ('strict', 'Strict'),
+        ('loose', 'Loose'),
+    ]
+
+    LEAVEWHENEMPTY_CHOICES = [
+        ('yes', 'Yes'),
+        ('no', 'No'),
+        ('strict', 'Strict'),
+        ('loose', 'Loose'),
+    ]
+
+    name = models.CharField(max_length=100, help_text="Human-readable queue name")
+    slug = models.SlugField(
+        max_length=100, unique=True,
+        help_text="Queue slug (unique per tenant, used in the tenant-prefixed Asterisk queue name)"
+    )
+    strategy = models.CharField(
+        max_length=20, choices=STRATEGY_CHOICES, default='rrmemory',
+        help_text="Asterisk queue ring strategy"
+    )
+    group = models.ForeignKey(
+        'users.TenantGroup',
+        on_delete=models.PROTECT,
+        related_name='queues',
+        help_text="Queue members are pulled from this group's members with an active UserPhoneAssignment"
+    )
+
+    # Ring behaviour
+    timeout_seconds = models.IntegerField(default=30, help_text="Per-agent ring timeout in seconds")
+    max_wait_seconds = models.IntegerField(default=300, help_text="Caller is abandoned after this many seconds in the queue")
+    max_len = models.IntegerField(default=0, help_text="Maximum callers in queue (0 = unlimited)")
+    wrapup_time = models.IntegerField(default=10, help_text="Seconds between calls for an agent (wrap-up time)")
+
+    # Announcements / hold music
+    music_on_hold = models.CharField(max_length=100, default='queue-hold', help_text="Music-on-hold class name")
+    announce_position = models.BooleanField(default=True, help_text="Announce position in queue to callers")
+    announce_holdtime = models.BooleanField(default=False, help_text="Announce expected hold time to callers")
+
+    # Edge-case behaviour (Asterisk-native values)
+    joinempty = models.CharField(
+        max_length=10, choices=JOINEMPTY_CHOICES, default='yes',
+        help_text="Whether callers can join when no agents are available"
+    )
+    leavewhenempty = models.CharField(
+        max_length=10, choices=LEAVEWHENEMPTY_CHOICES, default='no',
+        help_text="Whether queued callers are kicked when all agents become unavailable"
+    )
+
+    is_active = models.BooleanField(default=True)
+    is_default = models.BooleanField(default=False, help_text="Default queue for tenant (one per tenant)")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-is_default', 'name']
+
+    def __str__(self):
+        return f"{self.name} ({self.slug})"
+
+    def save(self, *args, **kwargs):
+        # Ensure only one default queue per tenant (mirrors SipConfiguration.save)
+        if self.is_default:
+            Queue.objects.filter(is_default=True).exclude(id=self.id).update(is_default=False)
+        super().save(*args, **kwargs)
+
+
+class QueueMember(models.Model):
+    """Derived agent row — one per (Queue, UserPhoneAssignment).
+
+    Kept in sync with ``Queue.group``'s members that have an active
+    ``UserPhoneAssignment`` by the (future) sync layer. This table is
+    read-only from the UI's perspective; its purpose is to give us a
+    1:1 shadow of what Asterisk's realtime ``queue_members`` table should
+    look like.
+    """
+
+    queue = models.ForeignKey(Queue, on_delete=models.CASCADE, related_name='members')
+    user_phone_assignment = models.ForeignKey(
+        UserPhoneAssignment,
+        on_delete=models.CASCADE,
+        related_name='queue_memberships',
+    )
+    penalty = models.IntegerField(default=0, help_text="Agent penalty (higher = rings last in penalty-aware strategies)")
+    paused = models.BooleanField(default=False, help_text="Agent paused (not receiving new calls)")
+    is_active = models.BooleanField(default=True)
+    synced_at = models.DateTimeField(auto_now=True, help_text="Updated on every sync write")
+
+    class Meta:
+        ordering = ['queue', 'penalty', 'user_phone_assignment']
+        unique_together = [('queue', 'user_phone_assignment')]
+
+    def __str__(self):
+        return f"{self.queue.slug} ← ext {self.user_phone_assignment.extension}"
+
+
+class InboundRoute(models.Model):
+    """A DID-to-destination rule.
+
+    Rules are matched in ``priority`` order (lower first) and route an
+    incoming call to a queue, a specific extension, voicemail, a custom
+    IVR context, or simply hang up.
+    """
+
+    DESTINATION_CHOICES = [
+        ('queue', 'Queue'),
+        ('extension', 'Extension'),
+        ('voicemail', 'Voicemail'),
+        ('ivr_custom', 'Custom IVR context'),
+        ('hangup', 'Hang up'),
+    ]
+
+    did = models.CharField(
+        max_length=30,
+        help_text="Matched DID (not unique — a tenant can have overlapping rules prioritised by priority)"
+    )
+    trunk = models.ForeignKey(
+        Trunk, on_delete=models.CASCADE, null=True, blank=True,
+        related_name='inbound_routes',
+        help_text="Trunk this DID belongs to (optional — a null trunk matches any trunk)"
+    )
+    destination_type = models.CharField(
+        max_length=20, choices=DESTINATION_CHOICES, default='queue',
+        help_text="Where calls matching this DID should be routed"
+    )
+    destination_queue = models.ForeignKey(
+        Queue, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='inbound_routes',
+        help_text="Target queue (required when destination_type='queue')"
+    )
+    destination_extension = models.ForeignKey(
+        UserPhoneAssignment, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='inbound_routes',
+        help_text="Target extension (required when destination_type='extension')"
+    )
+    ivr_custom_context = models.CharField(
+        max_length=100, blank=True,
+        help_text="Context name in extensions_custom.conf (required when destination_type='ivr_custom')"
+    )
+    working_hours_override = models.ForeignKey(
+        PbxSettings, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='inbound_route_overrides',
+        help_text="Optional working-hours override for this route"
+    )
+
+    priority = models.IntegerField(default=100, help_text="Lower priority is checked first")
+    is_active = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['priority', 'did']
+
+    def __str__(self):
+        return f"{self.did} → {self.destination_type} (priority {self.priority})"
+
+    def clean(self):
+        """Enforce destination-type/destination-field consistency."""
+        from django.core.exceptions import ValidationError
+
+        errors = {}
+        if self.destination_type == 'queue' and not self.destination_queue_id:
+            errors['destination_queue'] = "destination_queue is required when destination_type='queue'."
+        if self.destination_type == 'extension' and not self.destination_extension_id:
+            errors['destination_extension'] = "destination_extension is required when destination_type='extension'."
+        if self.destination_type == 'ivr_custom' and not self.ivr_custom_context:
+            errors['ivr_custom_context'] = "ivr_custom_context is required when destination_type='ivr_custom'."
+        if errors:
+            raise ValidationError(errors)
