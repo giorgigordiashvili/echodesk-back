@@ -6,7 +6,7 @@ from .views import (
     sip_webhook, recording_webhook, call_rating_webhook, call_recording_url_webhook,
     extension_status, call_routing, send_call_review_sms,
 )
-from . import views_pbx, views_stats
+from . import views_pbx, views_stats, views_pbx_install
 
 router = DefaultRouter()
 router.register(r'call-logs', CallLogViewSet, basename='call-logs')
@@ -19,6 +19,7 @@ router.register(r'trunks', views_pbx.TrunkViewSet, basename='trunks')
 router.register(r'queues', views_pbx.QueueViewSet, basename='queues')
 router.register(r'queue-members', views_pbx.QueueMemberViewSet, basename='queue-members')
 router.register(r'inbound-routes', views_pbx.InboundRouteViewSet, basename='inbound-routes')
+router.register(r'pbx-servers', views_pbx.PbxServerViewSet, basename='pbx-servers')
 
 urlpatterns = [
     path('api/', include(router.urls)),
@@ -29,6 +30,9 @@ urlpatterns = [
     path('api/webhooks/call-recording-url/', call_recording_url_webhook, name='call-recording-url-webhook'),
     path('api/pbx/call-routing/', call_routing, name='call-routing'),
     path('api/pbx/send-review-sms/', send_call_review_sms, name='send_call_review_sms'),
+    # BYO Asterisk install endpoints
+    path('api/pbx/install/<str:token>/', views_pbx_install.install_script, name='pbx-install-script'),
+    path('api/pbx/install/<str:token>/ping/', views_pbx_install.install_ping, name='pbx-install-ping'),
     # PBX Settings (working hours + sounds)
     path('api/pbx-settings/<int:sip_config_id>/', pbx_settings_detail, name='pbx-settings-detail'),
     path('api/pbx-settings/<int:sip_config_id>/upload-sound/', pbx_settings_upload_sound, name='pbx-settings-upload-sound'),

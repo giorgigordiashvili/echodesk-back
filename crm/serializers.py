@@ -3,7 +3,7 @@ from drf_spectacular.utils import extend_schema_field
 from .models import (
     CallLog, Client, SipConfiguration, CallEvent, CallRecording,
     UserPhoneAssignment, PbxSettings, CallRating,
-    Trunk, Queue, QueueMember, InboundRoute,
+    Trunk, Queue, QueueMember, InboundRoute, PbxServer,
 )
 
 
@@ -711,3 +711,40 @@ class InboundRouteSerializer(serializers.ModelSerializer):
         if errors:
             raise serializers.ValidationError(errors)
         return attrs
+
+
+class PbxServerSerializer(serializers.ModelSerializer):
+    """PbxServer CRUD serializer. Passwords are write-only — never returned
+    in responses. The ``install_command`` is computed from the enrollment
+    token so the UI can show the curl one-liner.
+    """
+    install_command = serializers.SerializerMethodField()
+    realtime_db_password = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    ami_password = serializers.CharField(write_only=True, required=False, allow_blank=True)
+
+    class Meta:
+        model = PbxServer
+        fields = [
+            'id', 'name', 'fqdn', 'public_ip',
+            'realtime_db_host', 'realtime_db_port', 'realtime_db_name',
+            'realtime_db_user', 'realtime_db_password', 'realtime_db_sslmode',
+            'ami_host', 'ami_port', 'ami_username', 'ami_password',
+            'wss_url', 'recording_base_url',
+            'status', 'asterisk_version', 'last_seen_at',
+            'enrollment_token', 'enrollment_expires_at', 'install_command',
+            'use_tenant_prefix', 'notes',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = [
+            'id', 'status', 'asterisk_version', 'last_seen_at',
+            'enrollment_token', 'enrollment_expires_at', 'install_command',
+            'created_at', 'updated_at',
+        ]
+
+    def get_install_command(self, obj):
+        request = self.context.get('request') if self.context else None
+        if request is None:
+            base = ''
+        else:
+            base = request.build_absolute_uri('/').rstrip('/')
+        return f"curl -sSL {base}/api/pbx/install/{obj.enrollment_token}/ | sudo bash"

@@ -8,6 +8,8 @@ these rows into Asterisk's realtime Postgres is built in a follow-up step.
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import extend_schema
 from rest_framework import filters, permissions, viewsets
+from rest_framework.decorators import action
+from rest_framework.response import Response
 
 from tenants.permissions import HasSubscriptionFeature
 
@@ -122,3 +124,45 @@ class InboundRouteViewSet(viewsets.ModelViewSet):
         return InboundRoute.objects.select_related(
             'trunk', 'destination_queue', 'destination_extension', 'working_hours_override',
         ).all()
+
+
+@extend_schema(tags=['PBX'])
+class PbxServerViewSet(viewsets.ModelViewSet):
+    """CRUD for the tenant's BYO Asterisk server registration.
+
+    On create, triggers provisioning (new realtime DB + role + migrate).
+    Passwords are write-only in the response; admins can only read a
+    masked placeholder once the server is registered.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, _SipCallingFeature]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['name', 'fqdn', 'realtime_db_name']
+    ordering_fields = ['name', 'fqdn', 'status', 'created_at']
+    ordering = ['-created_at']
+
+    def get_queryset(self):
+        from .models import PbxServer
+        return PbxServer.objects.all()
+
+    def get_serializer_class(self):
+        from .serializers import PbxServerSerializer
+        return PbxServerSerializer
+
+    def perform_create(self, serializer):
+        """Save then provision the per-tenant realtime DB."""
+        from .pbx_provisioning import provision_and_bootstrap
+        pbx = serializer.save()
+        try:
+            provision_and_bootstrap(pbx)
+        except Exception as exc:  # noqa: BLE001
+            pbx.status = pbx.STATUS_ERROR
+            pbx.notes = f"Provisioning failed: {exc}"[:1000]
+            pbx.save(update_fields=['status', 'notes', 'updated_at'])
+            raise
+
+    @action(detail=True, methods=['post'], url_path='regenerate-token')
+    def regenerate_token(self, request, pk=None):
+        pbx = self.get_object()
+        pbx.regenerate_enrollment_token()
+        return Response(self.get_serializer(pbx).data)
