@@ -1,8 +1,9 @@
 """Daily blog-post generator.
 
 Picks the top-N ``pending`` BlogTopic rows by priority and asks Claude
-to draft a BlogPost for each. Drafts land in ``status='review'`` —
-nothing is auto-published. Editors approve via the Django admin.
+to draft a BlogPost for each. Drafts land in ``status='review'`` by
+default; set ``BLOG_AUTO_PUBLISH=true`` to publish immediately with
+``published_at=now()`` (no human approval step).
 
 Usage::
 
@@ -128,19 +129,21 @@ class Command(BaseCommand):
             self.stdout.write(json.dumps(result.payload, indent=2, ensure_ascii=False))
             return
 
+        auto_publish = bool(getattr(settings, "BLOG_AUTO_PUBLISH", False))
+
         with transaction.atomic():
-            post = _persist_post(topic, result)
+            post = _persist_post(topic, result, auto_publish=auto_publish)
             run.resulting_post = post
             run.save()
             BlogTopic.objects.filter(pk=topic.pk).update(
-                status="drafted",
+                status=("published" if auto_publish else "drafted"),
                 processed_at=timezone.now(),
                 generated_post_id=post.pk,
                 updated_at=timezone.now(),
             )
 
         self.stdout.write(self.style.SUCCESS(
-            f"[{topic.slug}] saved post id={post.pk} "
+            f"[{topic.slug}] saved post id={post.pk} status={post.status} "
             f"(tokens: prompt={result.prompt_tokens}, out={result.completion_tokens})"
         ))
 
@@ -156,8 +159,14 @@ def _safe_store_response(result: GenerationResult) -> dict:
     }
 
 
-def _persist_post(topic: BlogTopic, result: GenerationResult) -> BlogPost:
+def _persist_post(
+    topic: BlogTopic,
+    result: GenerationResult,
+    *,
+    auto_publish: bool = False,
+) -> BlogPost:
     p = result.payload
+    now = timezone.now()
     post = BlogPost.objects.create(
         slug=_generate_unique_slug(topic.slug),
         post_type=topic.post_type,
@@ -169,13 +178,14 @@ def _persist_post(topic: BlogTopic, result: GenerationResult) -> BlogPost:
         meta_description={"en": p["meta_description_en"], "ka": p["meta_description_ka"]},
         keywords=p.get("keywords", []),
         faq_items=p.get("faq_items", []),
-        status="review",
+        status=("published" if auto_publish else "review"),
+        published_at=(now if auto_publish else None),
         source_topic=topic,
         generated_by_ai=True,
         ai_model=result.model,
         ai_prompt_tokens=result.prompt_tokens,
         ai_completion_tokens=result.completion_tokens,
-        ai_generated_at=timezone.now(),
+        ai_generated_at=now,
     )
     return post
 

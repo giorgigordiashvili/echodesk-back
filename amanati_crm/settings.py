@@ -465,6 +465,9 @@ OPENAI_MODEL = config('OPENAI_MODEL', default='gpt-4o')
 ANTHROPIC_API_KEY = config('ANTHROPIC_API_KEY', default='')
 BLOG_AI_MODEL = config('BLOG_AI_MODEL', default='claude-sonnet-4-6')
 BLOG_DAILY_POST_LIMIT = config('BLOG_DAILY_POST_LIMIT', default=2, cast=int)
+# When true, AI drafts go straight to status='published' instead of 'review'.
+# Flip off (or unset) to restore the human-in-the-loop approval flow.
+BLOG_AUTO_PUBLISH = config('BLOG_AUTO_PUBLISH', default=False, cast=bool)
 
 # TikTok Shop Partner Center Integration Settings
 TIKTOK_SHOP_APP_KEY = config('TIKTOK_SHOP_APP_KEY', default='')
