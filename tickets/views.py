@@ -290,12 +290,25 @@ class TicketPermission(permissions.BasePermission):
         user_groups = request.user.tenant_groups.all()
         is_in_assigned_group = obj.assigned_groups.filter(id__in=user_groups).exists()
 
-        # Users can view tickets they created, are assigned to, or belong to an assigned group
+        # Board-level access — mirrors the TicketViewSet.get_queryset() rules
+        # so a user who sees a ticket in the list can also open its detail.
+        board = obj.column.board if obj.column_id else None
+        has_board_access = bool(
+            board and (
+                board.board_users.filter(id=request.user.id).exists() or
+                board.order_users.filter(id=request.user.id).exists() or
+                board.board_groups.filter(id__in=user_groups).exists()
+            )
+        )
+
+        # Users can view tickets they created, are assigned to, belong to an
+        # assigned group, OR have access to the board the ticket lives on.
         if request.method in permissions.SAFE_METHODS:
             return (obj.created_by == request.user or
                    obj.assigned_to == request.user or
                    obj.assigned_users.filter(id=request.user.id).exists() or
-                   is_in_assigned_group)
+                   is_in_assigned_group or
+                   has_board_access)
 
         # Only staff can assign tickets or move to closed columns
         if request.method in ['PUT', 'PATCH']:
