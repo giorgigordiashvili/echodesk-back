@@ -128,6 +128,9 @@ urlpatterns = [
     # Help center and documentation
     path('api/help/', include('help_center.urls')),
 
+    # Blog (SHARED_APPS — available on root domain for the marketing site)
+    path('api/blog/', include('blog.urls')),
+
     # Public/tenant management endpoints
     path('', include('tenants.urls')),
 ]

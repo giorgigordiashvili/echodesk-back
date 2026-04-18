@@ -14,6 +14,7 @@ admins can create entries directly in the admin and never touch the AI.
 import re
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 
 POST_TYPE_CHOICES = [
@@ -289,6 +290,11 @@ class BlogPost(models.Model):
 
     def save(self, *args, **kwargs):
         self.reading_time_minutes = self._compute_reading_time()
+        # Editors sometimes flip status → 'published' via the field editor
+        # without remembering to set published_at. Auto-stamp it so the
+        # frontend sort-by-date + sitemap both work.
+        if self.status == "published" and self.published_at is None:
+            self.published_at = timezone.now()
         super().save(*args, **kwargs)
 
     # ------------------------------------------------------------------
