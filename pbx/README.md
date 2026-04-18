@@ -28,6 +28,12 @@ Start here if you're figuring out how EchoDesk talks to Asterisk.
   runbook for copying the AGI + dialplan edits onto pbx2. Superseded by
   the install script for new tenants, kept for reference on the AGI
   template itself.
+- **[FUTURE_OPTION_B_DEDICATED_CLUSTER.md](FUTURE_OPTION_B_DEDICATED_CLUSTER.md)**
+  — we currently co-locate all `asterisk_<tenant>` databases on the
+  main app cluster (Option A). This doc records the trigger conditions
+  + 30-minute migration recipe for splitting them onto a dedicated
+  realtime cluster (Option B) when we hit ~10 tenants or compliance
+  requires it.
 
 ### Scripts shipped to the Asterisk server
 - **echodesk-routing.py** — AGI called from `[from-provider]` dialplan.
