@@ -83,6 +83,7 @@ SHARED_APPS = [
     'crm',      # Move CRM to shared apps so it's available in public schema too
     'help_center',  # Help center and documentation - global content
     'blog',     # Marketing-site blog + AI-drafted posts — public schema only
+    'landing_pages',  # Marketing-site landing pages + AI-drafted — public schema only
 ]
 
 # Tenant-specific applications
@@ -468,6 +469,9 @@ BLOG_DAILY_POST_LIMIT = config('BLOG_DAILY_POST_LIMIT', default=2, cast=int)
 # When true, AI drafts go straight to status='published' instead of 'review'.
 # Flip off (or unset) to restore the human-in-the-loop approval flow.
 BLOG_AUTO_PUBLISH = config('BLOG_AUTO_PUBLISH', default=False, cast=bool)
+# Landing-pages app uses the same pattern; shares ANTHROPIC_API_KEY, BLOG_AI_MODEL,
+# and BLOG_DAILY_POST_LIMIT but has its own auto-publish toggle.
+LANDING_AUTO_PUBLISH = config('LANDING_AUTO_PUBLISH', default=False, cast=bool)
 
 # TikTok Shop Partner Center Integration Settings
 TIKTOK_SHOP_APP_KEY = config('TIKTOK_SHOP_APP_KEY', default='')

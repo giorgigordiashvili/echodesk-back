@@ -131,6 +131,9 @@ urlpatterns = [
     # Blog (SHARED_APPS — available on root domain for the marketing site)
     path('api/blog/', include('blog.urls')),
 
+    # Landing pages (SHARED_APPS — marketing-site feature/vertical/comparison pages)
+    path('api/landing/', include('landing_pages.urls')),
+
     # Public/tenant management endpoints
     path('', include('tenants.urls')),
 ]
