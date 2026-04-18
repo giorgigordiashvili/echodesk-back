@@ -24,6 +24,11 @@ python manage.py collectstatic --noinput
 echo "🗄️ Running shared schema migrations..."
 python manage.py migrate_schemas --shared
 
+# Run migrations for the Asterisk realtime DB alias (tenant-schemas' migrate
+# wrapper can't target secondary DBs, so we have a dedicated command).
+echo "📞 Running Asterisk realtime migrations..."
+python manage.py migrate_asterisk
+
 echo "✅ Production build completed successfully!"
 echo ""
 echo "🌐 Multi-tenant setup ready for:"
