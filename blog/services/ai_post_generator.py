@@ -1,19 +1,19 @@
 """Claude API wrapper for blog-post drafting.
 
-Thin layer on top of the `anthropic` SDK — it handles system+user
-prompt assembly, JSON schema validation of the response, and bubbles
-the token counts up so the caller can persist them for audit.
+Uses Anthropic's **tool use** pattern: we define a strict JSON schema for
+the blog-post payload and force Claude to respond via a tool call.
+Anthropic's server validates the schema for us, so we never have to
+parse a multi-thousand-character JSON string that might have unescaped
+newlines, quotes, or other whitespace hiccups inside long HTML content.
 
-Callers (the management command) are responsible for persistence,
-retries, and status transitions on BlogTopic / BlogPost. This module
-just talks to Claude.
+Callers (the management command) handle persistence, retries, and
+status transitions on BlogTopic / BlogPost. This module only talks to
+Claude and surfaces a typed payload.
 """
 
 from __future__ import annotations
 
-import json
 import logging
-import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -28,48 +28,85 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-REQUIRED_KEYS = {
-    "title_ka", "title_en",
-    "summary_ka", "summary_en",
-    "content_ka_html", "content_en_html",
-    "meta_title_ka", "meta_title_en",
-    "meta_description_ka", "meta_description_en",
-    "faq_items",
-    "keywords",
+# JSON schema for the tool Claude must call. Anthropic validates this
+# on the server and returns a parsed dict in `tool_use_block.input`.
+BLOG_POST_TOOL = {
+    "name": "save_blog_post",
+    "description": (
+        "Save the drafted blog post. Must be called with the full bilingual "
+        "content and metadata matching the EchoDesk brief."
+    ),
+    "input_schema": {
+        "type": "object",
+        "required": [
+            "title_ka", "title_en",
+            "summary_ka", "summary_en",
+            "content_ka_html", "content_en_html",
+            "meta_title_ka", "meta_title_en",
+            "meta_description_ka", "meta_description_en",
+            "faq_items", "keywords",
+        ],
+        "properties": {
+            "title_ka": {"type": "string", "minLength": 1, "maxLength": 120},
+            "title_en": {"type": "string", "minLength": 1, "maxLength": 120},
+            "summary_ka": {"type": "string", "minLength": 1, "maxLength": 300},
+            "summary_en": {"type": "string", "minLength": 1, "maxLength": 300},
+            "content_ka_html": {"type": "string", "minLength": 200},
+            "content_en_html": {"type": "string", "minLength": 200},
+            "meta_title_ka": {"type": "string", "minLength": 1, "maxLength": 120},
+            "meta_title_en": {"type": "string", "minLength": 1, "maxLength": 120},
+            "meta_description_ka": {"type": "string", "minLength": 1, "maxLength": 300},
+            "meta_description_en": {"type": "string", "minLength": 1, "maxLength": 300},
+            "faq_items": {
+                "type": "array",
+                "minItems": 3,
+                "maxItems": 10,
+                "items": {
+                    "type": "object",
+                    "required": ["question_ka", "question_en", "answer_ka", "answer_en"],
+                    "properties": {
+                        "question_ka": {"type": "string", "minLength": 1},
+                        "question_en": {"type": "string", "minLength": 1},
+                        "answer_ka": {"type": "string", "minLength": 1},
+                        "answer_en": {"type": "string", "minLength": 1},
+                    },
+                },
+            },
+            "keywords": {
+                "type": "array",
+                "items": {"type": "string"},
+                "minItems": 1,
+            },
+        },
+    },
 }
-
-FAQ_ITEM_REQUIRED_KEYS = {"question_ka", "question_en", "answer_ka", "answer_en"}
 
 
 class AIGenerationError(RuntimeError):
-    """Raised when Claude's response can't be parsed or is missing fields."""
+    """Raised when Claude's response can't be interpreted (no tool call,
+    missing fields, API error). Caller decides retry behaviour."""
 
 
 @dataclass
 class GenerationResult:
-    """Structured result of a successful Claude call."""
-
     payload: dict[str, Any]
     prompt_tokens: int
     completion_tokens: int
     model: str
-    raw_response_text: str
+    # Preview of what Claude returned (truncated). Useful for debugging
+    # prompt drift — persisted on BlogPostRun.
+    raw_preview: str
 
 
 def generate_blog_post(topic: "BlogTopic") -> GenerationResult:
-    """Ask Claude to draft a blog post for this topic.
-
-    Raises ``AIGenerationError`` on missing key / invalid JSON / API failure.
-    Caller decides retry/backoff policy.
-    """
+    """Draft one blog post via Claude tool use. Raises on failure."""
     if not settings.ANTHROPIC_API_KEY:
         raise AIGenerationError(
-            "ANTHROPIC_API_KEY is not set. Add it to environment to run blog "
-            "generation."
+            "ANTHROPIC_API_KEY is not set. Add it to environment to run blog generation."
         )
 
-    # Import lazily so the app boots even if anthropic isn't installed in
-    # environments that don't run the blog task.
+    # Import lazily so app boots without anthropic installed in environments
+    # that don't run the blog task.
     from anthropic import Anthropic
 
     client = Anthropic(api_key=settings.ANTHROPIC_API_KEY)
@@ -82,73 +119,50 @@ def generate_blog_post(topic: "BlogTopic") -> GenerationResult:
         model=model,
         max_tokens=8192,
         system=SYSTEM_PROMPT,
+        tools=[BLOG_POST_TOOL],
+        tool_choice={"type": "tool", "name": "save_blog_post"},
         messages=[{"role": "user", "content": user_prompt}],
     )
 
-    # Claude's response.content is a list of blocks; for text-only responses
-    # the payload is in the first block.
-    blocks = response.content or []
-    text = ""
-    for block in blocks:
-        # SDK exposes blocks as objects with .type / .text attributes.
-        text += getattr(block, "text", "") or ""
-    text = text.strip()
-
-    payload = _parse_json_strict(text)
-    _validate_schema(payload)
+    payload, preview = _extract_tool_payload(response)
 
     return GenerationResult(
         payload=payload,
-        prompt_tokens=getattr(response.usage, "input_tokens", 0),
-        completion_tokens=getattr(response.usage, "output_tokens", 0),
+        prompt_tokens=getattr(response.usage, "input_tokens", 0) or 0,
+        completion_tokens=getattr(response.usage, "output_tokens", 0) or 0,
         model=model,
-        raw_response_text=text,
+        raw_preview=preview,
     )
 
 
-def _parse_json_strict(text: str) -> dict[str, Any]:
-    """Claude is instructed to return bare JSON, but occasionally wraps it in
-    markdown fences anyway. Strip fences, then parse."""
-    if not text:
-        raise AIGenerationError("Empty response from Claude.")
+def _extract_tool_payload(response) -> tuple[dict[str, Any], str]:
+    """Pull the ``save_blog_post`` tool call out of Claude's response.
 
-    # Strip ```json ... ``` or ``` ... ``` if present.
-    fence = re.match(r"^```(?:json)?\s*(.+?)\s*```$", text, re.DOTALL)
-    if fence:
-        text = fence.group(1).strip()
+    Anthropic returns a list of content blocks; we expect exactly one
+    tool_use block with ``name='save_blog_post'``.
+    """
+    blocks = response.content or []
+    tool_block = None
+    text_fragments: list[str] = []
 
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError as e:
-        raise AIGenerationError(f"Claude did not return valid JSON: {e}") from e
+    for block in blocks:
+        btype = getattr(block, "type", None)
+        if btype == "tool_use" and getattr(block, "name", "") == "save_blog_post":
+            tool_block = block
+        elif btype == "text":
+            text_fragments.append(getattr(block, "text", "") or "")
 
+    preview = ("\n".join(text_fragments))[:4000] if text_fragments else ""
 
-def _validate_schema(payload: dict[str, Any]) -> None:
-    """Sanity-check the shape before we try to persist."""
-    missing = REQUIRED_KEYS - set(payload.keys())
-    if missing:
-        raise AIGenerationError(f"Claude response missing required keys: {sorted(missing)}")
+    if tool_block is None:
+        raise AIGenerationError(
+            "Claude did not call the save_blog_post tool. "
+            f"Got {len(blocks)} content block(s), "
+            f"types={[getattr(b, 'type', '?') for b in blocks]}"
+        )
 
-    # Basic type checks — enough to catch obvious drift, not full JSON-schema.
-    for k in (
-        "title_ka", "title_en", "summary_ka", "summary_en",
-        "content_ka_html", "content_en_html",
-        "meta_title_ka", "meta_title_en",
-        "meta_description_ka", "meta_description_en",
-    ):
-        if not isinstance(payload.get(k), str) or not payload[k].strip():
-            raise AIGenerationError(f"Field {k!r} must be a non-empty string.")
+    payload = getattr(tool_block, "input", None)
+    if not isinstance(payload, dict):
+        raise AIGenerationError("tool_use.input was not a dict.")
 
-    faq_items = payload.get("faq_items")
-    if not isinstance(faq_items, list) or len(faq_items) < 3:
-        raise AIGenerationError("faq_items must be a list with at least 3 entries.")
-    for idx, item in enumerate(faq_items):
-        if not isinstance(item, dict):
-            raise AIGenerationError(f"faq_items[{idx}] must be an object.")
-        missing = FAQ_ITEM_REQUIRED_KEYS - set(item.keys())
-        if missing:
-            raise AIGenerationError(f"faq_items[{idx}] missing keys: {sorted(missing)}")
-
-    keywords = payload.get("keywords")
-    if not isinstance(keywords, list):
-        raise AIGenerationError("keywords must be a list.")
+    return payload, preview

@@ -146,13 +146,13 @@ class Command(BaseCommand):
 
 
 def _safe_store_response(result: GenerationResult) -> dict:
-    """Store a truncated copy of the raw response in BlogPostRun — useful
-    for debugging prompt drift without blowing out the DB row size."""
-    text = result.raw_response_text or ""
+    """Store a truncated copy of the tool-use response in BlogPostRun —
+    useful for debugging prompt drift. We keep the structured payload
+    plus any commentary Claude emitted alongside the tool call."""
     return {
-        "text_preview": text[:4000],
-        "text_length": len(text),
+        "preview": result.raw_preview[:4000],
         "model": result.model,
+        "keys_present": sorted(result.payload.keys()) if result.payload else [],
     }
 
 
