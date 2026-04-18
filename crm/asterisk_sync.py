@@ -31,8 +31,10 @@ from typing import TYPE_CHECKING, Dict, Optional
 from django.conf import settings
 from django.db import transaction
 
+from crm.asterisk_db import get_active_pbx_for_current_tenant, register_pbx_alias
+
 if TYPE_CHECKING:
-    from crm.models import InboundRoute, Queue, Trunk, UserPhoneAssignment
+    from crm.models import InboundRoute, PbxServer, Queue, Trunk, UserPhoneAssignment
 
 
 logger = logging.getLogger(__name__)
@@ -113,20 +115,65 @@ class AsteriskStateSync:
     — they short-circuit with a DEBUG log.
     """
 
-    def __init__(self, tenant_schema: str):
+    def __init__(self, tenant_schema: str, pbx: Optional["PbxServer"] = None):
         self.tenant_schema = tenant_schema
+        # Resolve the active PbxServer once per sync instance. ``pbx=None``
+        # is the signal to every sync_* method that the tenant hasn't
+        # registered a BYO server yet — methods will no-op instead of
+        # trying to write to a non-existent realtime DB.
+        if pbx is None:
+            pbx = get_active_pbx_for_current_tenant()
+        self.pbx: Optional["PbxServer"] = pbx
+        # Register (or refresh) the per-tenant asterisk DB alias so that
+        # ``.using(self.alias)`` works immediately. Only register when we
+        # actually have a PbxServer — otherwise leave ``self.alias = None``
+        # and rely on ``_enabled()`` to short-circuit callers.
+        self.alias: Optional[str] = None
+        if self.pbx is not None:
+            try:
+                self.alias = register_pbx_alias(self.pbx, schema_name=tenant_schema)
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "Failed to register asterisk DB alias for tenant=%s",
+                    tenant_schema,
+                )
+                self.pbx = None  # degrade to no-op mode rather than crash
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def prefix(tenant_schema: str, name: str) -> str:
-        """Return the tenant-prefixed id used in Asterisk realtime tables.
+    def prefix(self, tenant_schema: str, name: str) -> str:
+        """Return the Asterisk realtime ID for ``name`` in this tenant.
 
-        >>> AsteriskStateSync.prefix('acme', '100')
-        'acme_100'
+        When the bound PbxServer has ``use_tenant_prefix=True`` (legacy
+        shared-DB deployments), the schema name is prepended to keep IDs
+        globally unique:
+
+            >>> sync.prefix('amanati', '100')  # use_tenant_prefix=True
+            'amanati_100'
+
+        For BYO PBXs with their own dedicated DB, the prefix is redundant
+        (no other tenant shares the row namespace), so we return the bare
+        name:
+
+            >>> sync.prefix('acme', '100')  # use_tenant_prefix=False
+            '100'
+
+        ``tenant_schema`` stays in the signature for backwards compatibility
+        with call sites that still pass it explicitly. Static callers (tests,
+        migrations) can use :meth:`prefix_with` which takes the flag
+        directly.
         """
+        if self.pbx is not None and not self.pbx.use_tenant_prefix:
+            return name
+        return f"{tenant_schema}_{name}"
+
+    @staticmethod
+    def prefix_with(tenant_schema: str, name: str, use_tenant_prefix: bool) -> str:
+        """Static variant of :meth:`prefix` for callers outside a tenant context."""
+        if not use_tenant_prefix:
+            return name
         return f"{tenant_schema}_{name}"
 
     @property
@@ -140,9 +187,23 @@ class AsteriskStateSync:
         return f"from-provider-{self.tenant_schema}"
 
     def _enabled(self) -> bool:
-        if not getattr(settings, "ASTERISK_SYNC_ENABLED", False):
+        """Return True when this sync instance can actually write.
+
+        Writes require **both** the global ``ASTERISK_SYNC_ENABLED`` flag
+        (always True in Phase 2; kept as a kill-switch for emergencies)
+        **and** a bound PbxServer for the current tenant. If no PbxServer
+        is registered yet, signals still fire but every sync method
+        short-circuits — the tenant just hasn't enrolled a BYO server yet.
+        """
+        if not getattr(settings, "ASTERISK_SYNC_ENABLED", True):
             logger.debug(
                 "AsteriskStateSync no-op (ASTERISK_SYNC_ENABLED=False) for tenant=%s",
+                self.tenant_schema,
+            )
+            return False
+        if self.pbx is None or self.alias is None:
+            logger.debug(
+                "AsteriskStateSync no-op (no active PbxServer) for tenant=%s",
                 self.tenant_schema,
             )
             return False
@@ -201,20 +262,20 @@ class AsteriskStateSync:
             "realm": getattr(settings, "PBX_REALM", "asterisk"),
         }
 
-        with transaction.atomic(using="asterisk"):
-            PsAuth.objects.using("asterisk").update_or_create(
+        with transaction.atomic(using=self.alias):
+            PsAuth.objects.using(self.alias).update_or_create(
                 id=endpoint_id, defaults=auth_fields
             )
-            PsAor.objects.using("asterisk").update_or_create(
+            PsAor.objects.using(self.alias).update_or_create(
                 id=endpoint_id, defaults=aor_fields
             )
-            PsEndpoint.objects.using("asterisk").update_or_create(
+            PsEndpoint.objects.using(self.alias).update_or_create(
                 id=endpoint_id, defaults=endpoint_fields
             )
             # Identify by username — pjsip already uses identify_by=username
             # on the endpoint so this row is only needed when we later layer
             # IP-based identify. For WebRTC endpoints we ensure no stale row.
-            PsIdentify.objects.using("asterisk").filter(id=endpoint_id).delete()
+            PsIdentify.objects.using(self.alias).filter(id=endpoint_id).delete()
 
     def tombstone_endpoint(self, assignment_id: int, extension: str) -> None:
         """Delete all 4 pjsip rows for an extension (on extension deletion)."""
@@ -226,11 +287,11 @@ class AsteriskStateSync:
         from asterisk_state.models import PsAor, PsAuth, PsEndpoint, PsIdentify
 
         endpoint_id = self.prefix(self.tenant_schema, str(extension))
-        with transaction.atomic(using="asterisk"):
-            PsEndpoint.objects.using("asterisk").filter(id=endpoint_id).delete()
-            PsIdentify.objects.using("asterisk").filter(id=endpoint_id).delete()
-            PsAor.objects.using("asterisk").filter(id=endpoint_id).delete()
-            PsAuth.objects.using("asterisk").filter(id=endpoint_id).delete()
+        with transaction.atomic(using=self.alias):
+            PsEndpoint.objects.using(self.alias).filter(id=endpoint_id).delete()
+            PsIdentify.objects.using(self.alias).filter(id=endpoint_id).delete()
+            PsAor.objects.using(self.alias).filter(id=endpoint_id).delete()
+            PsAuth.objects.using(self.alias).filter(id=endpoint_id).delete()
 
     # ------------------------------------------------------------------
     # Trunk sync
@@ -284,17 +345,17 @@ class AsteriskStateSync:
             "match": trunk.sip_server,
         }
 
-        with transaction.atomic(using="asterisk"):
-            PsAuth.objects.using("asterisk").update_or_create(
+        with transaction.atomic(using=self.alias):
+            PsAuth.objects.using(self.alias).update_or_create(
                 id=endpoint_id, defaults=auth_fields
             )
-            PsAor.objects.using("asterisk").update_or_create(
+            PsAor.objects.using(self.alias).update_or_create(
                 id=endpoint_id, defaults=aor_fields
             )
-            PsEndpoint.objects.using("asterisk").update_or_create(
+            PsEndpoint.objects.using(self.alias).update_or_create(
                 id=endpoint_id, defaults=endpoint_fields
             )
-            PsIdentify.objects.using("asterisk").update_or_create(
+            PsIdentify.objects.using(self.alias).update_or_create(
                 id=endpoint_id, defaults=identify_fields
             )
 
@@ -315,11 +376,11 @@ class AsteriskStateSync:
                     "auth_rejection_permanent": "no",
                     "support_path": "no",
                 }
-                PsRegistration.objects.using("asterisk").update_or_create(
+                PsRegistration.objects.using(self.alias).update_or_create(
                     id=endpoint_id, defaults=reg_fields
                 )
             else:
-                PsRegistration.objects.using("asterisk").filter(id=endpoint_id).delete()
+                PsRegistration.objects.using(self.alias).filter(id=endpoint_id).delete()
 
     def tombstone_trunk(self, trunk_id: int, slug: Optional[str] = None) -> None:
         """Delete all pjsip + registration rows for a deleted trunk.
@@ -349,12 +410,12 @@ class AsteriskStateSync:
         )
 
         endpoint_id = self.prefix(self.tenant_schema, f"trunk_{slug}")
-        with transaction.atomic(using="asterisk"):
-            PsRegistration.objects.using("asterisk").filter(id=endpoint_id).delete()
-            PsEndpoint.objects.using("asterisk").filter(id=endpoint_id).delete()
-            PsIdentify.objects.using("asterisk").filter(id=endpoint_id).delete()
-            PsAor.objects.using("asterisk").filter(id=endpoint_id).delete()
-            PsAuth.objects.using("asterisk").filter(id=endpoint_id).delete()
+        with transaction.atomic(using=self.alias):
+            PsRegistration.objects.using(self.alias).filter(id=endpoint_id).delete()
+            PsEndpoint.objects.using(self.alias).filter(id=endpoint_id).delete()
+            PsIdentify.objects.using(self.alias).filter(id=endpoint_id).delete()
+            PsAor.objects.using(self.alias).filter(id=endpoint_id).delete()
+            PsAuth.objects.using(self.alias).filter(id=endpoint_id).delete()
 
     # ------------------------------------------------------------------
     # Queue sync
@@ -391,7 +452,7 @@ class AsteriskStateSync:
             "reportholdtime": "no",
             "context": self._tenant_context,
         }
-        AsteriskQueue.objects.using("asterisk").update_or_create(
+        AsteriskQueue.objects.using(self.alias).update_or_create(
             name=queue_name, defaults=fields
         )
 
@@ -428,7 +489,7 @@ class AsteriskStateSync:
 
         # Upsert each desired interface.
         for interface, assignment in desired_interfaces.items():
-            AsteriskQueueMember.objects.using("asterisk").update_or_create(
+            AsteriskQueueMember.objects.using(self.alias).update_or_create(
                 queue_name=queue_name,
                 interface=interface,
                 defaults={
@@ -440,7 +501,7 @@ class AsteriskStateSync:
                 },
             )
         # Drop rows that are no longer in the desired set.
-        AsteriskQueueMember.objects.using("asterisk").filter(
+        AsteriskQueueMember.objects.using(self.alias).filter(
             queue_name=queue_name
         ).exclude(interface__in=list(desired_interfaces.keys())).delete()
 
@@ -484,11 +545,11 @@ class AsteriskStateSync:
         from asterisk_state.models import AsteriskQueue, AsteriskQueueMember
 
         queue_name = self.prefix(self.tenant_schema, slug)
-        with transaction.atomic(using="asterisk"):
-            AsteriskQueueMember.objects.using("asterisk").filter(
+        with transaction.atomic(using=self.alias):
+            AsteriskQueueMember.objects.using(self.alias).filter(
                 queue_name=queue_name
             ).delete()
-            AsteriskQueue.objects.using("asterisk").filter(name=queue_name).delete()
+            AsteriskQueue.objects.using(self.alias).filter(name=queue_name).delete()
 
     # ------------------------------------------------------------------
     # Inbound routes (intentionally no-op at the DB level)

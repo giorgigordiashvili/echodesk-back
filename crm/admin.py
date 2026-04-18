@@ -4,7 +4,7 @@ from django.db import connection
 from .asterisk_sync import AsteriskStateSync
 from .models import (
     Client, CallLog, SipConfiguration, CallEvent, CallRecording,
-    Trunk, Queue, QueueMember, InboundRoute, UserPhoneAssignment,
+    Trunk, Queue, QueueMember, InboundRoute, UserPhoneAssignment, PbxServer,
 )
 
 
@@ -376,4 +376,39 @@ class InboundRouteAdmin(admin.ModelAdmin):
             'fields': ('created_at', 'updated_at'),
             'classes': ('collapse',)
         })
+    )
+
+
+@admin.register(PbxServer)
+class PbxServerAdmin(admin.ModelAdmin):
+    list_display = ('name', 'fqdn', 'status', 'use_tenant_prefix', 'last_seen_at', 'created_at')
+    list_filter = ('status', 'use_tenant_prefix')
+    search_fields = ('name', 'fqdn', 'realtime_db_name', 'ami_username')
+    readonly_fields = (
+        'enrollment_token', 'enrollment_expires_at', 'asterisk_version',
+        'last_seen_at', 'created_at', 'updated_at',
+    )
+    fieldsets = (
+        ('Identity', {'fields': ('name', 'fqdn', 'public_ip', 'status')}),
+        ('Realtime DB', {
+            'fields': (
+                'realtime_db_host', 'realtime_db_port', 'realtime_db_name',
+                'realtime_db_user', 'realtime_db_password', 'realtime_db_sslmode',
+            ),
+        }),
+        ('AMI', {
+            'fields': ('ami_host', 'ami_port', 'ami_username', 'ami_password'),
+        }),
+        ('Transport endpoints', {
+            'fields': ('wss_url', 'recording_base_url'),
+        }),
+        ('Enrollment', {
+            'fields': (
+                'enrollment_token', 'enrollment_expires_at',
+                'asterisk_version', 'last_seen_at',
+            ),
+            'classes': ('collapse',),
+        }),
+        ('Naming', {'fields': ('use_tenant_prefix', 'notes')}),
+        ('Timestamps', {'fields': ('created_at', 'updated_at'), 'classes': ('collapse',)}),
     )

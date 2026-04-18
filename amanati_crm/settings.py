@@ -27,6 +27,18 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = config('SECRET_KEY')  # Required - no default for security
 
+# Fernet key for encrypting per-tenant PBX credentials (PbxServer.*_password).
+# Generate with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
+# Default is derived deterministically from SECRET_KEY so dev environments
+# work without extra setup; production MUST set an explicit FERNET_KEY.
+def _default_fernet_key(secret: str) -> str:
+    import base64, hashlib
+    digest = hashlib.sha256(secret.encode()).digest()
+    return base64.urlsafe_b64encode(digest).decode()
+
+FERNET_KEY = config('FERNET_KEY', default=_default_fernet_key(SECRET_KEY))
+FERNET_KEYS_FALLBACK = [k for k in config('FERNET_KEYS_FALLBACK', default='').split(',') if k]
+
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config('DEBUG', default=False, cast=bool)
 
@@ -183,31 +195,18 @@ DATABASES = {
     }
 }
 
-# Shared Asterisk realtime DB (ARA). Asterisk 18 reads this DB via
-# ``res_config_pgsql`` + sorcery; Django owns writes through the models in
-# the ``asterisk_state`` app. Unset env vars → ASTERISK_SYNC_ENABLED=False
-# and the sync layer no-ops. We register the alias regardless so tests and
-# local dev can swap it to an SQLite URL without touching code.
-# Asterisk realtime tables live in the default ``public`` schema alongside
-# app data. Asterisk 18's res_config_pgsql hardcodes ``public`` in its
-# information_schema discovery, so a dedicated schema doesn't work cleanly.
-# Django's asterisk DB alias reuses the main DB creds; the router pins the
-# ``asterisk_state`` app to this alias.
-_default_db = DATABASES.get('default', {})
-ASTERISK_DB_NAME = config('ASTERISK_DB_NAME', default=_default_db.get('NAME', ''))
-ASTERISK_SYNC_ENABLED = bool(ASTERISK_DB_NAME)
-DATABASES['asterisk'] = {
-    'ENGINE': 'django.db.backends.postgresql',
-    'NAME': ASTERISK_DB_NAME,
-    'USER': config('ASTERISK_DB_USER', default=_default_db.get('USER', '')),
-    'PASSWORD': config('ASTERISK_DB_PASSWORD', default=_default_db.get('PASSWORD', '')),
-    'HOST': config('ASTERISK_DB_HOST', default=_default_db.get('HOST', '')),
-    'PORT': config('ASTERISK_DB_PORT', default=str(_default_db.get('PORT', '') or '')),
-    'CONN_MAX_AGE': 60,
-    'OPTIONS': {
-        'sslmode': config('ASTERISK_DB_SSLMODE', default='require'),
-    },
-}
+# Asterisk realtime DB (ARA) — Phase 2 (BYO Asterisk).
+#
+# There is NO static ``DATABASES['asterisk']`` alias anymore. Each tenant
+# registers their own Asterisk via :class:`crm.models.PbxServer`, and the
+# sync layer dynamically creates a per-tenant alias (``asterisk_{schema}``)
+# via :func:`crm.asterisk_db.register_pbx_alias`.
+#
+# ``ASTERISK_SYNC_ENABLED`` used to be a global env flag. Now sync is
+# always "enabled" at the module level — whether anything actually writes
+# is a per-tenant decision based on PbxServer.status. The sync service
+# short-circuits when no active PbxServer exists for the current tenant.
+ASTERISK_SYNC_ENABLED = True
 
 # Router order matters: the asterisk router short-circuits for its own app
 # label, then the tenant-schemas router handles everything else.

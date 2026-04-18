@@ -26,15 +26,12 @@ from .serializers import (
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Asterisk AMI constants
-# ---------------------------------------------------------------------------
-AMI_PORT = 5038
-AMI_USERNAME = "echodesk"
-AMI_SECRET = "EchoDesk_AMI_2024!"
-
-
-# ---------------------------------------------------------------------------
 # Asterisk AMI helpers (raw TCP, no external library)
+#
+# Phase 2 (BYO Asterisk): AMI credentials come from the current tenant's
+# PbxServer row, not module-level constants. Each helper now takes host +
+# username + password (+ optional port) so callers can resolve these from
+# their tenant's PbxServer and stay isolated from every other tenant's AMI.
 # ---------------------------------------------------------------------------
 
 def _ami_send_action(sock, action_lines):
@@ -65,12 +62,14 @@ def _ami_read_response(sock, timeout=5):
     return data.decode("utf-8", errors="replace")
 
 
-def _ami_connect_and_login(host):
+def _ami_connect_and_login(host, username, password, port=5038):
     """Open a TCP connection to AMI, read the banner, and log in.
-    Returns the socket on success; raises on failure."""
+
+    Returns the socket on success; raises on failure.
+    """
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.settimeout(10)
-    sock.connect((host, AMI_PORT))
+    sock.connect((host, port))
 
     # Read the AMI banner (e.g. "Asterisk Call Manager/...")
     _ami_read_response(sock, timeout=3)
@@ -78,8 +77,8 @@ def _ami_connect_and_login(host):
     # Login
     resp = _ami_send_action(sock, [
         ("Action", "Login"),
-        ("Username", AMI_USERNAME),
-        ("Secret", AMI_SECRET),
+        ("Username", username),
+        ("Secret", password),
     ])
     if "Success" not in resp:
         sock.close()
@@ -99,14 +98,14 @@ def _ami_logoff(sock):
         pass
 
 
-def _ami_get_channels(host):
+def _ami_get_channels(host, username, password, port=5038):
     """Connect to AMI, run CoreShowChannels, and return a list of channel dicts.
 
     Each dict has at least:
         - channel: full channel name (e.g. PJSIP/geo-provider-endpoint-00000001)
         - context, exten, calleridnum, duration, application, bridgeid, ...
     """
-    sock = _ami_connect_and_login(host)
+    sock = _ami_connect_and_login(host, username, password, port=port)
     try:
         # CoreShowChannels returns multiple "Event: CoreShowChannel" messages
         # followed by "Event: CoreShowChannelsComplete".
@@ -145,12 +144,12 @@ def _ami_get_channels(host):
         _ami_logoff(sock)
 
 
-def _ami_redirect_to_confbridge(host, channel, conference_room):
+def _ami_redirect_to_confbridge(host, channel, conference_room, username, password, port=5038):
     """Redirect a single Asterisk channel into a ConfBridge room.
 
     Uses the ``confbridge-dynamic`` dialplan context.
     """
-    sock = _ami_connect_and_login(host)
+    sock = _ami_connect_and_login(host, username, password, port=port)
     try:
         resp = _ami_send_action(sock, [
             ("Action", "Redirect"),
@@ -1252,21 +1251,31 @@ class CallLogViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        # --- Determine PBX host from SIP configuration ------------------
-        sip_config = original_call.sip_configuration
-        if not sip_config:
+        # --- Resolve this tenant's PbxServer for AMI creds --------------
+        from crm.asterisk_db import get_active_pbx_for_current_tenant
+
+        pbx = get_active_pbx_for_current_tenant()
+        if pbx is None:
             return Response(
-                {"error": "No SIP configuration associated with this call"},
-                status=status.HTTP_400_BAD_REQUEST,
+                {"error": "PBX not configured for this tenant"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
-        pbx_host = sip_config.sip_server
+        pbx_host = pbx.ami_host or pbx.fqdn
+        ami_user = pbx.ami_username
+        ami_pass = pbx.ami_password
+        ami_port = pbx.ami_port or 5038
+        if not (pbx_host and ami_user and ami_pass):
+            return Response(
+                {"error": "PbxServer missing AMI credentials"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
 
         # --- Generate a unique conference room ID -----------------------
         conference_room = f"conf_{original_call.id}"
 
         # --- Discover active channels via AMI ---------------------------
         try:
-            all_channels = _ami_get_channels(pbx_host)
+            all_channels = _ami_get_channels(pbx_host, ami_user, ami_pass, port=ami_port)
         except Exception as exc:
             logger.error("AMI CoreShowChannels failed on %s: %s", pbx_host, exc)
             return Response(
@@ -1335,7 +1344,10 @@ class CallLogViewSet(viewsets.ModelViewSet):
         errors = []
         for ch_name in unique_channels:
             try:
-                _ami_redirect_to_confbridge(pbx_host, ch_name, conference_room)
+                _ami_redirect_to_confbridge(
+                    pbx_host, ch_name, conference_room,
+                    ami_user, ami_pass, port=ami_port,
+                )
                 redirected.append(ch_name)
             except Exception as exc:
                 logger.error("AMI Redirect failed for %s: %s", ch_name, exc)
@@ -2040,15 +2052,34 @@ def send_call_review_sms(request):
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated])
 def extension_status(request):
-    """Proxy to PBX status API — returns which extensions are online."""
+    """Proxy to PBX status API — returns which extensions are online.
+
+    Resolves the tenant's active :class:`PbxServer` first so each tenant
+    gets a response from their own Asterisk. Falls back to the default
+    SipConfiguration when no PbxServer is registered yet, keeping the
+    legacy shared-pbx2 path alive during the BYO migration window.
+    """
     import requests as http_requests
+    from crm.asterisk_db import get_active_pbx_for_current_tenant
+
     try:
-        sip_config = SipConfiguration.objects.filter(is_default=True, is_active=True).first()
-        if not sip_config:
+        pbx = get_active_pbx_for_current_tenant()
+        if pbx is not None:
+            pbx_host = pbx.ami_host or pbx.fqdn
+        else:
+            sip_config = SipConfiguration.objects.filter(
+                is_default=True, is_active=True
+            ).first()
+            if not sip_config:
+                return Response({'extensions': []})
+            pbx_host = sip_config.sip_server
+
+        if not pbx_host:
             return Response({'extensions': []})
 
-        pbx_host = sip_config.sip_server
-        resp = http_requests.get(f'http://{pbx_host}:8081/api/extensions/status', timeout=3)
+        resp = http_requests.get(
+            f'http://{pbx_host}:8081/api/extensions/status', timeout=3
+        )
         return Response(resp.json())
     except Exception:
         return Response({'extensions': []})
@@ -2221,6 +2252,187 @@ def pbx_settings_remove_sound(request, sip_config_id):
 # ============================================================================
 
 
+_PBX_TOKEN_CACHE_PREFIX = "pbx_token_tenant:"
+_PBX_TOKEN_CACHE_TTL = 60 * 10  # 10 minutes
+
+
+def _resolve_tenant_by_pbx_token(token: str):
+    """Return the tenant schema_name bound to a PbxServer ``enrollment_token``.
+
+    PbxServer rows live in tenant schemas, so we have to iterate the
+    registry until we find a match. Results are cached in Django's cache
+    keyed by the token so subsequent AGI hits hit the cache (critical on
+    high call volumes — every inbound ring fires this endpoint).
+
+    Returns ``None`` if no active PbxServer matches the token.
+    """
+    from django.core.cache import cache
+    from tenant_schemas.utils import schema_context
+    from tenants.models import Tenant
+
+    if not token:
+        return None
+
+    cache_key = f"{_PBX_TOKEN_CACHE_PREFIX}{token}"
+    cached = cache.get(cache_key)
+    if cached:
+        return cached  # schema_name string
+
+    try:
+        tenants = list(Tenant.objects.exclude(schema_name='public'))
+    except Exception:  # noqa: BLE001
+        return None
+
+    for tenant in tenants:
+        try:
+            with schema_context(tenant.schema_name):
+                from crm.models import PbxServer
+                pbx = PbxServer.objects.filter(enrollment_token=token).first()
+                if pbx is None:
+                    continue
+                cache.set(cache_key, tenant.schema_name, _PBX_TOKEN_CACHE_TTL)
+                return tenant.schema_name
+        except Exception:  # noqa: BLE001
+            continue
+    return None
+
+
+def _resolve_routing_for_tenant(tenant_schema: str, did: str):
+    """Run the DID → InboundRoute resolution inside ``tenant_schema``.
+
+    Returns a response dict ready to return from :func:`call_routing`, or
+    ``None`` if no SIP config / routing data was found in this tenant.
+    """
+    from django.conf import settings as django_settings
+    from tenant_schemas.utils import schema_context
+
+    clean_did = did.replace('+', '').replace(' ', '').replace('-', '')
+
+    with schema_context(tenant_schema):
+        from crm.models import InboundRoute, Queue, Trunk
+
+        # Try matching by phone number first, then fall back to default config
+        sip_config = SipConfiguration.objects.filter(
+            phone_number__endswith=clean_did[-7:]
+        ).first()
+        if not sip_config:
+            sip_config = SipConfiguration.objects.filter(is_default=True).first()
+        if not sip_config:
+            sip_config = SipConfiguration.objects.first()
+        if not sip_config:
+            return None
+
+        pbx_settings, _ = PbxSettings.objects.get_or_create(
+            sip_configuration=sip_config
+        )
+
+        is_working = pbx_settings.is_working_hours_now()
+        sound_urls = pbx_settings.get_sound_urls()
+
+        # Resolve InboundRoute for this DID (exact, then any route whose
+        # trunk owns this DID). When matched we can override extensions
+        # and action with the route's configured destination.
+        route = InboundRoute.objects.filter(
+            did=did, is_active=True
+        ).first() or InboundRoute.objects.filter(
+            did__endswith=clean_did[-9:], is_active=True
+        ).first()
+        if not route:
+            trunk_for_did = Trunk.objects.filter(
+                phone_numbers__contains=[did], is_active=True
+            ).first()
+            if trunk_for_did:
+                route = InboundRoute.objects.filter(
+                    trunk=trunk_for_did, is_active=True
+                ).order_by('priority').first()
+
+        inbound_route_info = None
+        queue_name = None
+        queue_slug = None
+        destination_extensions = []
+        if route:
+            dest_type = str(route.destination_type or 'queue')
+            inbound_route_info = {
+                'id': route.id,
+                'did': route.did,
+                'destination_type': dest_type,
+                'priority': route.priority,
+            }
+            if dest_type == 'queue' and route.destination_queue_id:
+                queue = Queue.objects.filter(
+                    id=route.destination_queue_id, is_active=True
+                ).select_related('group').first()
+                if queue:
+                    # Asterisk queue name. For BYO PbxServers with
+                    # use_tenant_prefix=False (isolated DB), the slug is
+                    # used verbatim. For legacy shared-DB deployments
+                    # (use_tenant_prefix=True) we prepend the schema.
+                    from crm.asterisk_db import get_active_pbx_for_current_tenant
+                    pbx = get_active_pbx_for_current_tenant()
+                    use_prefix = bool(
+                        pbx is not None and pbx.use_tenant_prefix
+                    )
+                    queue_slug = queue.slug
+                    queue_name = (
+                        f"{tenant_schema}_{queue.slug}" if use_prefix else queue.slug
+                    )
+                    inbound_route_info['queue_slug'] = queue.slug
+                    inbound_route_info['queue_name'] = queue_name
+                    # Derive ringing extensions from the backing group.
+                    destination_extensions = list(
+                        UserPhoneAssignment.objects.filter(
+                            user__tenant_groups=queue.group,
+                            is_active=True,
+                        ).values_list('extension', flat=True).distinct()
+                    )
+            elif dest_type == 'extension' and route.destination_extension_id:
+                assignment = UserPhoneAssignment.objects.filter(
+                    id=route.destination_extension_id, is_active=True
+                ).first()
+                if assignment:
+                    destination_extensions = [assignment.extension]
+                    inbound_route_info['extension'] = assignment.extension
+            elif dest_type == 'ivr_custom':
+                inbound_route_info['ivr_custom_context'] = route.ivr_custom_context
+            elif dest_type in ('voicemail', 'hangup'):
+                pass  # handled below by action
+
+        # Legacy: if no InboundRoute matched, fall back to all active
+        # extensions on the SIP config (prior behavior).
+        fallback_extensions = list(
+            UserPhoneAssignment.objects.filter(
+                sip_configuration=sip_config, is_active=True
+            ).values_list('extension', flat=True)
+        )
+        extensions = destination_extensions or fallback_extensions
+
+        # Determine action: InboundRoute overrides, else working-hours gate
+        if route and not is_working:
+            route_action = 'after_hours'
+        elif route and route.destination_type:
+            route_action = str(route.destination_type)
+        else:
+            route_action = 'queue' if is_working else 'after_hours'
+
+        return {
+            'is_working_hours': is_working,
+            'action': route_action,
+            'sounds': sound_urls,
+            'extensions': extensions,
+            'voicemail_enabled': pbx_settings.voicemail_enabled,
+            'after_hours_action': pbx_settings.after_hours_action,
+            'forward_number': (
+                pbx_settings.forward_number
+                if pbx_settings.after_hours_action == 'forward' else None
+            ),
+            'review_method': pbx_settings.review_method,
+            'inbound_route': inbound_route_info,
+            'queue_name': queue_name,
+            'queue_slug': queue_slug,
+            'tenant_schema': tenant_schema,
+        }
+
+
 @csrf_exempt
 @api_view(['GET'])
 @permission_classes([])
@@ -2231,150 +2443,79 @@ def call_routing(request):
 
     Query params:
         did: The DID/phone number that was called (e.g., +995322421219)
+        pbx_token: (optional) Tenant-scoping token; fallback for the header.
 
-    Auth: Bearer token via PBX_SHARED_SECRET env var.
+    Headers:
+        X-PBX-Token: (optional) When set, resolves tenant via
+            ``PbxServer.enrollment_token`` for O(1) routing — Asterisk's
+            install script bakes this in so we don't have to iterate every
+            tenant on every call.
+        Authorization: Bearer <PBX_SHARED_SECRET> — legacy shared secret,
+            still accepted for backwards compat during the BYO migration.
     """
     from django.conf import settings as django_settings
-    from tenant_schemas.utils import schema_context
     from tenants.models import Tenant
 
-    # Authenticate via shared secret
+    # Authenticate via shared secret (legacy). When X-PBX-Token is present
+    # we treat the token itself as sufficient auth — the token is a 64+ char
+    # secret minted by EchoDesk at enrollment time.
+    pbx_token = (
+        request.META.get('HTTP_X_PBX_TOKEN', '')
+        or request.GET.get('pbx_token', '')
+    ).strip()
+
     auth_header = request.META.get('HTTP_AUTHORIZATION', '')
-    expected_token = getattr(django_settings, 'PBX_SHARED_SECRET', '')
-    if expected_token and not auth_header.endswith(expected_token):
-        return Response({'error': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
+    expected_shared_secret = getattr(django_settings, 'PBX_SHARED_SECRET', '')
+    if not pbx_token:
+        # Legacy path: require the shared secret.
+        if expected_shared_secret and not auth_header.endswith(expected_shared_secret):
+            return Response(
+                {'error': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED
+            )
 
     did = request.GET.get('did', '').strip()
     if not did:
         return Response({'error': 'did parameter required'}, status=status.HTTP_400_BAD_REQUEST)
 
-    clean_did = did.replace('+', '').replace(' ', '').replace('-', '')
+    # ------------------------------------------------------------------
+    # Fast path: X-PBX-Token identifies the tenant without scanning all.
+    # ------------------------------------------------------------------
+    if pbx_token:
+        tenant_schema = _resolve_tenant_by_pbx_token(pbx_token)
+        if tenant_schema is None:
+            return Response(
+                {'error': 'Unknown X-PBX-Token'},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        try:
+            resolved = _resolve_routing_for_tenant(tenant_schema, did)
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "call_routing: resolution failed for tenant=%s did=%s",
+                tenant_schema, did,
+            )
+            resolved = None
+        if resolved is not None:
+            return Response(resolved)
+        # Fall through to the legacy scan as a last resort so a
+        # mis-wired DID doesn't 404 when the tenant actually exists.
 
-    # Lazy imports so shared-schema code paths aren't touched at import time.
-    from crm.models import InboundRoute, Queue, Trunk
-
-    # Search across all tenants for the SIP configuration with this phone number
+    # ------------------------------------------------------------------
+    # Legacy all-tenant scan. Kept for backwards compatibility until every
+    # deployed Asterisk install script includes X-PBX-Token. Emits a
+    # warning so we notice if we accidentally regress to the slow path.
+    # ------------------------------------------------------------------
+    logger.warning(
+        "call_routing called without X-PBX-Token — O(N) fallback (did=%s)", did,
+    )
     tenants = Tenant.objects.exclude(schema_name='public')
     for tenant in tenants:
         try:
-            with schema_context(tenant.schema_name):
-                # Try matching by phone number first, then fall back to default config
-                sip_config = SipConfiguration.objects.filter(
-                    phone_number__endswith=clean_did[-7:]
-                ).first()
-                if not sip_config:
-                    sip_config = SipConfiguration.objects.filter(is_default=True).first()
-                if not sip_config:
-                    sip_config = SipConfiguration.objects.first()
-                if not sip_config:
-                    continue
-
-                pbx_settings, _ = PbxSettings.objects.get_or_create(
-                    sip_configuration=sip_config
-                )
-
-                is_working = pbx_settings.is_working_hours_now()
-                sound_urls = pbx_settings.get_sound_urls()
-
-                # Resolve InboundRoute for this DID (exact, then any route whose
-                # trunk owns this DID). When matched we can override extensions
-                # and action with the route's configured destination.
-                route = InboundRoute.objects.filter(
-                    did=did, is_active=True
-                ).first() or InboundRoute.objects.filter(
-                    did__endswith=clean_did[-9:], is_active=True
-                ).first()
-                if not route:
-                    trunk_for_did = Trunk.objects.filter(
-                        phone_numbers__contains=[did], is_active=True
-                    ).first()
-                    if trunk_for_did:
-                        route = InboundRoute.objects.filter(
-                            trunk=trunk_for_did, is_active=True
-                        ).order_by('priority').first()
-
-                inbound_route_info = None
-                queue_name = None
-                queue_slug = None
-                destination_extensions = []
-                if route:
-                    dest_type = str(route.destination_type or 'queue')
-                    inbound_route_info = {
-                        'id': route.id,
-                        'did': route.did,
-                        'destination_type': dest_type,
-                        'priority': route.priority,
-                    }
-                    if dest_type == 'queue' and route.destination_queue_id:
-                        queue = Queue.objects.filter(
-                            id=route.destination_queue_id, is_active=True
-                        ).select_related('group').first()
-                        if queue:
-                            # Asterisk queue name. Until realtime sync is enabled,
-                            # Asterisk still has the hand-written queue (e.g. "support"),
-                            # so we return the bare slug. Once ASTERISK_SYNC_ENABLED is
-                            # on, swap to the tenant-prefixed name.
-                            sync_on = getattr(django_settings, 'ASTERISK_SYNC_ENABLED', False)
-                            queue_slug = queue.slug
-                            queue_name = (
-                                f"{tenant.schema_name}_{queue.slug}" if sync_on else queue.slug
-                            )
-                            inbound_route_info['queue_slug'] = queue.slug
-                            inbound_route_info['queue_name'] = queue_name
-                            # Derive ringing extensions from the backing group.
-                            destination_extensions = list(
-                                UserPhoneAssignment.objects.filter(
-                                    user__tenant_groups=queue.group,
-                                    is_active=True,
-                                ).values_list('extension', flat=True).distinct()
-                            )
-                    elif dest_type == 'extension' and route.destination_extension_id:
-                        assignment = UserPhoneAssignment.objects.filter(
-                            id=route.destination_extension_id, is_active=True
-                        ).first()
-                        if assignment:
-                            destination_extensions = [assignment.extension]
-                            inbound_route_info['extension'] = assignment.extension
-                    elif dest_type == 'ivr_custom':
-                        inbound_route_info['ivr_custom_context'] = route.ivr_custom_context
-                    elif dest_type in ('voicemail', 'hangup'):
-                        pass  # handled below by action
-
-                # Legacy: if no InboundRoute matched, fall back to all active
-                # extensions on the SIP config (prior behavior).
-                fallback_extensions = list(
-                    UserPhoneAssignment.objects.filter(
-                        sip_configuration=sip_config, is_active=True
-                    ).values_list('extension', flat=True)
-                )
-                extensions = destination_extensions or fallback_extensions
-
-                # Determine action: InboundRoute overrides, else working-hours gate
-                if route and not is_working:
-                    action = 'after_hours'
-                elif route and route.destination_type:
-                    action = str(route.destination_type)
-                else:
-                    action = 'queue' if is_working else 'after_hours'
-
-                response_data = {
-                    'is_working_hours': is_working,
-                    'action': action,
-                    'sounds': sound_urls,
-                    'extensions': extensions,
-                    'voicemail_enabled': pbx_settings.voicemail_enabled,
-                    'after_hours_action': pbx_settings.after_hours_action,
-                    'forward_number': pbx_settings.forward_number if pbx_settings.after_hours_action == 'forward' else None,
-                    'review_method': pbx_settings.review_method,
-                    # New fields driven by the PBX management panel.
-                    'inbound_route': inbound_route_info,
-                    'queue_name': queue_name,
-                    'queue_slug': queue_slug,
-                    'tenant_schema': tenant.schema_name,
-                }
-                return Response(response_data)
-        except Exception:
+            resolved = _resolve_routing_for_tenant(tenant.schema_name, did)
+        except Exception:  # noqa: BLE001
             continue
+        if resolved is not None:
+            return Response(resolved)
 
     # DID not found in any tenant — default to open
     return Response({

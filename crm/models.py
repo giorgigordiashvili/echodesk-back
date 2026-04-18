@@ -3,6 +3,7 @@ from django.conf import settings
 import uuid
 
 from amanati_crm.file_utils import SanitizedUploadTo
+from crm.fields import EncryptedCharField
 
 
 class SipConfiguration(models.Model):
@@ -826,3 +827,138 @@ class InboundRoute(models.Model):
             errors['ivr_custom_context'] = "ivr_custom_context is required when destination_type='ivr_custom'."
         if errors:
             raise ValidationError(errors)
+
+
+class PbxServer(models.Model):
+    """Per-tenant Asterisk server that EchoDesk manages via realtime config.
+
+    Each tenant registers one (MVP: enforce 1-per-tenant by service code)
+    Asterisk instance — hostname, credentials for its dedicated Postgres
+    realtime DB, and AMI credentials for runtime ops (merge_conference,
+    extension_status). Provisioning flow generates ``enrollment_token``
+    and the tenant runs a one-line install script on their box that
+    fetches config from ``/api/pbx/install/<token>/``.
+    """
+
+    STATUS_PENDING = 'pending'
+    STATUS_PROVISIONING = 'provisioning'
+    STATUS_ACTIVE = 'active'
+    STATUS_ERROR = 'error'
+    STATUS_REVOKED = 'revoked'
+    STATUS_CHOICES = [
+        (STATUS_PENDING, 'Pending'),
+        (STATUS_PROVISIONING, 'Provisioning'),
+        (STATUS_ACTIVE, 'Active'),
+        (STATUS_ERROR, 'Error'),
+        (STATUS_REVOKED, 'Revoked'),
+    ]
+
+    # Identity
+    name = models.CharField(max_length=100, help_text="Friendly label (e.g. 'Main PBX')")
+    fqdn = models.CharField(
+        max_length=255,
+        help_text="FQDN of the Asterisk server (e.g. pbx.acme.com). Used to derive wss_url.",
+    )
+    public_ip = models.GenericIPAddressField(
+        null=True, blank=True,
+        help_text="Public IP — needed so DO Postgres firewall can allow this host.",
+    )
+
+    # Realtime DB connection (Django writes, Asterisk reads)
+    realtime_db_host = models.CharField(max_length=255)
+    realtime_db_port = models.IntegerField(default=25060)
+    realtime_db_name = models.CharField(
+        max_length=63,
+        help_text="Tenant-dedicated Postgres database (e.g. asterisk_acme).",
+    )
+    realtime_db_user = models.CharField(max_length=63)
+    realtime_db_password = EncryptedCharField(
+        blank=True, default='',
+        help_text="Encrypted at rest with Fernet.",
+    )
+    realtime_db_sslmode = models.CharField(max_length=16, default='require')
+
+    # AMI (Asterisk Manager Interface) for runtime channel ops
+    ami_host = models.CharField(
+        max_length=255, blank=True,
+        help_text="Usually same as fqdn; override if AMI is bound to a different interface.",
+    )
+    ami_port = models.IntegerField(default=5038)
+    ami_username = models.CharField(max_length=80, blank=True)
+    ami_password = EncryptedCharField(blank=True, default='')
+
+    # SIP / WebRTC transport endpoints for softphones + recordings
+    wss_url = models.URLField(
+        blank=True,
+        help_text="WebSocket SIP endpoint (e.g. wss://pbx.acme.com:8089/ws). "
+                  "Derived from fqdn if blank.",
+    )
+    recording_base_url = models.URLField(
+        blank=True,
+        help_text="Public HTTPS base where recording files live "
+                  "(e.g. https://pbx.acme.com:8443/recordings/).",
+    )
+
+    # Onboarding / health
+    enrollment_token = models.CharField(
+        max_length=128, unique=True, db_index=True,
+        help_text="Bearer token embedded in the install script + AGI callbacks. "
+                  "Used to identify this PbxServer on inbound API calls.",
+    )
+    enrollment_expires_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Install token TTL; after this the install endpoint returns 410.",
+    )
+    status = models.CharField(
+        max_length=16, choices=STATUS_CHOICES, default=STATUS_PENDING, db_index=True,
+    )
+    asterisk_version = models.CharField(max_length=64, blank=True)
+    last_seen_at = models.DateTimeField(null=True, blank=True)
+
+    # Naming scheme — legacy deployments on the shared public schema
+    # need prefixed IDs (amanati_100) to avoid collisions. Fresh per-tenant
+    # DBs don't need the prefix.
+    use_tenant_prefix = models.BooleanField(
+        default=False,
+        help_text="Legacy shim: prefix realtime row IDs with the tenant schema "
+                  "name. Leave False for new BYO PBXs that use a dedicated DB.",
+    )
+
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'PBX Server'
+
+    def __str__(self):
+        return f"{self.name} ({self.fqdn}, {self.status})"
+
+    def save(self, *args, **kwargs):
+        if not self.enrollment_token:
+            import secrets
+            self.enrollment_token = secrets.token_urlsafe(48)
+        if not self.ami_host:
+            self.ami_host = self.fqdn
+        if not self.wss_url and self.fqdn:
+            self.wss_url = f"wss://{self.fqdn}:8089/ws"
+        if not self.recording_base_url and self.fqdn:
+            self.recording_base_url = f"https://{self.fqdn}:8443/recordings/"
+        super().save(*args, **kwargs)
+
+    @property
+    def is_active(self) -> bool:
+        return self.status == self.STATUS_ACTIVE
+
+    def regenerate_enrollment_token(self, ttl_hours: int = 24):
+        """Mint a fresh install token; invalidates any previous one."""
+        import secrets
+        from django.utils import timezone
+        from datetime import timedelta
+        self.enrollment_token = secrets.token_urlsafe(48)
+        self.enrollment_expires_at = timezone.now() + timedelta(hours=ttl_hours)
+        self.status = self.STATUS_PENDING
+        self.save(update_fields=[
+            'enrollment_token', 'enrollment_expires_at', 'status', 'updated_at',
+        ])
