@@ -188,12 +188,13 @@ DATABASES = {
 # the ``asterisk_state`` app. Unset env vars → ASTERISK_SYNC_ENABLED=False
 # and the sync layer no-ops. We register the alias regardless so tests and
 # local dev can swap it to an SQLite URL without touching code.
-# When the dedicated ASTERISK_DB_* env vars aren't set we fall back to the
-# main app DB creds but point at a separate schema (``asterisk_state``). That
-# lets us stand up Asterisk realtime without provisioning a second managed DB.
+# Asterisk realtime tables live in the default ``public`` schema alongside
+# app data. Asterisk 18's res_config_pgsql hardcodes ``public`` in its
+# information_schema discovery, so a dedicated schema doesn't work cleanly.
+# Django's asterisk DB alias reuses the main DB creds; the router pins the
+# ``asterisk_state`` app to this alias.
 _default_db = DATABASES.get('default', {})
 ASTERISK_DB_NAME = config('ASTERISK_DB_NAME', default=_default_db.get('NAME', ''))
-ASTERISK_DB_SCHEMA = config('ASTERISK_DB_SCHEMA', default='asterisk_state')
 ASTERISK_SYNC_ENABLED = bool(ASTERISK_DB_NAME)
 DATABASES['asterisk'] = {
     'ENGINE': 'django.db.backends.postgresql',
@@ -205,8 +206,6 @@ DATABASES['asterisk'] = {
     'CONN_MAX_AGE': 60,
     'OPTIONS': {
         'sslmode': config('ASTERISK_DB_SSLMODE', default='require'),
-        # Force every query/write into the asterisk_state schema.
-        'options': f'-c search_path={ASTERISK_DB_SCHEMA},public',
     },
 }
 
