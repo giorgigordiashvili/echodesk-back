@@ -111,26 +111,35 @@ all reference the same key.
   works before and after the realtime cutover.
 - `DEPLOY_PBX2_SCRIPTS.md` — runbook for applying the AGI + dialplan on pbx2.
 
-### Asterisk realtime (ARA) cutover — **LIVE**
+### Asterisk realtime (ARA) — **BYO model, LIVE**
 
-Cut over on 2026-04-19. `pjsip show endpoints` lists both file-based
-(`100`, `101`, `geo-provider-endpoint`) and realtime (`amanati_100`,
-`amanati_101`, `amanati_trunk_…`) side-by-side. `queue show
-amanati_support` reports its members as `(realtime)`.
+**Phase 2 architecture (2026-04-19): one Asterisk per tenant.** Each
+tenant registers their own server via `/settings/pbx/server/` and gets
+their own Postgres DB on the shared DO cluster (`asterisk_<tenant>`)
+with its own RW role (`asterisk_rw_<tenant>`). IDs are unprefixed
+(endpoint `100`, queue `support` — no tenant prefix) because each DB
+is isolated.
 
-- Realtime tables live in the **`public` schema** of `defaultdb`
-  (Asterisk 18's pgsql driver hardcodes `public` in information_schema
-  queries — a dedicated schema doesn't work). Row IDs are tenant-prefixed.
-- Django's `asterisk` DB alias reuses the main DB creds (no separate env
-  vars required on DO). `ASTERISK_SYNC_ENABLED` auto-flips to True.
-- Asterisk connects as `asterisk_ro` with SELECT/INSERT/UPDATE/DELETE on
-  just the 7 realtime tables (plus the auto-created `ps_contacts`).
-- Full runbook with all gotchas at `pbx/CUTOVER_RUNBOOK.md`.
-
-The hand-written `[100]`/`[101]`/`[geo-provider]` blocks in `pjsip.conf`
-stay in place during the bedding-in period so existing softphones keep
-working. After ~1 week stable, we retire those blocks and reconfigure
-softphones to register as `amanati_100` / `amanati_101`.
+- Per-tenant `PbxServer` model (`crm/models.py`) stores encrypted DB
+  + AMI credentials and the enrollment token for install-script auth.
+- Dynamic Django DB routing via `crm/asterisk_db.py` — `AsteriskStateRouter`
+  resolves the current tenant's PbxServer → registers alias
+  `asterisk_<schema>` on first use.
+- AMI creds fully parameterized (no more `AMI_USERNAME`/`AMI_SECRET`
+  constants); all call-ops views look up the tenant's PbxServer.
+- `call_routing` AGI endpoint accepts `X-PBX-Token` header for O(1)
+  tenant resolution (falls back to all-tenant scan for legacy clients).
+- Install script endpoint: `GET /api/pbx/install/<token>/` returns a
+  self-contained bash installer the tenant pipes to `sudo bash`.
+  Writes res_pgsql.conf + sorcery + extconfig + modules.conf preload +
+  systemd drop-in, installs AMI user, restarts Asterisk, pings back.
+- Amanati's pbx2 is registered and running on `asterisk_amanati`
+  with unprefixed IDs. Legacy `amanati_*` rows still in `defaultdb.public`
+  pending cleanup per `pbx/AMANATI_BYO_MIGRATION.md`.
+- Runbooks: `pbx/CUTOVER_RUNBOOK.md` (Phase 1 shared-schema setup,
+  still used as reference for the config patterns), `pbx/BYO_PROVISIONING.md`
+  (Phase 2 tenant onboarding), `pbx/AMANATI_BYO_MIGRATION.md` (the
+  first retrofit).
 
 ## Deployment workflow
 
