@@ -623,6 +623,13 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'blog.tasks.generate_daily_blog_posts',
         'schedule': crontab(hour=6, minute=0),
     },
+    # Landing pages: draft pending topics into LandingPage(review) via Claude.
+    # Daily at 07:00 UTC = 11:00 Tbilisi — one hour after the blog to keep
+    # API spend evenly distributed. Draft count limited by BLOG_DAILY_POST_LIMIT.
+    'generate-daily-landing-pages': {
+        'task': 'landing_pages.tasks.generate_daily_landing_pages',
+        'schedule': crontab(hour=7, minute=0),
+    },
 }
 
 # Bank of Georgia (BOG) Payment Gateway Configuration
