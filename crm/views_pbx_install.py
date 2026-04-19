@@ -220,6 +220,14 @@ txt = p.read_text()
 txt = re.sub(r"\\n; === EchoDesk realtime.*\\Z", "", txt, flags=re.DOTALL)
 txt += \"\"\"
 ; === EchoDesk realtime (managed) ===
+; NOTE: a sorcery memory_cache wizard in front of realtime would save
+; ~60 ms per call setup (Tbilisi→Frankfurt RTT) but the
+; 'memory_cache/<wizard>,<data>' syntax in Asterisk 18.10's build on
+; Ubuntu 22.04 rejects the wrapped form ("Wizard 'memory_cache/realtime'
+; could not be applied to object type 'endpoint' as it was not found").
+; Deferred — see pbx/FUTURE_MEMORY_CACHE_SYNTAX.md for the investigation
+; trail. For tenants whose PBX is colocated with the DO DB region the
+; 60 ms saving isn't worth the complexity anyway.
 [res_pjsip]
 endpoint=realtime,ps_endpoints
 endpoint=config,pjsip.conf,criteria=type=endpoint

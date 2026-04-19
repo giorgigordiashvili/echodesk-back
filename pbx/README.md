@@ -34,6 +34,12 @@ Start here if you're figuring out how EchoDesk talks to Asterisk.
   + 30-minute migration recipe for splitting them onto a dedicated
   realtime cluster (Option B) when we hit ~10 tenants or compliance
   requires it.
+- **[FUTURE_MEMORY_CACHE_SYNTAX.md](FUTURE_MEMORY_CACHE_SYNTAX.md)** —
+  investigation trail on sorcery memory cache. Would save ~60 ms per
+  call setup for tenants with cross-region DB latency (Tbilisi→Frankfurt
+  today). The `memory_cache/realtime` wrapping syntax doesn't load on
+  our Ubuntu 22.04 Asterisk 18.10 build — deferred until we have more
+  tenants or a concrete latency complaint.
 
 ### Scripts shipped to the Asterisk server
 - **echodesk-routing.py** — AGI called from `[from-provider]` dialplan.
