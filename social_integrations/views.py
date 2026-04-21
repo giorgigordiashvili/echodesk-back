@@ -582,20 +582,24 @@ class FacebookMessageViewSet(viewsets.ReadOnlyModelViewSet):
                 # Get page IDs for this tenant
                 page_ids = list(tenant_pages.values_list('page_id', flat=True))
 
-                # Get conversations assigned to current user
-                my_assigned = ChatAssignment.objects.filter(
-                    assigned_user=self.request.user,
+                # Only active assignments count — completed sessions have
+                # ``assigned_user=None`` (see end_session view) so without the
+                # status filter, completed chats land in ``all_assigned`` but
+                # not ``my_assigned`` and get excluded for every non-staff
+                # user. This bit teonagolodze.16@gmail.com on amanati,
+                # 2026-04-21: after ending a chat she couldn't see its
+                # history on return. Mirrors the email-viewset pattern below.
+                active_assignments = ChatAssignment.objects.filter(
                     platform='facebook',
-                    account_id__in=page_ids
+                    account_id__in=page_ids,
+                    status__in=['active', 'in_session'],
+                )
+                my_assigned = active_assignments.filter(
+                    assigned_user=self.request.user
                 ).values_list('conversation_id', flat=True)
+                all_assigned = active_assignments.values_list('conversation_id', flat=True)
 
-                # Get all assigned conversations for Facebook
-                all_assigned = ChatAssignment.objects.filter(
-                    platform='facebook',
-                    account_id__in=page_ids
-                ).values_list('conversation_id', flat=True)
-
-                # Return: assigned to me OR not assigned to anyone
+                # Return: assigned to me OR not assigned to anyone active
                 base_queryset = base_queryset.filter(
                     Q(sender_id__in=my_assigned) | ~Q(sender_id__in=all_assigned)
                 )
@@ -2721,20 +2725,19 @@ class InstagramMessageViewSet(viewsets.ReadOnlyModelViewSet):
                 # Get account IDs for this tenant
                 account_ids = list(tenant_accounts.values_list('instagram_account_id', flat=True))
 
-                # Get conversations assigned to current user
-                my_assigned = ChatAssignment.objects.filter(
-                    assigned_user=self.request.user,
+                # Only active assignments — see the Facebook viewset for the
+                # full rationale. Completed sessions have assigned_user=None
+                # and would otherwise be hidden from everyone.
+                active_assignments = ChatAssignment.objects.filter(
                     platform='instagram',
-                    account_id__in=account_ids
+                    account_id__in=account_ids,
+                    status__in=['active', 'in_session'],
+                )
+                my_assigned = active_assignments.filter(
+                    assigned_user=self.request.user
                 ).values_list('conversation_id', flat=True)
+                all_assigned = active_assignments.values_list('conversation_id', flat=True)
 
-                # Get all assigned conversations for Instagram
-                all_assigned = ChatAssignment.objects.filter(
-                    platform='instagram',
-                    account_id__in=account_ids
-                ).values_list('conversation_id', flat=True)
-
-                # Return: assigned to me OR not assigned to anyone
                 base_queryset = base_queryset.filter(
                     Q(sender_id__in=my_assigned) | ~Q(sender_id__in=all_assigned)
                 )
@@ -6539,18 +6542,18 @@ class WhatsAppMessageViewSet(viewsets.ReadOnlyModelViewSet):
                 # Get WABA IDs for this tenant
                 waba_ids = list(tenant_accounts.values_list('waba_id', flat=True))
 
-                # Get conversations assigned to current user
-                my_assigned = ChatAssignment.objects.filter(
-                    assigned_user=self.request.user,
+                # Only active assignments — see the Facebook viewset for the
+                # full rationale. Completed sessions have assigned_user=None
+                # and would otherwise be hidden from everyone.
+                active_assignments = ChatAssignment.objects.filter(
                     platform='whatsapp',
-                    account_id__in=waba_ids
+                    account_id__in=waba_ids,
+                    status__in=['active', 'in_session'],
+                )
+                my_assigned = active_assignments.filter(
+                    assigned_user=self.request.user
                 ).values_list('conversation_id', flat=True)
-
-                # Get all assigned conversations for WhatsApp
-                all_assigned = ChatAssignment.objects.filter(
-                    platform='whatsapp',
-                    account_id__in=waba_ids
-                ).values_list('conversation_id', flat=True)
+                all_assigned = active_assignments.values_list('conversation_id', flat=True)
 
                 # For WhatsApp, we need to check both from_number and to_number
                 # conversation_id is the customer's phone number (from_number for incoming, to_number for outgoing)

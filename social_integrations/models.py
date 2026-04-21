@@ -923,7 +923,10 @@ class ChatAssignment(models.Model):
         verbose_name_plural = "Chat Assignments"
 
     def __str__(self):
-        return f"{self.platform} - {self.conversation_id} -> {self.assigned_user.email}"
+        # assigned_user is nulled out by end_session (see views.py) when a
+        # chat is released back to the queue, so guard the attribute access.
+        who = self.assigned_user.email if self.assigned_user_id else "(unassigned)"
+        return f"{self.platform} - {self.conversation_id} -> {who}"
 
     @property
     def full_conversation_id(self):
