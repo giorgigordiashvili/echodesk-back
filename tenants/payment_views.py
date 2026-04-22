@@ -982,14 +982,28 @@ def bog_webhook(request):
                     try:
                         subscription = TenantSubscription.objects.select_for_update().get(id=subscription_id)
 
-                        # Update subscription dates for next billing cycle
-                        # Advance from previous next_billing_date to preserve the cycle,
+                        # Update subscription dates for next billing cycle.
+                        # Advance from previous next_billing_date to preserve the cycle
                         # rather than from now() which shifts the cycle on late payments.
+                        #
+                        # IMPORTANT: always advance by at least one interval on a
+                        # successful charge. The prior logic only advanced if the
+                        # anchor was in the past, which caused daily double-charges
+                        # when the recurring cron (which runs 3 days before
+                        # next_billing_date) fired more than once inside that
+                        # 3-day window — next_billing_date never moved, so the
+                        # same sub was selected again the next day. Reported for
+                        # tenant `artlighthouse` on 2026-04-22 (charged 2026-04-21
+                        # and again 2026-04-22 for a cycle whose next_billing_date
+                        # was 2026-04-24).
                         billing_interval = timedelta(days=30)
                         if getattr(settings, 'TEST_BILLING_INTERVAL', False):
                             billing_interval = timedelta(minutes=2)
                         anchor = subscription.next_billing_date or timezone.now()
-                        # If anchor is in the past, advance it until it's in the future
+                        # Always advance at least one cycle on a successful charge.
+                        anchor += billing_interval
+                        # Keep advancing while still in the past (catching up after
+                        # long outages / failed-retry runs).
                         while anchor <= timezone.now():
                             anchor += billing_interval
                         subscription.last_billed_at = timezone.now()

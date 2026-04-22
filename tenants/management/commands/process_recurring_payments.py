@@ -43,11 +43,19 @@ class Command(BaseCommand):
 
         # Find subscriptions that need renewal (BOG-only — Paddle manages billing automatically)
         cutoff_date = timezone.now() + timedelta(days=days_before)
+        # Recent-bill guard: don't pick up a sub whose last successful charge
+        # is younger than 25 days. Prevents the "charge daily for 3 days until
+        # next_billing_date passes" double-billing bug when the webhook fails
+        # to advance next_billing_date (belt-and-braces — the webhook now
+        # always advances, but the guard protects against future regressions).
+        recent_bill_cutoff = timezone.now() - timedelta(days=25)
         subscriptions_to_renew = TenantSubscription.objects.filter(
             is_active=True,
             next_billing_date__lte=cutoff_date,
             tenant__is_active=True,
             tenant__payment_provider='bog',
+        ).exclude(
+            last_billed_at__gte=recent_bill_cutoff,
         ).select_related('tenant')
 
         self.stdout.write(f'Found {subscriptions_to_renew.count()} subscriptions to process')
