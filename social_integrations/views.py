@@ -7176,8 +7176,39 @@ def whatsapp_media_proxy(request, media_id):
         )
 
         if media_response.status_code != 200:
-            logger.error(f"Failed to get WhatsApp media info for {media_id}: {media_response.status_code}")
-            return Response({'error': 'Failed to get media info from Meta'}, status=status.HTTP_502_BAD_GATEWAY)
+            # Distinguish "Meta says it's gone" from transient upstream failures
+            # so the frontend can show a friendly "expired" message instead of
+            # DigitalOcean's generic 502 HTML page (DO replaces any backend 5xx
+            # with its branded error page). Meta returns 4xx + error code 100
+            # when the media_id has expired — Cloud API attachments only live
+            # for a limited window (days for documents, up to 30 days for
+            # other types). Anything 5xx from Meta is worth retrying → 502.
+            try:
+                err_body = media_response.json()
+                meta_code = (err_body.get('error') or {}).get('code')
+            except ValueError:
+                err_body = {}
+                meta_code = None
+            logger.warning(
+                "WhatsApp media info fetch failed: media_id=%s http=%s meta_code=%s body=%s",
+                media_id, media_response.status_code, meta_code, str(err_body)[:500],
+            )
+            if 400 <= media_response.status_code < 500:
+                return Response(
+                    {
+                        'error': 'Media no longer available',
+                        'detail': (
+                            'WhatsApp has expired this attachment. Ask the sender '
+                            'to resend it, or contact support to retrieve from backup.'
+                        ),
+                        'media_id': media_id,
+                    },
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            return Response(
+                {'error': 'Upstream error from WhatsApp Cloud API'},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
 
         media_data = media_response.json()
         download_url = media_data.get('url')
