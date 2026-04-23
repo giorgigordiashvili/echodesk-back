@@ -5846,15 +5846,22 @@ def unread_messages_count(request):
     logger = logging.getLogger(__name__)
 
     try:
-        # Get accessible email connection IDs for this user
+        # Get accessible email connection IDs for this user.
+        # Fetch connections + their user_assignments in two queries, then
+        # iterate in Python. .exists() / .filter().exists() inside the loop
+        # bypass prefetch_related and trigger N+1; reading .all() hits the
+        # prefetch cache.
         is_admin = request.user.is_superuser or request.user.is_staff
-        all_email_connections = EmailConnection.objects.filter(is_active=True).prefetch_related('user_assignments')
+        all_email_connections = EmailConnection.objects.filter(
+            is_active=True
+        ).prefetch_related('user_assignments')
         accessible_connection_ids = []
+        user_id = request.user.id
         for conn in all_email_connections:
-            if not conn.user_assignments.exists():
-                # No assignments = everyone can access
+            assignments = list(conn.user_assignments.all())  # prefetched
+            if not assignments:
                 accessible_connection_ids.append(conn.id)
-            elif is_admin or conn.user_assignments.filter(user=request.user).exists():
+            elif is_admin or any(a.user_id == user_id for a in assignments):
                 accessible_connection_ids.append(conn.id)
 
         # Archived conversation IDs per platform — excluded from unread counts
