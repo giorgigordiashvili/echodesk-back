@@ -10469,6 +10469,12 @@ class SocialClientViewSet(viewsets.ModelViewSet):
         """
         Get client by social account details.
         Query params: platform, platform_id, account_connection_id
+
+        For widget chats, the stable identifier is ``visitor_id`` (persisted
+        in visitor localStorage). If no SocialAccount is linked yet we fall
+        back to the most recent WidgetSession's visitor_name/email so the
+        frontend can prefill the "new client" form without the agent
+        retyping.
         """
         platform = request.query_params.get('platform')
         platform_id = request.query_params.get('platform_id')
@@ -10492,10 +10498,31 @@ class SocialClientViewSet(viewsets.ModelViewSet):
                 'social_account': SocialAccountSerializer(social_account).data
             })
         except SocialAccount.DoesNotExist:
+            prefill = None
+            if platform == 'widget':
+                try:
+                    conn_id = int(account_connection_id)
+                except (TypeError, ValueError):
+                    conn_id = None
+                if conn_id is not None:
+                    session = (
+                        WidgetSession.objects
+                        .filter(connection_id=conn_id, visitor_id=platform_id)
+                        .order_by('-last_seen_at')
+                        .first()
+                    )
+                    if session:
+                        prefill = {
+                            'name': session.visitor_name or '',
+                            'email': session.visitor_email or '',
+                            'visitor_id': session.visitor_id,
+                            'session_id': session.session_id,
+                        }
             return Response({
                 'found': False,
                 'client': None,
-                'social_account': None
+                'social_account': None,
+                'prefill': prefill,
             })
 
     @action(detail=True, methods=['post'])
