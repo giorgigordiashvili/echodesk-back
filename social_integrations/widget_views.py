@@ -73,10 +73,13 @@ def widget_public_config(request):
         'welcome_message': conn.welcome_message or {},
         'pre_chat_form': conn.pre_chat_form or {},
         'offline_message': conn.offline_message or {},
-        'voice_enabled': conn.voice_enabled,
-        'proactive_enabled': conn.proactive_enabled,
-        'proactive_message': conn.proactive_message or {},
-        'proactive_delay_seconds': conn.proactive_delay_seconds,
+        'voice_enabled': getattr(conn, 'voice_enabled', False),
+        # Fields added in migration 0002 — defensive getattr keeps the
+        # endpoint responding even if a pod still has the pre-migration
+        # model imported (DO rolling restart window).
+        'proactive_enabled': getattr(conn, 'proactive_enabled', False),
+        'proactive_message': getattr(conn, 'proactive_message', None) or {},
+        'proactive_delay_seconds': getattr(conn, 'proactive_delay_seconds', 30),
         'is_online': is_tenant_online(conn.tenant_schema),
         'is_setup_mode': is_setup_mode,
         'origin_allowed': origin_allowed or is_setup_mode,
