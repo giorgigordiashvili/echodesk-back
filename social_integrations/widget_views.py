@@ -356,7 +356,7 @@ def widget_public_upload(request):
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
-@ratelimit(key='ip', rate='20/h', block=True)
+@ratelimit(key='ip', rate='60/h', block=True)
 def widget_public_call_credentials(request):
     """Issue short-lived SIP creds for a widget voice call.
 
