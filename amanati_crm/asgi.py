@@ -10,7 +10,7 @@ https://docs.djangoproject.com/en/4.2/howto/deployment/asgi/
 import os
 from channels.routing import ProtocolTypeRouter, URLRouter
 from django.core.asgi import get_asgi_application
-from django.urls import path
+from django.urls import path, re_path
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'amanati_crm.settings')
 
@@ -31,5 +31,12 @@ application = ProtocolTypeRouter({
         path('ws/notifications/<str:tenant_schema>/', JWTAuthMiddlewareStack(users_consumers.NotificationConsumer.as_asgi())),
         path('ws/boards/<str:tenant_schema>/<str:board_id>/', JWTAuthMiddlewareStack(users_consumers.TicketBoardConsumer.as_asgi())),
         path('ws/team-chat/<str:tenant_schema>/', JWTAuthMiddlewareStack(users_consumers.TeamChatConsumer.as_asgi())),
+        # Widget visitor WebSocket — anonymous (no JWT). Token + session_id
+        # in the URL identify the tenant + session; the consumer resolves
+        # the tenant schema internally via the widget token.
+        re_path(
+            r'^ws/widget/(?P<token>[\w\-]+)/(?P<session_id>\w+)/$',
+            consumers.WidgetVisitorConsumer.as_asgi(),
+        ),
     ]),
 })
