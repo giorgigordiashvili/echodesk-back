@@ -16,4 +16,5 @@ urlpatterns = [
     path('public/sessions/', widget_views.widget_public_sessions, name='widget_public_sessions'),
     path('public/messages/', widget_views.widget_public_messages, name='widget_public_messages'),
     path('public/messages/list/', widget_views.widget_public_messages_list, name='widget_public_messages_list'),
+    path('public/upload/', widget_views.widget_public_upload, name='widget_public_upload'),
 ]

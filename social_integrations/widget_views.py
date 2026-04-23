@@ -264,6 +264,92 @@ def widget_public_messages_list(request):
         return Response(WidgetMessageSerializer(qs, many=True).data)
 
 
+WIDGET_UPLOAD_MAX_BYTES = 10 * 1024 * 1024  # 10 MB
+WIDGET_UPLOAD_ALLOWED_PREFIXES = (
+    'image/',
+    'audio/',
+    'video/',
+    'application/pdf',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument',
+    'application/vnd.ms-excel',
+    'application/vnd.ms-powerpoint',
+    'text/plain',
+    'text/csv',
+)
+
+
+def _is_allowed_upload_type(content_type: str) -> bool:
+    if not content_type:
+        return False
+    content_type = content_type.lower()
+    return any(content_type.startswith(p) for p in WIDGET_UPLOAD_ALLOWED_PREFIXES)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+@ratelimit(key='ip', rate='30/h', block=True)
+def widget_public_upload(request):
+    """Visitor-side attachment upload.
+
+    Body (multipart/form-data):
+        token:       widget token
+        session_id:  active session id
+        file:        the file (<=10 MB, allowed content-type)
+    Returns {url, filename, size, content_type}.
+
+    We trust the DO Spaces UUID path to keep the URL unguessable; the
+    attachment only becomes reachable once the visitor references it
+    from a WidgetMessage, which is tied to their session.
+    """
+    token = request.data.get('token') or request.query_params.get('token')
+    session_id = (request.data.get('session_id') or '').strip()
+    upload = request.FILES.get('file')
+
+    if not upload:
+        return _error('missing_file', status.HTTP_400_BAD_REQUEST)
+    if not session_id:
+        return _error('missing_session_id', status.HTTP_400_BAD_REQUEST)
+    if upload.size > WIDGET_UPLOAD_MAX_BYTES:
+        return _error('file_too_large', status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                      detail=f'Max {WIDGET_UPLOAD_MAX_BYTES // (1024 * 1024)} MB.')
+    if not _is_allowed_upload_type(upload.content_type or ''):
+        return _error('unsupported_type', status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                      detail=f'Content-Type {upload.content_type!r} not allowed.')
+
+    conn, err = resolve_widget_connection(token)
+    if err:
+        code_map = {'missing_token': 400, 'not_found': 404, 'disabled': 403}
+        return _error(err, code_map[err])
+    if conn.allowed_origins and not check_origin_allowed(conn, request):
+        return _error('origin_not_allowed', status.HTTP_403_FORBIDDEN)
+
+    with schema_context(conn.tenant_schema):
+        try:
+            session = WidgetSession.objects.get(session_id=session_id, connection_id=conn.id)
+        except WidgetSession.DoesNotExist:
+            return _error('session_not_found', status.HTTP_404_NOT_FOUND)
+        if timezone.now() - session.last_seen_at > SESSION_STALE_AFTER:
+            return _error('session_expired', status.HTTP_410_GONE)
+
+    # Save to Spaces. Keep filename but prefix with a UUID so the URL can't be
+    # enumerated and two visitors uploading "receipt.pdf" don't collide.
+    from django.core.files.storage import default_storage
+    safe_name = (upload.name or 'file').replace('/', '_').replace('\\', '_')[:120]
+    storage_path = (
+        f'widget/{conn.tenant_schema}/{session.session_id}/'
+        f'{uuid.uuid4().hex}-{safe_name}'
+    )
+    saved_path = default_storage.save(storage_path, upload)
+    url = default_storage.url(saved_path)
+    return Response({
+        'url': url,
+        'filename': safe_name,
+        'size': upload.size,
+        'content_type': upload.content_type,
+    }, status=status.HTTP_201_CREATED)
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def widget_admin_send_message(request):
