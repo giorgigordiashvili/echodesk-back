@@ -467,7 +467,7 @@ class ChatAssignmentSerializer(serializers.ModelSerializer):
 
 class ChatAssignmentCreateSerializer(serializers.Serializer):
     """Serializer for assigning a chat"""
-    platform = serializers.ChoiceField(choices=['facebook', 'instagram', 'whatsapp', 'email'])
+    platform = serializers.ChoiceField(choices=['facebook', 'instagram', 'whatsapp', 'email', 'widget'])
     conversation_id = serializers.CharField(max_length=255)
     account_id = serializers.CharField(max_length=255)
 
@@ -1162,7 +1162,7 @@ ClientCreateSerializer = SocialClientCreateSerializer
 
 class SocialAccountLinkSerializer(serializers.Serializer):
     """Serializer for linking/unlinking a social account to a client"""
-    platform = serializers.ChoiceField(choices=['facebook', 'instagram', 'whatsapp', 'email', 'tiktok'])
+    platform = serializers.ChoiceField(choices=['facebook', 'instagram', 'whatsapp', 'email', 'tiktok', 'widget'])
     platform_id = serializers.CharField(max_length=255, help_text="Platform-specific ID (sender_id, wa_id, etc.)")
     account_connection_id = serializers.CharField(max_length=255, help_text="Account connection ID (page_id, waba_id, etc.)")
     display_name = serializers.CharField(max_length=255, required=False, allow_blank=True)
