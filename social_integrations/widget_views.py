@@ -420,11 +420,25 @@ def widget_public_call_credentials(request):
             return _error('pbx_unavailable', status.HTTP_503_SERVICE_UNAVAILABLE)
 
         sync = AsteriskStateSync(conn.tenant_schema, pbx=pbx)
-        endpoint_id = sync.sync_widget_guest_endpoint(
-            session_id=session_id,
-            password=sip_password,
-            queue=conn.voice_queue or 'support',
-        )
+        try:
+            endpoint_id = sync._sync_widget_guest_endpoint_impl(
+                session_id=session_id,
+                password=sip_password,
+                queue=conn.voice_queue or 'support',
+                ttl_hours=4,
+            )
+        except Exception:
+            # Surface the real reason provision failed instead of the
+            # generic swallowed-exception None return from _run().
+            logger.exception(
+                "widget_public_call_credentials: sync_widget_guest_endpoint failed "
+                "tenant=%s session=%s pbx=%s",
+                conn.tenant_schema, session_id, getattr(pbx, 'fqdn', None),
+            )
+            return _error(
+                'provision_failed', status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail='Asterisk realtime write failed. Check pod → PBX DB connectivity.',
+            )
         if not endpoint_id:
             return _error('provision_failed', status.HTTP_503_SERVICE_UNAVAILABLE)
 

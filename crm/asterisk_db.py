@@ -53,6 +53,11 @@ def _build_db_config(pbx_server) -> dict:
         'CONN_MAX_AGE': 60,
         'OPTIONS': {
             'sslmode': pbx_server.realtime_db_sslmode or 'require',
+            # Fail the TCP handshake in 5 s instead of libpq's default ~75 s
+            # retry loop — the request-serving pod shouldn't hold a load-
+            # balancer connection for over a minute waiting on an
+            # unreachable PBX DB.
+            'connect_timeout': 5,
         },
         'TIME_ZONE': None,
         'AUTOCOMMIT': True,
