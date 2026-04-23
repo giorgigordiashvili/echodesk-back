@@ -1189,7 +1189,7 @@ class LastMessageSerializer(serializers.Serializer):
 class UnifiedConversationSerializer(serializers.Serializer):
     """Serializer for unified conversation across all platforms"""
     conversation_id = serializers.CharField()
-    platform = serializers.ChoiceField(choices=['facebook', 'instagram', 'whatsapp', 'email'])
+    platform = serializers.ChoiceField(choices=['facebook', 'instagram', 'whatsapp', 'email', 'widget'])
     sender_id = serializers.CharField()
     sender_name = serializers.CharField(allow_null=True, allow_blank=True)
     profile_pic_url = serializers.CharField(allow_null=True, allow_blank=True, required=False)

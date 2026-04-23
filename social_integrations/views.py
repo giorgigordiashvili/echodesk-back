@@ -5174,7 +5174,7 @@ def unified_conversations(request):
     - connection_id: Filter emails by specific email connection ID
     """
     # Parse query parameters
-    platforms_param = request.query_params.get('platforms', 'facebook,instagram,whatsapp,email')
+    platforms_param = request.query_params.get('platforms', 'facebook,instagram,whatsapp,email,widget')
     enabled_platforms = [p.strip().lower() for p in platforms_param.split(',')]
     search_query = request.query_params.get('search', '').strip().lower()
     page = int(request.query_params.get('page', 1))
@@ -5696,6 +5696,98 @@ def unified_conversations(request):
                     all_conversations.append(conversation)
         except Exception as e:
             logger.error(f"Error loading Email conversations: {e}")
+
+    # Load Widget (embeddable chat) conversations
+    if 'widget' in enabled_platforms:
+        try:
+            from widget_registry.models import WidgetConnection
+            from .models import WidgetSession, WidgetMessage
+
+            tenant_schema = request.tenant.schema_name
+            with schema_context('public'):
+                connections = list(
+                    WidgetConnection.objects.filter(tenant_schema=tenant_schema)
+                )
+
+            for wconn in connections:
+                sessions = list(
+                    WidgetSession.objects.filter(connection_id=wconn.id)
+                    .order_by('-last_seen_at')
+                )
+                if not sessions:
+                    continue
+                session_pks = [s.pk for s in sessions]
+
+                # Latest message per session via DISTINCT ON.
+                latest_by_session = {}
+                for m in (
+                    WidgetMessage.objects
+                    .filter(session_id__in=session_pks, is_deleted=False)
+                    .order_by('session_id', '-timestamp')
+                    .distinct('session_id')
+                ):
+                    latest_by_session[m.session_id] = m
+
+                # Unread counts (visitor messages not yet read by staff).
+                unread_counts = {
+                    item['session_id']: item['cnt']
+                    for item in (
+                        WidgetMessage.objects
+                        .filter(
+                            session_id__in=session_pks,
+                            is_from_visitor=True,
+                            is_read_by_staff=False,
+                            is_deleted=False,
+                        )
+                        .values('session_id')
+                        .annotate(cnt=Count('id'))
+                    )
+                }
+
+                for session in sessions:
+                    last = latest_by_session.get(session.pk)
+                    if not last:
+                        continue
+                    account_id = str(wconn.id)
+                    conversation_id = session.session_id
+                    if not is_conversation_visible('widget', account_id, conversation_id):
+                        continue
+
+                    sender_name = (
+                        session.visitor_name
+                        or f"Website visitor {session.visitor_id[:6]}"
+                    )
+
+                    # Best-effort search filter: match visitor name or last
+                    # message text. Cheap enough to do in Python here.
+                    if search_query:
+                        haystack = (
+                            (sender_name or '') + ' ' + (last.message_text or '')
+                        ).lower()
+                        if search_query not in haystack:
+                            continue
+
+                    all_conversations.append({
+                        'conversation_id': f"widget_{wconn.id}_{session.session_id}",
+                        'platform': 'widget',
+                        'sender_id': session.visitor_id,
+                        'sender_name': sender_name,
+                        'profile_pic_url': None,
+                        'last_message': {
+                            'id': str(last.id),
+                            'text': last.message_text,
+                            'timestamp': last.timestamp,
+                            'is_from_business': not last.is_from_visitor,
+                            'attachment_type': 'attachment' if last.attachments else None,
+                            'platform_message_id': last.message_id,
+                        },
+                        'message_count': 0,
+                        'unread_count': unread_counts.get(session.pk, 0),
+                        'account_name': wconn.label,
+                        'account_id': account_id,
+                    })
+        except Exception as e:
+            logger.error(f"Error loading Widget conversations: {e}")
 
     # Sort all conversations by last message timestamp (most recent first)
     all_conversations.sort(

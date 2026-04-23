@@ -7,7 +7,10 @@ from . import consumers
 websocket_urlpatterns = [
     # Messages WebSocket for receiving new messages in real-time
     re_path(r'ws/messages/(?P<tenant_schema>\w+)/$', consumers.MessagesConsumer.as_asgi()),
-    
+
     # Typing indicators WebSocket for specific conversations
     re_path(r'ws/typing/(?P<tenant_schema>\w+)/(?P<conversation_id>\w+)/$', consumers.TypingConsumer.as_asgi()),
+
+    # Widget visitor WebSocket (anonymous; auth is token + session_id pair)
+    re_path(r'ws/widget/(?P<token>[\w\-]+)/(?P<session_id>\w+)/$', consumers.WidgetVisitorConsumer.as_asgi()),
 ]

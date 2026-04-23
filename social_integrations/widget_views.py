@@ -188,8 +188,39 @@ def widget_public_messages(request):
         )
         session.last_seen_at = now
         session.save(update_fields=['last_seen_at'])
-        # PR 3 will broadcast via Channels here.
-        return Response(WidgetMessageSerializer(msg).data, status=status.HTTP_201_CREATED)
+        response_data = WidgetMessageSerializer(msg).data
+
+    # PR 3: broadcast the new message so the agent's inbox and any other
+    # widget tabs for this session update in real time.
+    from asgiref.sync import async_to_sync
+    from channels.layers import get_channel_layer
+    channel_layer = get_channel_layer()
+    if channel_layer:
+        conversation_id = f"widget_{conn.id}_{session.session_id}"
+        msg_payload = {
+            'message_id': msg.message_id,
+            'message_text': msg.message_text,
+            'attachments': msg.attachments,
+            'is_from_visitor': True,
+            'timestamp': msg.timestamp.isoformat(),
+            'session_id': session.session_id,
+            'connection_id': conn.id,
+            'platform': 'widget',
+        }
+        async_to_sync(channel_layer.group_send)(f'messages_{conn.tenant_schema}', {
+            'type': 'new_message',
+            'message': msg_payload,
+            'conversation_id': conversation_id,
+            'timestamp': msg_payload['timestamp'],
+        })
+        async_to_sync(channel_layer.group_send)(f'widget_visitor_{session.session_id}', {
+            'type': 'new_message',
+            'message': msg_payload,
+            'conversation_id': conversation_id,
+            'timestamp': msg_payload['timestamp'],
+        })
+
+    return Response(response_data, status=status.HTTP_201_CREATED)
 
 
 @api_view(['GET'])
@@ -231,6 +262,91 @@ def widget_public_messages_list(request):
         )
 
         return Response(WidgetMessageSerializer(qs, many=True).data)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def widget_admin_send_message(request):
+    """Agent-side: send a reply into a widget conversation.
+
+    Body: {connection_id: int, session_id: str, message_text: str, attachments?: list}
+    """
+    body = request.data or {}
+    try:
+        connection_id = int(body.get('connection_id'))
+    except (TypeError, ValueError):
+        return _error('invalid_connection_id', status.HTTP_400_BAD_REQUEST)
+    session_id = (body.get('session_id') or '').strip()
+    message_text = (body.get('message_text') or '').strip()
+    attachments = body.get('attachments') or []
+    if not session_id:
+        return _error('missing_session_id', status.HTTP_400_BAD_REQUEST)
+    if not message_text and not attachments:
+        return _error('empty_message', status.HTTP_400_BAD_REQUEST)
+    if len(message_text) > 10_000:
+        return _error('message_too_long', status.HTTP_400_BAD_REQUEST)
+
+    schema = getattr(request.tenant, 'schema_name', None)
+    if not schema or schema == 'public':
+        return _error('tenant_required', status.HTTP_400_BAD_REQUEST)
+
+    # Verify tenant owns this connection.
+    with schema_context('public'):
+        try:
+            conn = WidgetConnection.objects.get(id=connection_id, tenant_schema=schema)
+        except WidgetConnection.DoesNotExist:
+            return _error('not_found', status.HTTP_404_NOT_FOUND)
+
+    with schema_context(schema):
+        try:
+            session = WidgetSession.objects.get(session_id=session_id, connection_id=connection_id)
+        except WidgetSession.DoesNotExist:
+            return _error('session_not_found', status.HTTP_404_NOT_FOUND)
+        now = timezone.now()
+        msg = WidgetMessage.objects.create(
+            session=session,
+            message_id=uuid.uuid4().hex,
+            message_text=message_text,
+            attachments=attachments if isinstance(attachments, list) else [],
+            is_from_visitor=False,
+            sent_by=request.user,
+            is_delivered=True,
+            delivered_at=now,
+            timestamp=now,
+        )
+        payload_data = WidgetMessageSerializer(msg).data
+
+    # Broadcast
+    from asgiref.sync import async_to_sync
+    from channels.layers import get_channel_layer
+    channel_layer = get_channel_layer()
+    if channel_layer:
+        conversation_id = f"widget_{connection_id}_{session_id}"
+        msg_payload = {
+            'message_id': msg.message_id,
+            'message_text': msg.message_text,
+            'attachments': msg.attachments,
+            'is_from_visitor': False,
+            'sent_by': request.user.id,
+            'timestamp': msg.timestamp.isoformat(),
+            'session_id': session_id,
+            'connection_id': connection_id,
+            'platform': 'widget',
+        }
+        async_to_sync(channel_layer.group_send)(f'messages_{schema}', {
+            'type': 'new_message',
+            'message': msg_payload,
+            'conversation_id': conversation_id,
+            'timestamp': msg_payload['timestamp'],
+        })
+        async_to_sync(channel_layer.group_send)(f'widget_visitor_{session_id}', {
+            'type': 'new_message',
+            'message': msg_payload,
+            'conversation_id': conversation_id,
+            'timestamp': msg_payload['timestamp'],
+        })
+
+    return Response(payload_data, status=status.HTTP_201_CREATED)
 
 
 class WidgetConnectionViewSet(viewsets.ModelViewSet):

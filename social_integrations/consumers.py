@@ -133,6 +133,180 @@ class MessagesConsumer(AsyncWebsocketConsumer):
         }))
 
 
+class WidgetVisitorConsumer(AsyncWebsocketConsumer):
+    """
+    WebSocket endpoint for a website visitor's widget chat session.
+
+    URL: /ws/widget/<token>/<session_id>/
+    - Anonymous (no JWT/session auth) — token + session_id are the credential pair.
+    - Joins group `widget_visitor_<session_id>` so agent replies land in real time.
+    - Messages sent by the client create a WidgetMessage row and broadcast to
+      both the visitor's group AND the agent's `messages_<tenant_schema>` group
+      (reused as-is from Facebook / WhatsApp / etc.).
+    """
+
+    async def connect(self):
+        self.token = self.scope['url_route']['kwargs']['token']
+        self.session_id = self.scope['url_route']['kwargs']['session_id']
+
+        resolved = await self._resolve()
+        if not resolved:
+            await self.close(code=4004)
+            return
+
+        self.connection_id, self.tenant_schema, self.widget_connection_pk = resolved
+        self.visitor_group = f'widget_visitor_{self.session_id}'
+        self.tenant_group = f'messages_{self.tenant_schema}'
+
+        await self.channel_layer.group_add(self.visitor_group, self.channel_name)
+        # Also join the tenant group so agent-initiated broadcasts land here —
+        # but filter in new_message to only surface messages for THIS session.
+        await self.channel_layer.group_add(self.tenant_group, self.channel_name)
+
+        await self.accept()
+        await self.send(text_data=json.dumps({
+            'type': 'connection',
+            'status': 'connected',
+            'session_id': self.session_id,
+        }))
+
+    @database_sync_to_async
+    def _resolve(self):
+        """Validate token + session_id. Returns (connection_id, tenant_schema, pk) or None."""
+        from widget_registry.models import WidgetConnection
+        from .models import WidgetSession
+        from tenant_schemas.utils import schema_context, get_public_schema_name
+
+        with schema_context(get_public_schema_name()):
+            try:
+                conn = WidgetConnection.objects.get(widget_token=self.token, is_active=True)
+            except WidgetConnection.DoesNotExist:
+                return None
+            conn_id = conn.id
+            conn_pk = conn.pk
+            tenant_schema = conn.tenant_schema
+        with schema_context(tenant_schema):
+            exists = WidgetSession.objects.filter(
+                session_id=self.session_id, connection_id=conn_id
+            ).exists()
+        if not exists:
+            return None
+        return conn_id, tenant_schema, conn_pk
+
+    async def disconnect(self, close_code):
+        if hasattr(self, 'visitor_group'):
+            await self.channel_layer.group_discard(self.visitor_group, self.channel_name)
+        if hasattr(self, 'tenant_group'):
+            await self.channel_layer.group_discard(self.tenant_group, self.channel_name)
+
+    async def receive(self, text_data):
+        try:
+            data = json.loads(text_data)
+        except json.JSONDecodeError:
+            await self.send(text_data=json.dumps({'type': 'error', 'message': 'invalid_json'}))
+            return
+
+        mtype = data.get('type')
+        if mtype == 'ping':
+            await self.send(text_data=json.dumps({'type': 'pong', 'timestamp': data.get('timestamp')}))
+            return
+        if mtype == 'message':
+            text = (data.get('text') or '').strip()
+            attachments = data.get('attachments') or []
+            if not text and not attachments:
+                await self.send(text_data=json.dumps({'type': 'error', 'message': 'empty_message'}))
+                return
+            msg_dict = await self._persist_visitor_message(text, attachments if isinstance(attachments, list) else [])
+            if not msg_dict:
+                await self.send(text_data=json.dumps({'type': 'error', 'message': 'session_expired'}))
+                return
+            # Broadcast to both groups so agent sidebar AND other widget tabs update.
+            conversation_id = f"widget_{self.connection_id}_{self.session_id}"
+            await self.channel_layer.group_send(self.visitor_group, {
+                'type': 'new_message',
+                'message': msg_dict,
+                'conversation_id': conversation_id,
+                'timestamp': msg_dict.get('timestamp'),
+            })
+            await self.channel_layer.group_send(self.tenant_group, {
+                'type': 'new_message',
+                'message': msg_dict,
+                'conversation_id': conversation_id,
+                'timestamp': msg_dict.get('timestamp'),
+            })
+            return
+
+    @database_sync_to_async
+    def _persist_visitor_message(self, text, attachments):
+        import uuid
+        from django.utils import timezone
+        from datetime import timedelta
+        from .models import WidgetMessage, WidgetSession
+
+        STALE = timedelta(hours=24)
+        with schema_context(self.tenant_schema):
+            try:
+                session = WidgetSession.objects.get(
+                    session_id=self.session_id, connection_id=self.connection_id
+                )
+            except WidgetSession.DoesNotExist:
+                return None
+            now = timezone.now()
+            if now - session.last_seen_at > STALE:
+                return None
+            msg = WidgetMessage.objects.create(
+                session=session,
+                message_id=uuid.uuid4().hex,
+                message_text=text,
+                attachments=attachments,
+                is_from_visitor=True,
+                is_delivered=True,
+                delivered_at=now,
+                timestamp=now,
+            )
+            session.last_seen_at = now
+            session.save(update_fields=['last_seen_at'])
+            return {
+                'message_id': msg.message_id,
+                'message_text': msg.message_text,
+                'attachments': msg.attachments,
+                'is_from_visitor': True,
+                'timestamp': msg.timestamp.isoformat(),
+                'session_id': self.session_id,
+                'connection_id': self.connection_id,
+                'platform': 'widget',
+            }
+
+    # Outbound handlers invoked by channel_layer.group_send
+    async def new_message(self, event):
+        """Forward new_message events to the visitor iframe.
+
+        We're subscribed to both our session-scoped group (visitor_group) AND
+        the tenant-wide one (tenant_group). For the tenant-wide broadcast we
+        must filter — only messages for THIS session should reach the visitor.
+        """
+        msg = event.get('message') or {}
+        # Session-scoped group: always pass through.
+        # Tenant-scoped: only pass through if the message belongs to this session.
+        msg_session = msg.get('session_id') or self._session_from_conversation_id(event.get('conversation_id'))
+        if msg_session and msg_session != self.session_id:
+            return
+        await self.send(text_data=json.dumps({
+            'type': 'new_message',
+            'message': msg,
+            'conversation_id': event.get('conversation_id'),
+            'timestamp': event.get('timestamp'),
+        }))
+
+    @staticmethod
+    def _session_from_conversation_id(conv_id):
+        # conversation_id format: widget_<connection_id>_<session_id>
+        if not conv_id or not conv_id.startswith('widget_'):
+            return None
+        parts = conv_id.split('_', 2)
+        return parts[2] if len(parts) == 3 else None
+
+
 class TypingConsumer(AsyncWebsocketConsumer):
     """
     WebSocket consumer for typing indicators.
