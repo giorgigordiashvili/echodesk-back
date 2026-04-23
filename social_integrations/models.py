@@ -868,6 +868,7 @@ class ChatAssignment(models.Model):
         ('whatsapp', 'WhatsApp'),
         ('email', 'Email'),
         ('tiktok', 'TikTok'),
+        ('widget', 'Website widget'),
     ]
 
     STATUS_CHOICES = [
@@ -976,7 +977,7 @@ class ChatRating(models.Model):
     # Store conversation info for historical reference
     platform = models.CharField(
         max_length=20,
-        choices=[('facebook', 'Facebook'), ('instagram', 'Instagram'), ('whatsapp', 'WhatsApp'), ('email', 'Email'), ('tiktok', 'TikTok')],
+        choices=[('facebook', 'Facebook'), ('instagram', 'Instagram'), ('whatsapp', 'WhatsApp'), ('email', 'Email'), ('tiktok', 'TikTok'), ('widget', 'Website widget')],
         default='facebook',  # Default for migration
         help_text="Platform where the chat occurred"
     )
@@ -1544,6 +1545,7 @@ class QuickReply(models.Model):
         ('whatsapp', 'WhatsApp'),
         ('email', 'Email'),
         ('tiktok', 'TikTok'),
+        ('widget', 'Website widget'),
     ]
 
     # Content
@@ -1818,6 +1820,7 @@ class SocialAccount(models.Model):
         ('whatsapp', 'WhatsApp'),
         ('email', 'Email'),
         ('tiktok', 'TikTok'),
+        ('widget', 'Website widget'),
     ]
 
     client = models.ForeignKey(
@@ -1885,6 +1888,7 @@ class ConversationArchive(models.Model):
         ('whatsapp', 'WhatsApp'),
         ('email', 'Email'),
         ('tiktok', 'TikTok'),
+        ('widget', 'Website widget'),
     ]
 
     platform = models.CharField(max_length=20, choices=PLATFORM_CHOICES)

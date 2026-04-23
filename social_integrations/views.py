@@ -34,6 +34,7 @@ from .models import (
     EmailSignature, QuickReply,
     SocialClient, SocialClientCustomField, SocialClientCustomFieldValue, SocialAccount,
     AutoPostSettings, AutoPostContent,
+    WidgetSession, WidgetMessage,
 )
 from .serializers import (
     FacebookPageConnectionSerializer, FacebookMessageSerializer, FacebookSendMessageSerializer,
@@ -5872,6 +5873,9 @@ def unread_messages_count(request):
         archived_email_threads = list(ConversationArchive.objects.filter(
             platform='email'
         ).values_list('conversation_id', flat=True))
+        archived_widget_sessions = list(ConversationArchive.objects.filter(
+            platform='widget'
+        ).values_list('conversation_id', flat=True))
 
         # Check if chat assignment filtering is enabled
         settings_obj = SocialIntegrationSettings.objects.first()
@@ -5904,6 +5908,11 @@ def unread_messages_count(request):
                 platform='email'
             ).values_list('conversation_id', flat=True)
 
+            my_widget_assignments = active_assignments.filter(
+                assigned_user=request.user,
+                platform='widget'
+            ).values_list('conversation_id', flat=True)
+
             # Get all active assignments by platform (to exclude others' chats)
             all_fb_assignments = active_assignments.filter(
                 platform='facebook'
@@ -5919,6 +5928,10 @@ def unread_messages_count(request):
 
             all_email_assignments = active_assignments.filter(
                 platform='email'
+            ).values_list('conversation_id', flat=True)
+
+            all_widget_assignments = active_assignments.filter(
+                platform='widget'
             ).values_list('conversation_id', flat=True)
 
             # Count unread Facebook messages - only mine or unassigned
@@ -5971,6 +5984,17 @@ def unread_messages_count(request):
                 Q(thread_id__in=my_email_assignments) |  # Assigned to me
                 ~Q(thread_id__in=all_email_assignments)  # Not assigned to anyone
             ).count()
+
+            widget_unread = WidgetMessage.objects.filter(
+                is_from_visitor=True,
+                is_read_by_staff=False,
+                is_deleted=False,
+            ).exclude(
+                session__session_id__in=archived_widget_sessions
+            ).filter(
+                Q(session__session_id__in=my_widget_assignments)
+                | ~Q(session__session_id__in=all_widget_assignments)
+            ).count()
         else:
             # Assignment not enabled - count all unread messages (original behavior)
             facebook_unread = FacebookMessage.objects.filter(
@@ -5999,14 +6023,24 @@ def unread_messages_count(request):
                 connection_id__in=accessible_connection_ids,
             ).exclude(thread_id__in=archived_email_threads).count()
 
-        total_unread = facebook_unread + instagram_unread + whatsapp_unread + email_unread
+            widget_unread = WidgetMessage.objects.filter(
+                is_from_visitor=True,
+                is_read_by_staff=False,
+                is_deleted=False,
+            ).exclude(session__session_id__in=archived_widget_sessions).count()
+
+        total_unread = (
+            facebook_unread + instagram_unread + whatsapp_unread
+            + email_unread + widget_unread
+        )
 
         return Response({
             'total': total_unread,
             'facebook': facebook_unread,
             'instagram': instagram_unread,
             'whatsapp': whatsapp_unread,
-            'email': email_unread
+            'email': email_unread,
+            'widget': widget_unread,
         })
 
     except Exception as e:
@@ -6086,6 +6120,15 @@ def mark_conversation_read(request):
                 is_read_by_staff=True,
                 read_by_staff_at=now,
                 is_read=True
+            )
+        elif platform == 'widget':
+            updated_count = WidgetMessage.objects.filter(
+                session__session_id=conversation_id,
+                is_from_visitor=True,
+                is_read_by_staff=False,
+            ).update(
+                is_read_by_staff=True,
+                read_by_staff_at=now,
             )
         else:
             return Response({
@@ -6226,6 +6269,17 @@ def mark_conversation_unread(request):
                 last_message.is_read = False
                 last_message.save()
                 updated_count = 1
+        elif platform == 'widget':
+            last_message = WidgetMessage.objects.filter(
+                session__session_id=conversation_id,
+                is_from_visitor=True,
+                is_read_by_staff=True,
+            ).order_by('-timestamp').first()
+            if last_message:
+                last_message.is_read_by_staff = False
+                last_message.read_by_staff_at = None
+                last_message.save()
+                updated_count = 1
         else:
             return Response({
                 'error': f'Invalid platform: {platform}'
@@ -6340,6 +6394,12 @@ def delete_conversation(request):
                 deleted_at=now,
                 deleted_by=request.user
             )
+
+        elif platform == 'widget':
+            deleted_count = WidgetMessage.objects.filter(
+                session__session_id=conversation_id,
+                is_deleted=False,
+            ).update(is_deleted=True)
 
         else:
             return Response({
@@ -10693,6 +10753,18 @@ def mark_all_conversations_read(request):
             total_updated += count
             logger.info(f"Marked {count} Email messages as read")
 
+        # Mark Widget messages as read
+        if include_all or 'widget' in platforms:
+            count = WidgetMessage.objects.filter(
+                is_from_visitor=True,
+                is_read_by_staff=False,
+            ).update(
+                is_read_by_staff=True,
+                read_by_staff_at=now,
+            )
+            total_updated += count
+            logger.info(f"Marked {count} Widget messages as read")
+
         return Response({
             'success': True,
             'messages_marked_read': total_updated,
@@ -10786,6 +10858,12 @@ def archive_conversation(request):
                     thread_id=conversation_id,
                     is_from_business=False,
                     is_read_by_staff=False
+                ).update(is_read_by_staff=True, read_by_staff_at=now)
+            elif platform == 'widget':
+                WidgetMessage.objects.filter(
+                    session__session_id=conversation_id,
+                    is_from_visitor=True,
+                    is_read_by_staff=False,
                 ).update(is_read_by_staff=True, read_by_staff_at=now)
 
             if created:
