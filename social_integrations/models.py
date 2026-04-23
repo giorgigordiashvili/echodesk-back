@@ -761,7 +761,7 @@ class SocialIntegrationSettings(models.Model):
         default=False,
         help_text="Enable the embeddable chat widget for this tenant."
     )
-    widget_notification_sound = models.CharField(
+    notification_sound_widget = models.CharField(
         max_length=64,
         default='default',
         help_text="Sound identifier for widget notifications."

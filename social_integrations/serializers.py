@@ -369,6 +369,7 @@ class SocialIntegrationSettingsSerializer(serializers.ModelSerializer):
             'post_review_redirect_url',
             'notification_sound_facebook', 'notification_sound_instagram',
             'notification_sound_whatsapp', 'notification_sound_email',
+            'notification_sound_widget',
             'notification_sound_team_chat', 'notification_sound_system',
             # Auto-reply settings
             'timezone', 'away_hours_enabled', 'away_hours_schedule',
