@@ -21,6 +21,12 @@ class WidgetConnection(models.Model):
     voice_enabled = models.BooleanField(default=False)
     voice_queue = models.CharField(max_length=64, default="support")
     voice_working_hours_only = models.BooleanField(default=False)
+    # Proactive messages — widget.js shows a preview bubble after the
+    # visitor has been on the page for ``proactive_delay_seconds`` seconds.
+    # Message is localized (e.g. {"en": "Need help?", "ka": "..."}).
+    proactive_enabled = models.BooleanField(default=False)
+    proactive_message = models.JSONField(default=dict, blank=True)
+    proactive_delay_seconds = models.PositiveIntegerField(default=30)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

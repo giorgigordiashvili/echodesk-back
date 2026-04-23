@@ -12,6 +12,7 @@ class WidgetConnectionSerializer(serializers.ModelSerializer):
             'welcome_message', 'pre_chat_form', 'offline_message',
             'business_hours_schedule',
             'voice_enabled', 'voice_queue', 'voice_working_hours_only',
+            'proactive_enabled', 'proactive_message', 'proactive_delay_seconds',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'tenant_schema', 'widget_token', 'created_at', 'updated_at']
