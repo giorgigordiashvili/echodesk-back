@@ -192,8 +192,10 @@ def widget_public_messages(request):
         session.save(update_fields=['last_seen_at'])
         response_data = WidgetMessageSerializer(msg).data
 
-    # PR 3: broadcast the new message so the agent's inbox and any other
-    # widget tabs for this session update in real time.
+    # Single broadcast to the tenant group — agents AND visitor iframes
+    # both listen there. Frontend dedupes by message_id if the same frame
+    # arrives twice (which happens when an agent is in both the tenant and
+    # a conversation-specific group).
     from asgiref.sync import async_to_sync
     from channels.layers import get_channel_layer
     channel_layer = get_channel_layer()
@@ -210,12 +212,6 @@ def widget_public_messages(request):
             'platform': 'widget',
         }
         async_to_sync(channel_layer.group_send)(f'messages_{conn.tenant_schema}', {
-            'type': 'new_message',
-            'message': msg_payload,
-            'conversation_id': conversation_id,
-            'timestamp': msg_payload['timestamp'],
-        })
-        async_to_sync(channel_layer.group_send)(f'widget_visitor_{session.session_id}', {
             'type': 'new_message',
             'message': msg_payload,
             'conversation_id': conversation_id,
@@ -521,12 +517,6 @@ def widget_admin_send_message(request):
             'platform': 'widget',
         }
         async_to_sync(channel_layer.group_send)(f'messages_{schema}', {
-            'type': 'new_message',
-            'message': msg_payload,
-            'conversation_id': conversation_id,
-            'timestamp': msg_payload['timestamp'],
-        })
-        async_to_sync(channel_layer.group_send)(f'widget_visitor_{session_id}', {
             'type': 'new_message',
             'message': msg_payload,
             'conversation_id': conversation_id,

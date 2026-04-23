@@ -155,12 +155,12 @@ class WidgetVisitorConsumer(AsyncWebsocketConsumer):
             return
 
         self.connection_id, self.tenant_schema, self.widget_connection_pk = resolved
-        self.visitor_group = f'widget_visitor_{self.session_id}'
+        # Match the pattern the rest of social messages uses: one broadcast
+        # group per tenant (``messages_<tenant>``). The visitor's consumer
+        # filters frames by session_id in new_message so only messages for
+        # this session land on the iframe. No separate widget_visitor_*
+        # group, no double broadcast, no double delivery.
         self.tenant_group = f'messages_{self.tenant_schema}'
-
-        await self.channel_layer.group_add(self.visitor_group, self.channel_name)
-        # Also join the tenant group so agent-initiated broadcasts land here —
-        # but filter in new_message to only surface messages for THIS session.
         await self.channel_layer.group_add(self.tenant_group, self.channel_name)
 
         await self.accept()
@@ -194,8 +194,6 @@ class WidgetVisitorConsumer(AsyncWebsocketConsumer):
         return conn_id, tenant_schema, conn_pk
 
     async def disconnect(self, close_code):
-        if hasattr(self, 'visitor_group'):
-            await self.channel_layer.group_discard(self.visitor_group, self.channel_name)
         if hasattr(self, 'tenant_group'):
             await self.channel_layer.group_discard(self.tenant_group, self.channel_name)
 
@@ -220,14 +218,10 @@ class WidgetVisitorConsumer(AsyncWebsocketConsumer):
             if not msg_dict:
                 await self.send(text_data=json.dumps({'type': 'error', 'message': 'session_expired'}))
                 return
-            # Broadcast to both groups so agent sidebar AND other widget tabs update.
+            # Single broadcast to the tenant group — agent sidebar AND any
+            # other visitor tabs of this session all listen there and filter
+            # by session_id in new_message.
             conversation_id = f"widget_{self.connection_id}_{self.session_id}"
-            await self.channel_layer.group_send(self.visitor_group, {
-                'type': 'new_message',
-                'message': msg_dict,
-                'conversation_id': conversation_id,
-                'timestamp': msg_dict.get('timestamp'),
-            })
             await self.channel_layer.group_send(self.tenant_group, {
                 'type': 'new_message',
                 'message': msg_dict,
@@ -281,15 +275,17 @@ class WidgetVisitorConsumer(AsyncWebsocketConsumer):
     async def new_message(self, event):
         """Forward new_message events to the visitor iframe.
 
-        We're subscribed to both our session-scoped group (visitor_group) AND
-        the tenant-wide one (tenant_group). For the tenant-wide broadcast we
-        must filter — only messages for THIS session should reach the visitor.
+        The consumer listens on the tenant-wide ``messages_<tenant>`` group
+        (same pattern as the agent's MessagesConsumer). Filter every frame
+        so only messages for THIS widget session reach the iframe — agent
+        messages to Facebook / WhatsApp / email are also on this group and
+        must be ignored.
         """
         msg = event.get('message') or {}
-        # Session-scoped group: always pass through.
-        # Tenant-scoped: only pass through if the message belongs to this session.
+        if (msg.get('platform') or '') != 'widget':
+            return
         msg_session = msg.get('session_id') or self._session_from_conversation_id(event.get('conversation_id'))
-        if msg_session and msg_session != self.session_id:
+        if msg_session != self.session_id:
             return
         await self.send(text_data=json.dumps({
             'type': 'new_message',
