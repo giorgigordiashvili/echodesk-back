@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import make_password, check_password
@@ -753,6 +754,17 @@ class SocialIntegrationSettings(models.Model):
         max_length=255,
         default='mixkit-confirmation-tone-2867.wav',
         help_text="Sound file for System notifications"
+    )
+
+    # Embeddable chat widget settings
+    widget_enabled = models.BooleanField(
+        default=False,
+        help_text="Enable the embeddable chat widget for this tenant."
+    )
+    widget_notification_sound = models.CharField(
+        max_length=64,
+        default='default',
+        help_text="Sound identifier for widget notifications."
     )
 
     # Auto-Reply Settings - Timezone & Away Hours
@@ -2025,3 +2037,63 @@ class AutoPostContent(models.Model):
     def __str__(self):
         product_name = self.featured_product.name if self.featured_product else 'Company'
         return f"AutoPost [{self.status}] - {product_name} ({self.scheduled_for})"
+
+
+class WidgetSession(models.Model):
+    """A single website visitor's chat session with the tenant."""
+    # No FK to WidgetConnection because that model lives in the public schema
+    # and this one lives in each tenant schema — cross-schema FKs aren't
+    # possible. Store the WidgetConnection.id by value.
+    connection_id = models.IntegerField(db_index=True)
+    session_id = models.CharField(max_length=64, unique=True, db_index=True)
+    visitor_id = models.CharField(max_length=64, db_index=True)
+    visitor_name = models.CharField(max_length=120, blank=True)
+    visitor_email = models.EmailField(blank=True)
+    referrer_url = models.CharField(max_length=500, blank=True)
+    page_url = models.CharField(max_length=500, blank=True)
+    user_agent = models.CharField(max_length=500, blank=True)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    started_at = models.DateTimeField(auto_now_add=True)
+    last_seen_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-started_at']
+        indexes = [
+            models.Index(fields=['connection_id', '-started_at']),
+            models.Index(fields=['connection_id', 'visitor_id']),
+        ]
+
+    def __str__(self):
+        return f"WidgetSession({self.session_id}) visitor={self.visitor_name or self.visitor_id}"
+
+
+class WidgetMessage(models.Model):
+    session = models.ForeignKey(
+        WidgetSession, on_delete=models.CASCADE, related_name='messages'
+    )
+    message_id = models.CharField(max_length=64, unique=True)
+    message_text = models.TextField(blank=True)
+    attachments = models.JSONField(default=list)
+    is_from_visitor = models.BooleanField(default=True, db_index=True)
+    sent_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='widget_messages_sent',
+    )
+    is_delivered = models.BooleanField(default=False)
+    delivered_at = models.DateTimeField(null=True, blank=True)
+    is_read_by_visitor = models.BooleanField(default=False)
+    is_read_by_staff = models.BooleanField(default=False, db_index=True)
+    read_by_staff_at = models.DateTimeField(null=True, blank=True)
+    is_deleted = models.BooleanField(default=False, db_index=True)
+    timestamp = models.DateTimeField(db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['timestamp']
+        indexes = [
+            models.Index(fields=['session', '-timestamp']),
+        ]
+
+    def __str__(self):
+        direction = 'visitor' if self.is_from_visitor else 'agent'
+        return f"WidgetMessage({self.message_id}) from={direction}"

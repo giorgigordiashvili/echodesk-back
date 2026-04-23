@@ -11,7 +11,8 @@ from .models import (
     InstagramAccountConnection, InstagramMessage,
     WhatsAppBusinessAccount, WhatsAppMessage,
     SocialIntegrationSettings, OrphanedFacebookMessage,
-    SocialClient, SocialClientCustomField, SocialClientCustomFieldValue, SocialAccount
+    SocialClient, SocialClientCustomField, SocialClientCustomFieldValue, SocialAccount,
+    WidgetSession, WidgetMessage,
 )
 
 
@@ -470,3 +471,19 @@ class SocialAccountAdmin(TenantAwareAdminMixin, admin.ModelAdmin):
         """Display name or platform ID"""
         return obj.display_name or obj.platform_id
     display_name_or_id.short_description = 'Name/ID'
+
+
+@admin.register(WidgetSession)
+class WidgetSessionAdmin(TenantAwareAdminMixin, admin.ModelAdmin):
+    list_display = ('session_id', 'connection_id', 'visitor_name', 'visitor_email', 'started_at', 'last_seen_at')
+    list_filter = ('connection_id',)
+    search_fields = ('session_id', 'visitor_id', 'visitor_name', 'visitor_email')
+    readonly_fields = ('started_at', 'last_seen_at')
+
+
+@admin.register(WidgetMessage)
+class WidgetMessageAdmin(TenantAwareAdminMixin, admin.ModelAdmin):
+    list_display = ('message_id', 'session', 'is_from_visitor', 'timestamp', 'is_delivered', 'is_read_by_staff')
+    list_filter = ('is_from_visitor', 'is_delivered', 'is_read_by_staff', 'is_deleted')
+    search_fields = ('message_id', 'message_text')
+    readonly_fields = ('created_at',)

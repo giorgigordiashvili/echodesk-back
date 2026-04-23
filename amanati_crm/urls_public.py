@@ -122,6 +122,9 @@ urlpatterns = [
     # Social integrations (needed for OAuth callbacks)
     path('api/social/', include('social_integrations.urls')),
 
+    # Widget public + admin API (public schema is where WidgetConnection lives)
+    path('api/widget/', include('social_integrations.widget_urls')),
+
     # Ecommerce endpoints (public access for client registration/login)
     path('api/ecommerce/', include('ecommerce_crm.urls')),
 

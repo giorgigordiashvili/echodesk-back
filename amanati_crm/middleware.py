@@ -70,6 +70,25 @@ class EchoDeskTenantMiddleware(TenantMiddleware):
         # Get the hostname
         hostname = request.get_host().split(':')[0].lower()
 
+        # Widget public endpoints carry their own token that resolves the tenant
+        # internally (the view activates the tenant schema via schema_context
+        # once the token is validated). Keep the public schema active so the
+        # WidgetConnection lookup works, and skip the hostname-based lookup that
+        # would 404 on the tenant subdomain lookup path.
+        if request.path.startswith('/api/widget/public/'):
+            from tenants.models import Tenant
+            tenant = Tenant()
+            tenant.schema_name = get_public_schema_name()
+            tenant.domain_url = hostname
+            request.tenant = tenant
+            from django.db import connection
+            try:
+                connection.set_tenant(tenant)
+            except Exception:
+                pass
+            request.urlconf = getattr(settings, 'PUBLIC_SCHEMA_URLCONF', None)
+            return None
+
         # Log the hostname for debugging
         if settings.DEBUG:
             print(f"[DEBUG] Hostname: {hostname}")

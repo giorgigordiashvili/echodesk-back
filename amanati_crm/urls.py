@@ -114,6 +114,7 @@ urlpatterns = [
     path('', include('crm.urls')),
     path('', include('tickets.urls')),
     path('api/social/', include('social_integrations.urls')),
+    path('api/widget/', include('social_integrations.widget_urls')),
     path('', include('notifications.urls')),
     path('api/ecommerce/', include('ecommerce_crm.urls')),
     path('api/help/', include('help_center.urls')),

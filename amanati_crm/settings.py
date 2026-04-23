@@ -97,6 +97,7 @@ SHARED_APPS = [
     'blog',     # Marketing-site blog + AI-drafted posts — public schema only
     'landing_pages',  # Marketing-site landing pages + AI-drafted — public schema only
     'marketing',  # Marketing-site testimonials + contact form + newsletter — public schema only
+    'widget_registry',  # Embeddable chat widget tokens + config — public schema only
     'asterisk_state',  # Shadow models for the Asterisk realtime DB (routed to ``asterisk`` alias)
 ]
 
