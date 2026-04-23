@@ -426,12 +426,14 @@ def widget_public_call_credentials(request):
         if not endpoint_id:
             return _error('provision_failed', status.HTTP_503_SERVICE_UNAVAILABLE)
 
-    # Read the WSS URL off settings so we can override per environment.
-    sip_server_wss = getattr(
-        django_settings, 'WIDGET_SIP_WSS_URL', 'wss://pbx2.echodesk.cloud:8089/ws'
-    )
-    sip_domain = getattr(
+    # Prefer the tenant's own PbxServer config (wss_url + fqdn) so each
+    # tenant uses their own PBX; fall back to the globals only if the
+    # tenant hasn't filled them in yet.
+    sip_domain = pbx.fqdn or getattr(
         django_settings, 'WIDGET_SIP_DOMAIN', 'pbx2.echodesk.cloud'
+    )
+    sip_server_wss = pbx.wss_url or getattr(
+        django_settings, 'WIDGET_SIP_WSS_URL', f'wss://{sip_domain}:8089/ws'
     )
     ice_servers = getattr(
         django_settings, 'WIDGET_SIP_ICE_SERVERS',
