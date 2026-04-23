@@ -156,16 +156,12 @@ class WidgetVisitorConsumer(AsyncWebsocketConsumer):
 
         self.connection_id, self.tenant_schema, self.widget_connection_pk = resolved
         self.visitor_group = f'widget_visitor_{self.session_id}'
-        # Kept as a plain string (not a group we're *subscribed to*) so
-        # inbound visitor WS messages can still broadcast to the agent
-        # tenant group when the visitor sends via the WS `message` frame.
         self.tenant_group = f'messages_{self.tenant_schema}'
-        # NOTE: we deliberately DO NOT join messages_<tenant> here. Every
-        # widget broadcast is sent to both groups by widget_public_messages
-        # and widget_admin_send_message, so subscribing to the tenant group
-        # would deliver every frame twice to the visitor's iframe. Only
-        # agents need the tenant-wide group (via MessagesConsumer).
+
         await self.channel_layer.group_add(self.visitor_group, self.channel_name)
+        # Also join the tenant group so agent-initiated broadcasts land here —
+        # but filter in new_message to only surface messages for THIS session.
+        await self.channel_layer.group_add(self.tenant_group, self.channel_name)
 
         await self.accept()
         await self.send(text_data=json.dumps({
@@ -200,8 +196,8 @@ class WidgetVisitorConsumer(AsyncWebsocketConsumer):
     async def disconnect(self, close_code):
         if hasattr(self, 'visitor_group'):
             await self.channel_layer.group_discard(self.visitor_group, self.channel_name)
-        # tenant_group is intentionally never joined (see connect) so nothing
-        # to discard here.
+        if hasattr(self, 'tenant_group'):
+            await self.channel_layer.group_discard(self.tenant_group, self.channel_name)
 
     async def receive(self, text_data):
         try:
@@ -285,10 +281,16 @@ class WidgetVisitorConsumer(AsyncWebsocketConsumer):
     async def new_message(self, event):
         """Forward new_message events to the visitor iframe.
 
-        We're only subscribed to the session-scoped group (visitor_group),
-        so every frame we receive here is already scoped to this session.
+        We're subscribed to both our session-scoped group (visitor_group) AND
+        the tenant-wide one (tenant_group). For the tenant-wide broadcast we
+        must filter — only messages for THIS session should reach the visitor.
         """
         msg = event.get('message') or {}
+        # Session-scoped group: always pass through.
+        # Tenant-scoped: only pass through if the message belongs to this session.
+        msg_session = msg.get('session_id') or self._session_from_conversation_id(event.get('conversation_id'))
+        if msg_session and msg_session != self.session_id:
+            return
         await self.send(text_data=json.dumps({
             'type': 'new_message',
             'message': msg,
