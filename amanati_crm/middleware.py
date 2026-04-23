@@ -139,6 +139,72 @@ class EchoDeskTenantMiddleware(TenantMiddleware):
                 print(f"[DEBUG] Using tenant URLs: {request.urlconf}")
 
 
+class WidgetPublicCorsMiddleware:
+    """Open CORS for the embeddable-chat-widget public endpoints.
+
+    These endpoints are called from arbitrary tenant websites (the whole
+    point of the widget), so the global CORS allow-list on
+    ``*.echodesk.ge`` doesn't apply. We echo the request's ``Origin``
+    header back as ``Access-Control-Allow-Origin`` and short-circuit
+    OPTIONS preflight so any origin can talk to the widget API. The
+    real authorization happens inside the view via the widget token +
+    the tenant's ``allowed_origins`` allowlist — this middleware only
+    removes the browser-level CORS blocker so those view-level checks
+    can even run.
+
+    Runs before the tenant middleware because the preflight OPTIONS
+    request won't carry the widget token and we want to short-circuit
+    it without touching the schema.
+    """
+
+    WIDGET_PUBLIC_PREFIX = '/api/widget/public/'
+    ALLOW_HEADERS = 'accept, accept-encoding, authorization, content-type, origin, user-agent, x-requested-with, cache-control'
+    ALLOW_METHODS = 'GET, POST, OPTIONS'
+    MAX_AGE = '86400'
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def _is_widget_public(self, request) -> bool:
+        return request.path.startswith(self.WIDGET_PUBLIC_PREFIX)
+
+    def __call__(self, request):
+        if not self._is_widget_public(request):
+            return self.get_response(request)
+
+        origin = request.META.get('HTTP_ORIGIN', '')
+
+        # Short-circuit preflight. We don't run the view — just return the
+        # CORS headers so the browser lets the real request through.
+        if request.method == 'OPTIONS':
+            from django.http import HttpResponse
+            response = HttpResponse(status=204)
+            if origin:
+                response['Access-Control-Allow-Origin'] = origin
+                response['Vary'] = 'Origin'
+                response['Access-Control-Allow-Methods'] = self.ALLOW_METHODS
+                response['Access-Control-Allow-Headers'] = (
+                    request.META.get('HTTP_ACCESS_CONTROL_REQUEST_HEADERS')
+                    or self.ALLOW_HEADERS
+                )
+                response['Access-Control-Max-Age'] = self.MAX_AGE
+                # Widget API is anonymous by design — never send cookies.
+                response['Access-Control-Allow-Credentials'] = 'false'
+            return response
+
+        response = self.get_response(request)
+        if origin:
+            response['Access-Control-Allow-Origin'] = origin
+            # Merge with any existing Vary header django-cors-headers may set.
+            existing_vary = response.get('Vary', '')
+            if 'Origin' not in existing_vary:
+                response['Vary'] = (
+                    f'{existing_vary}, Origin' if existing_vary else 'Origin'
+                )
+            response['Access-Control-Allow-Credentials'] = 'false'
+        return response
+
+
 class BotBlockerMiddleware:
     """
     Middleware to block suspicious bot requests early before URL routing.
