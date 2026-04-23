@@ -100,39 +100,3 @@ Once `ASTERISK_SYNC_ENABLED=True` + the realtime migration is applied, the
 API starts returning `queue_name: amanati_support`. The dialplan change in
 step 2 already handles it — no script changes needed at that point.
 
-## 5. Widget voice-call context
-
-PR 7 of the embeddable chat widget adds a `[widget-call-<tenant>]` dialplan
-context used by ephemeral guest PJSIP endpoints created for visitors who
-click the "Call" button. Endpoints are provisioned by
-`/api/widget/public/call/credentials/` via
-`AsteriskStateSync.sync_widget_guest_endpoint`, which sets the endpoint's
-pjsip `context` to `widget-call-<tenant_schema>`. That context must exist
-on pbx2 before widget calls will land.
-
-The canonical template lives in this repo at
-`pbx/extensions-incoming.conf` (look for `[widget-call-amanati]`). Copy
-that block into `/etc/asterisk/extensions.conf` on pbx2 and reload:
-
-```bash
-ssh root@185.229.109.65
-# Append the [widget-call-amanati] block from pbx/extensions-incoming.conf
-# (adjust the static filename if you've diverged); then:
-asterisk -rx 'dialplan reload'
-asterisk -rx 'dialplan show widget-call-amanati'
-```
-
-Smoke-test:
-
-1. Toggle `voice_enabled = true` on a WidgetConnection.
-2. Visit the widget host page; click the "Call" button (once PR 8 lands).
-3. Inspect the Asterisk CLI: `pjsip show endpoint widget_<session_id>`
-   should show a registered contact and the call should hit the
-   tenant's `support` queue.
-
-The ephemeral endpoint is cleaned up after 4h of session inactivity by
-the hourly Celery task `social_integrations.reap_stale_widget_endpoints`
-(also callable as `python manage.py reap_stale_widget_endpoints --dry-run`).
-
-When a second tenant enables widget voice, add a `[widget-call-<schema>]`
-block for them. A future PR will generate these programmatically.

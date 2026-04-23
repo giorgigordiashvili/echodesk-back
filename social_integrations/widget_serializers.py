@@ -11,7 +11,6 @@ class WidgetConnectionSerializer(serializers.ModelSerializer):
             'allowed_origins', 'brand_color', 'position',
             'welcome_message', 'pre_chat_form', 'offline_message',
             'business_hours_schedule',
-            'voice_enabled', 'voice_queue', 'voice_working_hours_only',
             'proactive_enabled', 'proactive_message', 'proactive_delay_seconds',
             'created_at', 'updated_at',
         ]

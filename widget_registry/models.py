@@ -18,9 +18,6 @@ class WidgetConnection(models.Model):
     pre_chat_form = models.JSONField(default=dict)
     offline_message = models.JSONField(default=dict)
     business_hours_schedule = models.JSONField(default=dict, blank=True)
-    voice_enabled = models.BooleanField(default=False)
-    voice_queue = models.CharField(max_length=64, default="support")
-    voice_working_hours_only = models.BooleanField(default=False)
     # Proactive messages — widget.js shows a preview bubble after the
     # visitor has been on the page for ``proactive_delay_seconds`` seconds.
     # Message is localized (e.g. {"en": "Need help?", "ka": "..."}).
