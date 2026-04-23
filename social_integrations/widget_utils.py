@@ -43,15 +43,45 @@ def request_origin(request) -> str:
     return request.headers.get('Origin', '') or request.META.get('HTTP_ORIGIN', '')
 
 
+def _trusted_embed_origins() -> list[str]:
+    """Origins where *we* host the widget iframe itself.
+
+    All post-config API calls originate from the iframe document, not
+    from the tenant's page. So the browser's Origin header on those
+    calls is always our embed host (e.g. https://echodesk.ge) — not the
+    tenant's site. We trust those hosts unconditionally because the
+    token was already validated against allowed_origins at the initial
+    config fetch from the tenant's page in widget.js.
+
+    Override via the WIDGET_TRUSTED_EMBED_ORIGINS setting (list of
+    scheme+host strings) for dev / staging.
+    """
+    default = [
+        'https://echodesk.ge',
+        'http://localhost:3000',
+    ]
+    override = getattr(django_settings, 'WIDGET_TRUSTED_EMBED_ORIGINS', None)
+    if isinstance(override, (list, tuple)) and override:
+        return list(override)
+    return default
+
+
 def check_origin_allowed(conn, request) -> bool:
     """True if the request's Origin matches an entry in allowed_origins.
 
     Empty allowed_origins means the widget is in setup mode — the config
     endpoint returns a warning flag; all other endpoints reject.
+
+    Our own embed host (echodesk.ge) is always trusted because the
+    widget iframe makes every post-config call from that origin; the
+    real allowed-origin enforcement happens in widget.js on the tenant's
+    page before the iframe even mounts.
     """
     origin = request_origin(request)
     if not conn.allowed_origins:
         return False
+    if origin in _trusted_embed_origins():
+        return True
     return origin in conn.allowed_origins
 
 
