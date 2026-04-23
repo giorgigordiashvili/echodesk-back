@@ -209,6 +209,18 @@ DATABASES = {
 # short-circuits when no active PbxServer exists for the current tenant.
 ASTERISK_SYNC_ENABLED = True
 
+# Widget voice-call configuration. These values are handed to the widget
+# iframe by ``/api/widget/public/call/credentials/`` so sip.js can open a
+# WebRTC session against pbx2. TURN can be added later by overriding
+# ``WIDGET_SIP_ICE_SERVERS`` in the environment.
+WIDGET_SIP_DOMAIN = config('WIDGET_SIP_DOMAIN', default='pbx2.echodesk.cloud')
+WIDGET_SIP_WSS_URL = config(
+    'WIDGET_SIP_WSS_URL', default='wss://pbx2.echodesk.cloud:8089/ws'
+)
+WIDGET_SIP_ICE_SERVERS = [
+    {'urls': 'stun:stun.l.google.com:19302'},
+]
+
 # Router order matters: the asterisk router short-circuits for its own app
 # label, then the tenant-schemas router handles everything else.
 DATABASE_ROUTERS = (
@@ -660,6 +672,13 @@ CELERY_BEAT_SCHEDULE = {
     'generate-daily-landing-pages': {
         'task': 'landing_pages.tasks.generate_daily_landing_pages',
         'schedule': crontab(hour=7, minute=0),
+    },
+    # Widget voice calls: sweep PJSIP rows for visitor sessions whose
+    # ephemeral SIP creds (4h TTL) have gone stale. Hourly at :17 to
+    # avoid top-of-hour pile-up with the other schedules above.
+    'reap-stale-widget-endpoints': {
+        'task': 'social_integrations.reap_stale_widget_endpoints',
+        'schedule': crontab(minute=17),
     },
 }
 

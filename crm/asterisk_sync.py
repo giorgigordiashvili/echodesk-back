@@ -294,6 +294,118 @@ class AsteriskStateSync:
             PsAuth.objects.using(self.alias).filter(id=endpoint_id).delete()
 
     # ------------------------------------------------------------------
+    # Widget guest endpoint (ephemeral, per-session)
+    # ------------------------------------------------------------------
+
+    def sync_widget_guest_endpoint(
+        self,
+        session_id: str,
+        password: str,
+        queue: str,
+        ttl_hours: int = 4,
+    ) -> Optional[str]:
+        """Upsert a short-lived PJSIP endpoint so a widget visitor can SIP-register.
+
+        Returns the endpoint_id (the SIP username) so the caller can hand it
+        to the widget. Returns None if asterisk sync is disabled or the tenant
+        has no bound PbxServer.
+
+        Endpoint IDs use a ``widget_<session_id>`` local name so the reaper
+        can find them without a separate tracking table. The ``session_id`` is
+        already a unique uuid4 hex.
+        """
+        if not self._enabled():
+            return None
+        return self._run(
+            "sync_widget_guest_endpoint",
+            self._sync_widget_guest_endpoint_impl,
+            session_id, password, queue, ttl_hours,
+        )
+
+    def _sync_widget_guest_endpoint_impl(
+        self, session_id: str, password: str, queue: str, ttl_hours: int
+    ) -> str:
+        from asterisk_state.models import PsAor, PsAuth, PsEndpoint, PsIdentify
+
+        local_name = f"widget_{session_id}"
+        endpoint_id = self.prefix(self.tenant_schema, local_name)
+
+        endpoint_fields = {
+            **ENDPOINT_DEFAULTS_WEBRTC,
+            "aors": endpoint_id,
+            "auth": endpoint_id,
+            # Custom per-tenant context so the dialplan knows to route this
+            # caller into the tenant's configured queue and nothing else.
+            # Defined per-tenant in pbx/extensions-incoming.conf (today:
+            # [widget-call-amanati]). When a second tenant enables widget
+            # voice we'll generate these contexts programmatically.
+            "context": f"widget-call-{self.tenant_schema}",
+            "callerid": f'"Website visitor" <{local_name}>',
+            "from_user": local_name,
+        }
+        # Visitors are short-lived — force a shorter expiration than agent
+        # endpoints so a dropped visitor's row clears quickly.
+        aor_fields = {
+            **AOR_DEFAULTS_WEBRTC,
+            "default_expiration": 60 * 60 * ttl_hours,
+            "maximum_expiration": 60 * 60 * ttl_hours,
+        }
+        auth_fields = {
+            **AUTH_DEFAULTS,
+            "username": local_name,
+            "password": password,
+            "realm": getattr(settings, "PBX_REALM", "asterisk"),
+        }
+
+        with transaction.atomic(using=self.alias):
+            PsAuth.objects.using(self.alias).update_or_create(
+                id=endpoint_id, defaults=auth_fields
+            )
+            PsAor.objects.using(self.alias).update_or_create(
+                id=endpoint_id, defaults=aor_fields
+            )
+            PsEndpoint.objects.using(self.alias).update_or_create(
+                id=endpoint_id, defaults=endpoint_fields
+            )
+            # No identify row for widget guests — they authenticate by
+            # username/password, not IP. Ensure any stale row is gone.
+            PsIdentify.objects.using(self.alias).filter(id=endpoint_id).delete()
+        return endpoint_id
+
+    def tombstone_widget_guest_endpoint(self, session_id: str) -> None:
+        """Delete all PJSIP rows for a widget visitor session."""
+        if not self._enabled():
+            return
+        self._run(
+            "tombstone_widget_guest_endpoint",
+            self._tombstone_widget_guest_endpoint_impl,
+            session_id,
+        )
+
+    def _tombstone_widget_guest_endpoint_impl(self, session_id: str) -> None:
+        from asterisk_state.models import PsAor, PsAuth, PsContact, PsEndpoint, PsIdentify
+
+        local_name = f"widget_{session_id}"
+        endpoint_id = self.prefix(self.tenant_schema, local_name)
+        with transaction.atomic(using=self.alias):
+            PsEndpoint.objects.using(self.alias).filter(id=endpoint_id).delete()
+            PsIdentify.objects.using(self.alias).filter(id=endpoint_id).delete()
+            PsAor.objects.using(self.alias).filter(id=endpoint_id).delete()
+            PsAuth.objects.using(self.alias).filter(id=endpoint_id).delete()
+        # PsContact is managed=False (Asterisk owns it), so it sits outside
+        # the transaction and is best-effort. If the pjsip shadow DB doesn't
+        # actually have the table (legacy shared-schema builds), swallow.
+        try:
+            PsContact.objects.using(self.alias).filter(endpoint=endpoint_id).delete()
+        except Exception:  # noqa: BLE001
+            logger.debug(
+                "PsContact cleanup skipped for widget session=%s (tenant=%s)",
+                session_id,
+                self.tenant_schema,
+                exc_info=True,
+            )
+
+    # ------------------------------------------------------------------
     # Trunk sync
     # ------------------------------------------------------------------
 

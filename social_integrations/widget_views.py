@@ -9,9 +9,11 @@ conversation transcripts.
 from __future__ import annotations
 
 import logging
+import secrets
 import uuid
 from datetime import timedelta
 
+from django.conf import settings as django_settings
 from django.utils import timezone
 from django_ratelimit.decorators import ratelimit
 from rest_framework import status, viewsets
@@ -347,6 +349,103 @@ def widget_public_upload(request):
         'filename': safe_name,
         'size': upload.size,
         'content_type': upload.content_type,
+    }, status=status.HTTP_201_CREATED)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+@ratelimit(key='ip', rate='20/h', block=True)
+def widget_public_call_credentials(request):
+    """Issue short-lived SIP creds for a widget voice call.
+
+    Visitor → POST /api/widget/public/call/credentials/
+    Body: {token, session_id}
+    Returns (on success):
+        {
+            sip_uri: "sip:widget_<sid>@pbx2.echodesk.cloud",
+            sip_username: "widget_<sid>",
+            sip_password: "...",       # ephemeral, 4h TTL
+            sip_server_wss: "wss://pbx2.echodesk.cloud:8089/ws",
+            destination_extension: "support",
+            ice_servers: [{urls: "stun:stun.l.google.com:19302"}],
+        }
+    Errors: 403 voice_disabled / outside_hours / origin_not_allowed,
+            404 not_found / session_not_found.
+
+    Security:
+    - Voice is gated behind the tenant's ``voice_enabled`` toggle AND
+      (implicitly) their having an enrolled PbxServer.
+    - The visitor side doesn't re-check the tenant's ``ip_calling``
+      subscription feature — that gate lives on the admin side that
+      toggles ``voice_enabled``. If no PbxServer exists we 503.
+    """
+    body = request.data or {}
+    token = body.get('token')
+    session_id = (body.get('session_id') or '').strip()
+    if not session_id:
+        return _error('missing_session_id', status.HTTP_400_BAD_REQUEST)
+
+    conn, err = resolve_widget_connection(token)
+    if err:
+        code_map = {'missing_token': 400, 'not_found': 404, 'disabled': 403}
+        return _error(err, code_map[err])
+    if conn.allowed_origins and not check_origin_allowed(conn, request):
+        return _error('origin_not_allowed', status.HTTP_403_FORBIDDEN)
+
+    if not conn.voice_enabled:
+        return _error('voice_disabled', status.HTTP_403_FORBIDDEN)
+
+    endpoint_id: str | None = None
+    sip_password = secrets.token_urlsafe(18)
+    with schema_context(conn.tenant_schema):
+        try:
+            session = WidgetSession.objects.get(
+                session_id=session_id, connection_id=conn.id
+            )
+        except WidgetSession.DoesNotExist:
+            return _error('session_not_found', status.HTTP_404_NOT_FOUND)
+        if timezone.now() - session.last_seen_at > SESSION_STALE_AFTER:
+            return _error('session_expired', status.HTTP_410_GONE)
+
+        if conn.voice_working_hours_only and not is_tenant_online(conn.tenant_schema):
+            return _error('outside_hours', status.HTTP_403_FORBIDDEN)
+
+        # Resolve the tenant's PBX and provision the ephemeral endpoint.
+        from crm.asterisk_db import get_active_pbx_for_current_tenant
+        from crm.asterisk_sync import AsteriskStateSync
+        pbx = get_active_pbx_for_current_tenant()
+        if pbx is None:
+            return _error('pbx_unavailable', status.HTTP_503_SERVICE_UNAVAILABLE)
+
+        sync = AsteriskStateSync(conn.tenant_schema, pbx=pbx)
+        endpoint_id = sync.sync_widget_guest_endpoint(
+            session_id=session_id,
+            password=sip_password,
+            queue=conn.voice_queue or 'support',
+        )
+        if not endpoint_id:
+            return _error('provision_failed', status.HTTP_503_SERVICE_UNAVAILABLE)
+
+    # Read the WSS URL off settings so we can override per environment.
+    sip_server_wss = getattr(
+        django_settings, 'WIDGET_SIP_WSS_URL', 'wss://pbx2.echodesk.cloud:8089/ws'
+    )
+    sip_domain = getattr(
+        django_settings, 'WIDGET_SIP_DOMAIN', 'pbx2.echodesk.cloud'
+    )
+    ice_servers = getattr(
+        django_settings, 'WIDGET_SIP_ICE_SERVERS',
+        [{'urls': 'stun:stun.l.google.com:19302'}],
+    )
+
+    return Response({
+        'sip_uri': f'sip:{endpoint_id}@{sip_domain}',
+        'sip_username': endpoint_id,
+        'sip_password': sip_password,
+        'sip_server_wss': sip_server_wss,
+        'sip_domain': sip_domain,
+        'destination_extension': conn.voice_queue or 'support',
+        'ice_servers': ice_servers,
     }, status=status.HTTP_201_CREATED)
 
 
