@@ -1025,10 +1025,81 @@ class SocialClientSerializer(serializers.ModelSerializer):
 ClientSerializer = SocialClientSerializer
 
 
+def _build_chat_id_for_account(account):
+    """Compose the frontend chatId for a given SocialAccount.
+
+    Mirrors the composite-id format the unified conversations endpoint
+    emits:
+
+      facebook  → fb_<account_connection_id>_<platform_id>
+      instagram → ig_<account_connection_id>_<platform_id>
+      whatsapp  → wa_<account_connection_id>_<platform_id stripped of +>
+      email     → email_<account_connection_id>_<platform_id>
+      widget    → widget_<account_connection_id>_<most recent session_id
+                  for this visitor_id> (returns None if no session exists)
+
+    Returns ``None`` when we can't resolve a chatable destination (e.g.
+    widget visitor with no session yet).
+    """
+    platform = account.platform
+    conn = account.account_connection_id
+    pid = account.platform_id
+    if not pid or not conn:
+        return None
+    if platform == 'facebook':
+        return f'fb_{conn}_{pid}'
+    if platform == 'instagram':
+        return f'ig_{conn}_{pid}'
+    if platform == 'whatsapp':
+        number = pid.lstrip('+')
+        return f'wa_{conn}_{number}'
+    if platform == 'email':
+        return f'email_{conn}_{pid}'
+    if platform == 'widget':
+        # platform_id is the stable visitor_id; look up the most recent
+        # WidgetSession for this visitor so the agent can pick up a live
+        # conversation thread.
+        try:
+            connection_id = int(conn)
+        except (TypeError, ValueError):
+            return None
+        try:
+            from .models import WidgetSession
+            session = (
+                WidgetSession.objects
+                .filter(connection_id=connection_id, visitor_id=pid)
+                .order_by('-last_seen_at')
+                .values_list('session_id', flat=True)
+                .first()
+            )
+        except Exception:
+            session = None
+        if not session:
+            return None
+        return f'widget_{connection_id}_{session}'
+    return None
+
+
+class SocialAccountChatLinkSerializer(serializers.ModelSerializer):
+    """Slim SocialAccount projection for the client-list row's "Open chat"
+    button — just the fields the frontend needs to navigate to the right
+    conversation and label the option when a client has multiple accounts."""
+    chat_id = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SocialAccount
+        fields = ['id', 'platform', 'display_name', 'chat_id']
+        read_only_fields = fields
+
+    def get_chat_id(self, obj):
+        return _build_chat_id_for_account(obj)
+
+
 class SocialClientListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for client list (without all nested details)"""
     social_accounts_count = serializers.SerializerMethodField()
     platforms = serializers.SerializerMethodField()
+    social_accounts = serializers.SerializerMethodField()
     booking_count = serializers.SerializerMethodField()
     full_name = serializers.ReadOnlyField()
 
@@ -1036,7 +1107,7 @@ class SocialClientListSerializer(serializers.ModelSerializer):
         model = SocialClient
         fields = [
             'id', 'name', 'email', 'phone', 'profile_picture',
-            'social_accounts_count', 'platforms',
+            'social_accounts_count', 'platforms', 'social_accounts',
             'created_at', 'updated_at',
             # Booking fields
             'first_name', 'last_name', 'full_name',
@@ -1052,6 +1123,14 @@ class SocialClientListSerializer(serializers.ModelSerializer):
     def get_platforms(self, obj):
         """Return list of unique platforms linked to this client (uses prefetch cache)"""
         return list(set(sa.platform for sa in obj.social_accounts.all()))
+
+    def get_social_accounts(self, obj):
+        """Slim per-account projection with a pre-built chatId so the
+        "Open chat" action on the clients list can navigate directly to
+        /social/messages/<chat_id> without a second round-trip."""
+        return SocialAccountChatLinkSerializer(
+            obj.social_accounts.all(), many=True
+        ).data
 
     def get_booking_count(self, obj):
         """Return total booking count for booking-enabled clients (uses annotated count)"""
