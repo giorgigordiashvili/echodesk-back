@@ -10904,6 +10904,42 @@ def archive_conversation(request):
                     is_from_visitor=True,
                     is_read_by_staff=False,
                 ).update(is_read_by_staff=True, read_by_staff_at=now)
+                # Archiving a widget chat is also the agent saying "I'm done
+                # with this conversation". Close the underlying session and
+                # tell the visitor's iframe so it surfaces the post-chat
+                # review form. Without this, the visitor could keep typing
+                # into a thread the agent already moved out of their inbox.
+                try:
+                    widget_session = WidgetSession.objects.filter(
+                        session_id=conversation_id
+                    ).first()
+                    if widget_session and widget_session.ended_at is None:
+                        widget_session.ended_at = now
+                        widget_session.ended_by = 'agent'
+                        widget_session.save(update_fields=['ended_at', 'ended_by'])
+                        # Broadcast so the iframe flips to review immediately.
+                        from asgiref.sync import async_to_sync
+                        from channels.layers import get_channel_layer
+                        channel_layer = get_channel_layer()
+                        if channel_layer:
+                            tenant_schema = getattr(request.tenant, 'schema_name', None)
+                            if tenant_schema:
+                                async_to_sync(channel_layer.group_send)(
+                                    f'messages_{tenant_schema}',
+                                    {
+                                        'type': 'session_ended',
+                                        'session_id': conversation_id,
+                                        'connection_id': widget_session.connection_id,
+                                        'conversation_id': f'widget_{widget_session.connection_id}_{conversation_id}',
+                                        'ended_by': 'agent',
+                                        'ended_at': now.isoformat(),
+                                        'message': 'The agent moved this conversation to history.',
+                                    },
+                                )
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to end widget session on archive: {e}"
+                    )
 
             if created:
                 archived_count += 1
