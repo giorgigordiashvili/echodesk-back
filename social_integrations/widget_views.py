@@ -106,12 +106,22 @@ def widget_public_sessions(request):
         return _error('origin_not_allowed', status.HTTP_403_FORBIDDEN)
 
     with schema_context(conn.tenant_schema):
-        # Re-use recent session for the same visitor so a returning browser
-        # keeps its conversation thread.
+        # Re-use a recent session for the same visitor so a returning browser
+        # keeps its conversation thread. Two filters keep this honest:
+        #   - `last_seen_at__gte=cutoff`: drop dormant sessions older than
+        #     SESSION_STALE_AFTER so a fresh visit feels like a fresh chat.
+        #   - `ended_at__isnull=True`: never re-attach to a session the agent
+        #     or visitor explicitly closed. After a close, the next message
+        #     starts a brand-new chat thread on both ends.
         cutoff = timezone.now() - SESSION_STALE_AFTER
         existing = (
             WidgetSession.objects
-            .filter(connection_id=conn.id, visitor_id=visitor_id, last_seen_at__gte=cutoff)
+            .filter(
+                connection_id=conn.id,
+                visitor_id=visitor_id,
+                last_seen_at__gte=cutoff,
+                ended_at__isnull=True,
+            )
             .order_by('-last_seen_at')
             .first()
         )
@@ -221,6 +231,17 @@ def widget_public_messages(request):
             'conversation_id': conversation_id,
             'timestamp': msg_payload['timestamp'],
         })
+
+    # Auto-unarchive: a new visitor message should always pop the conversation
+    # back into the agent's active inbox if it had been moved to history.
+    # Mirrors the behaviour shipped for facebook/instagram/whatsapp/email.
+    with schema_context(conn.tenant_schema):
+        from .views import auto_unarchive_conversation
+        auto_unarchive_conversation(
+            platform='widget',
+            conversation_id=session.session_id,
+            account_id=str(conn.id),
+        )
 
     return Response(response_data, status=status.HTTP_201_CREATED)
 
