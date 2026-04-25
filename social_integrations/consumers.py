@@ -183,6 +183,12 @@ class WidgetVisitorConsumer(AsyncWebsocketConsumer):
         self.tenant_group = f'messages_{self.tenant_schema}'
         await self.channel_layer.group_add(self.tenant_group, self.channel_name)
 
+        # MUST accept the connection before sending any frames — Channels
+        # silently drops `send()` calls until the handshake completes.
+        # (A previous edit accidentally removed this and broke the entire
+        # visitor WS path including the live `session_ended` delivery.)
+        await self.accept()
+
         # Hand the visitor the session's CURRENT close state in the
         # connection handshake, so a reconnect after a missed
         # `session_ended` event (e.g. iframe was display:none, network blip,
