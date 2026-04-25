@@ -522,12 +522,34 @@ def widget_public_close_session(request):
         session.ended_at = timezone.now()
         session.ended_by = 'visitor'
         session.save(update_fields=['ended_at', 'ended_by'])
+        ended_at_iso = session.ended_at.isoformat()
 
-        return Response({
-            'status': 'ok',
-            'ended_at': session.ended_at.isoformat(),
-            'ended_by': session.ended_by,
+    # Broadcast so the agent dashboard sees the visitor-initiated close in
+    # real time. Mirrors the agent-close path which broadcasts the same
+    # event the other direction. Both MessagesConsumer (agent) and
+    # WidgetVisitorConsumer (visitor) live in `messages_<tenant>` — but
+    # WidgetVisitorConsumer filters by session_id so only the active
+    # visitor iframe receives it (and on the visitor side we expect a
+    # no-op anyway: they're the one who clicked "End conversation").
+    from asgiref.sync import async_to_sync
+    from channels.layers import get_channel_layer
+    channel_layer = get_channel_layer()
+    if channel_layer:
+        async_to_sync(channel_layer.group_send)(f'messages_{conn.tenant_schema}', {
+            'type': 'session_ended',
+            'session_id': session_id,
+            'connection_id': conn.id,
+            'conversation_id': f'widget_{conn.id}_{session_id}',
+            'ended_by': 'visitor',
+            'ended_at': ended_at_iso,
+            'message': 'The visitor ended this conversation.',
         })
+
+    return Response({
+        'status': 'ok',
+        'ended_at': ended_at_iso,
+        'ended_by': 'visitor',
+    })
 
 
 @extend_schema(
@@ -709,6 +731,7 @@ def widget_admin_close_session(request):
             'type': 'session_ended',
             'session_id': session_id,
             'connection_id': connection_id,
+            'conversation_id': f'widget_{connection_id}_{session_id}',
             'ended_by': 'agent',
             'ended_at': ended_at_iso,
             'message': 'The agent has ended this conversation.',

@@ -132,6 +132,26 @@ class MessagesConsumer(AsyncWebsocketConsumer):
             'timestamp': event['timestamp']
         }))
 
+    async def session_ended(self, event):
+        """Forward widget `session_ended` events to the agent dashboard.
+
+        Both the agent-side MessagesConsumer and the visitor-side
+        WidgetVisitorConsumer subscribe to the same `messages_<tenant>` group.
+        When either side closes a widget chat we broadcast once and both
+        consumers forward the event to their respective sockets — the agent
+        UI uses this to refresh the conversation and mark the chat ended,
+        the visitor iframe uses it to flip to the post-chat review form.
+        """
+        await self.send(text_data=json.dumps({
+            'type': 'session_ended',
+            'platform': 'widget',
+            'session_id': event.get('session_id'),
+            'connection_id': event.get('connection_id'),
+            'conversation_id': event.get('conversation_id'),
+            'ended_by': event.get('ended_by'),
+            'ended_at': event.get('ended_at'),
+        }))
+
 
 class WidgetVisitorConsumer(AsyncWebsocketConsumer):
     """
