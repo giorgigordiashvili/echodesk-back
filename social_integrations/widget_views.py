@@ -22,7 +22,7 @@ from rest_framework.response import Response
 from tenant_schemas.utils import schema_context
 
 from widget_registry.models import WidgetConnection
-from .models import ChatRating, WidgetMessage, WidgetSession
+from .models import ChatRating, ConversationArchive, WidgetMessage, WidgetSession
 from .widget_serializers import (
     WidgetConnectionSerializer,
     WidgetMessageSerializer,
@@ -524,6 +524,17 @@ def widget_public_close_session(request):
         session.save(update_fields=['ended_at', 'ended_by'])
         ended_at_iso = session.ended_at.isoformat()
 
+        # When the visitor explicitly says "I'm done", also move the
+        # conversation to the agent's history. Without this the chat would
+        # linger in the active inbox with a disabled composer — taking up
+        # space for an interaction the visitor has clearly walked away from.
+        ConversationArchive.objects.get_or_create(
+            platform='widget',
+            conversation_id=session_id,
+            account_id=str(conn.id),
+            defaults={'archived_by': None},
+        )
+
     # Broadcast so the agent dashboard sees the visitor-initiated close in
     # real time. Mirrors the agent-close path which broadcasts the same
     # event the other direction. Both MessagesConsumer (agent) and
@@ -720,6 +731,15 @@ def widget_admin_close_session(request):
         session.ended_by = 'agent'
         session.save(update_fields=['ended_at', 'ended_by'])
         ended_at_iso = session.ended_at.isoformat()
+
+        # An agent-initiated end implies the chat is done — move it to
+        # history alongside the close so the inbox stays tidy. Idempotent.
+        ConversationArchive.objects.get_or_create(
+            platform='widget',
+            conversation_id=session_id,
+            account_id=str(connection_id),
+            defaults={'archived_by': request.user},
+        )
 
     # Broadcast to the tenant group — the visitor's WidgetVisitorConsumer
     # filters frames by session_id in its `session_ended` handler.
