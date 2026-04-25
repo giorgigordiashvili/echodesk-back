@@ -47,7 +47,7 @@ workers:
     repo: giorgigordiashvili/echodesk-back
     branch: main
     deploy_on_push: true
-  build_command: ./build_production.sh
+  build_command: ./build_worker.sh
   run_command: celery -A amanati_crm worker --loglevel=info --concurrency=2
   environment_slug: python
   instance_count: 1
@@ -88,7 +88,7 @@ workers:
     repo: giorgigordiashvili/echodesk-back
     branch: main
     deploy_on_push: true
-  build_command: ./build_production.sh
+  build_command: ./build_worker.sh
   run_command: celery -A amanati_crm beat --loglevel=info
   environment_slug: python
   instance_count: 1

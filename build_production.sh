@@ -7,9 +7,10 @@ set -e  # Exit on any error
 echo "🚀 Building EchoDesk Multi-Tenant CRM for Production"
 echo "=================================================="
 
-# Install dependencies
+# Install dependencies. We deliberately skip `pip install --upgrade pip` —
+# the buildpack ships a recent pip already and the upgrade step adds ~10s
+# to every deploy for no real benefit.
 echo "📦 Installing dependencies..."
-pip install --upgrade pip
 pip install -r requirements.txt
 
 # Run system checks
@@ -24,10 +25,11 @@ python manage.py collectstatic --noinput
 echo "🗄️ Running shared schema migrations..."
 python manage.py migrate_schemas --shared
 
-# Run migrations for the Asterisk realtime DB alias (tenant-schemas' migrate
-# wrapper can't target secondary DBs, so we have a dedicated command).
-echo "📞 Running Asterisk realtime migrations..."
-python manage.py migrate_asterisk
+# Asterisk realtime migrations are intentionally NOT run here.
+# Under Phase 2 (BYO Asterisk), each tenant owns their own asterisk DB and
+# there's no single global alias to migrate. Run on demand:
+#   python manage.py migrate_asterisk --database asterisk_<tenant>
+#   python manage.py migrate_asterisk --all
 
 echo "✅ Production build completed successfully!"
 echo ""
