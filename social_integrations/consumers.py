@@ -302,6 +302,26 @@ class WidgetVisitorConsumer(AsyncWebsocketConsumer):
         parts = conv_id.split('_', 2)
         return parts[2] if len(parts) == 3 else None
 
+    async def session_ended(self, event):
+        """Forward `session_ended` events to the visitor iframe.
+
+        Triggered when an agent (or future timeout job) closes the session
+        on the backend. The iframe uses this signal to swap its message
+        composer for the post-chat review form.
+        """
+        # Filter so frames for OTHER widget sessions on the same tenant
+        # group don't reach this iframe.
+        msg_session = event.get('session_id')
+        if msg_session and msg_session != self.session_id:
+            return
+        await self.send(text_data=json.dumps({
+            'type': 'session_ended',
+            'ended_by': event.get('ended_by'),
+            'message': event.get('message', ''),
+            'session_id': self.session_id,
+            'ended_at': event.get('ended_at'),
+        }))
+
 
 class TypingConsumer(AsyncWebsocketConsumer):
     """

@@ -2,6 +2,16 @@ import secrets
 from django.db import models
 
 
+def _default_pre_chat_form():
+    """Default pre-chat form configuration.
+
+    Empty `{}` previously caused the visitor-side widget to suppress the form
+    because `enabled` was `undefined`/falsy. We now opt new connections into
+    showing the form by default and capture the visitor's name only.
+    """
+    return {'enabled': True, 'name_required': True, 'email_required': False}
+
+
 class WidgetConnection(models.Model):
     tenant_schema = models.CharField(max_length=63, db_index=True)
     widget_token = models.CharField(max_length=64, unique=True, db_index=True)
@@ -15,7 +25,7 @@ class WidgetConnection(models.Model):
         choices=[("bottom-right", "Bottom right"), ("bottom-left", "Bottom left")],
     )
     welcome_message = models.JSONField(default=dict)
-    pre_chat_form = models.JSONField(default=dict)
+    pre_chat_form = models.JSONField(default=_default_pre_chat_form)
     offline_message = models.JSONField(default=dict)
     business_hours_schedule = models.JSONField(default=dict, blank=True)
     # Proactive messages — widget.js shows a preview bubble after the

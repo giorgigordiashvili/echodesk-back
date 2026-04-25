@@ -24,6 +24,7 @@ class WidgetSessionSerializer(serializers.ModelSerializer):
             'id', 'connection_id', 'session_id', 'visitor_id',
             'visitor_name', 'visitor_email', 'referrer_url', 'page_url',
             'started_at', 'last_seen_at',
+            'ended_at', 'ended_by',
         ]
         read_only_fields = fields
 

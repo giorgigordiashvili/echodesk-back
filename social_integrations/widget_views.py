@@ -14,6 +14,7 @@ from datetime import timedelta
 
 from django.utils import timezone
 from django_ratelimit.decorators import ratelimit
+from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework import status, viewsets
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -21,7 +22,7 @@ from rest_framework.response import Response
 from tenant_schemas.utils import schema_context
 
 from widget_registry.models import WidgetConnection
-from .models import WidgetMessage, WidgetSession
+from .models import ChatRating, WidgetMessage, WidgetSession
 from .widget_serializers import (
     WidgetConnectionSerializer,
     WidgetMessageSerializer,
@@ -428,6 +429,275 @@ def widget_admin_send_message(request):
         })
 
     return Response(payload_data, status=status.HTTP_201_CREATED)
+
+
+@extend_schema(
+    request={
+        'application/json': {
+            'type': 'object',
+            'required': ['token', 'session_id'],
+            'properties': {
+                'token': {'type': 'string', 'description': 'Widget token'},
+                'session_id': {'type': 'string', 'description': 'Active widget session id'},
+            },
+        }
+    },
+    responses={
+        200: OpenApiResponse(
+            response={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'enum': ['ok', 'already_ended']},
+                    'ended_at': {'type': 'string', 'format': 'date-time', 'nullable': True},
+                    'ended_by': {'type': 'string', 'enum': ['visitor', 'agent', 'timeout'], 'nullable': True},
+                },
+            },
+            description='Session closed (or already closed).'
+        ),
+        400: OpenApiResponse(description='Invalid request body.'),
+        403: OpenApiResponse(description='Widget connection disabled or origin not allowed.'),
+        404: OpenApiResponse(description='Token or session not found.'),
+        410: OpenApiResponse(description='Session expired.'),
+    },
+    description='Visitor-initiated session close. Marks the WidgetSession as ended_by=visitor.',
+    summary='Close widget session (visitor)',
+)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+@ratelimit(key='ip', rate='30/h', block=True)
+def widget_public_close_session(request):
+    """Visitor closes their own widget session."""
+    body = request.data or {}
+    token = body.get('token')
+    session_id = (body.get('session_id') or '').strip()
+
+    if not session_id:
+        return _error('missing_session_id', status.HTTP_400_BAD_REQUEST)
+
+    conn, err = resolve_widget_connection(token)
+    if err:
+        code_map = {'missing_token': 400, 'not_found': 404, 'disabled': 403}
+        return _error(err, code_map[err])
+    if conn.allowed_origins and not check_origin_allowed(conn, request):
+        return _error('origin_not_allowed', status.HTTP_403_FORBIDDEN)
+
+    with schema_context(conn.tenant_schema):
+        try:
+            session = WidgetSession.objects.get(session_id=session_id, connection_id=conn.id)
+        except WidgetSession.DoesNotExist:
+            return _error('session_not_found', status.HTTP_404_NOT_FOUND)
+
+        if session.ended_at is not None:
+            return Response({
+                'status': 'already_ended',
+                'ended_at': session.ended_at.isoformat(),
+                'ended_by': session.ended_by,
+            })
+
+        # Stale-session 410 — match the convention used by other widget views.
+        if timezone.now() - session.last_seen_at > SESSION_STALE_AFTER:
+            return _error('session_expired', status.HTTP_410_GONE)
+
+        session.ended_at = timezone.now()
+        session.ended_by = 'visitor'
+        session.save(update_fields=['ended_at', 'ended_by'])
+
+        return Response({
+            'status': 'ok',
+            'ended_at': session.ended_at.isoformat(),
+            'ended_by': session.ended_by,
+        })
+
+
+@extend_schema(
+    request={
+        'application/json': {
+            'type': 'object',
+            'required': ['token', 'session_id', 'rating'],
+            'properties': {
+                'token': {'type': 'string', 'description': 'Widget token'},
+                'session_id': {'type': 'string', 'description': 'Widget session id'},
+                'rating': {'type': 'integer', 'minimum': 1, 'maximum': 5},
+                'comment': {'type': 'string', 'description': 'Optional free-form comment'},
+            },
+        }
+    },
+    responses={
+        200: OpenApiResponse(
+            response={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'enum': ['ok']},
+                    'rating': {'type': 'integer'},
+                },
+            },
+            description='Rating recorded (created or updated).'
+        ),
+        400: OpenApiResponse(description='Invalid rating or missing fields.'),
+        403: OpenApiResponse(description='Origin not allowed or widget disabled.'),
+        404: OpenApiResponse(description='Token or session not found.'),
+    },
+    description=(
+        'Visitor submits a 1-5 star rating for a widget session. Idempotent — '
+        'a second submission for the same session updates the existing row.'
+    ),
+    summary='Rate widget session (visitor)',
+)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+@ratelimit(key='ip', rate='30/h', block=True)
+def widget_public_rate_session(request):
+    """Visitor submits a post-chat rating + optional comment."""
+    body = request.data or {}
+    token = body.get('token')
+    session_id = (body.get('session_id') or '').strip()
+    rating_raw = body.get('rating')
+    comment = (body.get('comment') or '').strip()
+
+    if not session_id:
+        return _error('missing_session_id', status.HTTP_400_BAD_REQUEST)
+
+    # Validate rating: must be an int 1..5. Reject floats / strings outright
+    # so we don't silently round.
+    try:
+        rating = int(rating_raw)
+    except (TypeError, ValueError):
+        return _error('invalid_rating', status.HTTP_400_BAD_REQUEST)
+    if rating < 1 or rating > 5:
+        return _error('invalid_rating', status.HTTP_400_BAD_REQUEST)
+    if len(comment) > 5000:
+        return _error('comment_too_long', status.HTTP_400_BAD_REQUEST)
+
+    conn, err = resolve_widget_connection(token)
+    if err:
+        code_map = {'missing_token': 400, 'not_found': 404, 'disabled': 403}
+        return _error(err, code_map[err])
+    if conn.allowed_origins and not check_origin_allowed(conn, request):
+        return _error('origin_not_allowed', status.HTTP_403_FORBIDDEN)
+
+    with schema_context(conn.tenant_schema):
+        try:
+            session = WidgetSession.objects.get(session_id=session_id, connection_id=conn.id)
+        except WidgetSession.DoesNotExist:
+            return _error('session_not_found', status.HTTP_404_NOT_FOUND)
+
+        # ChatRating's identity field is `conversation_id` (not `chat_id`).
+        # Match the convention the rest of the widget pipeline uses for
+        # tying social-style records back to a widget session:
+        # conversation_id = "widget_<connection_id>_<session_id>".
+        conversation_id = f"widget_{conn.id}_{session.session_id}"
+        session_ended_at = session.ended_at or timezone.now()
+
+        ChatRating.objects.update_or_create(
+            platform='widget',
+            conversation_id=conversation_id,
+            defaults={
+                'rating': rating,
+                'comment': comment,
+                'account_id': str(conn.id),
+                'session_started_at': session.started_at,
+                'session_ended_at': session_ended_at,
+            },
+        )
+
+    return Response({'status': 'ok', 'rating': rating})
+
+
+@extend_schema(
+    request={
+        'application/json': {
+            'type': 'object',
+            'required': ['connection_id', 'session_id'],
+            'properties': {
+                'connection_id': {'type': 'integer'},
+                'session_id': {'type': 'string'},
+            },
+        }
+    },
+    responses={
+        200: OpenApiResponse(
+            response={
+                'type': 'object',
+                'properties': {
+                    'status': {'type': 'string', 'enum': ['ok', 'already_ended']},
+                    'ended_at': {'type': 'string', 'format': 'date-time', 'nullable': True},
+                    'ended_by': {'type': 'string', 'enum': ['visitor', 'agent', 'timeout'], 'nullable': True},
+                },
+            },
+            description='Session closed (or already closed).'
+        ),
+        400: OpenApiResponse(description='Invalid request body.'),
+        404: OpenApiResponse(description='Connection or session not found.'),
+    },
+    description=(
+        'Agent-initiated session close from the dashboard. Marks the '
+        'WidgetSession ended_by=agent and pushes a `session_ended` WS '
+        'event so the visitor iframe can surface the post-chat review.'
+    ),
+    summary='Close widget session (agent)',
+)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def widget_admin_close_session(request):
+    """Agent ends a widget session from the tenant dashboard."""
+    body = request.data or {}
+    try:
+        connection_id = int(body.get('connection_id'))
+    except (TypeError, ValueError):
+        return _error('invalid_connection_id', status.HTTP_400_BAD_REQUEST)
+    session_id = (body.get('session_id') or '').strip()
+    if not session_id:
+        return _error('missing_session_id', status.HTTP_400_BAD_REQUEST)
+
+    schema = getattr(request.tenant, 'schema_name', None)
+    if not schema or schema == 'public':
+        return _error('tenant_required', status.HTTP_400_BAD_REQUEST)
+
+    # Verify the tenant owns this connection (registry lives in public).
+    with schema_context('public'):
+        try:
+            conn = WidgetConnection.objects.get(id=connection_id, tenant_schema=schema)
+        except WidgetConnection.DoesNotExist:
+            return _error('not_found', status.HTTP_404_NOT_FOUND)
+
+    with schema_context(schema):
+        try:
+            session = WidgetSession.objects.get(session_id=session_id, connection_id=connection_id)
+        except WidgetSession.DoesNotExist:
+            return _error('session_not_found', status.HTTP_404_NOT_FOUND)
+
+        if session.ended_at is not None:
+            return Response({
+                'status': 'already_ended',
+                'ended_at': session.ended_at.isoformat(),
+                'ended_by': session.ended_by,
+            })
+
+        session.ended_at = timezone.now()
+        session.ended_by = 'agent'
+        session.save(update_fields=['ended_at', 'ended_by'])
+        ended_at_iso = session.ended_at.isoformat()
+
+    # Broadcast to the tenant group — the visitor's WidgetVisitorConsumer
+    # filters frames by session_id in its `session_ended` handler.
+    from asgiref.sync import async_to_sync
+    from channels.layers import get_channel_layer
+    channel_layer = get_channel_layer()
+    if channel_layer:
+        async_to_sync(channel_layer.group_send)(f'messages_{conn.tenant_schema}', {
+            'type': 'session_ended',
+            'session_id': session_id,
+            'connection_id': connection_id,
+            'ended_by': 'agent',
+            'ended_at': ended_at_iso,
+            'message': 'The agent has ended this conversation.',
+        })
+
+    return Response({
+        'status': 'ok',
+        'ended_at': ended_at_iso,
+        'ended_by': 'agent',
+    })
 
 
 class WidgetConnectionViewSet(viewsets.ModelViewSet):

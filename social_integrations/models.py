@@ -2059,6 +2059,17 @@ class WidgetSession(models.Model):
     ip_address = models.GenericIPAddressField(null=True, blank=True)
     started_at = models.DateTimeField(auto_now_add=True)
     last_seen_at = models.DateTimeField(auto_now=True)
+    ended_at = models.DateTimeField(null=True, blank=True)
+    ended_by = models.CharField(
+        max_length=16,
+        choices=[
+            ('visitor', 'visitor'),
+            ('agent', 'agent'),
+            ('timeout', 'timeout'),
+        ],
+        null=True,
+        blank=True,
+    )
 
     class Meta:
         ordering = ['-started_at']
@@ -2069,6 +2080,10 @@ class WidgetSession(models.Model):
 
     def __str__(self):
         return f"WidgetSession({self.session_id}) visitor={self.visitor_name or self.visitor_id}"
+
+    @property
+    def is_ended(self):
+        return self.ended_at is not None
 
 
 class WidgetMessage(models.Model):

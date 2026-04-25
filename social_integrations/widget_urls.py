@@ -11,9 +11,12 @@ urlpatterns = [
     # Keep the agent-send path before the router's catch-all so its 'send'
     # segment can never collide with a (hypothetical) pk-based detail route.
     path('admin/messages/send/', widget_views.widget_admin_send_message, name='widget_admin_send_message'),
+    path('admin/sessions/close/', widget_views.widget_admin_close_session, name='widget_admin_close_session'),
     *router.urls,
     path('public/config/', widget_views.widget_public_config, name='widget_public_config'),
     path('public/sessions/', widget_views.widget_public_sessions, name='widget_public_sessions'),
+    path('public/sessions/close/', widget_views.widget_public_close_session, name='widget_public_close_session'),
+    path('public/sessions/rate/', widget_views.widget_public_rate_session, name='widget_public_rate_session'),
     path('public/messages/', widget_views.widget_public_messages, name='widget_public_messages'),
     path('public/messages/list/', widget_views.widget_public_messages_list, name='widget_public_messages_list'),
     path('public/upload/', widget_views.widget_public_upload, name='widget_public_upload'),
