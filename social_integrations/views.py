@@ -5786,6 +5786,11 @@ def unified_conversations(request):
                         'unread_count': unread_counts.get(session.pk, 0),
                         'account_name': wconn.label,
                         'account_id': account_id,
+                        # Widget-only: surface the session's close state so the
+                        # agent UI can disable the composer (and show a banner)
+                        # when the visitor or another agent has ended the chat.
+                        'session_ended_at': session.ended_at.isoformat() if session.ended_at else None,
+                        'session_ended_by': session.ended_by,
                     })
         except Exception as e:
             logger.error(f"Error loading Widget conversations: {e}")
