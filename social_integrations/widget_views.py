@@ -525,15 +525,22 @@ def widget_public_close_session(request):
         ended_at_iso = session.ended_at.isoformat()
 
         # When the visitor explicitly says "I'm done", also move the
-        # conversation to the agent's history. Without this the chat would
-        # linger in the active inbox with a disabled composer — taking up
-        # space for an interaction the visitor has clearly walked away from.
-        ConversationArchive.objects.get_or_create(
-            platform='widget',
-            conversation_id=session_id,
-            account_id=str(conn.id),
-            defaults={'archived_by': None},
-        )
+        # conversation to the agent's history. Best-effort — any failure
+        # here (unique constraint race, missing tenant migration, etc.)
+        # MUST NOT block the WS broadcast below, which is the only signal
+        # the visitor's iframe has to flip to the review form.
+        try:
+            ConversationArchive.objects.get_or_create(
+                platform='widget',
+                conversation_id=session_id,
+                account_id=str(conn.id),
+                defaults={'archived_by': None},
+            )
+        except Exception as exc:  # noqa: BLE001 — defensive
+            logger.warning(
+                "Failed to archive widget conversation on visitor close: %s",
+                exc,
+            )
 
     # Broadcast so the agent dashboard sees the visitor-initiated close in
     # real time. Mirrors the agent-close path which broadcasts the same
@@ -733,13 +740,21 @@ def widget_admin_close_session(request):
         ended_at_iso = session.ended_at.isoformat()
 
         # An agent-initiated end implies the chat is done — move it to
-        # history alongside the close so the inbox stays tidy. Idempotent.
-        ConversationArchive.objects.get_or_create(
-            platform='widget',
-            conversation_id=session_id,
-            account_id=str(connection_id),
-            defaults={'archived_by': request.user},
-        )
+        # history alongside the close so the inbox stays tidy. Best-effort
+        # for the same reason as the visitor close path: do not let an
+        # archive error swallow the broadcast.
+        try:
+            ConversationArchive.objects.get_or_create(
+                platform='widget',
+                conversation_id=session_id,
+                account_id=str(connection_id),
+                defaults={'archived_by': request.user},
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Failed to archive widget conversation on agent close: %s",
+                exc,
+            )
 
     # Broadcast to the tenant group — the visitor's WidgetVisitorConsumer
     # filters frames by session_id in its `session_ended` handler.
