@@ -183,11 +183,17 @@ class WidgetVisitorConsumer(AsyncWebsocketConsumer):
         self.tenant_group = f'messages_{self.tenant_schema}'
         await self.channel_layer.group_add(self.tenant_group, self.channel_name)
 
-        await self.accept()
+        # Hand the visitor the session's CURRENT close state in the
+        # connection handshake, so a reconnect after a missed
+        # `session_ended` event (e.g. iframe was display:none, network blip,
+        # host page reload) still routes them to the post-chat review.
+        ended_state = await self._fetch_ended_state()
         await self.send(text_data=json.dumps({
             'type': 'connection',
             'status': 'connected',
             'session_id': self.session_id,
+            'ended_at': ended_state.get('ended_at'),
+            'ended_by': ended_state.get('ended_by'),
         }))
 
     @database_sync_to_async
@@ -212,6 +218,31 @@ class WidgetVisitorConsumer(AsyncWebsocketConsumer):
         if not exists:
             return None
         return conn_id, tenant_schema, conn_pk
+
+    @database_sync_to_async
+    def _fetch_ended_state(self):
+        """Return `{ended_at, ended_by}` for the visitor's session.
+
+        Both fields are null when the session is still active; when set
+        the iframe uses them to immediately surface the review form
+        instead of the message composer.
+        """
+        from .models import WidgetSession
+        from tenant_schemas.utils import schema_context
+
+        with schema_context(self.tenant_schema):
+            row = (
+                WidgetSession.objects
+                .filter(session_id=self.session_id, connection_id=self.connection_id)
+                .values('ended_at', 'ended_by')
+                .first()
+            )
+        if not row:
+            return {'ended_at': None, 'ended_by': None}
+        return {
+            'ended_at': row['ended_at'].isoformat() if row['ended_at'] else None,
+            'ended_by': row['ended_by'],
+        }
 
     async def disconnect(self, close_code):
         if hasattr(self, 'tenant_group'):
