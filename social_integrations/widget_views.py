@@ -760,6 +760,7 @@ def widget_admin_close_session(request):
         except WidgetConnection.DoesNotExist:
             return _error('not_found', status.HTTP_404_NOT_FOUND)
 
+    already_ended = False
     with schema_context(schema):
         try:
             session = WidgetSession.objects.get(session_id=session_id, connection_id=connection_id)
@@ -767,36 +768,42 @@ def widget_admin_close_session(request):
             return _error('session_not_found', status.HTTP_404_NOT_FOUND)
 
         if session.ended_at is not None:
-            return Response({
-                'status': 'already_ended',
-                'ended_at': session.ended_at.isoformat(),
-                'ended_by': session.ended_by,
-            })
+            already_ended = True
+            ended_at_iso = session.ended_at.isoformat()
+            ended_by_value = session.ended_by or 'agent'
+        else:
+            session.ended_at = timezone.now()
+            session.ended_by = 'agent'
+            session.save(update_fields=['ended_at', 'ended_by'])
+            ended_at_iso = session.ended_at.isoformat()
+            ended_by_value = 'agent'
 
-        session.ended_at = timezone.now()
-        session.ended_by = 'agent'
-        session.save(update_fields=['ended_at', 'ended_by'])
-        ended_at_iso = session.ended_at.isoformat()
+            # An agent-initiated end implies the chat is done — move it to
+            # history alongside the close so the inbox stays tidy.
+            # Best-effort: do not let an archive error swallow the broadcast.
+            try:
+                ConversationArchive.objects.get_or_create(
+                    platform='widget',
+                    conversation_id=session_id,
+                    account_id=str(connection_id),
+                    defaults={'archived_by': request.user},
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Failed to archive widget conversation on agent close: %s",
+                    exc,
+                )
 
-        # An agent-initiated end implies the chat is done — move it to
-        # history alongside the close so the inbox stays tidy. Best-effort
-        # for the same reason as the visitor close path: do not let an
-        # archive error swallow the broadcast.
-        try:
-            ConversationArchive.objects.get_or_create(
-                platform='widget',
-                conversation_id=session_id,
-                account_id=str(connection_id),
-                defaults={'archived_by': request.user},
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "Failed to archive widget conversation on agent close: %s",
-                exc,
-            )
-
-    # Broadcast to the tenant group — the visitor's WidgetVisitorConsumer
-    # filters frames by session_id in its `session_ended` handler.
+    # Broadcast every time — even if the session was already ended on the
+    # backend, the visitor's iframe might have missed the original event
+    # (network blip, iframe was hidden, etc.). Re-firing is idempotent on
+    # the visitor side: setEndedBy('agent') is a no-op if it's already
+    # 'agent', and the iframe stays on the review form.
+    logger.info(
+        "Broadcasting widget session_ended: schema=%s connection_id=%s "
+        "session_id=%s ended_by=%s already_ended=%s",
+        conn.tenant_schema, connection_id, session_id, ended_by_value, already_ended,
+    )
     from asgiref.sync import async_to_sync
     from channels.layers import get_channel_layer
     channel_layer = get_channel_layer()
@@ -806,15 +813,21 @@ def widget_admin_close_session(request):
             'session_id': session_id,
             'connection_id': connection_id,
             'conversation_id': f'widget_{connection_id}_{session_id}',
-            'ended_by': 'agent',
+            'ended_by': ended_by_value,
             'ended_at': ended_at_iso,
             'message': 'The agent has ended this conversation.',
         })
+    else:
+        logger.warning(
+            "No channel layer available — agent end broadcast skipped for "
+            "session %s (tenant %s)",
+            session_id, conn.tenant_schema,
+        )
 
     return Response({
-        'status': 'ok',
+        'status': 'already_ended' if already_ended else 'ok',
         'ended_at': ended_at_iso,
-        'ended_by': 'agent',
+        'ended_by': ended_by_value,
     })
 
 
