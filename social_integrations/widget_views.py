@@ -134,12 +134,34 @@ def widget_public_sessions(request):
                 'session': WidgetSessionSerializer(existing).data,
             })
 
+        # Carry name/email forward when a returning visitor starts a fresh
+        # chat — they shouldn't have to re-enter prechat details after every
+        # close. Look up the most recent prior session for this visitor_id
+        # (any state — even ended ones) and inherit visitor_name /
+        # visitor_email when the request body didn't supply them.
+        body_name = (body.get('visitor_name') or '').strip()
+        body_email = (body.get('visitor_email') or '').strip()
+        if not body_name or not body_email:
+            previous = (
+                WidgetSession.objects
+                .filter(connection_id=conn.id, visitor_id=visitor_id)
+                .exclude(visitor_name='', visitor_email='')
+                .order_by('-started_at')
+                .only('visitor_name', 'visitor_email')
+                .first()
+            )
+            if previous:
+                if not body_name:
+                    body_name = previous.visitor_name
+                if not body_email:
+                    body_email = previous.visitor_email
+
         session = WidgetSession.objects.create(
             connection_id=conn.id,
             session_id=uuid.uuid4().hex,
             visitor_id=visitor_id,
-            visitor_name=body.get('visitor_name', '')[:120],
-            visitor_email=body.get('visitor_email', '')[:254],
+            visitor_name=body_name[:120],
+            visitor_email=body_email[:254],
             referrer_url=body.get('referrer', '')[:500],
             page_url=body.get('page_url', '')[:500],
             user_agent=(request.META.get('HTTP_USER_AGENT') or '')[:500],
