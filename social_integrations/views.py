@@ -65,6 +65,29 @@ from .permissions import (
 logger = logging.getLogger(__name__)
 
 
+# Sentinel that marks "we already looked and the row doesn't exist".
+# Distinct from a falsy `None` so a single per-request lookup can
+# memoise both hits and misses.
+_SOCIAL_SETTINGS_MISS = object()
+
+
+def get_social_settings(request):
+    """Return the singleton ``SocialIntegrationSettings`` row for this tenant,
+    cached for the lifetime of the request.
+
+    The hot social endpoints all peek at this same row (12+ callsites — see
+    plan ``Speed up Social Messages``). Without caching, every request
+    issues an identical ``SELECT … LIMIT 1`` per touchpoint. Memoising
+    against the request object collapses those into one query while keeping
+    invalidation trivial: a new request gets a fresh fetch automatically.
+    """
+    cached = getattr(request, '_social_settings_cache', _SOCIAL_SETTINGS_MISS)
+    if cached is _SOCIAL_SETTINGS_MISS:
+        cached = SocialIntegrationSettings.objects.first()
+        request._social_settings_cache = cached
+    return cached
+
+
 def convert_facebook_timestamp(timestamp):
     """Convert Facebook timestamp (Unix timestamp in milliseconds or seconds) to datetime object"""
     try:
@@ -576,7 +599,7 @@ class FacebookMessageViewSet(viewsets.ReadOnlyModelViewSet):
             base_queryset = base_queryset.filter(page_connection__page_id=page_id)
 
         # Check if hiding assigned chats is enabled
-        settings_obj = SocialIntegrationSettings.objects.first()
+        settings_obj = get_social_settings(self.request)
         if settings_obj and settings_obj.hide_assigned_chats:
             # Admin/superuser sees all messages
             if not (self.request.user.is_superuser or self.request.user.is_staff):
@@ -2719,7 +2742,7 @@ class InstagramMessageViewSet(viewsets.ReadOnlyModelViewSet):
             base_queryset = base_queryset.filter(account_connection__instagram_account_id=account_id)
 
         # Check if hiding assigned chats is enabled
-        settings_obj = SocialIntegrationSettings.objects.first()
+        settings_obj = get_social_settings(self.request)
         if settings_obj and settings_obj.hide_assigned_chats:
             # Admin/superuser sees all messages
             if not (self.request.user.is_superuser or self.request.user.is_staff):
@@ -3876,7 +3899,7 @@ def assign_chat(request):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     # Check if assignment mode is enabled
-    settings_obj = SocialIntegrationSettings.objects.first()
+    settings_obj = get_social_settings(request)
     if not settings_obj or not settings_obj.chat_assignment_enabled:
         return Response(
             {'error': 'Assignment mode is not enabled'},
@@ -4042,7 +4065,7 @@ def transfer_chat(request):
 def start_session(request):
     """Start a session for an assigned chat"""
     # Check if session management is enabled
-    settings_obj = SocialIntegrationSettings.objects.first()
+    settings_obj = get_social_settings(request)
     if not settings_obj or not settings_obj.session_management_enabled:
         return Response(
             {'error': 'Session management is not enabled'},
@@ -4091,7 +4114,7 @@ def start_session(request):
 def end_session(request):
     """End a session and optionally send rating request"""
     # Check if session management is enabled
-    settings_obj = SocialIntegrationSettings.objects.first()
+    settings_obj = get_social_settings(request)
     if not settings_obj or not settings_obj.session_management_enabled:
         return Response(
             {'error': 'Session management is not enabled'},
@@ -4295,7 +4318,7 @@ def get_assignment_status(request):
         )
 
     # Get settings to include in response
-    settings_obj = SocialIntegrationSettings.objects.first()
+    settings_obj = get_social_settings(request)
     settings_data = {
         'chat_assignment_enabled': settings_obj.chat_assignment_enabled if settings_obj else False,
         'session_management_enabled': settings_obj.session_management_enabled if settings_obj else False,
@@ -5134,7 +5157,7 @@ def submit_public_rating(request, token):
             # Get redirect URL from settings
             redirect_url = ''
             try:
-                settings_obj = SocialIntegrationSettings.objects.first()
+                settings_obj = get_social_settings(request)
                 if settings_obj and settings_obj.post_review_redirect_url:
                     redirect_url = settings_obj.post_review_redirect_url
             except Exception:
@@ -5245,13 +5268,17 @@ def unified_conversations(request):
     all_conversations = []
 
     # Check assignment settings
-    settings_obj = SocialIntegrationSettings.objects.first()
+    settings_obj = get_social_settings(request)
     hide_assigned = settings_obj and settings_obj.hide_assigned_chats
     is_admin = request.user.is_superuser or request.user.is_staff
 
-    # Load archived conversation keys for filtering
+    # Load archived conversation keys for filtering — bound to the platforms
+    # actually being aggregated so we don't pull every archive row in the
+    # tenant on each request.
     archived_conversations = set(
-        ConversationArchive.objects.values_list('platform', 'conversation_id', 'account_id')
+        ConversationArchive.objects
+        .filter(platform__in=enabled_platforms)
+        .values_list('platform', 'conversation_id', 'account_id')
     )
 
     # Helper to check if conversation is archived
@@ -5274,11 +5301,13 @@ def unified_conversations(request):
         return (platform, account_id, conversation_id) in user_assignments
 
     # Pre-load all active assignments for hide_assigned visibility check
-    # Maps (platform, account_id, conversation_id) -> assigned_user_id
+    # Maps (platform, account_id, conversation_id) -> assigned_user_id.
+    # Narrowed to visible platforms so the scan is bounded.
     _active_assignment_map = {}
     if hide_assigned and not is_admin:
         for a in ChatAssignment.objects.filter(
-            status__in=['active', 'in_session']
+            status__in=['active', 'in_session'],
+            platform__in=enabled_platforms,
         ).values_list('platform', 'account_id', 'conversation_id', 'assigned_user_id'):
             _active_assignment_map[(a[0], a[1], a[2])] = a[3]
 
@@ -5945,7 +5974,7 @@ def unread_messages_count(request):
         ).values_list('conversation_id', flat=True))
 
         # Check if chat assignment filtering is enabled
-        settings_obj = SocialIntegrationSettings.objects.first()
+        settings_obj = get_social_settings(request)
         assignment_enabled = settings_obj and settings_obj.chat_assignment_enabled
 
         if assignment_enabled:
@@ -6743,7 +6772,7 @@ class WhatsAppMessageViewSet(viewsets.ReadOnlyModelViewSet):
         base_queryset = WhatsAppMessage.objects.filter(
             business_account__in=tenant_accounts,
             is_deleted=False
-        ).select_related('business_account', 'template', 'sent_by')
+        ).select_related('business_account', 'template', 'sent_by', 'reply_to')
 
         # Apply waba_id or phone_number_id filter from query params
         waba_id = self.request.query_params.get('waba_id')
@@ -6754,7 +6783,7 @@ class WhatsAppMessageViewSet(viewsets.ReadOnlyModelViewSet):
             base_queryset = base_queryset.filter(business_account__phone_number_id=phone_number_id)
 
         # Check if hiding assigned chats is enabled
-        settings_obj = SocialIntegrationSettings.objects.first()
+        settings_obj = get_social_settings(self.request)
         if settings_obj and settings_obj.hide_assigned_chats:
             # Admin/superuser sees all messages
             if not (self.request.user.is_superuser or self.request.user.is_staff):
@@ -9354,7 +9383,7 @@ class EmailMessageViewSet(viewsets.ReadOnlyModelViewSet):
     def get_queryset(self):
         queryset = EmailMessage.objects.filter(
             is_deleted=False
-        ).select_related('connection').order_by('-timestamp')
+        ).select_related('connection', 'deleted_by').order_by('-timestamp')
 
         # Filter by connection_id (specific email account)
         connection_id = self.request.query_params.get('connection_id')
@@ -9409,7 +9438,7 @@ class EmailMessageViewSet(viewsets.ReadOnlyModelViewSet):
         - Threads with status='completed' are treated as unassigned
         """
         # Check if chat assignment filtering is enabled
-        settings_obj = SocialIntegrationSettings.objects.first()
+        settings_obj = get_social_settings(self.request)
         assignment_enabled = settings_obj and settings_obj.chat_assignment_enabled
 
         # Build base queryset
