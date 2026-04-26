@@ -944,10 +944,15 @@ class ChatAssignment(models.Model):
     @property
     def full_conversation_id(self):
         """Returns the full conversation ID as used in frontend"""
-        if self.platform == 'email':
-            # Email format is email_{connection_id}_{thread_id}
-            return f"email_{self.account_id}_{self.conversation_id}"
-        prefix = {'facebook': 'fb', 'instagram': 'ig', 'whatsapp': 'wa'}[self.platform]
+        # Platforms whose chat ID prefix matches the platform name verbatim:
+        # email -> email_<account>_<conv>, widget -> widget_<account>_<conv>,
+        # tiktok -> tiktok_<account>_<conv>.
+        if self.platform in ('email', 'widget', 'tiktok'):
+            return f"{self.platform}_{self.account_id}_{self.conversation_id}"
+        prefix = {'facebook': 'fb', 'instagram': 'ig', 'whatsapp': 'wa'}.get(self.platform)
+        if not prefix:
+            # Defensive: future-proof against new platforms slipping in.
+            return f"{self.platform}_{self.account_id}_{self.conversation_id}"
         return f"{prefix}_{self.account_id}_{self.conversation_id}"
 
 

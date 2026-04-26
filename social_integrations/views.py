@@ -4226,6 +4226,44 @@ def end_session(request):
         defaults={'archived_by': request.user}
     )
 
+    # Widget-specific: close the underlying WidgetSession and broadcast
+    # `session_ended` so the visitor's iframe flips to the post-chat
+    # review form. The other platforms have no session-end concept on the
+    # visitor side — agents just send messages and the user's app stays
+    # the same — so this branch only matters for widget.
+    if platform == 'widget':
+        try:
+            with schema_context(request.tenant.schema_name):
+                widget_session = WidgetSession.objects.filter(
+                    session_id=conversation_id
+                ).first()
+                if widget_session and widget_session.ended_at is None:
+                    widget_session.ended_at = timezone.now()
+                    widget_session.ended_by = 'agent'
+                    widget_session.save(update_fields=['ended_at', 'ended_by'])
+            from asgiref.sync import async_to_sync
+            from channels.layers import get_channel_layer
+            channel_layer = get_channel_layer()
+            tenant_schema = getattr(request.tenant, 'schema_name', None)
+            if channel_layer and tenant_schema and widget_session:
+                async_to_sync(channel_layer.group_send)(
+                    f'messages_{tenant_schema}',
+                    {
+                        'type': 'session_ended',
+                        'session_id': conversation_id,
+                        'connection_id': widget_session.connection_id,
+                        'conversation_id': f'widget_{widget_session.connection_id}_{conversation_id}',
+                        'ended_by': 'agent',
+                        'ended_at': (widget_session.ended_at or timezone.now()).isoformat(),
+                        'message': 'The agent has ended this conversation.',
+                    },
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "end_session: failed to close widget session %s: %s",
+                conversation_id, exc,
+            )
+
     logger.info(f"Session ended: {assignment.full_conversation_id} by {request.user.email}")
 
     response_message = 'Session ended'
