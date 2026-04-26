@@ -47,7 +47,13 @@ ENDPOINT_DEFAULTS_WEBRTC = {
     "aors": None,  # set per-endpoint to the endpoint id
     "context": None,  # set per-tenant
     "disallow": "all",
-    "allow": "opus,ulaw,alaw,g722",
+    # Opus deliberately omitted: pbx2 doesn't ship `codec_opus.so` (only the
+    # format-attribute helpers), so a browser that picks Opus and a trunk
+    # that only speaks ulaw/alaw end up with `No path to translate from
+    # opus to ulaw` and the call drops the moment the agent picks up.
+    # Keeping the list aligned with the trunk's `allow` forces SDP
+    # negotiation down to a common transcodable codec (almost always ulaw).
+    "allow": "ulaw,alaw,g722",
     "direct_media": "no",
     "dtmf_mode": "rfc4733",
     "force_rport": "yes",
