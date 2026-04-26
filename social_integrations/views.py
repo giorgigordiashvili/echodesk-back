@@ -4814,6 +4814,23 @@ def user_rating_sessions(request, user_id):
                 ).first()
                 if msg and msg.contact_name:
                     customer_name = msg.contact_name
+            elif rating.platform == 'widget':
+                # Widget conversation_id is `widget_<conn>_<session_id>`.
+                # Pull the visitor name off the WidgetSession so the table
+                # shows "Lika" instead of the raw composite identifier.
+                # Mirrors the conventions in the conversations list
+                # (views.py around line 5759).
+                parts = (rating.conversation_id or '').split('_', 2)
+                widget_session_id = parts[2] if len(parts) >= 3 else None
+                if widget_session_id:
+                    ws = WidgetSession.objects.filter(
+                        session_id=widget_session_id
+                    ).first()
+                    if ws:
+                        customer_name = (
+                            ws.visitor_name
+                            or f"Website visitor {ws.visitor_id[:6]}"
+                        )
 
             # Check if conversation is archived
             is_archived = ConversationArchive.objects.filter(

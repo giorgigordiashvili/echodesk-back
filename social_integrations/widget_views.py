@@ -649,6 +649,44 @@ def widget_public_rate_session(request):
         conversation_id = f"widget_{conn.id}_{session.session_id}"
         session_ended_at = session.ended_at or timezone.now()
 
+        # Attribute the rating to whichever agent actually handled the chat
+        # so the per-user rating-statistics breakdown picks it up. Best
+        # effort: most recent assignment wins; fall back to the latest
+        # agent-side message; otherwise leave null (still counts in the
+        # aggregate totals, just not in the per-agent table).
+        rated_user = None
+        try:
+            from .models import ChatAssignment
+            assignment = (
+                ChatAssignment.objects
+                .filter(
+                    platform='widget',
+                    conversation_id=session.session_id,
+                    account_id=str(conn.id),
+                )
+                .order_by('-created_at')
+                .first()
+            )
+            if assignment and assignment.assigned_user_id:
+                rated_user = assignment.assigned_user
+            else:
+                last_agent_msg = (
+                    WidgetMessage.objects
+                    .filter(
+                        session=session,
+                        is_from_visitor=False,
+                        sent_by__isnull=False,
+                    )
+                    .order_by('-timestamp')
+                    .first()
+                )
+                if last_agent_msg:
+                    rated_user = last_agent_msg.sent_by
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Failed to resolve rated_user for widget rating: %s", exc
+            )
+
         ChatRating.objects.update_or_create(
             platform='widget',
             conversation_id=conversation_id,
@@ -658,6 +696,7 @@ def widget_public_rate_session(request):
                 'account_id': str(conn.id),
                 'session_started_at': session.started_at,
                 'session_ended_at': session_ended_at,
+                'rated_user': rated_user,
             },
         )
 
