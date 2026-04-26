@@ -258,7 +258,16 @@ class AsteriskStateSync:
             "auth": endpoint_id,
             "context": self._tenant_context,
             "callerid": callerid,
-            "from_user": assignment.extension,
+            # Deliberately NOT setting `from_user` here. Asterisk treats
+            # `from_user` as a hard override on the From URI's user portion
+            # for every INVITE *to* this endpoint — including the inbound
+            # leg of a queued call — so the agent's softphone (which reads
+            # `invitation.remoteIdentity.uri.user` for caller display) ends
+            # up showing the agent's own extension number instead of the
+            # actual caller's CLI. Leaving it unset lets Asterisk fall back
+            # to CALLERID(num) on the bridged channel, which is the real
+            # phone number from the trunk.
+            "trust_id_outbound": "yes",
         }
         aor_fields = {**AOR_DEFAULTS_WEBRTC}
         auth_fields = {
