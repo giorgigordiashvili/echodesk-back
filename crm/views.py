@@ -1913,6 +1913,26 @@ def call_rating_webhook(request):
             }
         )
 
+        # Also persist a CallRating row so the rating-statistics dashboard
+        # picks it up. The webhook used to only update CallLog.call_quality_score
+        # which left rating-statistics empty for callback-based reviews —
+        # the page reads from CallRating exclusively. update_or_create keyed
+        # on call_log + review_method='callback' makes this idempotent if
+        # the same call gets rated twice (re-callback).
+        if call_log.sip_configuration_id:
+            from django.utils import timezone as _tz
+            CallRating.objects.update_or_create(
+                call_log=call_log,
+                review_method='callback',
+                defaults={
+                    'caller_number': caller_number,
+                    'rated_user': call_log.handled_by,
+                    'sip_configuration_id': call_log.sip_configuration_id,
+                    'rating': rating,
+                    'rated_at': _tz.now(),
+                },
+            )
+
         return Response({
             'message': f'Rating {rating}/5 saved for call {call_log.call_id}',
             'call_id': str(call_log.call_id),
