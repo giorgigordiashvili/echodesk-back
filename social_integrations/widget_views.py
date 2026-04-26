@@ -686,7 +686,7 @@ def widget_public_rate_session(request):
                     conversation_id=session.session_id,
                     account_id=str(conn.id),
                 )
-                .order_by('-created_at')
+                .order_by('-assigned_at')
                 .first()
             )
             if assignment and assignment.assigned_user_id:
