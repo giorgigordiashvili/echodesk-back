@@ -3877,6 +3877,48 @@ def my_assignments(request):
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, CanViewSocialMessages])
+def bulk_assignment_status(request):
+    """Return every active / in-session / completed chat assignment plus the
+    tenant settings flags in a single response.
+
+    The frontend used to fire one ``/assignments/status/`` request *per
+    visible chat* on every inbox load. The bulk endpoint replaces that fan-out
+    with one query so opening the inbox with 20 chats no longer triggers 20
+    round-trips.
+
+    Query parameters:
+    - ``platforms``: comma-separated list of platforms to include
+      (default: facebook,instagram,whatsapp,email,widget). The result is
+      bounded to these so we don't load assignments for platforms the user
+      isn't viewing.
+    """
+    platforms_param = request.query_params.get(
+        'platforms',
+        'facebook,instagram,whatsapp,email,widget',
+    )
+    enabled_platforms = [p.strip().lower() for p in platforms_param.split(',') if p.strip()]
+
+    assignments_qs = ChatAssignment.objects.filter(
+        platform__in=enabled_platforms,
+        status__in=['active', 'in_session', 'completed'],
+    ).select_related('assigned_user').order_by('-updated_at')
+
+    settings_obj = get_social_settings(request)
+    settings_data = {
+        'chat_assignment_enabled': settings_obj.chat_assignment_enabled if settings_obj else False,
+        'session_management_enabled': settings_obj.session_management_enabled if settings_obj else False,
+        'hide_assigned_chats': settings_obj.hide_assigned_chats if settings_obj else False,
+        'collect_customer_rating': settings_obj.collect_customer_rating if settings_obj else False,
+    }
+
+    return Response({
+        'assignments': ChatAssignmentSerializer(assignments_qs, many=True).data,
+        'settings': settings_data,
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, CanViewSocialMessages])
 def all_assignments(request):
     """Get all chat assignments (admin only)"""
     if not request.user.is_superuser and not request.user.is_staff:
