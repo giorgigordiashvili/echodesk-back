@@ -546,6 +546,29 @@ def widget_public_close_session(request):
         session.save(update_fields=['ended_at', 'ended_by'])
         ended_at_iso = session.ended_at.isoformat()
 
+        # When the visitor closes their own chat, also mark any active
+        # ChatAssignment as completed and unassign the agent — otherwise
+        # the agent's "Assigned to me" tab keeps showing a phantom chat
+        # for a session that no longer exists. Mirrors the same cleanup
+        # the assignment-end view does. Idempotent.
+        try:
+            from .models import ChatAssignment
+            ChatAssignment.objects.filter(
+                platform='widget',
+                conversation_id=session_id,
+                account_id=str(conn.id),
+                status__in=['active', 'in_session'],
+            ).update(
+                status='completed',
+                assigned_user=None,
+                session_ended_at=session.ended_at,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Failed to complete ChatAssignment on visitor close: %s",
+                exc,
+            )
+
         # When the visitor explicitly says "I'm done", also move the
         # conversation to the agent's history. Best-effort — any failure
         # here (unique constraint race, missing tenant migration, etc.)
@@ -800,9 +823,28 @@ def widget_admin_close_session(request):
             ended_at_iso = session.ended_at.isoformat()
             ended_by_value = 'agent'
 
-            # An agent-initiated end implies the chat is done — move it to
-            # history alongside the close so the inbox stays tidy.
-            # Best-effort: do not let an archive error swallow the broadcast.
+            # An agent-initiated end implies the chat is done — clear any
+            # active ChatAssignment and move the conversation to history
+            # so the agent inbox stays tidy. Both are idempotent and
+            # best-effort: failures log a warning, don't swallow the
+            # broadcast below.
+            try:
+                from .models import ChatAssignment
+                ChatAssignment.objects.filter(
+                    platform='widget',
+                    conversation_id=session_id,
+                    account_id=str(connection_id),
+                    status__in=['active', 'in_session'],
+                ).update(
+                    status='completed',
+                    assigned_user=None,
+                    session_ended_at=session.ended_at,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Failed to complete ChatAssignment on agent close: %s",
+                    exc,
+                )
             try:
                 ConversationArchive.objects.get_or_create(
                     platform='widget',
