@@ -3582,6 +3582,11 @@ from .services.quickshipper import (
     QuickshipperError,
     client_from_settings,
 )
+# Aliased to a private name so it doesn't conflict with anything in this
+# already-large module's namespace, and because the storefront's
+# ``/shipping/quote/`` is the only place we currently use it inside
+# ``views.py`` (the rest live in views_client.py).
+from .authentication import EcommerceClientJWTAuthentication as _EcommerceClientJWTAuthentication
 
 _qs_logger = _qs_logging.getLogger(__name__)
 
@@ -3688,6 +3693,7 @@ def quickshipper_test_connection(request):
     },
 )
 @api_view(['POST'])
+@authentication_classes([_EcommerceClientJWTAuthentication])
 @permission_classes([IsAuthenticated])
 def quickshipper_quote(request):
     cart_id = request.data.get('cart_id')
