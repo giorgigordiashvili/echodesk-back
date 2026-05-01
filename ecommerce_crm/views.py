@@ -3769,8 +3769,13 @@ def quickshipper_quote(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    # Pick the cheapest active provider's first price tier as the "default" quote.
-    best = None
+    # Flatten Quickshipper's nested (provider × prices) into a flat list of
+    # selectable courier options. Each entry is one (courier, weight-tier)
+    # pair the customer can pick at checkout. Includes everything the booking
+    # task needs later — provider_id, provider_fee_id, parcel_dimensions_id —
+    # so we can persist the customer's exact choice and book what they paid
+    # for, not just the cheapest re-quote.
+    options: list[dict] = []
     for fee in fees:
         if fee.get('isActive') is False:
             continue
@@ -3778,34 +3783,50 @@ def quickshipper_quote(request):
             user_price = price.get('userPrice')
             if user_price is None:
                 continue
-            if best is None or user_price < best['user_price']:
-                best = {
-                    'provider_id': fee.get('providerId'),
-                    'provider_name': fee.get('providerName'),
-                    'provider_logo_url': fee.get('providerLogoUrl'),
-                    'provider_fee_id': price.get('providerFeeId') or price.get('id'),
-                    'parcel_dimensions_id': price.get('parcelDimensionsId'),
-                    'user_price': float(user_price),
-                    'display_name': price.get('displayName'),
-                }
-    if best is None:
+            options.append({
+                'provider_id': fee.get('providerId'),
+                'provider_name': fee.get('providerName'),
+                'provider_code': fee.get('providerCode'),
+                'provider_logo_url': fee.get('providerLogoUrl'),
+                'provider_note': fee.get('providerNote'),
+                'allow_cash_on_delivery': fee.get('allowCashOnDelivery', True),
+                'provider_fee_id': price.get('providerFeeId') or price.get('id'),
+                'parcel_dimensions_id': price.get('parcelDimensionsId'),
+                'price': float(user_price),
+                'currency': price.get('userPriceCurrency') or 'GEL',
+                'display_name': price.get('displayName'),
+                'min_weight': price.get('minWeight'),
+                'max_weight': price.get('maxWeight'),
+                'estimated_minutes': price.get('estimatedMinutes') or price.get('estimatedDuration'),
+            })
+
+    if not options:
         return Response(
             {'error': 'No couriers available for this route — try a different address or check back later.'},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
+    # Default-selected = cheapest. Storefront pre-selects this so the
+    # checkout still works one-click for users who don't care; users who do
+    # care see the full list and can switch.
+    options.sort(key=lambda o: o['price'])
+    default_option = options[0]
+
     return Response({
         'provider': 'quickshipper',
-        'provider_id': best['provider_id'],
-        'provider_name': best['provider_name'],
-        'provider_logo_url': best['provider_logo_url'],
-        'provider_fee_id': best['provider_fee_id'],
-        'parcel_dimensions_id': best['parcel_dimensions_id'],
-        'price': best['user_price'],
-        'currency': 'GEL',
-        'display_name': best['display_name'],
+        # Fields kept for backward compatibility with the v1 single-quote UI.
+        'provider_id': default_option['provider_id'],
+        'provider_name': default_option['provider_name'],
+        'provider_logo_url': default_option['provider_logo_url'],
+        'provider_fee_id': default_option['provider_fee_id'],
+        'parcel_dimensions_id': default_option['parcel_dimensions_id'],
+        'price': default_option['price'],
+        'currency': default_option['currency'],
+        'display_name': default_option['display_name'],
         'distance_km': envelope.get('distance'),
-        'all_fees': fees,
+        # New: full list of selectable courier options + the cheapest as default.
+        'options': options,
+        'default_provider_fee_id': default_option['provider_fee_id'],
     })
 
 

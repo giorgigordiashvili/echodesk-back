@@ -904,6 +904,19 @@ class OrderCreateSerializer(serializers.Serializer):
     promo_code = serializers.CharField(required=False, allow_blank=True)
     shipping_method_id = serializers.IntegerField(required=False, allow_null=True)
 
+    # Quickshipper-selected courier (when the storefront is in live-quote
+    # mode). All four are needed by `book_quickshipper_courier` to book
+    # exactly the option the customer paid for instead of re-quoting and
+    # silently picking the cheapest. Stored on `Order.payment_metadata
+    # .quickshipper_quote` and used as the shipping cost line.
+    quickshipper_provider_id = serializers.IntegerField(required=False, allow_null=True)
+    quickshipper_provider_fee_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    quickshipper_parcel_dimensions_id = serializers.IntegerField(required=False, allow_null=True)
+    quickshipper_price = serializers.DecimalField(
+        max_digits=10, decimal_places=2, required=False, allow_null=True,
+    )
+    quickshipper_provider_name = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
     def validate_cart_id(self, value):
         """Validate cart exists and has items"""
         try:
@@ -982,6 +995,25 @@ class OrderCreateSerializer(serializers.Serializer):
             except ShippingMethod.DoesNotExist:
                 pass
 
+        # Quickshipper-selected courier: when the storefront passed a quote,
+        # use its price for shipping_cost and remember the choice on the
+        # order so the booking task books exactly that option.
+        quickshipper_quote_meta = None
+        qs_price = validated_data.get('quickshipper_price')
+        qs_provider_id = validated_data.get('quickshipper_provider_id')
+        qs_provider_fee_id = validated_data.get('quickshipper_provider_fee_id')
+        qs_parcel_dimensions_id = validated_data.get('quickshipper_parcel_dimensions_id')
+        qs_provider_name = validated_data.get('quickshipper_provider_name')
+        if qs_price is not None and qs_provider_id is not None:
+            shipping_cost = Decimal(str(qs_price))
+            quickshipper_quote_meta = {
+                'provider_id': qs_provider_id,
+                'provider_fee_id': qs_provider_fee_id,
+                'provider_name': qs_provider_name,
+                'parcel_dimensions_id': qs_parcel_dimensions_id,
+                'price': float(qs_price),
+            }
+
         # Calculate tax
         tax_amount = Decimal('0')
         try:
@@ -1034,7 +1066,15 @@ class OrderCreateSerializer(serializers.Serializer):
                 tax_amount=tax_amount,
                 total_amount=total_amount,
                 notes=validated_data.get('notes', ''),
-                status='pending'
+                status='pending',
+                # Persist the Quickshipper quote (if present) so
+                # `book_quickshipper_courier` books the exact option the
+                # customer chose at checkout, not a re-quoted cheapest.
+                payment_metadata=(
+                    {'quickshipper_quote': quickshipper_quote_meta}
+                    if quickshipper_quote_meta
+                    else {}
+                ),
             )
 
             # Create order items from cart items
