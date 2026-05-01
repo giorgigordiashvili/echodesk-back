@@ -312,10 +312,49 @@ class ProductCreateUpdateSerializer(serializers.ModelSerializer):
             )
         return value
 
+    def _normalise_image_field(self, validated_data):
+        """The admin's image-upload widget sometimes posts multiple URLs
+        joined with ", " into the single `Product.image` URLField. The
+        field is declared as one URL and downstream consumers (storefront,
+        OG scrapers, JSON-LD) all assume one URL — so split here at write
+        time: keep the first URL as the primary `image`, and stash the
+        rest in `_extra_image_urls` for after-save ProductImage creation.
+        """
+        raw = validated_data.get('image')
+        extras = []
+        if raw and ',' in str(raw):
+            parts = [p.strip() for p in str(raw).split(',')]
+            urls = [p for p in parts if p.startswith('http://') or p.startswith('https://')]
+            if urls:
+                validated_data['image'] = urls[0]
+                extras = urls[1:]
+            else:
+                validated_data['image'] = raw  # leave raw if no valid URLs
+        return extras
+
+    def _create_extra_images(self, product, urls):
+        if not urls:
+            return
+        existing = set(
+            product.images.values_list('image', flat=True)
+        ) if product.pk else set()
+        for idx, url in enumerate(urls):
+            if url in existing:
+                continue
+            ProductImage.objects.create(
+                product=product,
+                image=url,
+                sort_order=idx + 1,  # primary occupies sort_order 0 implicitly
+            )
+
     def create(self, validated_data):
         # Extract nested data
         attributes_data = validated_data.pop('attributes', [])
         images_data = validated_data.pop('images_data', [])
+
+        # Split a comma-joined `image` URL string into primary + extras
+        # (legacy admin upload pattern — see _normalise_image_field).
+        extra_image_urls = self._normalise_image_field(validated_data)
 
         # Set created_by from request user
         request = self.context.get('request')
@@ -341,6 +380,10 @@ class ProductCreateUpdateSerializer(serializers.ModelSerializer):
 
         # Create product
         product = super().create(validated_data)
+
+        # Persist any extra URLs from the comma-joined input as proper
+        # ProductImage rows so the storefront can render the gallery.
+        self._create_extra_images(product, extra_image_urls)
 
         # Create attribute values
         for attr_data in attributes_data:
@@ -377,6 +420,10 @@ class ProductCreateUpdateSerializer(serializers.ModelSerializer):
         attributes_data = validated_data.pop('attributes', None)
         images_data = validated_data.pop('images_data', None)
 
+        # Split a comma-joined `image` URL string into primary + extras
+        # so updates from the legacy admin form persist correctly.
+        extra_image_urls = self._normalise_image_field(validated_data)
+
         # Set updated_by from request user
         request = self.context.get('request')
         if request and hasattr(request, 'user'):
@@ -384,6 +431,9 @@ class ProductCreateUpdateSerializer(serializers.ModelSerializer):
 
         # Update product
         product = super().update(instance, validated_data)
+
+        # Persist any new extra URLs as proper ProductImage rows.
+        self._create_extra_images(product, extra_image_urls)
 
         # Update attributes if provided
         if attributes_data is not None:
