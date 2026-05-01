@@ -1890,22 +1890,30 @@ def resolve_ecommerce_domain(request):
             }
         }
 
-        # Add ecommerce-specific settings if available
+        # Add ecommerce-specific settings if available. The model
+        # exposes theme colours as `theme_primary_color` etc.; the
+        # original code referenced bare `primary_color` which only
+        # didn't crash because `ecommerce_settings` was always None
+        # (querying from the public schema). With the schema_context
+        # fix above, the rows now load and we have to use the real
+        # field names. Defensive getattr so a tenant on an older
+        # migration with missing columns degrades gracefully instead
+        # of bringing down the whole resolve-domain endpoint.
         if ecommerce_settings:
-            if ecommerce_settings.store_name:
+            if getattr(ecommerce_settings, 'store_name', None):
                 config['store_name'] = ecommerce_settings.store_name
-            if ecommerce_settings.store_email:
+            if getattr(ecommerce_settings, 'store_email', None):
                 config['contact']['email'] = ecommerce_settings.store_email
-            if ecommerce_settings.store_phone:
+            if getattr(ecommerce_settings, 'store_phone', None):
                 config['contact']['phone'] = ecommerce_settings.store_phone
 
             # Theme colors
-            if ecommerce_settings.primary_color:
-                config['primary_color'] = ecommerce_settings.primary_color
-            if ecommerce_settings.secondary_color:
-                config['secondary_color'] = ecommerce_settings.secondary_color
-            if ecommerce_settings.accent_color:
-                config['accent_color'] = ecommerce_settings.accent_color
+            if getattr(ecommerce_settings, 'theme_primary_color', None):
+                config['primary_color'] = ecommerce_settings.theme_primary_color
+            if getattr(ecommerce_settings, 'theme_secondary_color', None):
+                config['secondary_color'] = ecommerce_settings.theme_secondary_color
+            if getattr(ecommerce_settings, 'theme_accent_color', None):
+                config['accent_color'] = ecommerce_settings.theme_accent_color
 
         # Logo
         if tenant.logo:
