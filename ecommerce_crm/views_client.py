@@ -1551,6 +1551,12 @@ def get_homepage_config(request):
                         'tax_inclusive': serializers.BooleanField(required=False),
                     }
                 ),
+                'chat_widget': inline_serializer(
+                    name='ChatWidgetConfigResponse',
+                    fields={
+                        'token': serializers.CharField(allow_null=True),
+                    }
+                ),
             }
         ),
     },
@@ -1566,6 +1572,37 @@ def get_store_theme(request):
 
     GET /api/ecommerce/client/theme/
     """
+    # Resolve the active embeddable chat widget for this tenant. The
+    # storefront drops in <script async src="…/widget.js?t=TOKEN"> on
+    # every page when this is non-null, so visitors automatically get
+    # the support chat without the tenant having to paste a snippet.
+    # WidgetConnection lives on the public schema, keyed by schema name;
+    # SocialIntegrationSettings.widget_enabled is the tenant-side master
+    # switch on the current schema.
+    chat_widget_payload = {'token': None}
+    try:
+        from django.db import connection as _db_connection
+        from widget_registry.models import WidgetConnection
+        from social_integrations.models import SocialIntegrationSettings
+
+        social = SocialIntegrationSettings.objects.first()
+        if social and getattr(social, 'widget_enabled', False):
+            conn = (
+                WidgetConnection.objects
+                .filter(
+                    tenant_schema=_db_connection.schema_name,
+                    is_active=True,
+                )
+                .order_by('-created_at')
+                .first()
+            )
+            if conn:
+                chat_widget_payload = {'token': conn.widget_token}
+    except Exception:
+        # Never let widget lookup break the theme endpoint — storefront
+        # falls through with no widget, no chat bubble, no harm done.
+        pass
+
     try:
         settings = EcommerceSettings.objects.first()
         if not settings:
@@ -1600,6 +1637,7 @@ def get_store_theme(request):
                         'fontPair': 'bricolage-inter',
                     },
                 },
+                'chat_widget': chat_widget_payload,
             })
 
         return Response({
@@ -1653,6 +1691,9 @@ def get_store_theme(request):
                     'fontPair': settings.voltage_font_pair or 'bricolage-inter',
                 },
             },
+            # Embeddable chat widget — non-null token tells the storefront
+            # to drop in <script src="…/widget.js?t=TOKEN"> on every page.
+            'chat_widget': chat_widget_payload,
         })
     except Exception as e:
         return Response(
