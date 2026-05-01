@@ -32,10 +32,40 @@ def send_order_email(self, schema_name, order_id, email_type):
             client = order.client
             items = order.items.all()
 
+            # Resolve the storefront URL for the public-track link. The
+            # tenant's `frontend_url` is the canonical place to put the
+            # storefront URL for this tenant; if missing, fall back to
+            # the tenant's first verified custom domain or its
+            # subdomain on `.ecommerce.echodesk.ge`.
+            storefront_url = ''
+            try:
+                from tenants.models import Tenant, EcommerceCustomDomain
+                tenant = Tenant.objects.get(schema_name=schema_name)
+                storefront_url = (tenant.frontend_url or '').rstrip('/')
+                if not storefront_url:
+                    custom = EcommerceCustomDomain.objects.filter(
+                        tenant=tenant,
+                        is_verified=True,
+                    ).first()
+                    if custom:
+                        storefront_url = f"https://{custom.domain}"
+                    else:
+                        storefront_url = f"https://{schema_name}.ecommerce.echodesk.ge"
+            except Exception:
+                storefront_url = f"https://{schema_name}.ecommerce.echodesk.ge"
+
+            public_order_url = (
+                f"{storefront_url}/order-confirmation"
+                f"?order_id={order.id}&token={order.public_token}"
+            ) if order.public_token else f"{storefront_url}/order-confirmation?order_id={order.id}"
+
             # Build common context
             context = {
                 'order': order,
                 'order_number': order.order_number,
+                'frontend_url': storefront_url,
+                'public_order_url': public_order_url,
+                'public_token': order.public_token,
                 'client_name': client.first_name or 'Valued Customer',
                 'client_email': client.email,
                 'items': [

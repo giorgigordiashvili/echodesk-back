@@ -178,7 +178,11 @@
         <p>We will notify you when your order has been shipped.</p>
 
         <p style="text-align: center;">
+            {% if public_order_url %}
+            <a href="{{ public_order_url }}" class="button">View Your Order</a>
+            {% else %}
             <a href="{{ frontend_url }}" class="button">View Your Orders</a>
+            {% endif %}
         </p>
 
         <p>Best regards,<br>The {{ store_name|default:site_name }} Team</p>
