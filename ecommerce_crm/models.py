@@ -902,6 +902,16 @@ class Order(models.Model):
         blank=True,
         help_text="Internal admin notes"
     )
+    # Unguessable token used by guest visitors to view their order
+    # confirmation + status without authenticating. Generated on save
+    # for every order; emailed to the customer in the confirmation
+    # template (link looks like /order-confirmation?order_id=X&token=Y).
+    public_token = models.CharField(
+        max_length=64,
+        blank=True,
+        db_index=True,
+        help_text="URL-safe token for public order lookup (guest tracking)."
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     paid_at = models.DateTimeField(null=True, blank=True, help_text="When payment was completed")
@@ -941,6 +951,15 @@ class Order(models.Model):
         timestamp = timezone.now().strftime('%Y%m%d')
         random_str = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
         return f"ORD-{timestamp}-{random_str}"
+
+    def save(self, *args, **kwargs):
+        # Mint a public token on first save so guest order links work
+        # without an extra DB write later. Existing rows are backfilled
+        # via the data migration shipped with this field.
+        if not self.public_token:
+            import secrets as _secrets
+            self.public_token = _secrets.token_urlsafe(32)
+        super().save(*args, **kwargs)
 
 
 class OrderItem(models.Model):

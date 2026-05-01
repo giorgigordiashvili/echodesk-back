@@ -1890,6 +1890,43 @@ class ClientProductReviewViewSet(viewsets.ModelViewSet):
 
 
 @extend_schema(
+    operation_id='get_order_by_public_token',
+    tags=['Ecommerce Client - Orders'],
+    summary='Look up an order by public token',
+    description=(
+        'Public endpoint guests use to view their order confirmation + '
+        'tracking without authenticating. The token is generated per '
+        'order and emailed in the confirmation message; brute-forcing '
+        'is impractical against a 256-bit URL-safe random string.'
+    ),
+    parameters=[
+        OpenApiParameter(name='token', required=True, location=OpenApiParameter.QUERY, type=str),
+    ],
+    responses={
+        200: OrderSerializer,
+        404: OpenApiResponse(description='No order matches the token.'),
+    },
+)
+@api_view(['GET'])
+@permission_classes([AllowAny])
+@authentication_classes([])
+def get_order_by_public_token(request):
+    token = (request.query_params.get('token') or '').strip()
+    if not token:
+        return Response({'error': 'token is required'}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        order = (
+            Order.objects
+            .select_related('client', 'delivery_address')
+            .prefetch_related('items', 'items__product', 'items__variant')
+            .get(public_token=token)
+        )
+    except Order.DoesNotExist:
+        return Response({'error': 'not_found'}, status=status.HTTP_404_NOT_FOUND)
+    return Response(OrderSerializer(order).data)
+
+
+@extend_schema(
     tags=['Ecommerce Client - Guest Checkout'],
     summary='Guest checkout',
     description='Place an order without authentication. Creates or finds a client by email.',

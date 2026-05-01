@@ -24,6 +24,7 @@ from ecommerce_crm.views_client import (
     get_store_theme,
     validate_promo_code,
     guest_checkout,
+    get_order_by_public_token,
     change_password,
     ClientProductReviewViewSet,
     ClientShippingMethodViewSet,
@@ -61,6 +62,9 @@ urlpatterns = [
 
     # Guest checkout (public access)
     path('api/ecommerce/client/guest-checkout/', guest_checkout, name='client-guest-checkout'),
+
+    # Public order lookup by URL-safe token (guest order tracking)
+    path('api/ecommerce/client/orders/by-token/', get_order_by_public_token, name='client-order-by-token'),
 
     # Product reviews
     path('api/ecommerce/client/products/<int:product_id>/reviews/', ClientProductReviewViewSet.as_view({'get': 'list', 'post': 'create'}), name='client-product-reviews'),

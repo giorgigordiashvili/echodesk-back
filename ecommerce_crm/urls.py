@@ -54,6 +54,7 @@ from .views_client import (
     get_store_theme,
     validate_promo_code,
     guest_checkout,
+    get_order_by_public_token,
     change_password,
 )
 
@@ -126,6 +127,8 @@ urlpatterns = [
     path('client/promo/validate/', validate_promo_code, name='client-promo-validate'),
     # Guest checkout (public access)
     path('client/guest-checkout/', guest_checkout, name='client-guest-checkout'),
+    # Public order lookup by URL-safe token (guest order tracking)
+    path('client/orders/by-token/', get_order_by_public_token, name='client-order-by-token'),
     # Product reviews (nested under products)
     path('client/products/<int:product_pk>/reviews/',
          ClientProductReviewViewSet.as_view({'get': 'list', 'post': 'create'}),
