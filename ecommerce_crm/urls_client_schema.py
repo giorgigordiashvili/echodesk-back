@@ -13,6 +13,7 @@ from ecommerce_crm.views import (
     get_current_client,
     request_password_reset,
     confirm_password_reset,
+    quickshipper_quote,
 )
 from ecommerce_crm.views_client import (
     add_client_card,
@@ -54,6 +55,9 @@ urlpatterns = [
 
     # Promo code validation
     path('api/ecommerce/client/promo/validate/', validate_promo_code, name='client-promo-validate'),
+
+    # Quickshipper live quote (used by checkout when tenant has the courier enabled)
+    path('api/ecommerce/client/shipping/quote/', quickshipper_quote, name='client-quickshipper-quote'),
 
     # Guest checkout (public access)
     path('api/ecommerce/client/guest-checkout/', guest_checkout, name='client-guest-checkout'),
