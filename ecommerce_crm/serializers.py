@@ -107,6 +107,41 @@ class ProductVariantSerializer(serializers.ModelSerializer):
         read_only_fields = ['created_at', 'updated_at']
 
 
+def _first_image_url(raw):
+    """Some legacy uploads concatenate multiple URLs into the single
+    ``Product.image`` URLField separated by ``", "``. The field is
+    declared as one URL and downstream consumers (storefront,
+    open-graph scrapers, image CDNs) all assume one URL — return only
+    the first valid http(s) URL so a comma-separated string doesn't
+    leak through verbatim and break ``next/image`` etc.
+    """
+    if not raw:
+        return raw
+    for part in str(raw).split(','):
+        s = part.strip()
+        if s.startswith('http://') or s.startswith('https://'):
+            return s
+    return raw
+
+
+def _split_image_urls(raw):
+    """Split a comma-separated ``image`` string into a clean list of
+    URLs. Used by the read-only ``images_resolved`` field so storefront
+    consumers always have an array regardless of whether uploads went
+    through the admin's bulk-paste flow (saving "url1, url2" into
+    ``Product.image``) or the proper ``add_image`` endpoint (which
+    creates ``ProductImage`` rows).
+    """
+    if not raw:
+        return []
+    out = []
+    for part in str(raw).split(','):
+        s = part.strip()
+        if (s.startswith('http://') or s.startswith('https://')) and s not in out:
+            out.append(s)
+    return out
+
+
 class ProductListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for product listings"""
     discount_percentage = serializers.FloatField(read_only=True)
@@ -115,6 +150,7 @@ class ProductListSerializer(serializers.ModelSerializer):
     attribute_values = ProductAttributeValueSerializer(many=True, read_only=True)
     average_rating = serializers.SerializerMethodField()
     review_count = serializers.SerializerMethodField()
+    image = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
@@ -128,6 +164,9 @@ class ProductListSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['created_at', 'updated_at']
 
+    def get_image(self, obj):
+        return _first_image_url(obj.image)
+
     def get_average_rating(self, obj):
         from django.db.models import Avg
         result = obj.reviews.filter(is_approved=True).aggregate(avg=Avg('rating'))
@@ -139,7 +178,8 @@ class ProductListSerializer(serializers.ModelSerializer):
 
 class ProductDetailSerializer(serializers.ModelSerializer):
     """Detailed serializer for product with all related data"""
-    images = ProductImageSerializer(many=True, read_only=True)
+    images = serializers.SerializerMethodField()
+    image = serializers.SerializerMethodField()
     attribute_values = ProductAttributeValueSerializer(many=True, read_only=True)
     variants = ProductVariantSerializer(many=True, read_only=True)
     discount_percentage = serializers.FloatField(read_only=True)
@@ -149,6 +189,41 @@ class ProductDetailSerializer(serializers.ModelSerializer):
     review_count = serializers.SerializerMethodField()
     created_by_name = serializers.SerializerMethodField()
     updated_by_name = serializers.SerializerMethodField()
+
+    def get_image(self, obj):
+        return _first_image_url(obj.image)
+
+    def get_images(self, obj):
+        # Storefronts expect a list of {id, image, alt_text, sort_order,
+        # created_at}. Walk the legacy comma-separated `Product.image`
+        # field first (so visitors see all uploaded images even when the
+        # admin's old bulk-paste flow writes URLs directly into the
+        # URLField), then merge any rows that did make it into the
+        # ProductImage table — deduped by URL so we don't double-render.
+        seen = set()
+        out = []
+        # Pseudo-rows synthesised from the legacy comma-separated field.
+        # ID is negative so the storefront's React keys don't collide
+        # with real ProductImage rows; sort_order matches insertion.
+        for idx, url in enumerate(_split_image_urls(obj.image)):
+            if url in seen:
+                continue
+            seen.add(url)
+            out.append({
+                'id': -(idx + 1),
+                'image': url,
+                'alt_text': None,
+                'sort_order': idx,
+                'created_at': obj.updated_at,
+            })
+        # Real ProductImage rows ordered by sort_order then id.
+        rows = obj.images.all().order_by('sort_order', 'id')
+        for row in rows:
+            if row.image in seen:
+                continue
+            seen.add(row.image)
+            out.append(ProductImageSerializer(row).data)
+        return out
 
     class Meta:
         model = Product
