@@ -1114,6 +1114,58 @@ class EcommerceSettings(models.Model):
         help_text="Encrypted Flitt Merchant Password"
     )
 
+    # Quickshipper Courier Integration Settings
+    quickshipper_enabled = models.BooleanField(
+        default=False,
+        help_text="When ON, the storefront uses Quickshipper for live courier quotes "
+                  "and replaces static ShippingMethod rows at checkout."
+    )
+    quickshipper_api_key_encrypted = models.BinaryField(
+        blank=True,
+        null=True,
+        help_text="Encrypted Quickshipper API key"
+    )
+    quickshipper_use_production = models.BooleanField(
+        default=False,
+        help_text="Use Quickshipper production endpoint (unchecked = sandbox)"
+    )
+    quickshipper_webhook_secret = models.CharField(
+        max_length=64,
+        blank=True,
+        default='',
+        help_text="Auto-generated secret used to verify inbound Quickshipper webhook signatures"
+    )
+
+    # Pickup address sent to Quickshipper for every shipment created from this tenant
+    quickshipper_pickup_contact_name = models.CharField(
+        max_length=200, blank=True,
+        help_text="Name of the person courier should ask for at pickup"
+    )
+    quickshipper_pickup_phone = models.CharField(
+        max_length=50, blank=True,
+        help_text="Pickup contact phone (E.164 preferred)"
+    )
+    quickshipper_pickup_address = models.CharField(
+        max_length=500, blank=True,
+        help_text="Pickup street address"
+    )
+    quickshipper_pickup_city = models.CharField(
+        max_length=100, blank=True,
+        help_text="Pickup city (e.g., Tbilisi)"
+    )
+    quickshipper_pickup_latitude = models.DecimalField(
+        max_digits=9, decimal_places=6, null=True, blank=True,
+        help_text="Pickup latitude — set via the admin map picker"
+    )
+    quickshipper_pickup_longitude = models.DecimalField(
+        max_digits=9, decimal_places=6, null=True, blank=True,
+        help_text="Pickup longitude — set via the admin map picker"
+    )
+    quickshipper_pickup_extra_instructions = models.TextField(
+        blank=True,
+        help_text="Pickup notes for the courier (door code, floor, etc.)"
+    )
+
     # Payment settings
     enable_cash_on_delivery = models.BooleanField(
         default=True,
@@ -1393,6 +1445,45 @@ class EcommerceSettings(models.Model):
     def has_paddle_credentials(self) -> bool:
         """Check if Paddle credentials are configured"""
         return bool(self.paddle_api_key_encrypted and self.paddle_client_token)
+
+    # --- Quickshipper encryption helpers ---
+
+    def set_quickshipper_api_key(self, api_key: str):
+        """Encrypt and store Quickshipper API key"""
+        from cryptography.fernet import Fernet
+        from django.conf import settings
+
+        key = settings.SECRET_KEY[:32].encode().ljust(32, b'0')
+        fernet = Fernet(base64.urlsafe_b64encode(key))
+        self.quickshipper_api_key_encrypted = fernet.encrypt(api_key.encode())
+
+    def get_quickshipper_api_key(self) -> str:
+        """Decrypt and return Quickshipper API key"""
+        if not self.quickshipper_api_key_encrypted:
+            return ''
+        from cryptography.fernet import Fernet
+        from django.conf import settings
+
+        key = settings.SECRET_KEY[:32].encode().ljust(32, b'0')
+        fernet = Fernet(base64.urlsafe_b64encode(key))
+        return fernet.decrypt(bytes(self.quickshipper_api_key_encrypted)).decode()
+
+    @property
+    def has_quickshipper_credentials(self) -> bool:
+        """True iff this tenant has stored a Quickshipper API key."""
+        return bool(self.quickshipper_api_key_encrypted)
+
+    def ensure_quickshipper_webhook_secret(self) -> str:
+        """Lazily allocate a per-tenant webhook secret on first use. Returned
+        as the existing value if already set, or freshly generated and saved.
+        Quickshipper uses this secret to HMAC-sign callbacks back to us so the
+        webhook view can prove the payload originated from a configured tenant."""
+        if self.quickshipper_webhook_secret:
+            return self.quickshipper_webhook_secret
+        import secrets as _secrets
+        self.quickshipper_webhook_secret = _secrets.token_urlsafe(32)
+        self.save(update_fields=['quickshipper_webhook_secret'])
+        return self.quickshipper_webhook_secret
 
 
 class PasswordResetToken(models.Model):

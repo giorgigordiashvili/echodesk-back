@@ -29,6 +29,9 @@ from .views import (
     ecommerce_payment_webhook,
     tbc_payment_webhook,
     flitt_payment_webhook,
+    quickshipper_test_connection,
+    quickshipper_quote,
+    quickshipper_webhook,
 )
 from .views_client import (
     ClientProfileViewSet,
@@ -106,6 +109,10 @@ urlpatterns = [
     path('payment-webhook/', ecommerce_payment_webhook, name='payment-webhook'),
     path('payment-webhook/tbc/', tbc_payment_webhook, name='tbc-payment-webhook'),
     path('payment-webhook/flitt/', flitt_payment_webhook, name='flitt-payment-webhook'),
+    # Quickshipper courier integration
+    path('admin/quickshipper/test-connection/', quickshipper_test_connection, name='quickshipper-test-connection'),
+    path('client/shipping/quote/', quickshipper_quote, name='quickshipper-quote'),
+    path('shipping-webhook/quickshipper/', quickshipper_webhook, name='quickshipper-webhook'),
     # Client-facing card management endpoints (requires client JWT)
     path('client/cards/add/', add_client_card, name='client-add-card'),
     path('client/cards/', list_client_cards, name='client-list-cards'),

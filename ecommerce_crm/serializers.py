@@ -738,6 +738,15 @@ class EcommerceSettingsSerializer(serializers.ModelSerializer):
     )
     has_paddle_credentials = serializers.BooleanField(read_only=True)
 
+    # Quickshipper API key (write-only)
+    quickshipper_api_key = serializers.CharField(
+        write_only=True,
+        required=False,
+        allow_blank=True,
+        help_text="Quickshipper API key (write-only, will be encrypted). Leave blank to keep the existing one."
+    )
+    has_quickshipper_credentials = serializers.BooleanField(read_only=True)
+
     class Meta:
         model = EcommerceSettings
         fields = [
@@ -754,6 +763,13 @@ class EcommerceSettingsSerializer(serializers.ModelSerializer):
             # Paddle fields
             'paddle_api_key', 'paddle_webhook_secret', 'paddle_client_token',
             'paddle_use_production', 'has_paddle_credentials',
+            # Quickshipper courier fields
+            'quickshipper_enabled', 'quickshipper_api_key', 'has_quickshipper_credentials',
+            'quickshipper_use_production', 'quickshipper_webhook_secret',
+            'quickshipper_pickup_contact_name', 'quickshipper_pickup_phone',
+            'quickshipper_pickup_address', 'quickshipper_pickup_city',
+            'quickshipper_pickup_latitude', 'quickshipper_pickup_longitude',
+            'quickshipper_pickup_extra_instructions',
             # Payment settings
             'enable_cash_on_delivery', 'enable_card_payment',
             'store_name', 'store_email', 'store_phone',
@@ -773,6 +789,7 @@ class EcommerceSettingsSerializer(serializers.ModelSerializer):
             'id', 'tenant', 'ecommerce_frontend_url', 'deployment_status',
             'vercel_project_id', 'custom_domain',
             'has_bog_credentials', 'has_tbc_credentials', 'has_flitt_credentials', 'has_paddle_credentials',
+            'has_quickshipper_credentials', 'quickshipper_webhook_secret',
             'created_at', 'updated_at',
         ]
 
@@ -782,6 +799,7 @@ class EcommerceSettingsSerializer(serializers.ModelSerializer):
         tbc_secret = validated_data.pop('tbc_client_secret', None)
         flitt_password = validated_data.pop('flitt_password', None)
         paddle_api_key = validated_data.pop('paddle_api_key', None)
+        quickshipper_api_key = validated_data.pop('quickshipper_api_key', None)
 
         instance = super().create(validated_data)
 
@@ -798,8 +816,16 @@ class EcommerceSettingsSerializer(serializers.ModelSerializer):
         if paddle_api_key:
             instance.set_paddle_api_key(paddle_api_key)
             needs_save = True
+        if quickshipper_api_key:
+            instance.set_quickshipper_api_key(quickshipper_api_key)
+            needs_save = True
         if needs_save:
             instance.save()
+
+        # Allocate the webhook secret on first create so the admin UI sees a
+        # value (the storefront's webhook handler validates against this).
+        if instance.quickshipper_enabled and not instance.quickshipper_webhook_secret:
+            instance.ensure_quickshipper_webhook_secret()
 
         return instance
 
@@ -809,6 +835,7 @@ class EcommerceSettingsSerializer(serializers.ModelSerializer):
         tbc_secret = validated_data.pop('tbc_client_secret', None)
         flitt_password = validated_data.pop('flitt_password', None)
         paddle_api_key = validated_data.pop('paddle_api_key', None)
+        quickshipper_api_key = validated_data.pop('quickshipper_api_key', None)
 
         instance = super().update(instance, validated_data)
 
@@ -825,8 +852,15 @@ class EcommerceSettingsSerializer(serializers.ModelSerializer):
         if paddle_api_key:
             instance.set_paddle_api_key(paddle_api_key)
             needs_save = True
+        if quickshipper_api_key:
+            instance.set_quickshipper_api_key(quickshipper_api_key)
+            needs_save = True
         if needs_save:
             instance.save()
+
+        # Allocate the webhook secret the first time Quickshipper is turned on.
+        if instance.quickshipper_enabled and not instance.quickshipper_webhook_secret:
+            instance.ensure_quickshipper_webhook_secret()
 
         return instance
 

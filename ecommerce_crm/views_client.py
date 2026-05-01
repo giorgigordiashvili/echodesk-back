@@ -957,6 +957,15 @@ class ClientOrderViewSet(viewsets.ModelViewSet):
             order.payment_status = 'pending'
             order.save()
 
+            # Book Quickshipper courier — for COD orders we hand off to the
+            # courier the moment the order is created. The booking task is
+            # idempotent and a no-op if Quickshipper isn't configured.
+            try:
+                from .tasks import book_quickshipper_courier
+                book_quickshipper_courier.delay(connection.schema_name, order.id)
+            except Exception:
+                pass
+
             output_serializer = OrderSerializer(order)
             response_data = output_serializer.data
             response_data['payment_method'] = 'cash_on_delivery'
@@ -1605,6 +1614,15 @@ def get_store_theme(request):
                 'tax_rate': str(settings.tax_rate) if settings.tax_rate else '0',
                 'tax_label': settings.tax_label or 'VAT',
                 'tax_inclusive': settings.tax_inclusive,
+            },
+            # Shipping integration flags. The storefront flips on the map
+            # picker + live-quote step when `quickshipper_enabled` is true,
+            # otherwise it falls back to the static ShippingMethod table.
+            'shipping': {
+                'quickshipper_enabled': bool(
+                    settings.quickshipper_enabled
+                    and settings.has_quickshipper_credentials
+                ),
             },
         })
     except Exception as e:

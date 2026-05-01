@@ -205,3 +205,203 @@ def check_low_stock_products(self):
     except Exception as exc:
         logger.error(f'Error in check_low_stock_products task: {exc}')
         raise self.retry(exc=exc)
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=120)
+def book_quickshipper_courier(self, schema_name, order_id):
+    """Create a Quickshipper shipment for a paid order, then store the
+    returned tracking ID on the local Order. Invoked from the BOG / TBC /
+    Flitt webhook handlers (and the cash-on-delivery confirm path) the
+    moment ``payment_status`` flips to ``paid``.
+
+    No-op if the tenant doesn't have Quickshipper configured — keeps the
+    BOG/TBC payment hooks free to call this unconditionally.
+    """
+    from tenant_schemas.utils import schema_context
+
+    try:
+        with schema_context(schema_name):
+            from .models import Order, EcommerceSettings
+            from .services.quickshipper import (
+                client_from_settings,
+                QuickshipperError,
+            )
+
+            order = (
+                Order.objects
+                .select_related('delivery_address__client')
+                .prefetch_related('items__product')
+                .filter(id=order_id)
+                .first()
+            )
+            if not order:
+                logger.warning('book_quickshipper_courier: order %s not found', order_id)
+                return
+
+            settings_obj = EcommerceSettings.objects.first()
+            if not settings_obj or not settings_obj.quickshipper_enabled:
+                logger.debug(
+                    'book_quickshipper_courier: skipped — Quickshipper disabled for %s',
+                    schema_name,
+                )
+                return
+
+            client = client_from_settings(settings_obj)
+            if client is None:
+                logger.info(
+                    'book_quickshipper_courier: no Quickshipper credentials for %s',
+                    schema_name,
+                )
+                return
+
+            if order.tracking_number:
+                logger.info(
+                    'book_quickshipper_courier: order %s already has tracking %s — skipping',
+                    order.id, order.tracking_number,
+                )
+                return
+
+            address = order.delivery_address
+            if not address or address.latitude is None or address.longitude is None:
+                logger.warning(
+                    'book_quickshipper_courier: order %s missing delivery lat/lng',
+                    order.id,
+                )
+                return
+
+            # Pull cached quote details off the order's payment_metadata if the
+            # checkout step persisted them; otherwise re-quote here so we have
+            # a providerId / providerFeeId / parcelDimensionsId to attach.
+            quote_meta = (order.payment_metadata or {}).get('quickshipper_quote') or {}
+            provider_id = quote_meta.get('provider_id')
+            provider_fee_id = quote_meta.get('provider_fee_id')
+            parcel_dimensions_id = quote_meta.get('parcel_dimensions_id')
+
+            if provider_id is None:
+                # Re-quote on-the-fly. This is a fallback — checkout is meant
+                # to persist the quote so the actual booking matches what the
+                # customer paid for.
+                cart_amount = float(order.total_amount or 0)
+                cart_weight = sum(
+                    (float(getattr(item.product, 'weight', None) or 0.5) * item.quantity)
+                    for item in order.items.all()
+                )
+                try:
+                    envelope = client.get_quote(
+                        from_lat=settings_obj.quickshipper_pickup_latitude,
+                        from_lng=settings_obj.quickshipper_pickup_longitude,
+                        from_street=settings_obj.quickshipper_pickup_address,
+                        from_city=settings_obj.quickshipper_pickup_city,
+                        to_lat=address.latitude,
+                        to_lng=address.longitude,
+                        to_street=address.address,
+                        to_city=address.city,
+                        cart_amount=cart_amount,
+                        cart_weight=cart_weight,
+                    )
+                except QuickshipperError as exc:
+                    logger.warning(
+                        'book_quickshipper_courier: re-quote failed for order %s: %s',
+                        order.id, exc,
+                    )
+                    raise self.retry(exc=exc)
+                fees = envelope.get('fees') or []
+                cheapest = None
+                for fee in fees:
+                    if fee.get('isActive') is False:
+                        continue
+                    for price in (fee.get('prices') or []):
+                        up = price.get('userPrice')
+                        if up is None:
+                            continue
+                        if cheapest is None or up < cheapest['user_price']:
+                            cheapest = {
+                                'provider_id': fee.get('providerId'),
+                                'provider_fee_id': price.get('providerFeeId') or price.get('id'),
+                                'parcel_dimensions_id': price.get('parcelDimensionsId'),
+                                'user_price': float(up),
+                            }
+                if cheapest is None:
+                    logger.warning(
+                        'book_quickshipper_courier: no quote available for order %s',
+                        order.id,
+                    )
+                    return
+                provider_id = cheapest['provider_id']
+                provider_fee_id = cheapest['provider_fee_id']
+                parcel_dimensions_id = cheapest['parcel_dimensions_id']
+
+            payload = {
+                'integrationOrderId': order.order_number,
+                'cartAmount': float(order.total_amount or 0),
+                'comment': order.notes or '',
+                'pickUpInfo': {
+                    'address': settings_obj.quickshipper_pickup_address or '',
+                    'addressComment': settings_obj.quickshipper_pickup_extra_instructions or '',
+                    'city': settings_obj.quickshipper_pickup_city or '',
+                    'country': '',
+                    'latitude': float(settings_obj.quickshipper_pickup_latitude) if settings_obj.quickshipper_pickup_latitude else 0,
+                    'longitude': float(settings_obj.quickshipper_pickup_longitude) if settings_obj.quickshipper_pickup_longitude else 0,
+                    'name': settings_obj.quickshipper_pickup_contact_name or '',
+                    'phone': settings_obj.quickshipper_pickup_phone or '',
+                    'phonePrefix': '',
+                },
+                'dropOffInfo': {
+                    'address': address.address or '',
+                    'addressComment': address.extra_instructions or '',
+                    'city': address.city or '',
+                    'country': address.country or '',
+                    'latitude': float(address.latitude) if address.latitude is not None else 0,
+                    'longitude': float(address.longitude) if address.longitude is not None else 0,
+                    'name': address.client.full_name if address.client_id else '',
+                    'phone': (address.client.phone or '') if address.client_id else '',
+                    'phonePrefix': '',
+                },
+                'provider': {
+                    'providerId': provider_id,
+                    'providerFeeId': provider_fee_id,
+                },
+                'parcelDimensionId': parcel_dimensions_id,
+                'autoAssign': True,
+                'cashOnDelivery': (
+                    {
+                        'parcelPrice': float(order.total_amount or 0),
+                    }
+                    if order.payment_status != 'paid'
+                    else None
+                ),
+            }
+            # Strip None values so we don't trip Quickshipper's strict
+            # additionalProperties=false on nested models.
+            payload = {k: v for k, v in payload.items() if v is not None}
+
+            try:
+                resp = client.create_order(payload)
+            except QuickshipperError as exc:
+                logger.warning(
+                    'book_quickshipper_courier: create_order failed for %s: %s',
+                    order.id, exc,
+                )
+                raise self.retry(exc=exc)
+
+            qs_order_id = resp.get('orderId')
+            tracking_url = resp.get('trackingUrl')
+            metadata = order.payment_metadata or {}
+            metadata['quickshipper'] = {
+                'order_id': qs_order_id,
+                'tracking_url': tracking_url,
+                'provider_name': resp.get('providerName'),
+                'delivery_fee': resp.get('deliveryFee'),
+                'create_date': resp.get('createDate'),
+            }
+            order.tracking_number = str(qs_order_id) if qs_order_id is not None else order.tracking_number
+            order.courier_provider = 'quickshipper'
+            order.payment_metadata = metadata
+            order.save(update_fields=['tracking_number', 'courier_provider', 'payment_metadata', 'updated_at'])
+            logger.info(
+                'book_quickshipper_courier: order %s booked, tracking=%s',
+                order.id, order.tracking_number,
+            )
+    except Exception as exc:
+        logger.error('book_quickshipper_courier failed: %s', exc)
+        raise self.retry(exc=exc)

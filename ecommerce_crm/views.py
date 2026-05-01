@@ -1833,6 +1833,14 @@ class OrderViewSet(NoCacheMixin, viewsets.ModelViewSet):
 
         order.save()
 
+        # Book Quickshipper courier (no-op if not configured for tenant)
+        try:
+            from .tasks import book_quickshipper_courier
+            from django.db import connection as _db_conn
+            book_quickshipper_courier.delay(_db_conn.schema_name, order.id)
+        except Exception:
+            pass
+
         serializer = self.get_serializer(order)
         return Response(serializer.data)
 
@@ -2411,6 +2419,14 @@ def ecommerce_payment_webhook(request):
             except Exception:
                 pass
 
+            # Book the Quickshipper courier (no-op if not configured for tenant)
+            try:
+                from .tasks import book_quickshipper_courier
+                from django.db import connection
+                book_quickshipper_courier.delay(connection.schema_name, order.id)
+            except Exception:
+                pass
+
             return Response({
                 'status': 'success',
                 'action': 'payment_completed',
@@ -2516,6 +2532,14 @@ def tbc_payment_webhook(request):
             order.save()
 
             logger.info(f'TBC payment completed for order: {merchant_payment_id}')
+
+            # Book Quickshipper courier (no-op if not configured for tenant)
+            try:
+                from .tasks import book_quickshipper_courier
+                from django.db import connection as _db_conn
+                book_quickshipper_courier.delay(_db_conn.schema_name, order.id)
+            except Exception:
+                pass
 
             return Response({
                 'status': 'success',
@@ -2643,6 +2667,14 @@ def flitt_payment_webhook(request):
             order.save()
 
             logger.info(f'Flitt payment completed for order: {order_id}')
+
+            # Book Quickshipper courier (no-op if not configured for tenant)
+            try:
+                from .tasks import book_quickshipper_courier
+                from django.db import connection as _db_conn
+                book_quickshipper_courier.delay(_db_conn.schema_name, order.id)
+            except Exception:
+                pass
 
             return Response({
                 'status': 'success',
@@ -3522,3 +3554,347 @@ class ProductReviewAdminViewSet(NoCacheMixin, viewsets.ModelViewSet):
         review.is_approved = False
         review.save(update_fields=['is_approved'])
         return Response(ProductReviewSerializer(review).data)
+
+
+# ============================================================================
+# Quickshipper courier integration
+# ============================================================================
+#
+# Three endpoints:
+#  - admin "Test Connection"      POST /api/ecommerce/admin/quickshipper/test-connection/
+#  - storefront live quote        POST /api/ecommerce/client/shipping/quote/
+#  - inbound status webhook       POST /api/ecommerce/shipping-webhook/quickshipper/
+#
+# All three keep tenant resolution implicit via django-tenant-schemas — the
+# request is already in the right schema context, EcommerceSettings is a
+# OneToOne on the tenant, so settings = EcommerceSettings.objects.first()
+# (matching the convention used by the BOG handlers).
+
+import hashlib
+import hmac
+import logging as _qs_logging
+
+from django.conf import settings as django_settings
+from django.utils import timezone
+
+from .services.quickshipper import (
+    QuickshipperClient,
+    QuickshipperError,
+    client_from_settings,
+)
+
+_qs_logger = _qs_logging.getLogger(__name__)
+
+
+def _quickshipper_settings_or_none():
+    """Return the per-tenant EcommerceSettings or None if missing."""
+    return EcommerceSettings.objects.first()
+
+
+def _build_drop_off_payload(address, fallback_phone: str = "") -> dict:
+    """Map a :class:`ClientAddress` onto Quickshipper's OrderDropOffModel."""
+    return {
+        "address": address.address or "",
+        "addressComment": address.extra_instructions or "",
+        "city": address.city or "",
+        "country": address.country or "",
+        "latitude": float(address.latitude) if address.latitude is not None else 0,
+        "longitude": float(address.longitude) if address.longitude is not None else 0,
+        "name": address.client.full_name if address.client_id else "",
+        "phone": (address.client.phone if address.client_id and address.client.phone else fallback_phone) or "",
+        "phonePrefix": "",
+    }
+
+
+def _build_pickup_payload(s) -> dict:
+    """Map EcommerceSettings pickup fields onto Quickshipper's OrderPickUpModel."""
+    return {
+        "address": s.quickshipper_pickup_address or "",
+        "addressComment": s.quickshipper_pickup_extra_instructions or "",
+        "city": s.quickshipper_pickup_city or "",
+        "country": "",
+        "latitude": float(s.quickshipper_pickup_latitude) if s.quickshipper_pickup_latitude is not None else 0,
+        "longitude": float(s.quickshipper_pickup_longitude) if s.quickshipper_pickup_longitude is not None else 0,
+        "name": s.quickshipper_pickup_contact_name or "",
+        "phone": s.quickshipper_pickup_phone or "",
+        "phonePrefix": "",
+    }
+
+
+@extend_schema(
+    operation_id='ecommerce_quickshipper_test_connection',
+    tags=['Ecommerce Admin - Delivery'],
+    summary='Test Quickshipper credentials',
+    description=(
+        "Calls Quickshipper's GET /v1/Account with the tenant's stored API key. "
+        "Returns 200 with the account profile on success, 4xx with the upstream "
+        "error message on failure. Used by the admin 'Test Connection' button."
+    ),
+    request=None,
+    responses={
+        200: OpenApiResponse(description='Credentials valid'),
+        400: OpenApiResponse(description='Quickshipper rejected the request'),
+        424: OpenApiResponse(description='Quickshipper not configured for this tenant'),
+    },
+)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def quickshipper_test_connection(request):
+    settings_obj = _quickshipper_settings_or_none()
+    client = client_from_settings(settings_obj)
+    if client is None:
+        return Response(
+            {'success': False, 'error': 'Quickshipper API key not configured for this tenant'},
+            status=status.HTTP_424_FAILED_DEPENDENCY,
+        )
+    try:
+        info = client.account_info()
+    except QuickshipperError as exc:
+        return Response(
+            {'success': False, 'error': str(exc), 'errors': exc.errors},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    return Response({
+        'success': True,
+        'shop_name': info.get('shopName'),
+        'user_name': info.get('userName'),
+        'balance': info.get('balance'),
+        'has_providers': info.get('hasProviders', False),
+    })
+
+
+@extend_schema(
+    operation_id='ecommerce_quickshipper_quote',
+    tags=['Ecommerce Client - Shipping'],
+    summary='Get live shipping quote from Quickshipper',
+    description=(
+        "Computes a courier delivery quote from the tenant's Quickshipper-configured "
+        "pickup address to the cart's selected delivery address. Used by checkout to "
+        "replace static ShippingMethod rows with a real-time price + ETA when "
+        "Quickshipper is enabled."
+    ),
+    request=inline_serializer(
+        name='QuickshipperQuoteRequest',
+        fields={
+            'cart_id': serializers.IntegerField(),
+            'delivery_address_id': serializers.IntegerField(),
+        },
+    ),
+    responses={
+        200: OpenApiResponse(description='Quote computed'),
+        400: OpenApiResponse(description='Bad request (missing fields or no quote available)'),
+        404: OpenApiResponse(description='Cart or address not found'),
+        424: OpenApiResponse(description='Quickshipper not configured for this tenant'),
+    },
+)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def quickshipper_quote(request):
+    cart_id = request.data.get('cart_id')
+    delivery_address_id = request.data.get('delivery_address_id')
+    if not cart_id or not delivery_address_id:
+        return Response(
+            {'error': 'cart_id and delivery_address_id are required'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    settings_obj = _quickshipper_settings_or_none()
+    if not settings_obj or not settings_obj.quickshipper_enabled:
+        return Response(
+            {'error': 'Quickshipper is not enabled for this tenant'},
+            status=status.HTTP_424_FAILED_DEPENDENCY,
+        )
+    client = client_from_settings(settings_obj)
+    if client is None:
+        return Response(
+            {'error': 'Quickshipper API key not configured'},
+            status=status.HTTP_424_FAILED_DEPENDENCY,
+        )
+
+    try:
+        cart = Cart.objects.prefetch_related('items').get(id=cart_id, client=request.user)
+    except Cart.DoesNotExist:
+        return Response({'error': 'Cart not found'}, status=status.HTTP_404_NOT_FOUND)
+    try:
+        address = ClientAddress.objects.select_related('client').get(
+            id=delivery_address_id, client=request.user,
+        )
+    except ClientAddress.DoesNotExist:
+        return Response({'error': 'Address not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if address.latitude is None or address.longitude is None:
+        return Response(
+            {'error': 'Delivery address is missing lat/lng — drop a pin on the map first.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if settings_obj.quickshipper_pickup_latitude is None or settings_obj.quickshipper_pickup_longitude is None:
+        return Response(
+            {'error': 'Tenant pickup address is missing lat/lng. Ask the shop owner to set it under Settings → Ecommerce → Delivery.'},
+            status=status.HTTP_424_FAILED_DEPENDENCY,
+        )
+
+    cart_amount = float(cart.total_amount or 0)
+    # Best-effort weight: sum of item weights (kg). If a product has no
+    # weight on file, default to 0.5kg per unit so the quote isn't
+    # rejected for missing weight.
+    cart_weight = 0.0
+    for item in cart.items.all():
+        w = getattr(item.product, 'weight', None) if item.product_id else None
+        cart_weight += float(w) * item.quantity if w else 0.5 * item.quantity
+
+    try:
+        envelope = client.get_quote(
+            from_lat=settings_obj.quickshipper_pickup_latitude,
+            from_lng=settings_obj.quickshipper_pickup_longitude,
+            from_street=settings_obj.quickshipper_pickup_address,
+            from_city=settings_obj.quickshipper_pickup_city,
+            to_lat=address.latitude,
+            to_lng=address.longitude,
+            to_street=address.address,
+            to_city=address.city,
+            cart_amount=cart_amount,
+            cart_weight=cart_weight,
+        )
+    except QuickshipperError as exc:
+        _qs_logger.info('Quickshipper quote failed: %s', exc)
+        return Response(
+            {'error': str(exc), 'errors': exc.errors},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    fees = envelope.get('fees') or []
+    if not fees:
+        return Response(
+            {'error': 'No couriers available for this route — try a different address or check back later.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Pick the cheapest active provider's first price tier as the "default" quote.
+    best = None
+    for fee in fees:
+        if fee.get('isActive') is False:
+            continue
+        for price in (fee.get('prices') or []):
+            user_price = price.get('userPrice')
+            if user_price is None:
+                continue
+            if best is None or user_price < best['user_price']:
+                best = {
+                    'provider_id': fee.get('providerId'),
+                    'provider_name': fee.get('providerName'),
+                    'provider_logo_url': fee.get('providerLogoUrl'),
+                    'provider_fee_id': price.get('providerFeeId') or price.get('id'),
+                    'parcel_dimensions_id': price.get('parcelDimensionsId'),
+                    'user_price': float(user_price),
+                    'display_name': price.get('displayName'),
+                }
+    if best is None:
+        return Response(
+            {'error': 'No couriers available for this route — try a different address or check back later.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    return Response({
+        'provider': 'quickshipper',
+        'provider_id': best['provider_id'],
+        'provider_name': best['provider_name'],
+        'provider_logo_url': best['provider_logo_url'],
+        'provider_fee_id': best['provider_fee_id'],
+        'parcel_dimensions_id': best['parcel_dimensions_id'],
+        'price': best['user_price'],
+        'currency': 'GEL',
+        'display_name': best['display_name'],
+        'distance_km': envelope.get('distance'),
+        'all_fees': fees,
+    })
+
+
+@extend_schema(
+    operation_id='ecommerce_quickshipper_webhook',
+    tags=['Ecommerce Webhooks - Shipping'],
+    summary='Quickshipper status callback',
+    description=(
+        "Inbound status webhook from Quickshipper. Verifies the X-QuickShipper-"
+        "Signature HMAC against the tenant's stored webhook secret, then updates "
+        "the matched Order's tracking timestamps. Idempotent."
+    ),
+    request=None,
+    responses={
+        200: OpenApiResponse(description='Webhook accepted'),
+        401: OpenApiResponse(description='Invalid signature'),
+        404: OpenApiResponse(description='Order not found'),
+    },
+)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+@authentication_classes([])
+def quickshipper_webhook(request):
+    raw_body = request.body or b''
+    signature = (
+        request.headers.get('X-QuickShipper-Signature')
+        or request.headers.get('X-Signature')
+        or ''
+    )
+
+    settings_obj = _quickshipper_settings_or_none()
+    if not settings_obj:
+        return Response({'error': 'Tenant not configured'}, status=status.HTTP_404_NOT_FOUND)
+
+    secret = settings_obj.quickshipper_webhook_secret
+    if secret and signature:
+        expected = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected, signature):
+            return Response(
+                {'error': 'Invalid signature'},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+    payload = request.data or {}
+    qs_order_id = payload.get('orderId') or payload.get('OrderId')
+    integration_order_id = (
+        payload.get('integrationOrderId')
+        or payload.get('IntegrationOrderId')
+        or payload.get('externalOrderId')
+    )
+    new_status = (payload.get('status') or payload.get('OrderStatus') or '').strip()
+
+    order = None
+    if integration_order_id:
+        order = Order.objects.filter(order_number=integration_order_id).first()
+    if order is None and qs_order_id is not None:
+        order = Order.objects.filter(tracking_number=str(qs_order_id)).first()
+    if order is None:
+        return Response({'error': 'Order not matched'}, status=status.HTTP_404_NOT_FOUND)
+
+    update_fields = []
+    if qs_order_id and not order.tracking_number:
+        order.tracking_number = str(qs_order_id)
+        update_fields.append('tracking_number')
+    if not order.courier_provider:
+        order.courier_provider = 'quickshipper'
+        update_fields.append('courier_provider')
+
+    # Map upstream status to our local lifecycle. Only progress forward —
+    # never rewind from delivered → shipped, never overwrite cancelled.
+    status_normalized = new_status.lower()
+    now = timezone.now()
+    if status_normalized in {'pickedup', 'picked_up', 'pickup', 'inprogress', 'in_progress', 'delivering', 'shipping'} and order.status not in ('shipped', 'delivered', 'cancelled', 'refunded'):
+        order.status = 'shipped'
+        order.shipped_at = order.shipped_at or now
+        update_fields += ['status', 'shipped_at']
+    elif status_normalized in {'delivered', 'finished', 'completed'} and order.status not in ('delivered', 'cancelled', 'refunded'):
+        order.status = 'delivered'
+        order.delivered_at = order.delivered_at or now
+        order.shipped_at = order.shipped_at or now
+        update_fields += ['status', 'delivered_at', 'shipped_at']
+    elif status_normalized in {'cancelled', 'canceled', 'rejected', 'failed'} and order.status not in ('delivered', 'refunded'):
+        order.status = 'cancelled'
+        order.cancelled_at = order.cancelled_at or now
+        update_fields += ['status', 'cancelled_at']
+
+    if update_fields:
+        order.updated_at = now
+        update_fields.append('updated_at')
+        order.save(update_fields=list(set(update_fields)))
+
+    return Response({'success': True, 'order_id': order.id, 'order_status': order.status})
