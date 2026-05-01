@@ -142,6 +142,33 @@ def _split_image_urls(raw):
     return out
 
 
+def _merged_product_images(obj):
+    """Merge legacy comma-separated ``Product.image`` URLs with real
+    ``ProductImage`` rows into the storefront-expected list shape.
+    Pseudo-rows from the legacy field get negative IDs so React keys
+    don't collide with real rows. Deduped by URL."""
+    seen = set()
+    out = []
+    for idx, url in enumerate(_split_image_urls(obj.image)):
+        if url in seen:
+            continue
+        seen.add(url)
+        out.append({
+            'id': -(idx + 1),
+            'image': url,
+            'alt_text': None,
+            'sort_order': idx,
+            'created_at': obj.updated_at,
+        })
+    rows = obj.images.all().order_by('sort_order', 'id')
+    for row in rows:
+        if row.image in seen:
+            continue
+        seen.add(row.image)
+        out.append(ProductImageSerializer(row).data)
+    return out
+
+
 class ProductListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for product listings"""
     discount_percentage = serializers.FloatField(read_only=True)
@@ -151,13 +178,17 @@ class ProductListSerializer(serializers.ModelSerializer):
     average_rating = serializers.SerializerMethodField()
     review_count = serializers.SerializerMethodField()
     image = serializers.SerializerMethodField()
+    # Listing cards use the second image (when present) for the hover
+    # swap. Expose the same merged list the detail page sees so the
+    # storefront can render it without a second fetch.
+    images = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
         fields = [
             'id', 'sku', 'slug', 'name', 'short_description',
             'price', 'compare_at_price', 'discount_percentage',
-            'image', 'quantity', 'status', 'is_featured',
+            'image', 'images', 'quantity', 'status', 'is_featured',
             'is_low_stock', 'is_in_stock', 'attribute_values',
             'average_rating', 'review_count',
             'created_at', 'updated_at'
@@ -166,6 +197,9 @@ class ProductListSerializer(serializers.ModelSerializer):
 
     def get_image(self, obj):
         return _first_image_url(obj.image)
+
+    def get_images(self, obj):
+        return _merged_product_images(obj)
 
     def get_average_rating(self, obj):
         from django.db.models import Avg
@@ -194,36 +228,7 @@ class ProductDetailSerializer(serializers.ModelSerializer):
         return _first_image_url(obj.image)
 
     def get_images(self, obj):
-        # Storefronts expect a list of {id, image, alt_text, sort_order,
-        # created_at}. Walk the legacy comma-separated `Product.image`
-        # field first (so visitors see all uploaded images even when the
-        # admin's old bulk-paste flow writes URLs directly into the
-        # URLField), then merge any rows that did make it into the
-        # ProductImage table — deduped by URL so we don't double-render.
-        seen = set()
-        out = []
-        # Pseudo-rows synthesised from the legacy comma-separated field.
-        # ID is negative so the storefront's React keys don't collide
-        # with real ProductImage rows; sort_order matches insertion.
-        for idx, url in enumerate(_split_image_urls(obj.image)):
-            if url in seen:
-                continue
-            seen.add(url)
-            out.append({
-                'id': -(idx + 1),
-                'image': url,
-                'alt_text': None,
-                'sort_order': idx,
-                'created_at': obj.updated_at,
-            })
-        # Real ProductImage rows ordered by sort_order then id.
-        rows = obj.images.all().order_by('sort_order', 'id')
-        for row in rows:
-            if row.image in seen:
-                continue
-            seen.add(row.image)
-            out.append(ProductImageSerializer(row).data)
-        return out
+        return _merged_product_images(obj)
 
     class Meta:
         model = Product
