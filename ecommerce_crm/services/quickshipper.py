@@ -30,6 +30,7 @@ header (the field name in the docs is also ``apiKey``), only
 from __future__ import annotations
 
 import logging
+import time
 from decimal import Decimal
 from typing import Any
 
@@ -37,15 +38,32 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-# Quickshipper publishes only one production host for the integrator API.
-# A "test" API key issued by their portal still points at this host; what
-# differs is the account behind the key. Keeping the URL field on the
-# client so callers can override during local development if Quickshipper
-# ever spins up a separate sandbox host.
+# Delivery API host. Quickshipper publishes only one production host for
+# the integrator API; test API keys issued by their portal authenticate
+# against the test auth server but still hit this delivery host (they
+# just won't return real shop data). Override `base_url` per-client if
+# Quickshipper ever spins up a dedicated sandbox host.
 PRODUCTION_BASE_URL = "https://delivery.quickshipper.app"
 SANDBOX_BASE_URL = "https://delivery.quickshipper.app"
 
+# OAuth2 token endpoints. The Delivery API JWT is minted via a custom
+# `Express` grant on Quickshipper's auth server: integrators present the
+# shop's API key as `ApiKey`, and the auth server returns a Bearer JWT
+# scoped to `DeliveryApi` and bound to that shop.
+PRODUCTION_AUTH_TOKEN_URL = "https://auth.quickshipper.app/connect/token"
+SANDBOX_AUTH_TOKEN_URL = "https://test-auth.quickshipper.ge/connect/token"
+
+# These are public dashboard credentials extracted from the storefront
+# SPA — every Quickshipper integrator passes them. The shop-specific
+# auth bit comes from the per-tenant `ApiKey` parameter.
+OAUTH_CLIENT_ID = "QuickShipperClient"
+OAUTH_CLIENT_SECRET = "QuickShipperSecret"
+OAUTH_SCOPE = "DeliveryApi"
+
 DEFAULT_TIMEOUT_SECONDS = 15
+# Refresh the JWT 60s before its declared expiry so a token that's about
+# to expire mid-call gets re-minted instead of the request 401-ing.
+TOKEN_EXPIRY_BUFFER_SECONDS = 60
 
 
 class QuickshipperError(Exception):
@@ -74,26 +92,82 @@ class QuickshipperClient:
         *,
         use_production: bool = False,
         base_url: str | None = None,
+        token_url: str | None = None,
         timeout: int = DEFAULT_TIMEOUT_SECONDS,
         session: requests.Session | None = None,
     ) -> None:
         if not api_key:
             raise ValueError("Quickshipper API key is required")
         self.api_key = api_key
+        self.use_production = use_production
         self.base_url = base_url or (PRODUCTION_BASE_URL if use_production else SANDBOX_BASE_URL)
+        self.token_url = token_url or (
+            PRODUCTION_AUTH_TOKEN_URL if use_production else SANDBOX_AUTH_TOKEN_URL
+        )
         self.timeout = timeout
         self.session = session or requests.Session()
+        # JWT cache. Tokens are valid for ~1 year, so a single mint
+        # comfortably outlasts every request the worker handles.
+        self._access_token: str | None = None
+        self._access_token_expires_at: float = 0.0
+
+    # ---- auth ---------------------------------------------------------------
+
+    def _mint_access_token(self) -> str:
+        """Exchange the per-tenant API key for a Delivery API JWT via the
+        ``Express`` OAuth2 grant. The JWT carries the shop binding the
+        Delivery API uses to scope every subsequent request."""
+        try:
+            response = self.session.post(
+                self.token_url,
+                data={
+                    "grant_type": "Express",
+                    "client_id": OAUTH_CLIENT_ID,
+                    "client_secret": OAUTH_CLIENT_SECRET,
+                    "scope": OAUTH_SCOPE,
+                    "ApiKey": self.api_key,
+                },
+                timeout=self.timeout,
+            )
+        except requests.RequestException as exc:
+            logger.warning("Quickshipper token mint network error: %s", exc)
+            raise QuickshipperError(
+                f"Network error contacting Quickshipper auth: {exc}"
+            ) from exc
+
+        try:
+            data = response.json() if response.content else {}
+        except ValueError:
+            data = {}
+
+        if response.status_code >= 400 or not data.get("access_token"):
+            err = data.get("error_description") or data.get("error") or f"HTTP {response.status_code}"
+            raise QuickshipperError(
+                f"Quickshipper auth rejected the API key: {err}",
+                status_code=response.status_code,
+                payload=data if isinstance(data, dict) else {},
+            )
+
+        self._access_token = data["access_token"]
+        # Token endpoint reports `expires_in` in seconds; treat anything
+        # under the buffer as already expired so we don't cache it.
+        expires_in = int(data.get("expires_in", 0))
+        if expires_in > TOKEN_EXPIRY_BUFFER_SECONDS:
+            self._access_token_expires_at = time.time() + expires_in - TOKEN_EXPIRY_BUFFER_SECONDS
+        else:
+            self._access_token_expires_at = 0.0
+        return self._access_token
+
+    def _get_access_token(self) -> str:
+        if self._access_token and time.time() < self._access_token_expires_at:
+            return self._access_token
+        return self._mint_access_token()
 
     # ---- low-level helpers --------------------------------------------------
 
     def _headers(self) -> dict[str, str]:
-        # Bearer scheme matches the convention probed against
-        # delivery.quickshipper.app — the same key value works as a
-        # bearer token without an OAuth round-trip. If Quickshipper ever
-        # rotates to a different header name, this is the one place to
-        # change it.
         return {
-            "Authorization": f"Bearer {self.api_key}",
+            "Authorization": f"Bearer {self._get_access_token()}",
             "Accept": "application/json",
             "Content-Type": "application/json",
         }
