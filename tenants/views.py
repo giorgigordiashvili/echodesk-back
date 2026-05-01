@@ -1845,11 +1845,18 @@ def resolve_ecommerce_domain(request):
 
     # Build tenant configuration response
     try:
-        # Get ecommerce settings if available
+        # Get ecommerce settings if available. EcommerceSettings is a
+        # tenant-scoped model — querying from the public schema never
+        # returns rows, which previously meant the resolve-domain
+        # response always fell back to `tenant.name` ("groot") instead
+        # of the configured `EcommerceSettings.store_name` ("Refurb").
+        # Wrap the lookup in schema_context so the storefront sees the
+        # right brand on every meta tag, OG card, and JSON-LD entity.
         ecommerce_settings = None
         try:
             from ecommerce_crm.models import EcommerceSettings
-            ecommerce_settings = EcommerceSettings.objects.filter(tenant=tenant).first()
+            with schema_context(tenant.schema_name):
+                ecommerce_settings = EcommerceSettings.objects.first()
         except Exception:
             pass
 
