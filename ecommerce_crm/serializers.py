@@ -783,6 +783,10 @@ class EcommerceSettingsSerializer(serializers.ModelSerializer):
             'tax_rate', 'tax_inclusive', 'tax_label',
             # Homepage variant
             'homepage_variant',
+            # Storefront visual template + Voltage tweaks
+            'storefront_template',
+            'voltage_theme_preset', 'voltage_color_mode',
+            'voltage_density', 'voltage_radius', 'voltage_font_pair',
             'created_at', 'updated_at'
         ]
         read_only_fields = [

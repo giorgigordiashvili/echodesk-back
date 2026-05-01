@@ -1326,6 +1326,77 @@ class EcommerceSettings(models.Model):
         default='',
     )
 
+    # Storefront visual template — orthogonal to `homepage_variant` (which
+    # only affects the homepage section composition). This switches the
+    # entire storefront's visual language: fonts, colour tokens, header /
+    # footer / page shells. Each tenant picks one; default is the existing
+    # clean shadcn look.
+    STOREFRONT_TEMPLATE_CHOICES = [
+        ('classic', 'Classic — clean & neutral'),
+        ('voltage', 'Voltage — bold electronics'),
+    ]
+    storefront_template = models.CharField(
+        max_length=20,
+        choices=STOREFRONT_TEMPLATE_CHOICES,
+        default='classic',
+        help_text='Which visual template the storefront renders.',
+    )
+
+    # Voltage-template tweaks. Only applied when storefront_template = 'voltage'.
+    # Mirror the data-* attribute axes the prototype uses on <html>:
+    #   data-theme    — accent colour pair
+    #   data-mode     — light / dark
+    #   data-density  — paddings + row heights
+    #   data-radius   — corner radius scale
+    #   data-fontpair — display + UI font pair
+    VOLTAGE_THEME_CHOICES = [
+        ('refurb', 'Refurb (voltage yellow + cobalt)'),
+        ('cobalt', 'Cobalt (cobalt + voltage yellow)'),
+        ('ember', 'Ember (orange + ink)'),
+        ('forest', 'Forest (green + voltage yellow)'),
+        ('violet', 'Violet (violet + voltage yellow)'),
+        ('mono', 'Mono (ink only)'),
+        ('rose', 'Rose (rose + ink)'),
+    ]
+    VOLTAGE_MODE_CHOICES = [('light', 'Light'), ('dark', 'Dark')]
+    VOLTAGE_DENSITY_CHOICES = [
+        ('compact', 'Compact'),
+        ('cozy', 'Cozy'),
+        ('comfortable', 'Comfortable'),
+    ]
+    VOLTAGE_RADIUS_CHOICES = [
+        ('sharp', 'Sharp'),
+        ('soft', 'Soft'),
+        ('rounded', 'Rounded'),
+    ]
+    VOLTAGE_FONTPAIR_CHOICES = [
+        ('bricolage-inter', 'Bricolage Grotesque + Inter'),
+        ('space-dm', 'Space Grotesk + DM Sans'),
+        ('serif-inter', 'Instrument Serif + Inter'),
+        ('mono-inter', 'JetBrains Mono + Inter'),
+    ]
+
+    voltage_theme_preset = models.CharField(
+        max_length=20, choices=VOLTAGE_THEME_CHOICES, default='refurb',
+        help_text='Voltage colour preset (--accent / --accent-2 pair).',
+    )
+    voltage_color_mode = models.CharField(
+        max_length=10, choices=VOLTAGE_MODE_CHOICES, default='light',
+        help_text='Voltage light / dark mode.',
+    )
+    voltage_density = models.CharField(
+        max_length=15, choices=VOLTAGE_DENSITY_CHOICES, default='cozy',
+        help_text='Voltage UI density (paddings / row heights).',
+    )
+    voltage_radius = models.CharField(
+        max_length=10, choices=VOLTAGE_RADIUS_CHOICES, default='soft',
+        help_text='Voltage corner-radius scale.',
+    )
+    voltage_font_pair = models.CharField(
+        max_length=20, choices=VOLTAGE_FONTPAIR_CHOICES, default='bricolage-inter',
+        help_text='Voltage display + UI font pair.',
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

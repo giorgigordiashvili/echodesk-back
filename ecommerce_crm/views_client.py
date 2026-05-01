@@ -1587,6 +1587,19 @@ def get_store_theme(request):
                 },
                 'radius': '0.5rem',
                 'store_name': '',
+                # Same default storefront block the populated branch ships, so
+                # the storefront's `<TemplateSwitch>` doesn't crash on tenants
+                # without an `EcommerceSettings` row yet.
+                'storefront': {
+                    'template': 'classic',
+                    'voltage': {
+                        'theme': 'refurb',
+                        'mode': 'light',
+                        'density': 'cozy',
+                        'radius': 'soft',
+                        'fontPair': 'bricolage-inter',
+                    },
+                },
             })
 
         return Response({
@@ -1623,6 +1636,22 @@ def get_store_theme(request):
                     settings.quickshipper_enabled
                     and settings.has_quickshipper_credentials
                 ),
+            },
+            # Storefront visual template selection. Drives the
+            # `<TemplateSwitch>` server component that picks between the
+            # classic shadcn UI and the bold Voltage UI. Voltage tweaks
+            # only apply when template == 'voltage'; serialised always so
+            # the storefront doesn't need a second round-trip when the
+            # tenant flips templates.
+            'storefront': {
+                'template': settings.storefront_template or 'classic',
+                'voltage': {
+                    'theme': settings.voltage_theme_preset or 'refurb',
+                    'mode': settings.voltage_color_mode or 'light',
+                    'density': settings.voltage_density or 'cozy',
+                    'radius': settings.voltage_radius or 'soft',
+                    'fontPair': settings.voltage_font_pair or 'bricolage-inter',
+                },
             },
         })
     except Exception as e:
