@@ -311,13 +311,18 @@ def book_quickshipper_courier(self, schema_name, order_id):
                     if fee.get('isActive') is False:
                         continue
                     for price in (fee.get('prices') or []):
-                        up = price.get('userPrice')
+                        # Live response uses `amount`; fall back to
+                        # `userPrice` for forward-compat with the published
+                        # OpenAPI spec field name.
+                        up = price.get('amount')
+                        if up is None:
+                            up = price.get('userPrice')
                         if up is None:
                             continue
                         if cheapest is None or up < cheapest['user_price']:
                             cheapest = {
                                 'provider_id': fee.get('providerId'),
-                                'provider_fee_id': price.get('providerFeeId') or price.get('id'),
+                                'provider_fee_id': price.get('id') or price.get('providerFeeId'),
                                 'parcel_dimensions_id': price.get('parcelDimensionsId'),
                                 'user_price': float(up),
                             }

@@ -3781,29 +3781,53 @@ def quickshipper_quote(request):
     # task needs later — provider_id, provider_fee_id, parcel_dimensions_id —
     # so we can persist the customer's exact choice and book what they paid
     # for, not just the cheapest re-quote.
+    #
+    # Field names below match the LIVE Delivery API response (probed against
+    # delivery.quickshipper.app — the OpenAPI spec at /swagger/v1/swagger.json
+    # uses generic camelCase names that don't match runtime payloads).
     options: list[dict] = []
     for fee in fees:
         if fee.get('isActive') is False:
             continue
         for price in (fee.get('prices') or []):
-            user_price = price.get('userPrice')
-            if user_price is None:
+            # Live response uses `amount` for the per-tier price. Fall back to
+            # `userPrice` for forward-compat in case Quickshipper aligns the
+            # field names with their published spec later.
+            amount = price.get('amount')
+            if amount is None:
+                amount = price.get('userPrice')
+            if amount is None:
                 continue
+            currency = (
+                price.get('currencyName')
+                or price.get('currency')
+                or 'GEL'
+            )
+            # The Lari sign (₾) shows up as `currency` on some tiers — coerce
+            # to the ISO code for consistency on the storefront.
+            if currency in ('₾', '₾'):
+                currency = 'GEL'
             options.append({
                 'provider_id': fee.get('providerId'),
                 'provider_name': fee.get('providerName'),
                 'provider_code': fee.get('providerCode'),
                 'provider_logo_url': fee.get('providerLogoUrl'),
                 'provider_note': fee.get('providerNote'),
-                'allow_cash_on_delivery': fee.get('allowCashOnDelivery', True),
-                'provider_fee_id': price.get('providerFeeId') or price.get('id'),
+                'allow_cash_on_delivery': fee.get('hasCashOnDelivery', False),
+                # Per-tier ID is plain `id` in the live response; the
+                # `providerFeeId` name in the spec is unused. It can be
+                # alphanumeric (e.g. `"asap"`, `"Bike"`, `"57"`).
+                'provider_fee_id': price.get('id') or price.get('providerFeeId'),
                 'parcel_dimensions_id': price.get('parcelDimensionsId'),
-                'price': float(user_price),
-                'currency': price.get('userPriceCurrency') or 'GEL',
-                'display_name': price.get('displayName'),
+                'delivery_speed_id': price.get('deliverySpeedId'),
+                'price': float(amount),
+                'currency': currency,
+                'display_name': price.get('deliverySpeedName') or price.get('displayName'),
+                'has_car_delivery': bool(price.get('hasCarDelivery')),
                 'min_weight': price.get('minWeight'),
                 'max_weight': price.get('maxWeight'),
                 'estimated_minutes': price.get('estimatedMinutes') or price.get('estimatedDuration'),
+                'service_fee': fee.get('serviceFee'),
             })
 
     if not options:
