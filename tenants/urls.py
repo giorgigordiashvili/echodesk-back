@@ -5,7 +5,7 @@ from .views import (
     register_tenant_form, get_tenant_language, update_tenant_language, get_tenant_config,
     get_all_tenants, check_deployment_status, tenant_login, tenant_logout,
     tenant_dashboard, tenant_profile, update_tenant_profile, change_tenant_password,
-    tenant_settings, upload_logo, remove_logo, forced_password_change, upload_image,
+    tenant_settings, tenant_public_branding, upload_logo, remove_logo, forced_password_change, upload_image,
     get_subscription_me, resolve_ecommerce_domain,
     get_dashboard_appearance, update_dashboard_appearance, reset_dashboard_appearance
 )
@@ -101,6 +101,7 @@ urlpatterns = [
 
     # Tenant settings endpoints
     path('api/tenant-settings/', tenant_settings, name='tenant_settings'),
+    path('api/tenant-settings/public-branding/', tenant_public_branding, name='tenant_public_branding'),
     path('api/tenant-settings/upload-logo/', upload_logo, name='upload_logo'),
     path('api/tenant-settings/remove-logo/', remove_logo, name='remove_logo'),
 

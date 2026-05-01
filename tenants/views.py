@@ -1336,6 +1336,50 @@ def tenant_settings(request):
 
 
 @extend_schema(
+    operation_id='tenant_public_branding',
+    summary='Get Public Tenant Branding',
+    description=(
+        'Public (unauthenticated) read of the current tenant\'s logo and '
+        'display name. Used by the frontend\'s dynamic PWA manifest route '
+        'so the install dialog and home-screen icon are tenant-branded '
+        'before the user has signed in. Returns 403 from the public schema '
+        '— there is no fallback "EchoDesk" tenant on the bare domain.'
+    ),
+    responses={
+        200: OpenApiResponse(
+            description='Branding retrieved successfully',
+            response={
+                'type': 'object',
+                'properties': {
+                    'logo': {'type': 'string', 'nullable': True},
+                    'company_name': {'type': 'string'},
+                    'schema_name': {'type': 'string'},
+                },
+            },
+        ),
+        403: OpenApiResponse(description='Not available from main domain'),
+    },
+    tags=['Tenant Settings'],
+)
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def tenant_public_branding(request):
+    """Public, no-auth read of tenant logo + display name for PWA manifest."""
+    if not hasattr(request, 'tenant') or request.tenant.schema_name == get_public_schema_name():
+        return Response(
+            {'error': 'This endpoint is only available from tenant subdomains'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    tenant = request.tenant
+    return Response({
+        'logo': request.build_absolute_uri(tenant.logo.url) if tenant.logo else None,
+        'company_name': tenant.name,
+        'schema_name': tenant.schema_name,
+    })
+
+
+@extend_schema(
     operation_id='tenant_settings_upload_logo',
     summary='Upload Tenant Logo',
     description='Upload a company logo for the tenant',
