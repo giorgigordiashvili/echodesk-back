@@ -1091,6 +1091,16 @@ class EcommerceSettings(models.Model):
         default='',
         help_text="Conversion label suffix from Google Ads (without the AW- prefix). Required to fire `purchase` events."
     )
+    # Google Analytics 4 measurement ID (`G-XXXXXXXXXX`). Independent
+    # of Google Ads — drives general visitor/session/page tracking,
+    # not ad-conversion attribution. Both can run side by side; the
+    # storefront calls `gtag('config', ...)` once per ID.
+    google_analytics_id = models.CharField(
+        max_length=64,
+        blank=True,
+        default='',
+        help_text="Google Analytics 4 Measurement ID (e.g. G-TS7YN24F1C). Loads gtag.js + sends visitor / page-view data when set."
+    )
 
     # Pickup option — tenant offers customers the option of picking the
     # order up at the shop instead of having it couriered. Reuses the
