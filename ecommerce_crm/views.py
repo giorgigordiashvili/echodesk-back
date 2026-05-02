@@ -778,7 +778,21 @@ def refresh_client_token(request):
             'refresh': str(new_refresh)
         }, status=status.HTTP_200_OK)
 
-    except (TokenError, InvalidToken) as e:
+    except (TokenError, InvalidToken):
+        return Response({
+            'error': 'Invalid or expired refresh token'
+        }, status=status.HTTP_401_UNAUTHORIZED)
+    except Exception:
+        # Catch-all so a malformed/corrupt token never escapes as a 500.
+        # Anything that isn't a clean refresh attempt should bounce the
+        # caller back to /login (401) so they can re-authenticate. The
+        # storefront's axios refresh interceptor already maps 401 to
+        # "clear local tokens, redirect to /login" — a 500 leaks the
+        # exception trace and the interceptor gets stuck retrying.
+        import logging
+        logging.getLogger(__name__).warning(
+            'Unexpected error refreshing client token', exc_info=True
+        )
         return Response({
             'error': 'Invalid or expired refresh token'
         }, status=status.HTTP_401_UNAUTHORIZED)
