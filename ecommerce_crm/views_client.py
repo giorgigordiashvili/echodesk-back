@@ -1709,6 +1709,12 @@ def get_store_theme(request):
                 'google_analytics_id': settings.google_analytics_id or '',
                 'clarity_project_id': settings.clarity_project_id or '',
             },
+            # Google Maps API key — drives the map + autocomplete
+            # experience on every address picker. Empty = use the
+            # default Leaflet/OSM picker.
+            'maps': {
+                'google_maps_api_key': settings.google_maps_api_key or '',
+            },
             # Pickup option — when allow_pickup is True the storefront
             # offers "Pickup at store" alongside courier delivery in
             # checkout step 1. The address block doubles as the receipt

@@ -1110,6 +1110,18 @@ class EcommerceSettings(models.Model):
         default='',
         help_text="Microsoft Clarity project ID (e.g. p1q2r3s4t5). Loads the Clarity heatmap + session-replay tag when set."
     )
+    # Google Maps JavaScript API key. When set, the storefront swaps
+    # out the default Leaflet/OpenStreetMap address picker for the
+    # Google Maps experience: Places Autocomplete on the address
+    # input, auto-pin on selection, drag-to-refine. Per-tenant so
+    # each merchant manages their own Google Cloud billing + domain
+    # restrictions.
+    google_maps_api_key = models.CharField(
+        max_length=128,
+        blank=True,
+        default='',
+        help_text="Google Maps JavaScript API key (with Places + Maps enabled). When set, the address pickers use Google Maps + Places Autocomplete instead of the default Leaflet/OpenStreetMap picker."
+    )
 
     # Pickup option — tenant offers customers the option of picking the
     # order up at the shop instead of having it couriered. Reuses the

@@ -889,6 +889,8 @@ class EcommerceSettingsSerializer(serializers.ModelSerializer):
             # Google Ads / GA4 tracking
             'google_ads_conversion_id', 'google_ads_purchase_label',
             'google_analytics_id', 'clarity_project_id',
+            # Google Maps + Places autocomplete
+            'google_maps_api_key',
             # Pickup option
             'allow_pickup',
             # TBC fields
