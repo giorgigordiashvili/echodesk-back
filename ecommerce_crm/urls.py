@@ -31,6 +31,7 @@ from .views import (
     flitt_payment_webhook,
     quickshipper_test_connection,
     quickshipper_quote,
+    quickshipper_quote_guest,
     quickshipper_webhook,
 )
 from .views_client import (
@@ -113,6 +114,7 @@ urlpatterns = [
     # Quickshipper courier integration
     path('admin/quickshipper/test-connection/', quickshipper_test_connection, name='quickshipper-test-connection'),
     path('client/shipping/quote/', quickshipper_quote, name='quickshipper-quote'),
+    path('client/shipping/quote-guest/', quickshipper_quote_guest, name='quickshipper-quote-guest'),
     path('shipping-webhook/quickshipper/', quickshipper_webhook, name='quickshipper-webhook'),
     # Client-facing card management endpoints (requires client JWT)
     path('client/cards/add/', add_client_card, name='client-add-card'),

@@ -1996,6 +1996,21 @@ def guest_checkout(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
+    # Parse lat/lng off the address payload. Stored as Decimal on
+    # ClientAddress (max_digits=9, decimal_places=6), so we coerce here
+    # and handle both numeric + stringified inputs from the storefront.
+    raw_lat = address_data.get('latitude')
+    raw_lng = address_data.get('longitude')
+    address_lat = None
+    address_lng = None
+    if raw_lat is not None and raw_lng is not None:
+        try:
+            address_lat = Decimal(str(raw_lat))
+            address_lng = Decimal(str(raw_lng))
+        except (ValueError, TypeError):
+            address_lat = None
+            address_lng = None
+
     # --- Find or create EcommerceClient ---
     email = data['email'].strip().lower()
     client, created = EcommerceClient.objects.get_or_create(
@@ -2018,6 +2033,8 @@ def guest_checkout(request):
         label=address_data.get('label', 'Delivery'),
         address=address_data['address'],
         city=address_data['city'],
+        latitude=address_lat,
+        longitude=address_lng,
     )
 
     # --- Validate items, compute subtotal ---
@@ -2087,6 +2104,30 @@ def guest_checkout(request):
         except ShippingMethod.DoesNotExist:
             pass
 
+    # --- Quickshipper-selected courier ---
+    # When the storefront ran the live guest-quote flow it sends back
+    # the price + provider IDs the customer picked. Use those to set
+    # shipping_cost so the order totals match what the visitor saw,
+    # and stash the meta for the booking task to honour later.
+    quickshipper_quote_meta = None
+    qs_price_raw = data.get('quickshipper_price')
+    qs_provider_id = data.get('quickshipper_provider_id')
+    qs_provider_fee_id = data.get('quickshipper_provider_fee_id')
+    qs_parcel_dimensions_id = data.get('quickshipper_parcel_dimensions_id')
+    qs_provider_name = data.get('quickshipper_provider_name')
+    if qs_price_raw is not None and qs_provider_id is not None:
+        try:
+            shipping_cost = Decimal(str(qs_price_raw))
+            quickshipper_quote_meta = {
+                'provider_id': qs_provider_id,
+                'provider_fee_id': qs_provider_fee_id,
+                'provider_name': qs_provider_name,
+                'parcel_dimensions_id': qs_parcel_dimensions_id,
+                'price': float(qs_price_raw),
+            }
+        except (ValueError, TypeError):
+            pass
+
     # --- Tax ---
     tax_amount = Decimal('0')
     ecommerce_settings = EcommerceSettings.objects.first()
@@ -2135,6 +2176,15 @@ def guest_checkout(request):
                 total_amount=total_amount,
                 notes=data.get('notes', ''),
                 status='pending',
+                # Persist the Quickshipper quote (if present) so the
+                # booking task books the exact option the visitor chose
+                # at checkout, not a re-quoted cheapest. Mirrors the
+                # authenticated OrderCreate flow.
+                payment_metadata=(
+                    {'quickshipper_quote': quickshipper_quote_meta}
+                    if quickshipper_quote_meta
+                    else {}
+                ),
             )
 
             for item_info in order_items_to_create:

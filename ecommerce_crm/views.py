@@ -3875,6 +3875,186 @@ def quickshipper_quote(request):
 
 
 @extend_schema(
+    operation_id='ecommerce_quickshipper_quote_guest',
+    tags=['Ecommerce Client - Shipping'],
+    summary='Get live shipping quote (guest)',
+    description=(
+        "Same as the authenticated /shipping/quote/ endpoint, but accepts "
+        "raw `items` + delivery lat/lng/street/city instead of requiring "
+        "a saved cart and a saved-address row. Used by guest checkout."
+    ),
+    request=inline_serializer(
+        name='QuickshipperQuoteGuestRequest',
+        fields={
+            'items': serializers.ListField(
+                child=inline_serializer(
+                    name='QuickshipperGuestItem',
+                    fields={
+                        'product_id': serializers.IntegerField(),
+                        'quantity': serializers.IntegerField(),
+                    },
+                ),
+            ),
+            'to_lat': serializers.FloatField(),
+            'to_lng': serializers.FloatField(),
+            'to_street': serializers.CharField(),
+            'to_city': serializers.CharField(),
+        },
+    ),
+    responses={
+        200: OpenApiResponse(description='Quote computed'),
+        400: OpenApiResponse(description='Bad request'),
+        424: OpenApiResponse(description='Quickshipper not configured'),
+    },
+)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def quickshipper_quote_guest(request):
+    """Public Quickshipper quote — same envelope, no auth, no cart row.
+
+    Used by the guest checkout flow before an order or address row exists.
+    Authenticated visitors should still hit /shipping/quote/ which goes
+    through their saved cart + address.
+    """
+    items_data = request.data.get('items') or []
+    to_lat = request.data.get('to_lat')
+    to_lng = request.data.get('to_lng')
+    to_street = request.data.get('to_street') or ''
+    to_city = request.data.get('to_city') or ''
+
+    if not items_data:
+        return Response({'error': 'items is required'}, status=status.HTTP_400_BAD_REQUEST)
+    if to_lat is None or to_lng is None:
+        return Response(
+            {'error': 'to_lat and to_lng are required — drop a pin on the map first.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    settings_obj = _quickshipper_settings_or_none()
+    if not settings_obj or not settings_obj.quickshipper_enabled:
+        return Response(
+            {'error': 'Quickshipper is not enabled for this tenant'},
+            status=status.HTTP_424_FAILED_DEPENDENCY,
+        )
+    qs_client = client_from_settings(settings_obj)
+    if qs_client is None:
+        return Response(
+            {'error': 'Quickshipper API key not configured'},
+            status=status.HTTP_424_FAILED_DEPENDENCY,
+        )
+    if settings_obj.quickshipper_pickup_latitude is None or settings_obj.quickshipper_pickup_longitude is None:
+        return Response(
+            {'error': 'Tenant pickup address is missing lat/lng. Ask the shop owner to set it under Settings → Ecommerce → Delivery.'},
+            status=status.HTTP_424_FAILED_DEPENDENCY,
+        )
+
+    # Compute cart amount + weight from raw items, mirroring the auth path.
+    from decimal import Decimal as _Decimal
+    cart_amount = 0.0
+    cart_weight = 0.0
+    for item in items_data:
+        try:
+            product = Product.objects.get(id=item.get('product_id'), status='active')
+        except Product.DoesNotExist:
+            continue
+        qty = int(item.get('quantity') or 1)
+        cart_amount += float(product.price) * qty
+        w = getattr(product, 'weight', None)
+        cart_weight += float(w) * qty if w else 0.5 * qty
+
+    try:
+        envelope = qs_client.get_quote(
+            from_lat=settings_obj.quickshipper_pickup_latitude,
+            from_lng=settings_obj.quickshipper_pickup_longitude,
+            from_street=settings_obj.quickshipper_pickup_address,
+            from_city=settings_obj.quickshipper_pickup_city,
+            to_lat=to_lat,
+            to_lng=to_lng,
+            to_street=to_street,
+            to_city=to_city,
+            cart_amount=cart_amount,
+            cart_weight=cart_weight,
+        )
+    except QuickshipperError as exc:
+        _qs_logger.info('Quickshipper guest quote failed: %s', exc)
+        return Response(
+            {'error': str(exc), 'errors': exc.errors},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    fees = envelope.get('fees') or []
+    if not fees:
+        return Response(
+            {'error': 'No couriers available for this route — try a different address or check back later.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Same flatten/normalise logic as the authed endpoint. Kept inline
+    # rather than factored out because the only difference is the input
+    # source (cart row vs raw items list); duplicating the 50 lines is
+    # cheaper than adding a helper that has to know about both shapes.
+    options: list[dict] = []
+    for fee in fees:
+        if fee.get('isActive') is False:
+            continue
+        for price in (fee.get('prices') or []):
+            amount = price.get('amount')
+            if amount is None:
+                amount = price.get('userPrice')
+            if amount is None:
+                continue
+            currency = (
+                price.get('currencyName')
+                or price.get('currency')
+                or 'GEL'
+            )
+            if currency in ('₾', '₾'):
+                currency = 'GEL'
+            options.append({
+                'provider_id': fee.get('providerId'),
+                'provider_name': fee.get('providerName'),
+                'provider_code': fee.get('providerCode'),
+                'provider_logo_url': fee.get('providerLogoUrl'),
+                'provider_note': fee.get('providerNote'),
+                'allow_cash_on_delivery': fee.get('hasCashOnDelivery', False),
+                'provider_fee_id': price.get('id') or price.get('providerFeeId'),
+                'parcel_dimensions_id': price.get('parcelDimensionsId'),
+                'delivery_speed_id': price.get('deliverySpeedId'),
+                'price': float(amount),
+                'currency': currency,
+                'display_name': price.get('deliverySpeedName') or price.get('displayName'),
+                'has_car_delivery': bool(price.get('hasCarDelivery')),
+                'min_weight': price.get('minWeight'),
+                'max_weight': price.get('maxWeight'),
+                'estimated_minutes': price.get('estimatedMinutes') or price.get('estimatedDuration'),
+                'service_fee': fee.get('serviceFee'),
+            })
+
+    if not options:
+        return Response(
+            {'error': 'No couriers available for this route — try a different address or check back later.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    options.sort(key=lambda o: o['price'])
+    default_option = options[0]
+    return Response({
+        'provider': 'quickshipper',
+        'provider_id': default_option['provider_id'],
+        'provider_name': default_option['provider_name'],
+        'provider_logo_url': default_option['provider_logo_url'],
+        'provider_fee_id': default_option['provider_fee_id'],
+        'parcel_dimensions_id': default_option['parcel_dimensions_id'],
+        'price': default_option['price'],
+        'currency': default_option['currency'],
+        'display_name': default_option['display_name'],
+        'distance_km': envelope.get('distance'),
+        'options': options,
+        'default_provider_fee_id': default_option['provider_fee_id'],
+    })
+
+
+@extend_schema(
     operation_id='ecommerce_quickshipper_webhook',
     tags=['Ecommerce Webhooks - Shipping'],
     summary='Quickshipper status callback',
