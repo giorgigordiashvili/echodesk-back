@@ -888,6 +888,8 @@ class EcommerceSettingsSerializer(serializers.ModelSerializer):
             'bog_return_url_success', 'bog_return_url_fail',
             # Google Ads / GA4 tracking
             'google_ads_conversion_id', 'google_ads_purchase_label',
+            # Pickup option
+            'allow_pickup',
             # TBC fields
             'tbc_client_id', 'tbc_client_secret', 'tbc_api_key', 'tbc_use_production',
             'has_tbc_credentials',
@@ -1054,6 +1056,16 @@ class OrderCreateSerializer(serializers.Serializer):
     )
     quickshipper_provider_name = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
+    # Pickup vs courier. Defaults to 'courier' for backward compatibility.
+    # When 'pickup', the courier-booking task is skipped, shipping_cost is
+    # forced to 0, and the cash-on-delivery payment method becomes
+    # available (it's blocked for couriers — couriers don't collect cash).
+    delivery_method = serializers.ChoiceField(
+        choices=[('courier', 'Courier'), ('pickup', 'Pickup at store')],
+        required=False,
+        default='courier',
+    )
+
     def validate_cart_id(self, value):
         """Validate cart exists and has items"""
         try:
@@ -1132,6 +1144,13 @@ class OrderCreateSerializer(serializers.Serializer):
             except ShippingMethod.DoesNotExist:
                 pass
 
+        # Pickup orders short-circuit the shipping pipeline: free, no
+        # courier booking, and the delivery_method is stamped so the
+        # task layer can confirm.
+        delivery_method = validated_data.get('delivery_method') or 'courier'
+        if delivery_method == 'pickup':
+            shipping_cost = Decimal('0')
+
         # Quickshipper-selected courier: when the storefront passed a quote,
         # use its price for shipping_cost and remember the choice on the
         # order so the booking task books exactly that option.
@@ -1141,7 +1160,7 @@ class OrderCreateSerializer(serializers.Serializer):
         qs_provider_fee_id = validated_data.get('quickshipper_provider_fee_id')
         qs_parcel_dimensions_id = validated_data.get('quickshipper_parcel_dimensions_id')
         qs_provider_name = validated_data.get('quickshipper_provider_name')
-        if qs_price is not None and qs_provider_id is not None:
+        if delivery_method != 'pickup' and qs_price is not None and qs_provider_id is not None:
             shipping_cost = Decimal(str(qs_price))
             quickshipper_quote_meta = {
                 'provider_id': qs_provider_id,
@@ -1207,11 +1226,13 @@ class OrderCreateSerializer(serializers.Serializer):
                 # Persist the Quickshipper quote (if present) so
                 # `book_quickshipper_courier` books the exact option the
                 # customer chose at checkout, not a re-quoted cheapest.
-                payment_metadata=(
-                    {'quickshipper_quote': quickshipper_quote_meta}
-                    if quickshipper_quote_meta
-                    else {}
-                ),
+                # Also stamp delivery_method so the booking task can
+                # bail on pickup orders.
+                payment_metadata=({
+                    **({'quickshipper_quote': quickshipper_quote_meta}
+                       if quickshipper_quote_meta else {}),
+                    'delivery_method': delivery_method,
+                }),
             )
 
             # Create order items from cart items

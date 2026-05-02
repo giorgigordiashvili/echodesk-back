@@ -1707,6 +1707,24 @@ def get_store_theme(request):
                 'google_ads_conversion_id': settings.google_ads_conversion_id or '',
                 'google_ads_purchase_label': settings.google_ads_purchase_label or '',
             },
+            # Pickup option — when allow_pickup is True the storefront
+            # offers "Pickup at store" alongside courier delivery in
+            # checkout step 1. The address block doubles as the receipt
+            # for the customer to actually go pick up the order.
+            'pickup': (
+                {
+                    'enabled': True,
+                    'address': settings.quickshipper_pickup_address or '',
+                    'city': settings.quickshipper_pickup_city or '',
+                    'phone': settings.quickshipper_pickup_phone or '',
+                    'contact_name': settings.quickshipper_pickup_contact_name or '',
+                    'extra_instructions': settings.quickshipper_pickup_extra_instructions or '',
+                }
+                if settings.allow_pickup
+                and settings.quickshipper_pickup_address
+                and settings.quickshipper_pickup_city
+                else {'enabled': False}
+            ),
         })
     except Exception as e:
         return Response(
@@ -2106,6 +2124,27 @@ def guest_checkout(request):
         except PromoCode.DoesNotExist:
             pass
 
+    # --- Tenant config (used by pickup + tax + downstream BOG paths) ---
+    ecommerce_settings = EcommerceSettings.objects.first()
+
+    # --- Delivery method (pickup vs courier) ---
+    # Storefront sends `delivery_method='pickup'` when the customer
+    # chose to pick up at the store. Pickup is free and doesn't go
+    # through Quickshipper. Validation:
+    #   - pickup must be allowed by the tenant config
+    #   - pickup + card OR pickup + cash on delivery — both fine
+    #   - courier (default) + cash on delivery is rejected because we
+    #     don't trust couriers with cash collection
+    delivery_method = (data.get('delivery_method') or 'courier').strip().lower()
+    if delivery_method not in ('pickup', 'courier'):
+        delivery_method = 'courier'
+    if delivery_method == 'pickup':
+        if not (ecommerce_settings and ecommerce_settings.allow_pickup):
+            return Response(
+                {'error': 'Pickup is not enabled for this store.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
     # --- Shipping method ---
     shipping_method = None
     shipping_cost = Decimal('0')
@@ -2143,7 +2182,6 @@ def guest_checkout(request):
 
     # --- Tax ---
     tax_amount = Decimal('0')
-    ecommerce_settings = EcommerceSettings.objects.first()
     if ecommerce_settings and ecommerce_settings.tax_rate > 0:
         taxable_amount = subtotal - discount_amount
         if ecommerce_settings.tax_inclusive:
@@ -2192,12 +2230,14 @@ def guest_checkout(request):
                 # Persist the Quickshipper quote (if present) so the
                 # booking task books the exact option the visitor chose
                 # at checkout, not a re-quoted cheapest. Mirrors the
-                # authenticated OrderCreate flow.
-                payment_metadata=(
-                    {'quickshipper_quote': quickshipper_quote_meta}
-                    if quickshipper_quote_meta
-                    else {}
-                ),
+                # authenticated OrderCreate flow. Also stamp the
+                # delivery_method so the booking task can skip
+                # Quickshipper booking on pickup orders.
+                payment_metadata=({
+                    **({'quickshipper_quote': quickshipper_quote_meta}
+                       if quickshipper_quote_meta else {}),
+                    'delivery_method': delivery_method,
+                }),
             )
 
             for item_info in order_items_to_create:
@@ -2219,6 +2259,16 @@ def guest_checkout(request):
 
     # --- Payment handling ---
     payment_method = data.get('payment_method', 'cash_on_delivery')
+
+    # Reject the cash-on-delivery + courier combination. Couriers can't
+    # be trusted with cash collection in our setup — if the visitor
+    # picked courier delivery they have to pay by card. (UI gates this
+    # already; the backend check is belt-and-braces.)
+    if payment_method == 'cash_on_delivery' and delivery_method == 'courier':
+        return Response(
+            {'error': 'Cash on delivery is only available for pickup orders. Choose card payment for courier delivery.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
     # --- Send confirmation email (COD only) ---
     # For card payments the BOG webhook fires the confirmation once

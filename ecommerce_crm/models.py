@@ -1092,6 +1092,19 @@ class EcommerceSettings(models.Model):
         help_text="Conversion label suffix from Google Ads (without the AW- prefix). Required to fire `purchase` events."
     )
 
+    # Pickup option — tenant offers customers the option of picking the
+    # order up at the shop instead of having it couriered. Reuses the
+    # Quickshipper pickup address fields (quickshipper_pickup_address /
+    # _city / _phone / _contact_name / _extra_instructions) as the
+    # pickup-point details since they're the same physical place.
+    # Business rule: cash on delivery is only available when the
+    # customer chose pickup; courier orders must be paid by card so the
+    # merchant doesn't have to chase cash through couriers.
+    allow_pickup = models.BooleanField(
+        default=False,
+        help_text="Let customers pick up orders at the store instead of using a courier. Pickup address is read from the Quickshipper pickup fields."
+    )
+
     # TBC Bank Payment Gateway Settings
     tbc_client_id = models.CharField(
         max_length=255,

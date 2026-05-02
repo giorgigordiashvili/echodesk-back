@@ -296,6 +296,16 @@ def book_quickshipper_courier(self, schema_name, order_id):
                 logger.warning('book_quickshipper_courier: order %s not found', order_id)
                 return
 
+            # Pickup orders never go through a courier — the customer
+            # is collecting at the store. The delivery_method is
+            # stamped on payment_metadata at order creation.
+            if (order.payment_metadata or {}).get('delivery_method') == 'pickup':
+                logger.info(
+                    'book_quickshipper_courier: skipped — pickup order %s',
+                    order_id,
+                )
+                return
+
             settings_obj = EcommerceSettings.objects.first()
             if not settings_obj or not settings_obj.quickshipper_enabled:
                 logger.debug(
