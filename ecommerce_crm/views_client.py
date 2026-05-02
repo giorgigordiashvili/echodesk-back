@@ -941,15 +941,21 @@ class ClientOrderViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         order = serializer.save()
 
-        # Send order confirmation email asynchronously
-        try:
-            from .tasks import send_order_email
-            send_order_email.delay(connection.schema_name, order.id, 'confirmation')
-        except Exception:
-            pass  # Don't fail order creation if email task fails
-
         # Automatically generate payment URL
         payment_method = request.data.get('payment_method', 'card')
+
+        # Send order confirmation email — only for COD orders, where the
+        # order is final the moment it's placed. Card-payment orders go
+        # through BOG, and the confirmation email fires from the BOG
+        # webhook once payment actually clears (see ecommerce_payment_webhook
+        # in views.py). Sending it here too would mean the customer gets
+        # an "Order Confirmed" email before they've even paid.
+        if payment_method == 'cash_on_delivery':
+            try:
+                from .tasks import send_order_email
+                send_order_email.delay(connection.schema_name, order.id, 'confirmation')
+            except Exception:
+                pass  # Don't fail order creation if email task fails
 
         if payment_method == 'cash_on_delivery':
             # No BOG payment needed, just mark as COD
@@ -2204,15 +2210,19 @@ def guest_checkout(request):
     except serializers.ValidationError as ve:
         return Response({'error': str(ve.detail)}, status=status.HTTP_400_BAD_REQUEST)
 
-    # --- Send confirmation email ---
-    try:
-        from .tasks import send_order_email
-        send_order_email.delay(connection.schema_name, order.id, 'confirmation')
-    except Exception:
-        pass
-
     # --- Payment handling ---
     payment_method = data.get('payment_method', 'cash_on_delivery')
+
+    # --- Send confirmation email (COD only) ---
+    # For card payments the BOG webhook fires the confirmation once
+    # payment actually clears. Sending it here would mean the customer
+    # gets an "Order Confirmed" email before they've paid.
+    if payment_method == 'cash_on_delivery':
+        try:
+            from .tasks import send_order_email
+            send_order_email.delay(connection.schema_name, order.id, 'confirmation')
+        except Exception:
+            pass
 
     if payment_method == 'cash_on_delivery':
         order.payment_method = 'cash_on_delivery'

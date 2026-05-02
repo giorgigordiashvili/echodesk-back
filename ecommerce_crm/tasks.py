@@ -145,6 +145,34 @@ def send_order_email(self, schema_name, order_id, email_type):
                     f'Failed to send {email_type} email for order {order.order_number}'
                 )
 
+            # On a fresh order also notify the merchant. The customer
+            # confirmation above goes to the buyer; this second email
+            # goes to the tenant's `EcommerceSettings.store_email` so
+            # the shop owner sees the sale come in. Quietly swallow
+            # failures here — the customer-facing email is the one the
+            # task's success status should reflect.
+            if email_type == 'confirmation':
+                try:
+                    from .models import EcommerceSettings
+                    s = EcommerceSettings.objects.first()
+                    merchant_email = (s.store_email or '').strip() if s else ''
+                    if merchant_email and merchant_email.lower() != (client.email or '').lower():
+                        send_email(
+                            subject=f'New Order #{order.order_number} — {order.total_amount} GEL',
+                            recipient_email=merchant_email,
+                            template_name='new_order_admin',
+                            context=context,
+                        )
+                        logger.info(
+                            f'Merchant new-order alert sent for order {order.order_number} '
+                            f'to {merchant_email}'
+                        )
+                except Exception as merchant_exc:
+                    logger.warning(
+                        f'Failed to send merchant new-order alert for order '
+                        f'{order.order_number}: {merchant_exc}'
+                    )
+
             return success
 
     except Exception as exc:

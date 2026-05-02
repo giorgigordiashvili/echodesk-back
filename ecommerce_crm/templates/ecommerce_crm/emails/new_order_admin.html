@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>New Order - {{ order_number }}</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            color: #1a1a2e;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f7f4eb;
+        }
+        .card {
+            background: white;
+            border: 1.5px solid #1a1a2e;
+            border-radius: 12px;
+            padding: 28px;
+        }
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            background: #f7e98a;
+            color: #1a1a2e;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            border-radius: 999px;
+            margin-bottom: 12px;
+        }
+        h1 { margin: 0 0 8px; font-size: 28px; letter-spacing: -0.02em; }
+        .total {
+            font-size: 36px;
+            font-weight: 800;
+            margin: 16px 0;
+        }
+        table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+        td { padding: 8px 0; border-bottom: 1px solid #e5e7eb; font-size: 14px; }
+        .label { color: #6b7280; width: 140px; }
+        .items { margin-top: 20px; }
+        .item-row td { padding: 8px 12px; }
+        .item-row { background: #f9fafb; }
+        .cta {
+            display: inline-block;
+            background: #1a1a2e;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 999px;
+            text-decoration: none;
+            font-weight: 700;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="badge">New order received</div>
+        <h1>Order #{{ order_number }}</h1>
+        <p style="color: #6b7280; margin: 0 0 16px;">A new order has been placed on your store.</p>
+
+        <div class="total">{{ total_amount }} GEL</div>
+
+        <table>
+            <tr>
+                <td class="label">Customer</td>
+                <td>{{ client_name }}</td>
+            </tr>
+            <tr>
+                <td class="label">Email</td>
+                <td><a href="mailto:{{ client_email }}">{{ client_email }}</a></td>
+            </tr>
+            {% if order.client.phone_number %}
+            <tr>
+                <td class="label">Phone</td>
+                <td>{{ order.client.phone_number }}</td>
+            </tr>
+            {% endif %}
+            {% if delivery_address %}
+            <tr>
+                <td class="label">Address</td>
+                <td>{{ delivery_address.address }}, {{ delivery_address.city }}</td>
+            </tr>
+            {% endif %}
+            <tr>
+                <td class="label">Payment</td>
+                <td>{{ order.payment_method|default:"—" }}</td>
+            </tr>
+            {% if order.notes %}
+            <tr>
+                <td class="label">Notes</td>
+                <td>{{ order.notes }}</td>
+            </tr>
+            {% endif %}
+        </table>
+
+        <div class="items">
+            <strong style="font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; color: #6b7280;">Items</strong>
+            <table>
+                {% for item in items %}
+                <tr class="item-row">
+                    <td>{{ item.product_name }}</td>
+                    <td style="text-align: right;">×{{ item.quantity }}</td>
+                    <td style="text-align: right; font-weight: 700;">{{ item.subtotal }} ₾</td>
+                </tr>
+                {% endfor %}
+            </table>
+        </div>
+
+        <p style="margin: 20px 0 0;">
+            <a href="{{ public_order_url }}" class="cta">View order →</a>
+        </p>
+    </div>
+
+    <p style="text-align: center; font-size: 12px; color: #9ca3af; margin-top: 20px;">
+        Sent by {{ store_name }} via Echodesk
+    </p>
+</body>
+</html>
