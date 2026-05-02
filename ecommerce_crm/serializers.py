@@ -886,6 +886,8 @@ class EcommerceSettingsSerializer(serializers.ModelSerializer):
             # BOG fields
             'bog_client_id', 'bog_client_secret', 'has_bog_credentials',
             'bog_return_url_success', 'bog_return_url_fail',
+            # Google Ads / GA4 tracking
+            'google_ads_conversion_id', 'google_ads_purchase_label',
             # TBC fields
             'tbc_client_id', 'tbc_client_secret', 'tbc_api_key', 'tbc_use_production',
             'has_tbc_credentials',

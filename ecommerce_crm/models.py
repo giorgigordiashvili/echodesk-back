@@ -1074,6 +1074,24 @@ class EcommerceSettings(models.Model):
         help_text="URL to redirect after failed payment (e.g., https://yourstore.com/payment/fail)"
     )
 
+    # Google Ads / GA4 conversion tracking. The storefront drops in
+    # gtag.js only when a conversion_id is set, and fires `purchase`
+    # events on order-confirmation only when both id + label are set.
+    # Per-tenant: each tenant configures their own AW-xxx id from
+    # admin → Settings → Ecommerce → Marketing.
+    google_ads_conversion_id = models.CharField(
+        max_length=64,
+        blank=True,
+        default='',
+        help_text="Google Ads tag ID (e.g. AW-18133924374). Loads gtag.js on every page when set."
+    )
+    google_ads_purchase_label = models.CharField(
+        max_length=64,
+        blank=True,
+        default='',
+        help_text="Conversion label suffix from Google Ads (without the AW- prefix). Required to fire `purchase` events."
+    )
+
     # TBC Bank Payment Gateway Settings
     tbc_client_id = models.CharField(
         max_length=255,

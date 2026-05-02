@@ -1700,6 +1700,13 @@ def get_store_theme(request):
             # Embeddable chat widget — non-null token tells the storefront
             # to drop in <script src="…/widget.js?t=TOKEN"> on every page.
             'chat_widget': chat_widget_payload,
+            # Google Ads / GA4 tracking. The storefront drops in gtag.js
+            # only when conversion_id is set; fires `purchase` events on
+            # order-confirmation only when both id + label are set.
+            'analytics': {
+                'google_ads_conversion_id': settings.google_ads_conversion_id or '',
+                'google_ads_purchase_label': settings.google_ads_purchase_label or '',
+            },
         })
     except Exception as e:
         return Response(
