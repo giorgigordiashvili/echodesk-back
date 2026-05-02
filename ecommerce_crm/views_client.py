@@ -1707,6 +1707,7 @@ def get_store_theme(request):
                 'google_ads_conversion_id': settings.google_ads_conversion_id or '',
                 'google_ads_purchase_label': settings.google_ads_purchase_label or '',
                 'google_analytics_id': settings.google_analytics_id or '',
+                'clarity_project_id': settings.clarity_project_id or '',
             },
             # Pickup option — when allow_pickup is True the storefront
             # offers "Pickup at store" alongside courier delivery in

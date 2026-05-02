@@ -1101,6 +1101,15 @@ class EcommerceSettings(models.Model):
         default='',
         help_text="Google Analytics 4 Measurement ID (e.g. G-TS7YN24F1C). Loads gtag.js + sends visitor / page-view data when set."
     )
+    # Microsoft Clarity — heatmaps + session recordings. Tenants paste
+    # either the full snippet or just the project ID; the admin form
+    # extracts the 10-char ID via regex before saving here.
+    clarity_project_id = models.CharField(
+        max_length=32,
+        blank=True,
+        default='',
+        help_text="Microsoft Clarity project ID (e.g. p1q2r3s4t5). Loads the Clarity heatmap + session-replay tag when set."
+    )
 
     # Pickup option — tenant offers customers the option of picking the
     # order up at the shop instead of having it couriered. Reuses the

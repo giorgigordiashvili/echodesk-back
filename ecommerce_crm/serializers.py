@@ -888,7 +888,7 @@ class EcommerceSettingsSerializer(serializers.ModelSerializer):
             'bog_return_url_success', 'bog_return_url_fail',
             # Google Ads / GA4 tracking
             'google_ads_conversion_id', 'google_ads_purchase_label',
-            'google_analytics_id',
+            'google_analytics_id', 'clarity_project_id',
             # Pickup option
             'allow_pickup',
             # TBC fields
