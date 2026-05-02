@@ -205,6 +205,101 @@ class WidgetPublicCorsMiddleware:
         return response
 
 
+class EcommerceClientCustomDomainCorsMiddleware:
+    """Open CORS for ecommerce-client API endpoints when called from a
+    tenant's verified custom domain (e.g. ``refurb.ge``).
+
+    The static ``CORS_ALLOWED_ORIGIN_REGEXES`` list whitelists every
+    ``*.echodesk.ge`` and ``*.api.echodesk.ge`` host, but custom domains
+    registered through ``TenantDomain`` are dynamic and unknown at
+    server boot. Without this middleware, a storefront on
+    ``refurb.ge`` calling ``groot.api.echodesk.ge`` gets blocked by
+    the browser's CORS preflight before any view runs — every product
+    fetch / cart action / login fails silently.
+
+    Runs before the tenant middleware so the preflight OPTIONS is
+    short-circuited without needing tenant resolution. The hostname
+    lookup against ``TenantDomain`` is one indexed query per request;
+    the table is small and lives on the public schema.
+    """
+
+    ECOMMERCE_PREFIXES = ('/api/ecommerce/',)
+    ALLOW_HEADERS = (
+        'accept, accept-encoding, authorization, content-type, dnt, '
+        'origin, user-agent, x-csrftoken, x-requested-with, '
+        'x-tenant-subdomain, x-tenant-domain, cache-control'
+    )
+    ALLOW_METHODS = 'GET, POST, PUT, PATCH, DELETE, OPTIONS'
+    MAX_AGE = '86400'
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def _is_ecommerce_client(self, request) -> bool:
+        return any(request.path.startswith(p) for p in self.ECOMMERCE_PREFIXES)
+
+    @staticmethod
+    def _origin_host(origin: str) -> str:
+        if not origin:
+            return ''
+        try:
+            from urllib.parse import urlparse
+            return (urlparse(origin).hostname or '').lower()
+        except Exception:
+            return ''
+
+    @staticmethod
+    def _is_verified_custom_domain(host: str) -> bool:
+        if not host:
+            return False
+        try:
+            from tenants.models import TenantDomain
+            return TenantDomain.objects.filter(
+                domain__iexact=host, is_verified=True
+            ).exists()
+        except Exception:
+            return False
+
+    def __call__(self, request):
+        if not self._is_ecommerce_client(request):
+            return self.get_response(request)
+
+        origin = request.META.get('HTTP_ORIGIN', '')
+        host = self._origin_host(origin)
+        is_custom_domain = self._is_verified_custom_domain(host)
+
+        # Short-circuit the preflight OPTIONS for verified custom-domain
+        # origins. The actual request that follows will hit the tenant
+        # middleware which routes by the *destination* hostname (the
+        # API subdomain), not the Origin.
+        if is_custom_domain and request.method == 'OPTIONS':
+            from django.http import HttpResponse
+            response = HttpResponse(status=204)
+            response['Access-Control-Allow-Origin'] = origin
+            response['Vary'] = 'Origin'
+            response['Access-Control-Allow-Methods'] = self.ALLOW_METHODS
+            response['Access-Control-Allow-Headers'] = (
+                request.META.get('HTTP_ACCESS_CONTROL_REQUEST_HEADERS')
+                or self.ALLOW_HEADERS
+            )
+            response['Access-Control-Max-Age'] = self.MAX_AGE
+            response['Access-Control-Allow-Credentials'] = 'true'
+            return response
+
+        response = self.get_response(request)
+
+        if is_custom_domain and not response.has_header('Access-Control-Allow-Origin'):
+            response['Access-Control-Allow-Origin'] = origin
+            existing_vary = response.get('Vary', '')
+            if 'Origin' not in existing_vary:
+                response['Vary'] = (
+                    f'{existing_vary}, Origin' if existing_vary else 'Origin'
+                )
+            response['Access-Control-Allow-Credentials'] = 'true'
+
+        return response
+
+
 class BotBlockerMiddleware:
     """
     Middleware to block suspicious bot requests early before URL routing.

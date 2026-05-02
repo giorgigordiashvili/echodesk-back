@@ -140,6 +140,7 @@ TENANT_MODEL = "tenants.Tenant"
 MIDDLEWARE = [
     'amanati_crm.middleware.BotBlockerMiddleware',  # Block bots/scanners early (before CommonMiddleware)
     'amanati_crm.middleware.WidgetPublicCorsMiddleware',  # Open CORS on /api/widget/public/* (arbitrary tenant origins)
+    'amanati_crm.middleware.EcommerceClientCustomDomainCorsMiddleware',  # Open CORS on /api/ecommerce/* for verified TenantDomain custom domains
     'amanati_crm.middleware.EchoDeskTenantMiddleware',  # Custom tenant middleware (must be first)
     'tenants.subscription_middleware.SubscriptionMiddleware',  # Subscription feature middleware
     'amanati_crm.debug_middleware.TransactionDebugMiddleware',  # Debug transaction errors
