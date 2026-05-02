@@ -580,7 +580,12 @@ class ClientRegistrationSerializer(serializers.Serializer):
     first_name = serializers.CharField(max_length=150, required=True)
     last_name = serializers.CharField(max_length=150, required=True)
     email = serializers.EmailField(required=True)
-    phone_number = serializers.CharField(max_length=20, required=True)
+    # Phone is optional at sign-up — visitors can fill it in at first
+    # checkout. The uniqueness check still runs when a value is given
+    # so we don't end up with two accounts on the same number.
+    phone_number = serializers.CharField(
+        max_length=20, required=False, allow_blank=True, allow_null=True, default=''
+    )
     password = serializers.CharField(write_only=True, required=True, min_length=8)
     password_confirm = serializers.CharField(write_only=True, required=True)
     date_of_birth = serializers.DateField(required=False, allow_null=True)
@@ -593,7 +598,9 @@ class ClientRegistrationSerializer(serializers.Serializer):
         return value
 
     def validate_phone_number(self, value):
-        """Validate that phone number is unique"""
+        """Validate that phone number is unique when provided."""
+        if not value:
+            return ''
         from .models import EcommerceClient
         if EcommerceClient.objects.filter(phone_number=value).exists():
             raise serializers.ValidationError("A client with this phone number already exists.")
