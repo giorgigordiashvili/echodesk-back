@@ -252,11 +252,35 @@ class EcommerceClientCustomDomainCorsMiddleware:
     def _is_verified_custom_domain(host: str) -> bool:
         if not host:
             return False
+        from django.core.cache import cache
+        cache_key = f'cors_custom_domain:{host}'
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return bool(cached)
         try:
             from tenants.models import TenantDomain
-            return TenantDomain.objects.filter(
+            ok = TenantDomain.objects.filter(
                 domain__iexact=host, is_verified=True
             ).exists()
+            # Also check EcommerceSettings.custom_domain on each tenant —
+            # the resolve-domain endpoint supports both registries and we
+            # need to mirror it. Iterating tenants is expensive, so we
+            # cache the answer for 5 minutes (matches the resolve-domain
+            # revalidate window).
+            if not ok:
+                from tenants.models import Tenant
+                from tenant_schemas.utils import schema_context
+                from ecommerce_crm.models import EcommerceSettings
+                for t in Tenant.objects.filter(is_active=True).exclude(schema_name='public'):
+                    try:
+                        with schema_context(t.schema_name):
+                            if EcommerceSettings.objects.filter(custom_domain__iexact=host).exists():
+                                ok = True
+                                break
+                    except Exception:
+                        continue
+            cache.set(cache_key, 1 if ok else 0, 300)
+            return ok
         except Exception:
             return False
 
