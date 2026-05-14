@@ -4026,6 +4026,122 @@ def all_assignments(request):
     return Response(serializer.data)
 
 
+# ---------------------------------------------------------------------------
+# Cross-user reactivity broadcast helpers for /messages-beta.
+#
+# Each `_broadcast_*` is best-effort: if the channel layer or Redis is down
+# we log and move on; the REST response still succeeds. The legacy /messages
+# frontend ignores these event types, so we can ship these emits ahead of
+# /messages-beta turning on, without any risk to the live UI.
+# ---------------------------------------------------------------------------
+def _broadcast_assignment_change(request, assignment, archived_change_to_unarchived=False):
+    """Emit an `assignment_update` WS frame after an assign/unassign/transfer/
+    start-session/end-session mutation has committed. `assignment` can be a
+    ChatAssignment instance (still in the DB) or a dict with the platform /
+    conversation_id / account_id keys when the row was just deleted.
+
+    Best-effort — wraps any broadcast failure so it never breaks the REST
+    request. Also emits an `archive_update(archived=false)` companion when
+    the mutation unarchived the conversation, so beta clients reflect the
+    move out of history in the same call.
+    """
+    from django.db import connection
+    from .consumers import send_assignment_update, send_archive_update
+
+    if isinstance(assignment, ChatAssignment):
+        payload = {
+            'platform': assignment.platform,
+            'conversation_id': assignment.conversation_id,
+            'account_id': assignment.account_id,
+            'assigned_user_id': assignment.assigned_user_id,
+            'assigned_user_name': (
+                assignment.assigned_user.get_full_name() or assignment.assigned_user.email
+            ) if assignment.assigned_user else None,
+            'status': assignment.status,
+            'session_started_at': assignment.session_started_at.isoformat()
+                if assignment.session_started_at else None,
+            'session_ended_at': assignment.session_ended_at.isoformat()
+                if assignment.session_ended_at else None,
+        }
+    else:
+        # Post-delete: caller passes the lookup keys plus the desired final
+        # state (typically unassigned + null status).
+        payload = {
+            'platform': assignment.get('platform'),
+            'conversation_id': assignment.get('conversation_id'),
+            'account_id': assignment.get('account_id'),
+            'assigned_user_id': None,
+            'assigned_user_name': None,
+            'status': assignment.get('status'),
+            'session_started_at': assignment.get('session_started_at'),
+            'session_ended_at': assignment.get('session_ended_at'),
+        }
+
+    payload['by_user_id'] = request.user.id if getattr(request, 'user', None) and request.user.is_authenticated else None
+    tenant_schema = connection.schema_name
+
+    try:
+        async_to_sync(send_assignment_update)(tenant_schema, **payload)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning('assignment_update broadcast failed: %s', exc)
+
+    if archived_change_to_unarchived:
+        try:
+            async_to_sync(send_archive_update)(
+                tenant_schema,
+                platform=payload['platform'],
+                conversation_id=payload['conversation_id'],
+                account_id=payload['account_id'],
+                archived=False,
+                archived_at=None,
+                by_user_id=payload['by_user_id'],
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning('archive_update broadcast failed: %s', exc)
+
+
+def _broadcast_read_state(request, *, platform, conversation_id, account_id, unread_count, last_read_at=None):
+    """Emit a `read_state_update` WS frame after a mark-read/unread mutation."""
+    from django.db import connection
+    from .consumers import send_read_state_update
+
+    tenant_schema = connection.schema_name
+    by_user_id = request.user.id if getattr(request, 'user', None) and request.user.is_authenticated else None
+    try:
+        async_to_sync(send_read_state_update)(
+            tenant_schema,
+            platform=platform,
+            conversation_id=conversation_id,
+            account_id=account_id,
+            unread_count=unread_count,
+            last_read_at=last_read_at.isoformat() if hasattr(last_read_at, 'isoformat') else last_read_at,
+            by_user_id=by_user_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning('read_state_update broadcast failed: %s', exc)
+
+
+def _broadcast_archive_change(request, *, platform, conversation_id, account_id, archived, archived_at=None):
+    """Emit an `archive_update` WS frame after archive/unarchive."""
+    from django.db import connection
+    from .consumers import send_archive_update
+
+    tenant_schema = connection.schema_name
+    by_user_id = request.user.id if getattr(request, 'user', None) and request.user.is_authenticated else None
+    try:
+        async_to_sync(send_archive_update)(
+            tenant_schema,
+            platform=platform,
+            conversation_id=conversation_id,
+            account_id=account_id,
+            archived=archived,
+            archived_at=archived_at.isoformat() if hasattr(archived_at, 'isoformat') else archived_at,
+            by_user_id=by_user_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning('archive_update broadcast failed: %s', exc)
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated, CanViewSocialMessages])
 def assign_chat(request):
@@ -4090,6 +4206,7 @@ def assign_chat(request):
         logger.info(f"📤 Unarchived conversation due to assignment: {platform}/{account_id}/{conversation_id}")
 
     logger.info(f"Chat assigned and session started: {assignment.full_conversation_id} -> {request.user.email}")
+    _broadcast_assignment_change(request, assignment, archived_change_to_unarchived=bool(unarchived))
     return Response(ChatAssignmentSerializer(assignment).data, status=status.HTTP_201_CREATED)
 
 
@@ -4124,7 +4241,18 @@ def unassign_chat(request):
         )
 
     logger.info(f"Chat unassigned: {assignment.full_conversation_id} by {request.user.email}")
+    # Snapshot lookup keys before delete so the post-delete broadcast can
+    # carry them to clients (the ORM row is gone after .delete()).
+    snapshot = {
+        'platform': assignment.platform,
+        'conversation_id': assignment.conversation_id,
+        'account_id': assignment.account_id,
+        'status': None,
+        'session_started_at': None,
+        'session_ended_at': None,
+    }
     assignment.delete()
+    _broadcast_assignment_change(request, snapshot)
     return Response({'message': 'Chat unassigned successfully'})
 
 
@@ -4171,6 +4299,7 @@ def transfer_chat(request):
             session_started_at=timezone.now(),
         )
         logger.info(f"Chat transferred (new assignment): {assignment.full_conversation_id} to {target_user.email} by {request.user.email}")
+        _broadcast_assignment_change(request, assignment)
         return Response({
             'message': f'Chat transferred to {target_user.get_full_name() or target_user.email}',
             'assignment': ChatAssignmentSerializer(assignment).data,
@@ -4189,6 +4318,7 @@ def transfer_chat(request):
         f"from {previous_user.email if previous_user else 'unassigned'} "
         f"to {target_user.email} by {request.user.email}"
     )
+    _broadcast_assignment_change(request, assignment)
 
     return Response({
         'message': f'Chat transferred to {target_user.get_full_name() or target_user.email}',
@@ -4242,6 +4372,7 @@ def start_session(request):
     assignment.save()
 
     logger.info(f"Session started: {assignment.full_conversation_id} by {request.user.email}")
+    _broadcast_assignment_change(request, assignment)
     return Response(ChatAssignmentSerializer(assignment).data)
 
 
@@ -4293,6 +4424,9 @@ def end_session(request):
     assignment.session_ended_at = timezone.now()
     assignment.assigned_user = None  # Explicitly unassign the user
     assignment.save()
+    # Broadcast the unassign so every connected agent's beta sidebar moves
+    # the conversation out of their Assigned tab back to All.
+    _broadcast_assignment_change(request, assignment)
 
     # Check if customer rating collection is enabled
     collect_rating = settings_obj.collect_customer_rating if settings_obj else False
@@ -6406,6 +6540,20 @@ def mark_conversation_read(request):
         except Exception as e:
             logger.warning(f"Failed to clear message notifications on conversation read: {e}")
 
+        # Cross-user reactivity: tell every connected agent that this chat's
+        # unread count just dropped to 0 so their sidebar badge clears live.
+        # account_id is not available on this endpoint (the request body
+        # carries only platform + conversation_id); beta clients match by
+        # conversation_id alone when account_id is null.
+        _broadcast_read_state(
+            request,
+            platform=platform,
+            conversation_id=conversation_id,
+            account_id=None,
+            unread_count=0,
+            last_read_at=now,
+        )
+
         return Response({
             'success': True,
             'messages_marked_read': updated_count
@@ -6518,6 +6666,20 @@ def mark_conversation_unread(request):
             }, status=status.HTTP_400_BAD_REQUEST)
 
         logger.info(f"Marked {updated_count} {platform} messages as unread for conversation {conversation_id}")
+
+        # We bumped the unread count by exactly 1 (the endpoint flips only the
+        # last incoming message). Beta clients use this to put the badge back
+        # on the sidebar without polling. Passing unread_count=1 is a hint —
+        # the precise count can be re-derived from the conversation list on
+        # the next refresh if needed.
+        _broadcast_read_state(
+            request,
+            platform=platform,
+            conversation_id=conversation_id,
+            account_id=None,
+            unread_count=updated_count,
+            last_read_at=None,
+        )
 
         return Response({
             'success': True,
@@ -11018,6 +11180,22 @@ def mark_all_conversations_read(request):
             total_updated += count
             logger.info(f"Marked {count} Widget messages as read")
 
+        # Bulk read-state broadcast: beta clients treat conversation_id=None
+        # as "clear all unread for the listed platform(s)" so the sidebar
+        # badges drop instantly without a list refetch. Emitted once per
+        # touched platform so handlers can keep platform-scoped logic clean.
+        for plat in [p for p in platforms if p != 'all'] or (
+            ['facebook', 'instagram', 'whatsapp', 'email', 'widget'] if include_all else []
+        ):
+            _broadcast_read_state(
+                request,
+                platform=plat,
+                conversation_id=None,  # null => bulk clear
+                account_id=None,
+                unread_count=0,
+                last_read_at=now,
+            )
+
         return Response({
             'success': True,
             'messages_marked_read': total_updated,
@@ -11165,6 +11343,17 @@ def archive_conversation(request):
                 archive.save()
                 logger.info(f"Updated archive timestamp: {platform}/{account_id}/{conversation_id}")
 
+            # Cross-user reactivity: beta clients move the row from active
+            # inbox into the Archive tab on this frame, no list refetch.
+            _broadcast_archive_change(
+                request,
+                platform=platform,
+                conversation_id=conversation_id,
+                account_id=account_id,
+                archived=True,
+                archived_at=archive.archived_at,
+            )
+
         response_data = {
             'success': True,
             'archived_count': archived_count,
@@ -11237,6 +11426,14 @@ def unarchive_conversation(request):
             if deleted_count > 0:
                 unarchived_count += 1
                 logger.info(f"Unarchived conversation: {platform}/{account_id}/{conversation_id}")
+                _broadcast_archive_change(
+                    request,
+                    platform=platform,
+                    conversation_id=conversation_id,
+                    account_id=account_id,
+                    archived=False,
+                    archived_at=None,
+                )
 
         response_data = {
             'success': True,
@@ -11419,6 +11616,24 @@ def archive_all_conversations(request):
             messages_marked_read += count
 
         logger.info(f"Archived {archived_count} conversations, marked {messages_marked_read} messages as read (platform: {platform_param})")
+
+        # Bulk archive_update broadcast: emit one frame per touched platform
+        # with conversation_id=None so beta clients can re-evaluate the entire
+        # platform's archived map at once instead of receiving N frames. Same
+        # convention as the bulk mark-all-read path above.
+        bulk_platforms = (
+            [p for p in platforms if p != 'all']
+            or (['facebook', 'instagram', 'whatsapp', 'email', 'widget'] if include_all else [])
+        )
+        for plat in bulk_platforms:
+            _broadcast_archive_change(
+                request,
+                platform=plat,
+                conversation_id=None,
+                account_id=None,
+                archived=True,
+                archived_at=now,
+            )
 
         return Response({
             'success': True,

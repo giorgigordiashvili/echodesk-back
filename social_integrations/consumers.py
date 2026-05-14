@@ -152,6 +152,55 @@ class MessagesConsumer(AsyncWebsocketConsumer):
             'ended_at': event.get('ended_at'),
         }))
 
+    # ------------------------------------------------------------------
+    # /messages-beta cross-user reactivity broadcasts (additive — the
+    # legacy /messages frontend ignores these types via the switch's
+    # default branch). Each handler just forwards the event payload so
+    # consumers stay dumb; the heavy logic lives in the Django views that
+    # call `channel_layer.group_send`.
+    # ------------------------------------------------------------------
+    async def assignment_update(self, event):
+        """Pushed by assign/unassign/transfer/start-session/end-session views."""
+        await self.send(text_data=json.dumps({
+            'type': 'assignment_update',
+            'platform': event.get('platform'),
+            'conversation_id': event.get('conversation_id'),
+            'account_id': event.get('account_id'),
+            'assigned_user_id': event.get('assigned_user_id'),
+            'assigned_user_name': event.get('assigned_user_name'),
+            'status': event.get('status'),
+            'session_started_at': event.get('session_started_at'),
+            'session_ended_at': event.get('session_ended_at'),
+            'by_user_id': event.get('by_user_id'),
+            'timestamp': event.get('timestamp'),
+        }))
+
+    async def read_state_update(self, event):
+        """Pushed by mark-read/mark-unread/mark-all-read views."""
+        await self.send(text_data=json.dumps({
+            'type': 'read_state_update',
+            'platform': event.get('platform'),
+            'conversation_id': event.get('conversation_id'),
+            'account_id': event.get('account_id'),
+            'unread_count': event.get('unread_count'),
+            'last_read_at': event.get('last_read_at'),
+            'by_user_id': event.get('by_user_id'),
+            'timestamp': event.get('timestamp'),
+        }))
+
+    async def archive_update(self, event):
+        """Pushed by archive/unarchive/archive-all views."""
+        await self.send(text_data=json.dumps({
+            'type': 'archive_update',
+            'platform': event.get('platform'),
+            'conversation_id': event.get('conversation_id'),
+            'account_id': event.get('account_id'),
+            'archived': event.get('archived'),
+            'archived_at': event.get('archived_at'),
+            'by_user_id': event.get('by_user_id'),
+            'timestamp': event.get('timestamp'),
+        }))
+
 
 class WidgetVisitorConsumer(AsyncWebsocketConsumer):
     """
@@ -547,9 +596,9 @@ async def send_conversation_update(tenant_schema, conversation_id, last_message_
     Call this when a conversation's last message changes.
     """
     from channels.layers import get_channel_layer
-    
+
     channel_layer = get_channel_layer()
-    
+
     await channel_layer.group_send(
         f'messages_{tenant_schema}',
         {
@@ -559,3 +608,113 @@ async def send_conversation_update(tenant_schema, conversation_id, last_message_
             'timestamp': last_message_data.get('timestamp')
         }
     )
+
+
+# ---------------------------------------------------------------------------
+# Cross-user reactivity broadcasts for /messages-beta.
+#
+# These are deliberately additive — the legacy /messages frontend ignores
+# unknown `type` values via the switch default, so it's safe to start
+# emitting these even before any clients consume them. Each helper wraps
+# `group_send` in a try/except so a Channels failure (Redis down, channel
+# layer mis-config) can't break the REST mutation that called it.
+# ---------------------------------------------------------------------------
+import logging  # noqa: E402  (kept inline so the helpers below are self-contained)
+_realtime_logger = logging.getLogger(__name__)
+
+
+async def _safe_group_send(tenant_schema, payload):
+    from channels.layers import get_channel_layer
+    try:
+        channel_layer = get_channel_layer()
+        if channel_layer is None:
+            return  # Channel layer not configured (some test envs) — swallow.
+        await channel_layer.group_send(f'messages_{tenant_schema}', payload)
+    except Exception as exc:  # noqa: BLE001 — broadcast is best-effort.
+        _realtime_logger.warning(
+            'Cross-user broadcast failed for tenant=%s type=%s: %s',
+            tenant_schema, payload.get('type'), exc,
+        )
+
+
+async def send_assignment_update(
+    tenant_schema,
+    *,
+    platform,
+    conversation_id,
+    account_id,
+    assigned_user_id,
+    assigned_user_name=None,
+    status,
+    session_started_at=None,
+    session_ended_at=None,
+    by_user_id=None,
+):
+    """Broadcast a chat-assignment change. Consumed by /messages-beta clients
+    so every connected agent's sidebar reorders/hides the chat live.
+    """
+    from datetime import datetime, timezone
+
+    await _safe_group_send(tenant_schema, {
+        'type': 'assignment_update',
+        'platform': platform,
+        'conversation_id': conversation_id,
+        'account_id': account_id,
+        'assigned_user_id': assigned_user_id,
+        'assigned_user_name': assigned_user_name,
+        'status': status,
+        'session_started_at': session_started_at,
+        'session_ended_at': session_ended_at,
+        'by_user_id': by_user_id,
+        'timestamp': datetime.now(timezone.utc).isoformat(),
+    })
+
+
+async def send_read_state_update(
+    tenant_schema,
+    *,
+    platform,
+    conversation_id,
+    account_id,
+    unread_count,
+    last_read_at=None,
+    by_user_id=None,
+):
+    """Broadcast a read/unread state change for one conversation."""
+    from datetime import datetime, timezone
+
+    await _safe_group_send(tenant_schema, {
+        'type': 'read_state_update',
+        'platform': platform,
+        'conversation_id': conversation_id,
+        'account_id': account_id,
+        'unread_count': unread_count,
+        'last_read_at': last_read_at,
+        'by_user_id': by_user_id,
+        'timestamp': datetime.now(timezone.utc).isoformat(),
+    })
+
+
+async def send_archive_update(
+    tenant_schema,
+    *,
+    platform,
+    conversation_id,
+    account_id,
+    archived,
+    archived_at=None,
+    by_user_id=None,
+):
+    """Broadcast that a conversation moved into / out of the archive."""
+    from datetime import datetime, timezone
+
+    await _safe_group_send(tenant_schema, {
+        'type': 'archive_update',
+        'platform': platform,
+        'conversation_id': conversation_id,
+        'account_id': account_id,
+        'archived': bool(archived),
+        'archived_at': archived_at,
+        'by_user_id': by_user_id,
+        'timestamp': datetime.now(timezone.utc).isoformat(),
+    })
