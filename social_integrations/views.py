@@ -1399,6 +1399,16 @@ def facebook_send_message(request):
         send_url = f"https://graph.facebook.com/v23.0/me/messages"
         params = {'access_token': page_connection.page_access_token}
         attachments_meta = []
+        # When the agent sends text + attachment in one composer submit,
+        # Facebook's Send API requires two separate calls — one for the text,
+        # one for the attachment — and each gets its own `mid`. We need to
+        # remember the TEXT call's mid here so the local save below can store
+        # the text as its own row keyed by that mid. Without it we'd save a
+        # single row carrying both text + attachment, and the text echo
+        # webhook (with a different mid) would then create a *second* row
+        # with just the text — the duplicate the user is seeing in the UI.
+        text_message_id: str | None = None
+        text_sent_separately = False
 
         if media_file:
             # Upload media as attachment via Facebook Send API
@@ -1415,7 +1425,11 @@ def facebook_send_message(request):
             else:
                 attachment_type = 'file'
 
-            # If there's text AND media, send text first then media
+            # If there's text AND media, send text first then media. Capture
+            # the text-message id so we can store text + media as two distinct
+            # rows — matching how Facebook itself models them — and so the
+            # echo webhook dedupes against an existing row instead of inserting
+            # a third one.
             if message_text:
                 text_payload = {
                     'recipient': {'id': recipient_id},
@@ -1424,8 +1438,18 @@ def facebook_send_message(request):
                 }
                 if reply_to_message_id:
                     text_payload['reply_to'] = {'mid': reply_to_message_id}
-                requests.post(send_url, json=text_payload,
-                              headers={'Content-Type': 'application/json'}, params=params)
+                text_response = requests.post(
+                    send_url,
+                    json=text_payload,
+                    headers={'Content-Type': 'application/json'},
+                    params=params,
+                )
+                text_sent_separately = True
+                if text_response.status_code == 200:
+                    try:
+                        text_message_id = text_response.json().get('message_id')
+                    except ValueError:
+                        text_message_id = None
 
             # Send media attachment using form data upload
             message_payload = {
@@ -1488,12 +1512,64 @@ def facebook_send_message(request):
                     ).first()
 
                 timestamp = datetime.now()
-                create_kwargs = dict(
+                tenant_schema = connection.schema_name
+
+                # Look up recipient's name from previous incoming messages in this conversation
+                recipient_name = None
+                previous_msg = FacebookMessage.objects.filter(
+                    page_connection=page_connection,
+                    sender_id=recipient_id,
+                    is_from_page=False
+                ).order_by('-timestamp').first()
+                if previous_msg and previous_msg.sender_name:
+                    recipient_name = previous_msg.sender_name
+
+                # Facebook stores text + attachment as TWO distinct messages
+                # when sent in one composer submit. Mirror that locally:
+                #   • If text was sent separately, persist a text-only row.
+                #   • Persist a row for the attachment that holds ONLY the
+                #     attachment (no message_text) so the UI doesn't render
+                #     the text twice when the text-echo webhook lands.
+                # If only one of them was sent, persist a single row carrying
+                # whatever was sent.
+                sent_rows: list[FacebookMessage] = []
+
+                if text_sent_separately:
+                    text_row_kwargs = dict(
+                        page_connection=page_connection,
+                        message_id=text_message_id or f"sent_text_{timestamp.timestamp()}",
+                        sender_id=recipient_id,
+                        sender_name=page_connection.page_name,
+                        message_text=message_text,
+                        timestamp=timestamp,
+                        is_from_page=True,
+                        reply_to_message_id=reply_to_message_id if reply_to_message_id else None,
+                        reply_to=reply_to_obj,
+                        source='echodesk',
+                        is_echo=False,
+                        sent_by=request.user,
+                    )
+                    try:
+                        sent_rows.append(FacebookMessage.objects.create(**text_row_kwargs))
+                    except IntegrityError:
+                        # Echo beat us to it — pick up the existing row so we
+                        # still broadcast a WS frame for it.
+                        existing = FacebookMessage.objects.filter(
+                            page_connection=page_connection,
+                            message_id=text_row_kwargs['message_id'],
+                        ).first()
+                        if existing:
+                            sent_rows.append(existing)
+
+                # The "primary" row from this request's perspective. For
+                # media+text, this carries the attachment only. For text-only
+                # / media-only, it carries whatever was sent.
+                primary_kwargs = dict(
                     page_connection=page_connection,
                     message_id=message_id or f"sent_{timestamp.timestamp()}",
                     sender_id=recipient_id,
                     sender_name=page_connection.page_name,
-                    message_text=message_text,
+                    message_text='' if text_sent_separately else message_text,
                     timestamp=timestamp,
                     is_from_page=True,
                     reply_to_message_id=reply_to_message_id if reply_to_message_id else None,
@@ -1503,9 +1579,21 @@ def facebook_send_message(request):
                     sent_by=request.user,
                 )
                 if attachments_meta:
-                    create_kwargs['attachments'] = attachments_meta
+                    primary_kwargs['attachments'] = attachments_meta
 
-                fb_message = FacebookMessage.objects.create(**create_kwargs)
+                try:
+                    fb_message = FacebookMessage.objects.create(**primary_kwargs)
+                    sent_rows.append(fb_message)
+                except IntegrityError:
+                    existing = FacebookMessage.objects.filter(
+                        page_connection=page_connection,
+                        message_id=primary_kwargs['message_id'],
+                    ).first()
+                    if existing:
+                        fb_message = existing
+                        sent_rows.append(existing)
+                    else:
+                        raise
 
                 # Unarchive conversation if it was archived (move back to active when sending a message)
                 unarchived = ConversationArchive.objects.filter(
@@ -1526,35 +1614,25 @@ def facebook_send_message(request):
                 if deleted_assignment:
                     logger.info(f"🔄 Deleted completed assignment for new conversation: facebook/{page_id}/{recipient_id}")
 
-                # Broadcast via WebSocket so the message appears in real-time
-                tenant_schema = connection.schema_name
-
-                # Look up recipient's name from previous incoming messages in this conversation
-                recipient_name = None
-                previous_msg = FacebookMessage.objects.filter(
-                    page_connection=page_connection,
-                    sender_id=recipient_id,
-                    is_from_page=False
-                ).order_by('-timestamp').first()
-                if previous_msg and previous_msg.sender_name:
-                    recipient_name = previous_msg.sender_name
-
-                ws_message_data = {
-                    'id': fb_message.id,
-                    'message_id': fb_message.message_id,
-                    'platform': 'facebook',
-                    'sender_id': page_id,
-                    'sender_name': page_connection.page_name,
-                    'recipient_id': recipient_id,
-                    'recipient_name': recipient_name,
-                    'message_text': message_text,
-                    'attachments': attachments_meta,
-                    'timestamp': timestamp.isoformat(),
-                    'is_from_page': True,
-                    'page_id': page_id,
-                    'sent_by': request.user.email if request.user else None,
-                }
-                async_to_sync(send_new_message_notification)(tenant_schema, recipient_id, ws_message_data)
+                # Broadcast one WS frame per row so the UI renders the same
+                # bubbles the customer's Messenger app shows.
+                for row in sent_rows:
+                    ws_message_data = {
+                        'id': row.id,
+                        'message_id': row.message_id,
+                        'platform': 'facebook',
+                        'sender_id': page_id,
+                        'sender_name': page_connection.page_name,
+                        'recipient_id': recipient_id,
+                        'recipient_name': recipient_name,
+                        'message_text': row.message_text or '',
+                        'attachments': row.attachments or [],
+                        'timestamp': row.timestamp.isoformat() if row.timestamp else timestamp.isoformat(),
+                        'is_from_page': True,
+                        'page_id': page_id,
+                        'sent_by': request.user.email if request.user else None,
+                    }
+                    async_to_sync(send_new_message_notification)(tenant_schema, recipient_id, ws_message_data)
             except Exception as e:
                 logger.warning(f"Failed to save/broadcast sent message: {e}")
 
