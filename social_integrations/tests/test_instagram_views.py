@@ -49,6 +49,25 @@ class TestInstagramDisconnect(SocialIntegrationTestCase):
         resp = self.api_post(self.url, {}, user=self.agent)
         self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
 
+    def test_disconnect_soft_deletes_and_preserves_messages(self):
+        from social_integrations.models import (
+            InstagramAccountConnection, InstagramMessage,
+        )
+        conn = self.create_ig_connection(username='persisted')
+        self.create_ig_message(account_connection=conn)
+        self.create_ig_message(account_connection=conn)
+
+        resp = self.api_post(self.url, {}, user=self.admin)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+        conn.refresh_from_db()
+        self.assertFalse(conn.is_active)
+        # Messages must NOT be removed by disconnect — only clear-history does that.
+        self.assertEqual(
+            InstagramMessage.objects.filter(account_connection=conn).count(), 2
+        )
+        self.assertEqual(InstagramAccountConnection.objects.count(), 1)
+
 
 class TestInstagramMessageViewSet(SocialIntegrationTestCase):
 

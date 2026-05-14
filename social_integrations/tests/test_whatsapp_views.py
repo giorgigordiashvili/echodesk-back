@@ -48,6 +48,38 @@ class TestWhatsAppDisconnect(SocialIntegrationTestCase):
         resp = self.api_post(self.url, {}, user=self.agent)
         self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
 
+    def test_disconnect_all_soft_deletes_and_preserves_messages(self):
+        from social_integrations.models import (
+            WhatsAppBusinessAccount, WhatsAppMessage,
+        )
+        acct = self.create_wa_account()
+        self.create_wa_message(business_account=acct)
+        self.create_wa_message(business_account=acct)
+
+        resp = self.api_post(self.url, {}, user=self.admin)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+        acct.refresh_from_db()
+        self.assertFalse(acct.is_active)
+        self.assertEqual(
+            WhatsAppMessage.objects.filter(business_account=acct).count(), 2
+        )
+        self.assertEqual(WhatsAppBusinessAccount.objects.count(), 1)
+
+    def test_disconnect_specific_waba_id_soft_deletes_only_that_account(self):
+        from social_integrations.models import WhatsAppBusinessAccount
+        keep = self.create_wa_account(waba_id='waba_keep')
+        target = self.create_wa_account(waba_id='waba_target')
+
+        resp = self.api_post(self.url, {'waba_id': 'waba_target'}, user=self.admin)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+        keep.refresh_from_db()
+        target.refresh_from_db()
+        self.assertTrue(keep.is_active)
+        self.assertFalse(target.is_active)
+        self.assertEqual(WhatsAppBusinessAccount.objects.count(), 2)
+
 
 class TestWhatsAppMessageViewSet(SocialIntegrationTestCase):
 

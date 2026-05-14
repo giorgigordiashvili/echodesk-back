@@ -2822,14 +2822,21 @@ def instagram_connection_status(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated, CanManageSocialConnections])
 def instagram_disconnect(request):
-    """Disconnect Instagram integration for current tenant"""
+    """
+    Disconnect Instagram integration for current tenant.
+
+    Always performs soft delete (is_active=False) to preserve messages — same
+    pattern as facebook_disconnect. Hard CASCADE deletion of every related
+    InstagramMessage was timing out behind Daphne for tenants with large
+    histories ("Application instance ... took too long to shut down and was
+    killed"). Use the clear-history endpoint to permanently delete messages.
+    """
     try:
         logger = logging.getLogger(__name__)
 
-        # Get count before deletion for response
-        accounts_to_delete = InstagramAccountConnection.objects.all()  # All accounts for this tenant
-        account_count = accounts_to_delete.count()
-        usernames = list(accounts_to_delete.values_list('username', flat=True))
+        accounts = InstagramAccountConnection.objects.all()
+        account_count = accounts.count()
+        usernames = list(accounts.values_list('username', flat=True))
 
         if account_count == 0:
             return Response({
@@ -2837,28 +2844,22 @@ def instagram_disconnect(request):
                 'message': 'No Instagram accounts found to disconnect'
             })
 
-        # Delete Instagram messages
-        instagram_message_count = 0
-        for account in accounts_to_delete:
-            messages_deleted = InstagramMessage.objects.filter(
-                account_connection=account
-            ).count()
-            InstagramMessage.objects.filter(account_connection=account).delete()
-            instagram_message_count += messages_deleted
+        # Single UPDATE — fast, no cascade traversal, no message loss.
+        deactivated_count = accounts.update(is_active=False)
 
-        # Delete Instagram account connections
-        accounts_to_delete.delete()
-
-        logger.info(f"✅ Instagram disconnect completed:")
-        logger.info(f"   - Instagram accounts deleted: {account_count}")
-        logger.info(f"   - Instagram messages deleted: {instagram_message_count}")
+        logger.info(
+            "✅ Instagram soft disconnect completed: %d account(s) deactivated, messages preserved",
+            deactivated_count,
+        )
 
         return Response({
             'status': 'disconnected',
-            'instagram_accounts_deleted': account_count,
-            'instagram_messages_deleted': instagram_message_count,
-            'deleted_accounts': usernames,
-            'message': f'Permanently removed {account_count} Instagram account(s) and {instagram_message_count} messages'
+            'instagram_accounts_deactivated': deactivated_count,
+            'deactivated_accounts': usernames,
+            'message': (
+                f'Deactivated {deactivated_count} Instagram account(s). '
+                'Messages preserved. Webhooks will be rejected.'
+            ),
         })
 
     except Exception as e:
@@ -7340,64 +7341,58 @@ def whatsapp_connection_status(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated, CanManageSocialConnections])
 def whatsapp_disconnect(request):
-    """Disconnect WhatsApp Business Account(s) and delete all related data"""
+    """
+    Disconnect WhatsApp Business Account(s).
+
+    Always performs soft delete (is_active=False) to preserve messages and
+    templates — same pattern as facebook_disconnect / instagram_disconnect.
+    Hard CASCADE deletion was timing out behind Daphne for tenants with large
+    histories. Use the clear-history endpoint to permanently delete messages.
+    """
     try:
         waba_id = request.data.get('waba_id')
 
         if waba_id:
-            # Disconnect specific account
             account = WhatsAppBusinessAccount.objects.filter(waba_id=waba_id).first()
-            if account:
-                business_name = account.business_name
-
-                # Count related data before deletion
-                messages_count = WhatsAppMessage.objects.filter(business_account=account).count()
-                templates_count = WhatsAppMessageTemplate.objects.filter(business_account=account).count()
-
-                # Delete the account (will cascade delete messages and templates)
-                account.delete()
-
-                logger.info(
-                    f"Deleted WhatsApp Business Account: {business_name} "
-                    f"({messages_count} messages, {templates_count} templates)"
-                )
-                return Response({
-                    'status': 'success',
-                    'message': f'Disconnected and deleted WhatsApp Business Account: {business_name}',
-                    'deleted': {
-                        'messages': messages_count,
-                        'templates': templates_count
-                    }
-                })
-            else:
+            if not account:
                 return Response({
                     'error': 'WhatsApp Business Account not found'
                 }, status=status.HTTP_404_NOT_FOUND)
-        else:
-            # Disconnect all accounts
-            accounts = WhatsAppBusinessAccount.objects.all()
-            count = accounts.count()
 
-            # Count all related data
-            total_messages = WhatsAppMessage.objects.count()
-            total_templates = WhatsAppMessageTemplate.objects.count()
-
-            # Delete all accounts (will cascade delete all messages and templates)
-            accounts.delete()
+            business_name = account.business_name
+            account.is_active = False
+            account.save(update_fields=['is_active'])
 
             logger.info(
-                f"Deleted all {count} WhatsApp Business Account(s) "
-                f"({total_messages} messages, {total_templates} templates)"
+                "✅ WhatsApp soft disconnect: %s deactivated, messages preserved",
+                business_name,
             )
             return Response({
                 'status': 'success',
-                'message': f'Disconnected and deleted {count} WhatsApp Business Account(s)',
-                'deleted': {
-                    'accounts': count,
-                    'messages': total_messages,
-                    'templates': total_templates
-                }
+                'message': (
+                    f'Deactivated WhatsApp Business Account: {business_name}. '
+                    'Messages and templates preserved.'
+                ),
+                'deactivated': {'business_name': business_name},
             })
+
+        accounts = WhatsAppBusinessAccount.objects.all()
+        count = accounts.count()
+        # Single UPDATE — fast, no cascade traversal.
+        deactivated_count = accounts.update(is_active=False)
+
+        logger.info(
+            "✅ WhatsApp soft disconnect: %d account(s) deactivated, messages preserved",
+            deactivated_count,
+        )
+        return Response({
+            'status': 'success',
+            'message': (
+                f'Deactivated {count} WhatsApp Business Account(s). '
+                'Messages and templates preserved.'
+            ),
+            'deactivated': {'accounts': deactivated_count},
+        })
 
     except Exception as e:
         logger.error(f"Failed to disconnect WhatsApp: {e}")
