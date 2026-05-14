@@ -905,18 +905,21 @@ def facebook_oauth_callback(request):
         # Import tenant schema context for multi-tenant database operations
         from tenant_schemas.utils import schema_context
         
-        # Save page connections to database with proper tenant context
+        # Save page connections to database with proper tenant context.
+        # IMPORTANT: do NOT wipe existing connections first. FacebookMessage has
+        # on_delete=CASCADE to FacebookPageConnection, so a tenant-wide
+        # FacebookPageConnection.objects.all().delete() cascades through every
+        # historical message and routinely takes longer than Daphne's request
+        # shutdown window for large tenants — the OAuth callback gets killed
+        # mid-flight and the popup never reaches the success redirect.
+        # update_or_create below already upserts each page returned by the
+        # callback; pages that disappear from /me/accounts are deactivated via
+        # the post-loop sweep instead, preserving their messages.
         saved_pages = 0
         with schema_context(tenant_schema):
-            # First, delete all existing Facebook page connections for this tenant
-            existing_connections = FacebookPageConnection.objects.all()
-            deleted_count = existing_connections.count()
-            if deleted_count > 0:
-                existing_connections.delete()
-                logger.info(f"🗑️ Deleted {deleted_count} existing Facebook page connections for tenant {tenant_schema}")
-            
             # Create new connections for all pages from callback
             saved_instagram_accounts = 0
+            returned_page_ids: set[str] = set()
             for page in pages:
                 page_id = page.get('id')
                 page_name = page.get('name')
@@ -953,6 +956,7 @@ def facebook_oauth_callback(request):
                             logger.error(f"❌ Could not create or find FacebookPageConnection for page {page_id}")
                             continue
 
+                    returned_page_ids.add(page_id)
                     action = "Created" if created else "Reactivated"
                     logger.info(f"✅ {action} Facebook page connection: {page_name} ({page_id}) in schema {tenant_schema}")
                     saved_pages += 1
@@ -1021,7 +1025,18 @@ def facebook_oauth_callback(request):
                         # Continue processing other pages even if Instagram fetch fails
                 else:
                     logger.warning(f"⚠️ Skipped page with missing data: {page}")
-        
+
+            # Pages the tenant previously connected but Meta no longer returns
+            # for this user (revoked, removed from Business Portfolio, etc.):
+            # deactivate them so webhooks/send-message stop, but keep messages.
+            stale_pages = FacebookPageConnection.objects.filter(is_active=True).exclude(page_id__in=returned_page_ids)
+            stale_count = stale_pages.update(is_active=False) if returned_page_ids else 0
+            if stale_count:
+                logger.info(
+                    "Deactivated %d Facebook page connection(s) not returned by /me/accounts in schema %s",
+                    stale_count, tenant_schema,
+                )
+
         # Return success response with redirect to tenant frontend
         if saved_instagram_accounts > 0:
             success_msg = f"Successfully connected {saved_pages} Facebook page(s) and {saved_instagram_accounts} Instagram account(s)"
