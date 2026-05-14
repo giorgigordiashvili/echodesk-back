@@ -76,7 +76,13 @@ def report_bug(request):
                 metadata={
                     'bug_report': True,
                     'reporter_email': reporter_email,
+                    'reporter_name': reporter_name,
                     'reporter_tenant': source_tenant,
+                    # Stash the raw user-written description (plain text) so the
+                    # Telegram new-ticket signal can include it without having
+                    # to parse the HTML wrapper above.
+                    'description': description,
+                    'page_url': page_url,
                 },
             )
 

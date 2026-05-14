@@ -356,22 +356,65 @@ def _send_new_ticket_telegram_notification(ticket):
         priority = getattr(ticket, 'priority', None) or 'medium'
         priority_emoji = priority_emojis.get(priority, '⚪')
 
-        creator_name = 'Unknown'
-        if ticket.created_by:
+        # Bug reports are filed FROM another tenant into the groot bug board.
+        # ticket.created_by is a synthetic system superuser there — surfacing
+        # it on Telegram makes every bug look like it was filed by the owner.
+        # Prefer the reporter info stashed in metadata by report_bug.
+        metadata = ticket.metadata or {}
+        is_bug_report = bool(metadata.get('bug_report'))
+
+        def _esc(s: str) -> str:
+            # Minimal HTML escape so user-supplied <, >, & don't make Telegram
+            # reject the message (parse_mode='HTML').
+            return (s or '').replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+        creator_label = 'Unknown'
+        if is_bug_report:
+            reporter_name = (metadata.get('reporter_name') or '').strip()
+            reporter_email = (metadata.get('reporter_email') or '').strip()
+            reporter_tenant = (metadata.get('reporter_tenant') or '').strip()
+            if reporter_name and reporter_email:
+                creator_label = f'{reporter_name} ({reporter_email})'
+            else:
+                creator_label = reporter_email or reporter_name or 'Unknown'
+            if reporter_tenant:
+                creator_label = f'{creator_label} — tenant {reporter_tenant}'
+        elif ticket.created_by:
             name = f'{ticket.created_by.first_name} {ticket.created_by.last_name}'.strip()
-            creator_name = name or ticket.created_by.email
+            creator_label = name or ticket.created_by.email
 
         schema_name = connection.schema_name
         ticket_url = f'https://{schema_name}.echodesk.ge/tickets/{ticket.id}'
 
+        # Description block — only added when present. Telegram's HTML parse
+        # mode rejects tags it doesn't recognise (<p>, <hr>, …), so for bug
+        # reports we send the raw user-written description that report_bug
+        # stashed in metadata; for everything else we omit (ticket.description
+        # is rich-text and would render poorly without a sanitiser).
+        description_text = ''
+        if is_bug_report:
+            description_text = (metadata.get('description') or '').strip()
+        description_block = ''
+        if description_text:
+            # Truncate to keep the Telegram message under the 4096-char limit;
+            # the full text is always available via the View Ticket link.
+            if len(description_text) > 1500:
+                description_text = description_text[:1500].rstrip() + '…'
+            description_block = f"\n<b>Description:</b>\n{_esc(description_text)}\n"
+
+        page_url = (metadata.get('page_url') or '').strip() if is_bug_report else ''
+        page_url_block = f"\n🌐 <b>Page:</b> {_esc(page_url)}" if page_url else ''
+
         message = (
             f"📋 <b>New Ticket Created</b>\n\n"
-            f"<b>Title:</b> {ticket.title}\n"
+            f"<b>Title:</b> {_esc(ticket.title)}\n"
             f"{priority_emoji} <b>Priority:</b> {priority.capitalize()}\n"
-            f"👤 <b>Created by:</b> {creator_name}\n"
-            f"📌 <b>Board:</b> {board.name}\n"
-            f"📊 <b>Column:</b> {ticket.column.name}\n\n"
-            f"🔗 <a href=\"{ticket_url}\">View Ticket</a>"
+            f"👤 <b>Created by:</b> {_esc(creator_label)}\n"
+            f"📌 <b>Board:</b> {_esc(board.name)}\n"
+            f"📊 <b>Column:</b> {_esc(ticket.column.name)}"
+            f"{page_url_block}\n"
+            f"{description_block}"
+            f"\n🔗 <a href=\"{ticket_url}\">View Ticket</a>"
         )
 
         send_board_telegram_message(bot_token, conn.chat_id, message)
